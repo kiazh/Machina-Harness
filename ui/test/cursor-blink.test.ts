@@ -18,6 +18,7 @@ import { test } from "node:test";
 import {
 	CURSOR_MARKER,
 	stripTerminalSequences,
+	visibleWidth,
 	TuiAltScreen,
 	type Terminal,
 } from "@earendil-works/pi-tui";
@@ -25,6 +26,8 @@ import { App } from "../src/app.ts";
 import type { GatewayClient } from "../src/gateway.ts";
 import type { GatewayEvent, SessionInfo } from "../src/protocol.ts";
 import type { WorkspaceEvent } from "../src/workspace/protocol.ts";
+import type { EditorStore } from "../src/editor/model.ts";
+import type { LayoutInput, LayoutResult } from "../src/workspace/state.ts";
 
 const SESSION: SessionInfo = {
 	id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -116,6 +119,7 @@ interface MockTerminal extends Terminal {
 	columns: number;
 	rows: number;
 	onInput?: (data: string) => void;
+	onResize?: () => void;
 }
 
 function mockTerminal(columns: number, rows: number): MockTerminal {
@@ -124,8 +128,9 @@ function mockTerminal(columns: number, rows: number): MockTerminal {
 		columns,
 		rows,
 		kittyProtocolActive: false,
-		start(onInput: (data: string) => void) {
+		start(onInput: (data: string) => void, onResize: () => void) {
 			this.onInput = onInput;
+			this.onResize = onResize;
 		},
 		stop() {},
 		async drainInput() {},
@@ -147,13 +152,17 @@ interface Internals {
 	integration?: {
 		view: { focused: boolean };
 		tabs: { count(): number; activeDocumentId(): string | null };
-		controller: { phase: string };
+		controller: { phase: string; getLayoutInput(): LayoutInput };
+		store: EditorStore;
 	};
 	editor: { getText(): string; focused: boolean };
 	coordinator: { size: number; timerCount: number; isReducedMotion: boolean };
 	cursorBlinkSub: unknown;
 	cursorBlinkIdleTimer: unknown;
 	activeRegion: string;
+	workspaceLayout?: LayoutResult;
+	openProblems(): void;
+	problemsOpen: boolean;
 	setFocusForRegion(region: string): void;
 	openWorkspacePath(path: string): Promise<void>;
 	quickOpenPane?: unknown;
@@ -440,3 +449,65 @@ test("leaving the editor cancels its pending blink restart", async (t) => {
 		booted.restoreEnv();
 	}
 });
+
+
+for (const preferred of ["editor", "chat-composer", "explorer"] as const) {
+	test(`repeated terminal shrink/expand preserves the workspace with ${preferred} focus`, async (t) => {
+		t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: 1000 });
+		const booted = await boot();
+		try {
+			const state = internals(booted.app);
+			await state.openWorkspacePath("src/a.ts");
+			booted.term.onInput?.("X");
+			await settle();
+			const integration = state.integration!;
+			const documentId = integration.tabs.activeDocumentId()!;
+			const before = integration.store.getViewState(documentId)!;
+			state.openProblems();
+			if (preferred === "explorer") assert.ok(state.workspaceLayout?.explorer, "explorer starts visible");
+			state.setFocusForRegion(preferred);
+			const request = integration.controller.getLayoutInput();
+			assert.equal(request.requestedMode, "split");
+			for (let cycle = 0; cycle < 3; cycle++) {
+				for (const [columns, rows] of [[60, 24], [40, 6], [120, 30], [200, 60], [160, 48]]) {
+					booted.term.columns = columns!;
+					booted.term.rows = rows!;
+					booted.term.onResize?.();
+					booted.tui.renderNow(true);
+					await settle();
+					const frame = capture(booted.tui);
+					const layout = state.workspaceLayout!;
+					const label = `${columns}x${rows}, cycle ${cycle}`;
+					assert.equal(frame.screen.length, rows, label);
+					assert.ok(frame.screen.every((line) => visibleWidth(line) <= columns!), label);
+					assert.equal(integration.controller.getLayoutInput().requestedMode, "split", label);
+					assert.equal(integration.tabs.activeDocumentId(), documentId, label);
+					assert.equal(integration.store.getDocument(documentId)?.text, "Xhello\n", label);
+					assert.equal(integration.store.getViewState(documentId)?.cursorOffset, before.cursorOffset, label);
+					assert.equal(state.problemsOpen, true, "Problems remains requested across resizing");
+					if (columns! < 90) {
+						assert.equal(layout.effectiveMode, preferred === "editor" ? "editor" : "chat", label);
+						assert.equal(layout.explorer, undefined, "explorer hides when it cannot fit");
+						if (preferred !== "editor") {
+							assert.equal(layout.editor, undefined, label);
+							assert.equal(state.cursorBlinkSub, undefined, "hidden editor stops blinking");
+							assert.ok(!stripTerminalSequences(frame.screen.join("\n")).includes("Xhello"), label);
+						}
+					} else {
+						assert.equal(layout.effectiveMode, "split", label);
+						assert.equal(layout.editor!.rows, rows, label);
+						assert.ok(stripTerminalSequences(frame.screen.join("\n")).includes("Ln 1, Col 2"), "editor status scales back into view");
+						if (columns! >= 160 && request.explorerRequested) assert.ok(layout.explorer, "requested explorer restores when space returns");
+						assert.ok(stripTerminalSequences(frame.screen.join("\n")).includes("Xhello"), label);
+					}
+				}
+			}
+			assert.equal(state.activeRegion, preferred === "explorer" ? "chat-composer" : preferred);
+			assert.equal(state.integration, integration, "pane components are retained throughout");
+		} finally {
+			(booted.app as unknown as { pick: () => Promise<{ value: string }> }).pick = async () => ({ value: "discard" });
+			await booted.app.exit();
+			booted.restoreEnv();
+		}
+	});
+}

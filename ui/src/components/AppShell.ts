@@ -41,6 +41,8 @@ export class AppShell {
 	onWorkspaceRatioChange?: (ratio: number) => void;
 	/** Far-right explorer grip clicked: the app flips its explorer request. */
 	onWorkspaceExplorerToggle?: () => void;
+	/** Notify the app before layout measurement when terminal dimensions change. */
+	onViewportResize?: () => void;
 	private currentRoot: VStack;
 	private readonly viewportRoot: Component;
 	private readonly tui: TUI;
@@ -138,6 +140,7 @@ export class AppShell {
 		this.applyBudgets();
 		this.syncWorkspace(cols, rows);
 		if (changed || !this.currentRoot) this.rebuild();
+		this.onViewportResize?.();
 	}
 
 	/** Release shell state (the coordinator stays owned by the App). */

@@ -517,6 +517,7 @@ export class App implements FeatureHost {
             return true;
         };
 		this.shell = new AppShell(tui, this.transcriptView, this.composer, this.footer);
+		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
 		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
 		this.shell.setPinnedBar(this.nowPlayingBar);
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
