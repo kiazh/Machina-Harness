@@ -650,3 +650,57 @@ test("inline Unicode preview is clipped within the current soft-wrapped row", ()
 	}
 	assert.equal(store.getDocument(doc.id)?.text, "\tpa)");
 });
+
+for (const [source, expectedIndent] of [
+	["if ready:", "    "],
+	["    if ready:  # start this block", "        "],
+	["async def greet(name):", "    "],
+	["class Greeter:", "    "],
+	["    return value", "    "],
+	["\tif ready:", "\t\t"],
+	['value = "a colon:"', ""],
+	["# if ready:", ""],
+	['message = """text\n    if ready:', "    "],
+	["value:", ""],
+	["result = calculate(", "    "],
+] as const) {
+	test(`Python Enter indents ${JSON.stringify(source)} correctly`, () => {
+		const { store, doc } = freshStore(source, { languageId: "python" });
+		store.setSelection(doc.id, { cursorOffset: source.length });
+		const { view } = makeView(store, doc.id);
+		view.handleInput("\r");
+		const expected = `${source}\n${expectedIndent}`;
+		assert.equal(store.getDocument(doc.id)?.text, expected);
+		assert.equal(store.getViewState(doc.id)?.cursorOffset, expected.length);
+		assert.equal(store.undo(doc.id).ok, true, "newline and indentation are one undo step");
+		assert.equal(store.getDocument(doc.id)?.text, source);
+	});
+}
+
+test("Python indentation preserves CRLF and replaces selections at their start", () => {
+	const { store, doc } = freshStore("if ready:\r\n    pass", { languageId: "python" });
+	store.setSelection(doc.id, { cursorOffset: 19, anchorOffset: 9 });
+	const { view } = makeView(store, doc.id);
+	view.handleInput("\r");
+	assert.equal(store.getDocument(doc.id)?.text, "if ready:\r\n    ");
+	assert.equal(store.getViewState(doc.id)?.cursorOffset, 15);
+});
+
+test("Python Tab uses spaces at tab stops and preserves existing tab indentation", () => {
+	const spaces = freshStore("  ", { languageId: "python" });
+	spaces.store.setSelection(spaces.doc.id, { cursorOffset: 2 });
+	makeView(spaces.store, spaces.doc.id).view.handleInput("\t");
+	assert.equal(spaces.store.getDocument(spaces.doc.id)?.text, "    ");
+	const tabs = freshStore("\t", { languageId: "python" });
+	tabs.store.setSelection(tabs.doc.id, { cursorOffset: 1 });
+	makeView(tabs.store, tabs.doc.id).view.handleInput("\t");
+	assert.equal(tabs.store.getDocument(tabs.doc.id)?.text, "\t\t");
+});
+
+test("Python indentation honors the configured tab width", () => {
+	const { store, doc } = freshStore("if ready:", { languageId: "python" });
+	store.setSelection(doc.id, { cursorOffset: 9 });
+	const { view } = makeView(store, doc.id, { tabWidth: 2 });
+	view.handleInput("\r");
+	assert.equal(store.getDocument(doc.id)?.text, "if ready:\n  ");
+});

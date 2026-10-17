@@ -632,8 +632,15 @@ export class EditorView implements Component, Focusable {
 		// Editing.
 		if (matchesKey(data, Key.backspace)) return this.mutate(documentId, () => this.store.backspace(documentId));
 		if (matchesKey(data, Key.delete)) return this.mutate(documentId, () => this.store.deleteForward(documentId));
-		if (matchesKey(data, Key.enter)) return this.mutate(documentId, () => this.store.newline(documentId));
-		if (matchesKey(data, Key.tab)) return this.insertVerbatim(documentId, "\t");
+		if (matchesKey(data, Key.enter)) return this.mutate(documentId, () => this.store.newline(documentId, this.newlineIndentation(record)));
+		if (matchesKey(data, Key.tab)) {
+			if (record.languageId !== "python") return this.insertVerbatim(documentId, "\t");
+			const lineStart = lineStartOffset(record.text, this.cursor());
+			const indent = record.text.slice(lineStart, this.cursor()).match(/^[ \t]*/u)?.[0] ?? "";
+			if (indent.includes("\t")) return this.insertVerbatim(documentId, "\t");
+			const spaces = this.tabWidth - ((this.cursorDisplayPosition().column - 1) % this.tabWidth);
+			return this.insertVerbatim(documentId, " ".repeat(spaces));
+		}
 
 		const printable = decodePrintableKey(data);
 		if (printable !== undefined) return this.insertVerbatim(documentId, printable);
@@ -1171,6 +1178,32 @@ export class EditorView implements Component, Focusable {
 		this.onCursorMoveCallback?.();
 		this.requestRenderCallback();
 		return true;
+	}
+
+	/** Python indentation uses the existing lexical state, even with highlighting off. */
+	private newlineIndentation(record: DocumentRecord): string {
+		if (record.languageId !== "python") return "";
+		const state = this.stateFor(record.id);
+		const offset = clamp(Math.min(state.cursorOffset, state.selectionAnchorOffset ?? state.cursorOffset), 0, record.text.length);
+		const starts = this.linesFor(record);
+		const position = offsetToPosition(record.text, offset, starts);
+		const prefix = record.text.slice(starts[position.line], offset);
+		const indent = prefix.match(/^[ \t]*/u)?.[0] ?? "";
+		const code = prefix.split("");
+		for (const span of this.syntaxSpansFor(record, starts, "python", position.line)) {
+			if (span.kind === "string" || span.kind === "comment") {
+				code.fill(" ", span.start, Math.min(span.end, code.length));
+			}
+		}
+		const significant = code.join("").trim();
+		const brackets: string[] = [];
+		for (const char of significant) {
+			if ("([{".includes(char)) brackets.push(char);
+			else if (")]}".includes(char)) brackets.pop();
+		}
+		const block = significant.endsWith(":")
+			&& /^(?:(?:async\s+)?(?:def|for|with)|if|elif|else|while|try|except|finally|class|match|case)\b/u.test(significant);
+		return indent + (brackets.length || block ? (indent.includes("\t") ? "\t" : " ".repeat(this.tabWidth)) : "");
 	}
 
 	private mutate(documentId: string, action: () => { ok: boolean }): boolean {

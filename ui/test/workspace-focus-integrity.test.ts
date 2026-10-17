@@ -971,3 +971,37 @@ test("Python ghost completion inserts a call with the cursor ready for arguments
 		await app.exit();
 	}
 });
+
+test("Python block indentation and call completion work together", async () => {
+	const { app, tui, client } = makeApp();
+	client.handlers.set("workspace.read", (params) => ({
+		uri: String(params.uri), text: "if ready:", revision: "r", languageId: "python",
+		lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 9,
+	}));
+	client.handlers.set("workspace.documentChange", (params) => ({ acceptedVersion: params.version }));
+	client.handlers.set("workspace.intelligence", (params) => ({
+		workspaceId: "ws1", source: "editor-buffer", uri: params.uri, documentVersion: params.version,
+		serverGeneration: 1, workspaceEpoch: 1, operation: "completion", state: "ready", freshness: "versioned",
+		truncated: false, result: { items: [{ label: "print", kind: 3 }] },
+	}));
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		await internals(app).openWorkspacePath("src/main.py");
+		const integration = internals(app).integration!;
+		const id = integration.tabs.activeDocumentId()!;
+		integration.pane.handleInput("\x1b[F"); // End
+		integration.pane.handleInput("\r");
+		assert.equal(integration.store.getDocument(id)?.text, "if ready:\n    ");
+		integration.pane.handleInput("pri");
+		tui.press(CTRL_SPACE);
+		await settle();
+		assert.equal(internals(app).completionSession?.inlinePreview(), "nt()");
+		tui.press("\t");
+		integration.pane.handleInput("42");
+		assert.equal(integration.store.getDocument(id)?.text, "if ready:\n    print(42)");
+	} finally {
+		scriptPicks(app, ["discard"]);
+		await app.exit();
+	}
+});

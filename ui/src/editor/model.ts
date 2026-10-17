@@ -739,12 +739,12 @@ export class EditorStore {
 		);
 	}
 
-	/** Insert a newline using the document's dominant line ending. */
-	newline(documentId: string): ApplyEditResult {
+	/** Insert a newline and optional indentation using the document's dominant ending. */
+	newline(documentId: string, indentation = ""): ApplyEditResult {
 		const record = this.records.get(documentId);
 		if (!record) return refusal("not-found", `unknown document: ${documentId}`);
 		if (record.readOnly) return refusal("read-only", `document is read-only: ${record.uri}`);
-		return this.insertText(documentId, lineEndingSequence(dominantLineEnding(record.text)));
+		return this.insertText(documentId, lineEndingSequence(dominantLineEnding(record.text)) + indentation);
 	}
 
 	// -------------------------------------------------------------- save flow
