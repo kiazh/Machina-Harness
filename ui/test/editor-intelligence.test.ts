@@ -970,3 +970,17 @@ test("pane honors degenerate allocations with both slots mounted", () => {
 		}
 	}
 });
+
+test("plain insertText completion replaces the typed prefix instead of duplicating it", async () => {
+	const store = new EditorStore();
+	const doc = open(store, "os.pa");
+	const session = new CompletionSession({
+		store, documentId: doc.id, uri: doc.uri, prefix: "pa", position: { line: 0, character: 5 },
+		request: async () => ok(completionPayload([{ label: "path (module)", filterText: "path", insertText: "path" }])),
+	});
+	await session.start();
+	assert.equal(session.accept().ok, true);
+	assert.equal(store.getDocument(doc.id)?.text, "os.path");
+	assert.equal(store.undo(doc.id).ok, true);
+	assert.equal(store.getDocument(doc.id)?.text, "os.pa");
+});

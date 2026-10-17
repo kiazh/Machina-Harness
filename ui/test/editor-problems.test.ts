@@ -508,3 +508,21 @@ test("legacy string producers and unattributed rows still map to one key", async
 	assert.equal(rows.length, 1);
 	assert.equal(rows[0]?.producer, "pyright", "single-producer payload attributes unattributed rows");
 });
+
+test("Problems selection follows the same diagnostic when another file inserts earlier rows", () => {
+	const model = new ProblemsModel();
+	model.push({ uri: URI, source: "ts", version: 1, diagnostics: [
+		diagnostic(1, 0, 2, "first"), diagnostic(2, 0, 2, "keep selected"),
+	] });
+	const opened: string[] = [];
+	const pane = new ProblemsPane({ model, onOpen: (row) => opened.push(row.message) });
+	pane.render(80);
+	pane.moveSelection(1);
+	pane.render(80);
+	model.push({ uri: "file:///w/a.ts", source: "ts", version: 1, diagnostics: [
+		diagnostic(0, 0, 1, "new error"),
+	] });
+	pane.render(80);
+	pane.handleInput("\r");
+	assert.deepEqual(opened, ["keep selected"]);
+});

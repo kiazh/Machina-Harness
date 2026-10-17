@@ -522,7 +522,7 @@ export class ExplorerPane implements Component {
 	/** Set by the focus owner (TUI `Focusable`); unfocused keys are inert. */
 	focused = false;
 	onOpenFile: ((entry: WorkspaceListEntry) => void) | undefined;
-	onPreviewFile: ((entry: WorkspaceListEntry) => void) | undefined;
+	onPreviewFile: ((entry: WorkspaceListEntry, focus?: boolean) => void) | undefined;
 	/** App focus-router seam: invoked when a mouse event claims focus. */
 	onFocusRequested?: () => void;
 
@@ -620,7 +620,7 @@ export class ExplorerPane implements Component {
 					else this.onOpenFile?.(node.entry);
 					return { handled: true, focus: true, render: true };
 				}
-				if (!node.expandable) this.onPreviewFile?.(node.entry);
+				if (!node.expandable) this.onPreviewFile?.(node.entry, false);
 				return { handled: true, focus: true, render: true };
 			}
 			case "load-more": {

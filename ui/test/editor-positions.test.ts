@@ -8,6 +8,7 @@ import {
 	displayWidthOf,
 	lineEndOffset,
 	lineStartOffset,
+	lineStartsOf,
 	nextGraphemeOffset,
 	nextWordOffset,
 	offsetToDisplayColumn,
@@ -342,4 +343,31 @@ test("word motion is grapheme-safe for emoji and clamps", () => {
 	assert.equal(prevWordOffset("", 0), 0);
 	assert.equal(nextWordOffset("abc", 99), 3);
 	assert.equal(prevWordOffset("abc", -9), 0);
+});
+
+test("indexed cursor lookup does not rescan the document prefix", () => {
+	const text = "line\r\n".repeat(10_000);
+	const starts = Array.from({ length: 10_001 }, (_, index) => index * 6);
+	const original = String.prototype.charCodeAt;
+	let reads = 0;
+	String.prototype.charCodeAt = function (index) {
+		reads++;
+		return original.call(this, index);
+	};
+	try {
+		assert.deepEqual(offsetToPosition(text, text.length - 1, starts), { line: 9999, character: 5 });
+		assert.ok(reads < 40, `indexed position read ${reads} characters`);
+	} finally {
+		String.prototype.charCodeAt = original;
+	}
+});
+
+
+test("indexed positions agree with scanning for every Unicode and newline fixture offset", () => {
+	for (const text of FIXTURES) {
+		const starts = lineStartsOf(text);
+		for (let offset = 0; offset <= text.length; offset++) {
+			assert.deepEqual(offsetToPosition(text, offset, starts), offsetToPosition(text, offset));
+		}
+	}
 });

@@ -1064,15 +1064,27 @@ export class WorkspaceController {
 	/** Poll `workspace.lspStatus`; caches the result and notifies the listener. */
 	async lspStatus(): Promise<WorkspaceLspStatusResult | undefined> {
 		if (this.phaseValue !== "ready" || !this.currentIdentity) return undefined;
+		const identity = this.currentIdentity;
+		const before = new Map(this.lspProfiles);
 		try {
 			const result = await this.gateway.lspStatus();
 			if (isWorkspaceRefusal(result)) {
 				this.notifySafe("warning", `language-server status unavailable: ${result.refused.message}`);
 				return undefined;
 			}
+			if (this.currentIdentity !== identity) return undefined;
+			for (const server of result.servers) {
+				const current = this.lspProfiles.get(server.profile);
+				// A pushed transition after the poll began is newer than its reply.
+				if (current !== before.get(server.profile) || (current && current.generation > server.generation)) continue;
+				this.lspProfiles.set(server.profile, {
+					state: server.state, generation: server.generation,
+					...(server.detail === undefined ? {} : { detail: server.detail }),
+				});
+			}
 			this.lspServers = result.servers;
 			this.emitLspStatus();
-			return result;
+			return { servers: this.lspStatusSnapshot().servers };
 		} catch (error) {
 			this.notifySafe("warning", `language-server status failed: ${messageOf(error)}`);
 			return undefined;
@@ -1081,7 +1093,15 @@ export class WorkspaceController {
 
 	/** Cached status: last polled server rows + latest event-derived states. */
 	lspStatusSnapshot(): WorkspaceLspStatusSnapshot {
-		return { servers: this.lspServers, profiles: this.lspProfilesCopy() };
+		return {
+			servers: this.lspServers.map((server) => {
+				const current = this.lspProfiles.get(server.profile);
+				const merged = current ? { ...server, ...current } : { ...server };
+				if (current && current.detail === undefined) delete merged.detail;
+				return merged;
+			}),
+			profiles: this.lspProfilesCopy(),
+		};
 	}
 
 	/** start/stop/restart passthrough; updates the status cache on success. */

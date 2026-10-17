@@ -44,9 +44,34 @@ function clampNonNegative(value: number): number {
 	return Math.max(0, Math.floor(value));
 }
 
-/** 0-based line/character (UTF-16 code units) for a text offset. */
-export function offsetToPosition(text: string, offset: number): Position {
+/** Line start offsets; a text ending with a terminator has a trailing line. */
+export function lineStartsOf(text: string): number[] {
+	const starts = [0];
+	for (let index = 0; index < text.length; index++) {
+		const code = text.charCodeAt(index);
+		if (code === 0x0a) {
+			starts.push(index + 1);
+		} else if (code === 0x0d) {
+			if (text.charCodeAt(index + 1) === 0x0a) index += 1;
+			starts.push(index + 1);
+		}
+	}
+	return starts;
+}
+
+/** 0-based UTF-16 position; optionally reuse lineStartsOf(text) for indexed lookup. */
+export function offsetToPosition(text: string, offset: number, starts?: readonly number[]): Position {
 	const target = clampOffset(text, offset);
+	if (starts && starts.length > 0) {
+		let low = 0;
+		let high = starts.length - 1;
+		while (low < high) {
+			const middle = Math.ceil((low + high) / 2);
+			if (starts[middle]! <= target) low = middle;
+			else high = middle - 1;
+		}
+		return { line: low, character: target - starts[low]! };
+	}
 	let line = 0;
 	let lineStart = 0;
 	let index = 0;
@@ -174,23 +199,15 @@ export function graphemeCount(text: string): number {
 export function nextGraphemeOffset(text: string, offset: number): number {
 	const target = clampOffset(text, offset);
 	if (target >= text.length) return text.length;
-	for (const segment of graphemeSegmenter.segment(text)) {
-		const end = segment.index + segment.segment.length;
-		if (end > target) return end;
-	}
-	return text.length;
+	const segment = graphemeSegmenter.segment(text).containing(target);
+	return segment ? segment.index + segment.segment.length : text.length;
 }
 
 /** Previous grapheme boundary strictly before `offset` (clamped). */
 export function prevGraphemeOffset(text: string, offset: number): number {
 	const target = clampOffset(text, offset);
 	if (target <= 0) return 0;
-	let boundary = 0;
-	for (const segment of graphemeSegmenter.segment(text)) {
-		if (segment.index >= target) break;
-		boundary = segment.index;
-	}
-	return boundary;
+	return graphemeSegmenter.segment(text).containing(target - 1)?.index ?? 0;
 }
 
 type WordClass = "identifier" | "whitespace" | "punctuation";

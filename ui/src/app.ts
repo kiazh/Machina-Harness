@@ -450,6 +450,7 @@ export class App implements FeatureHost {
 	private completionPopup: CompletionPopup | undefined;
 	/** Orders deferred completion refilters; a newer pass supersedes older ones. */
 	private completionRefilterSeq = 0;
+	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 	private quickOpenPane: QuickOpenPane | undefined;
 	private quickOpenHandle: OverlayHandle | undefined;
 	/** `/skills` Menu dialog (A5, spec §12.3): the mounted component (dedup + tests). */
@@ -1822,6 +1823,7 @@ export class App implements FeatureHost {
 			view: { documentId: "", cursorOffset: 0, scrollLine: 0, horizontalCellOffset: 0 },
 			onChange: (documentId) => {
 				this.integration?.controller.noteEdit(documentId);
+				if (!this.completionSession) this.scheduleAutomaticCompletion();
 				this.tui.requestRender();
 			},
 			requestRender: () => this.tui.requestRender(),
@@ -1883,8 +1885,8 @@ export class App implements FeatureHost {
 		explorerPane.onOpenFile = (entry) => {
 			if (entry.kind === "file") void this.openWorkspacePath(entry.path, { preview: false });
 		};
-		explorerPane.onPreviewFile = (entry) => {
-			if (entry.kind === "file") void this.openWorkspacePath(entry.path, { preview: true });
+		explorerPane.onPreviewFile = (entry, focus = true) => {
+			if (entry.kind === "file") void this.openWorkspacePath(entry.path, { preview: true, focus });
 		};
 		const problemsModel = new ProblemsModel({ request: this.intelligenceRequest() });
 		const problemsPane = new ProblemsPane({
@@ -1976,6 +1978,7 @@ export class App implements FeatureHost {
 	 * (`armWorkspaceFence`), because that call legitimately advances it.
 	 */
 	private beginWorkspaceFence(): number {
+		this.clearCompletion();
 		this.workspaceFenceController = undefined;
 		return ++this.workspaceGeneration;
 	}
@@ -2357,6 +2360,7 @@ export class App implements FeatureHost {
 					? this.activeRegion
 					: "chat-composer";
 		const expected = this.regionComponent(next);
+		if (next !== "editor") this.cancelAutomaticCompletion();
 		if (next !== this.activeRegion) {
 			this.activeRegion = next;
 			if (next !== "editor" && this.completionSession) this.clearCompletion();
@@ -2394,6 +2398,7 @@ export class App implements FeatureHost {
 			(region === "explorer" && this.workspaceLayout?.explorer !== undefined) ||
 			(region === "problems" && this.problemsOpen && this.workspaceLayout?.editor !== undefined);
 		this.activeRegion = visible ? region : "chat-composer";
+		if (this.activeRegion !== "editor") this.cancelAutomaticCompletion();
 		// A completion list is editor-scoped: it must not stay mounted (and
 		// keep consuming keys) after focus left the editor (finding 4a).
 		if (this.activeRegion !== "editor" && this.completionSession) this.clearCompletion();
@@ -2428,6 +2433,7 @@ export class App implements FeatureHost {
 		const next = this.focusRegions().includes(region) ? region : "chat-composer";
 		if (this.activeRegion === next) return;
 		this.activeRegion = next;
+		if (next !== "editor") this.cancelAutomaticCompletion();
 		// A completion list is editor-scoped (finding 4a): mouse focus leaving
 		// the editor unmounts it instead of leaving a visible orphan that could
 		// later accept a stray Enter.
@@ -2648,10 +2654,13 @@ export class App implements FeatureHost {
 	}
 
 	/** Ctrl+Space: one explicit completion session mounted under the viewport. */
-	private async startCompletion(): Promise<void> {
+	private async startCompletion(automatic = false): Promise<void> {
+		this.cancelAutomaticCompletion();
 		const integration = this.integration;
 		const context = this.activeEditorContext();
 		if (!integration || !context) return; // no open file: do not fire (v1)
+		if (!automatic && this.activeRegion !== "editor") this.setFocusForRegion("editor");
+		if (this.activeRegion !== "editor") return;
 		const gen = this.captureWorkspaceFence();
 		this.completionSession?.close("superseded");
 		const session = new CompletionSession({
@@ -2660,6 +2669,8 @@ export class App implements FeatureHost {
 			uri: context.document.uri,
 			documentId: context.document.id,
 			position: context.position,
+			prefix: completionPrefixBefore(context.document.text,
+				integration.store.getViewState(context.document.id)?.cursorOffset ?? 0),
 		});
 		this.completionSession = session;
 		// Mouse acceptance (finding 5): a click selects the clicked row in the
@@ -2676,7 +2687,9 @@ export class App implements FeatureHost {
 		};
 		const state = await session.start();
 		if (this.completionSession !== session || this.exiting || !this.isWorkspaceCurrent(gen)) return;
-		if (state === "visible") {
+		// Typing may have superseded this request; its newer refilter owns the popup.
+		if (state === "loading") return;
+		if (state === "visible" && (!automatic || session.itemCount() > 0)) {
 			popup.setModel(completionPopupModelFrom(session));
 			integration.pane.setIntelligence(popup, {
 				accept: () => this.acceptCompletion(),
@@ -2691,8 +2704,8 @@ export class App implements FeatureHost {
 			return;
 		}
 		// Nothing to show: one quiet honest notice per explicit invocation.
-		if (session.lastDropReason === "unavailable") this.print("Completion is unavailable here.", "info");
-		else if (session.lastDropReason === "error") this.print("Completion request failed.", "info");
+		if (!automatic && session.lastDropReason === "unavailable") this.print("Completion is unavailable here.", "info");
+		else if (!automatic && session.lastDropReason === "error") this.print("Completion request failed.", "info");
 		this.clearCompletion();
 	}
 
@@ -2766,7 +2779,38 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
+	private cancelAutomaticCompletion(): void {
+		if (this.automaticCompletionTimer !== undefined) clearTimeout(this.automaticCompletionTimer);
+		this.automaticCompletionTimer = undefined;
+	}
+
+	/** Keep editing local; ask for suggestions once typing pauses. */
+	private scheduleAutomaticCompletion(): void {
+		this.cancelAutomaticCompletion();
+		if (this.activeRegion !== "editor" || this.completionSession || this.exiting) return;
+		const context = this.activeEditorContext();
+		const store = this.integration?.store;
+		if (!context || !store || context.document.readOnly || languageForId(context.document.languageId) === "plain") return;
+		const selection = store.getViewState(context.document.id);
+		if (!selection || (selection.selectionAnchorOffset !== undefined && selection.selectionAnchorOffset !== selection.cursorOffset)) return;
+		const cursor = selection.cursorOffset;
+		const previous = context.document.text[cursor - 1] ?? "";
+		if (!COMPLETION_PREFIX_CHAR.test(previous) && previous !== ".") return;
+		const { id, version } = context.document;
+		const gen = this.captureWorkspaceFence();
+		this.automaticCompletionTimer = setTimeout(() => {
+			this.automaticCompletionTimer = undefined;
+			if (this.exiting || !this.isWorkspaceCurrent(gen) || this.activeRegion !== "editor"
+				|| this.dialogs.length || this.approvalDialogs.size || this.quickOpenPane || this.completionSession) return;
+			const current = this.activeEditorContext();
+			if (current?.document.id !== id || current.document.version !== version
+				|| store.getViewState(id)?.cursorOffset !== cursor || this.lspStatusText() !== "ready") return;
+			void this.startCompletion(true);
+		}, 150);
+	}
+
 	private clearCompletion(): void {
+		this.cancelAutomaticCompletion();
 		this.completionSession?.close("dismissed");
 		this.completionSession = undefined;
 		this.completionPopup = undefined;
@@ -3005,7 +3049,7 @@ export class App implements FeatureHost {
 	}
 
 	/** Open a root-relative workspace path (explorer/quick open) as a file URI. */
-	private async openWorkspacePath(path: string, options: { preview?: boolean } = {}): Promise<void> {
+	private async openWorkspacePath(path: string, options: { preview?: boolean; focus?: boolean } = {}): Promise<void> {
 		const integration = this.integration;
 		if (!integration) return;
 		const identity = integration.controller.identity;
@@ -3123,13 +3167,15 @@ export class App implements FeatureHost {
 		if (!record) return undefined;
 		const target = languageForId(record.languageId);
 		if (target === "plain") return undefined;
+		const family = (language: string): string => language === "javascript" ? "typescript" : language;
+		const matches = (id: string): boolean => family(languageForId(id)) === family(target);
 		const shown = (state: string): string => (state === "starting" ? "starting…" : state);
 		const snapshot = controller.lspStatusSnapshot();
 		for (const server of snapshot.servers) {
-			if (languageForId(server.languageId || server.profile) === target) return shown(server.state);
+			if (matches(server.languageId || server.profile)) return shown(server.state);
 		}
 		for (const [profile, entry] of Object.entries(snapshot.profiles)) {
-			if (languageForId(profile) === target) return shown(entry.state);
+			if (matches(profile)) return shown(entry.state);
 		}
 		return undefined;
 	}
@@ -3380,6 +3426,9 @@ export class App implements FeatureHost {
 		const integration = this.integration;
 		if (!integration) return;
 		integration.controller.handleEvent(event);
+		if (event.workspaceId !== integration.controller.identity?.workspaceId
+			|| event.epoch !== integration.controller.identity?.epoch) return;
+		if (event.type === "workspace.lspState" && event.state === "ready") this.scheduleAutomaticCompletion();
 		if (event.type === "workspace.diagnostics") {
 			integration.problemsModel.push({
 				uri: event.uri,

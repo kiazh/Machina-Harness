@@ -56,7 +56,7 @@ from typing import Any
 
 from machina.workspace import lsp as lsp_module
 from machina.workspace import quickopen as quickopen_module
-from machina.workspace.documents import DocumentMirrorStore
+from machina.workspace.documents import DocumentMirrorStore, position_to_index
 from machina.workspace.files import WorkspaceFiles
 from machina.workspace.intelligence import (
     DEFAULT_INTELLIGENCE_TIMEOUTS,
@@ -67,6 +67,7 @@ from machina.workspace.intelligence import (
     language_for_profile,
     lsp_request_for,
     lsp_sync_kind,
+    normalize_completion_list,
     normalize_for,
     sanitize_log_text,
 )
@@ -219,6 +220,7 @@ class WorkspaceService:
         # Detached flush-then-didSave chains for confirmed saves (never awaited
         # by the save RPC; cancelled only when the workspace epoch resets).
         self._save_tasks: set[asyncio.Task[None]] = set()
+        self._startup_tasks: set[asyncio.Task[None]] = set()
         self._diagnostics = DiagnosticsStore()
         self._stop_task: asyncio.Task[None] | None = None
         # The manager whose bounded stop owns ``_stop_task`` (kept even when a
@@ -266,6 +268,36 @@ class WorkspaceService:
         ):
             self._ready_subscribed.append(manager)
             on_ready(self._handle_connection_ready)
+
+    def start_language_servers(self) -> None:
+        """Warm available profiles without delaying workspace.open or file editing."""
+        manager = self._lsp_manager
+        if not self.trusted or manager is None or self._startup_tasks:
+            return
+        ensure_started = getattr(manager, "ensure_started", None)
+        if not callable(ensure_started):
+            return
+
+        async def start(language: str) -> None:
+            result = await self._control_start("start", language, language, ensure_started)
+            if result["state"] == STATE_FAILED and self._identity is not None:
+                self._emit(
+                    lsp_state_event(
+                        self._identity.workspace_id,
+                        self._epoch,
+                        language,
+                        STATE_FAILED,
+                        0,
+                        result.get("detail", ""),
+                    )
+                )
+
+        for language in LSP_PROFILE_LANGUAGES:
+            if not self._profile_supported(language):
+                continue
+            task = asyncio.create_task(start(language), name=f"workspace-lsp-start:{language}")
+            self._startup_tasks.add(task)
+            task.add_done_callback(self._startup_tasks.discard)
 
     def open(self, root: str, trust: bool) -> WorkspaceIdentity:
         """Open (or reopen) the workspace; explicit trust decision required.
@@ -375,6 +407,9 @@ class WorkspaceService:
         here guarantees a previous workspace's diagnostics can never attach to
         a new one (the store additionally filters by epoch/generation).
         """
+        for task in list(self._startup_tasks):
+            task.cancel()
+        self._startup_tasks.clear()
         for task in list(self._sync_tasks.values()):
             task.cancel()
         self._sync_tasks.clear()
@@ -844,8 +879,10 @@ class WorkspaceService:
                     self._handle_connection_notification(connection, method, params)
 
                 subscribe_notifications(_notification)
-        if connection.state == STATE_READY:
-            self._reopen_documents(connection, language)
+        # Initialization can finish before this service subscribes. Publish
+        # the current state as well as future transitions so the UI never
+        # needs an explicit status poll to discover that the server is ready.
+        self._handle_connection_state(connection, connection.state)
 
     def _tracked_entry(self, connection: Any) -> _TrackedConnection | None:
         for entry in self._connections.values():
@@ -1358,7 +1395,25 @@ class WorkspaceService:
         except LspError:
             state = connection.state if connection.state != STATE_READY else STATE_FAILED
             return failure(state, "unavailable", generation, mirror_version)
-        normalized = normalize_for(operation, raw)
+        if operation == "completion" and mirror is not None and request_position is not None:
+            text = str(mirror["text"])
+            try:
+                offset = position_to_index(
+                    text, request_position["line"], request_position["character"]
+                )
+            except ValueError:
+                prefix = ""
+            else:
+                start = offset
+                while start > 0:
+                    char = text[start - 1]
+                    if not char.isascii() or not (char.isalnum() or char in "_$"):
+                        break
+                    start -= 1
+                prefix = text[start:offset]
+            normalized = normalize_completion_list(raw, prefix=prefix)
+        else:
+            normalized = normalize_for(operation, raw)
         return self._intelligence_result(
             workspace_epoch=workspace_epoch,
             operation=operation,
@@ -1694,6 +1749,7 @@ class WorkspaceService:
     async def _control_start(
         self, action: str, profile: str, language: str, ensure_started: Callable[..., Any]
     ) -> dict[str, Any]:
+        epoch, manager = self._epoch, self._lsp_manager
         try:
             connection = await asyncio.wait_for(
                 _await_if_needed(ensure_started(language)), timeout=self._control_timeout
@@ -1710,6 +1766,8 @@ class WorkspaceService:
         except Exception as error:
             logger.warning("lsp start failed", exc_info=True)
             return self._control_failure(action, profile, f"{type(error).__name__}: {error}")
+        if epoch != self._epoch or manager is not self._lsp_manager:
+            return {"action": action, "profile": profile, "state": STATE_STOPPED}
         self._track_connection(language, connection)
         # A manager with no resolvable executable returns an honest ``missing``
         # connection; its own error text is the best detail available.

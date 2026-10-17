@@ -75,6 +75,7 @@ import {
 	displayWidthOf,
 	lineEndOffset,
 	lineStartOffset,
+	lineStartsOf,
 	nextGraphemeOffset,
 	nextWordOffset,
 	offsetToPosition,
@@ -226,21 +227,6 @@ function segmentsOfLine(projected: string, tabWidth: number): Segment[] {
 		col += width;
 	}
 	return segments;
-}
-
-/** Line start offsets; a text ending with a terminator has a trailing line. */
-function lineStartsOf(text: string): number[] {
-	const starts = [0];
-	for (let index = 0; index < text.length; index++) {
-		const code = text.charCodeAt(index);
-		if (code === 0x0a) {
-			starts.push(index + 1);
-		} else if (code === 0x0d) {
-			if (text.charCodeAt(index + 1) === 0x0a) index += 1;
-			starts.push(index + 1);
-		}
-	}
-	return starts;
 }
 
 /** Offset just before the line's terminator (content end). */
@@ -444,7 +430,7 @@ export class EditorView implements Component, Focusable {
 		const state = this.stateFor(record.id);
 		const cursor = clamp(state.cursorOffset, 0, record.text.length);
 		const starts = this.linesFor(record);
-		const position = offsetToPosition(record.text, cursor);
+		const position = offsetToPosition(record.text, cursor, starts);
 		const info = this.lineInfo(record, starts, position.line);
 		return { line: position.line + 1, column: this.cellInLine(info, cursor) + 1 };
 	}
@@ -478,7 +464,7 @@ export class EditorView implements Component, Focusable {
 			anchor !== undefined && anchor !== cursor
 				? { startOffset: Math.min(anchor, cursor), endOffset: Math.max(anchor, cursor) }
 				: undefined;
-		const activeLine = offsetToPosition(record.text, cursor).line;
+		const activeLine = offsetToPosition(record.text, cursor, starts).line;
 		const caretRow = this.rowIndexOfOffset(record, starts, contentCells, cursor);
 		const marker = this.focused ? CURSOR_MARKER : "";
 		// The zero-width marker (IME/hardware-cursor placement) is emitted
@@ -869,7 +855,7 @@ export class EditorView implements Component, Focusable {
 	}
 
 	private rowIndexOfOffset(record: DocumentRecord, starts: number[], contentCells: number, offset: number): number {
-		const position = offsetToPosition(record.text, offset);
+		const position = offsetToPosition(record.text, offset, starts);
 		if (!this.softWrap) return Math.min(starts.length - 1, Math.max(0, position.line));
 		const rows = this.wrapRows(record, starts, contentCells);
 		if (rows.length === 0) return 0;
@@ -943,7 +929,7 @@ export class EditorView implements Component, Focusable {
 		else if (caretRow >= scroll + rows) scroll = caretRow - rows + 1;
 		state.scrollLine = clamp(scroll, 0, maxScroll);
 		if (!this.softWrap) {
-			const position = offsetToPosition(record.text, state.cursorOffset);
+			const position = offsetToPosition(record.text, state.cursorOffset, starts);
 			const info = this.lineInfo(record, starts, position.line);
 			const caretCell = this.cellInLine(info, state.cursorOffset);
 			if (caretCell < state.horizontalCellOffset) state.horizontalCellOffset = caretCell;
@@ -1141,7 +1127,7 @@ export class EditorView implements Component, Focusable {
 		const versionBefore = record.version;
 		// The pre-edit caret line bounds the syntax invalidation below: every
 		// view-driven edit happens at (or spans) the caret.
-		const lineBefore = offsetToPosition(record.text, this.cursor()).line;
+		const lineBefore = offsetToPosition(record.text, this.cursor(), this.linesFor(record)).line;
 		this.syncSelectionToStore(documentId);
 		const result = action();
 		if (!result.ok) return true; // refused (read-only, …): consumed, unchanged
@@ -1149,7 +1135,7 @@ export class EditorView implements Component, Focusable {
 		const after = this.store.getDocument(documentId);
 		if (after && after.version !== versionBefore) {
 			const state = this.states.get(documentId);
-			const lineAfter = offsetToPosition(after.text, clamp(state?.cursorOffset ?? 0, 0, after.text.length)).line;
+			const lineAfter = offsetToPosition(after.text, clamp(state?.cursorOffset ?? 0, 0, after.text.length), this.linesFor(after)).line;
 			this.syntaxInvalidateFrom(documentId, Math.min(lineBefore, lineAfter), after.version);
 		}
 		return true;
@@ -1298,7 +1284,7 @@ export class EditorView implements Component, Focusable {
 		const rowCount = this.rowCount(record, starts, contentCells);
 		if (rowCount === 0) return true;
 		const caretRow = this.rowIndexOfOffset(record, starts, contentCells, state.cursorOffset);
-		const position = offsetToPosition(record.text, state.cursorOffset);
+		const position = offsetToPosition(record.text, state.cursorOffset, starts);
 		const info = this.lineInfo(record, starts, position.line);
 		const preferred = state.preferredColumn ?? this.cellInLine(info, state.cursorOffset);
 		const targetRow = clamp(caretRow + amount, 0, rowCount - 1);
@@ -1333,7 +1319,7 @@ export class EditorView implements Component, Focusable {
 		if (!record) return false;
 		const cursor = this.cursor();
 		const starts = this.linesFor(record);
-		const line = offsetToPosition(record.text, cursor).line;
+		const line = offsetToPosition(record.text, cursor, starts).line;
 		const start = starts[line] ?? record.text.length;
 		const end = line + 1 < starts.length ? (starts[line + 1] as number) : record.text.length;
 		if (end > start) {
@@ -1362,7 +1348,7 @@ export class EditorView implements Component, Focusable {
 		const cursor = this.cursor();
 		const starts = this.linesFor(record);
 		const text = record.text;
-		const line = offsetToPosition(text, cursor).line;
+		const line = offsetToPosition(text, cursor, starts).line;
 		const pairStart = direction === -1 ? line - 1 : line;
 		if (pairStart < 0 || pairStart + 1 >= starts.length) return true;
 		const firstStart = starts[pairStart] as number;

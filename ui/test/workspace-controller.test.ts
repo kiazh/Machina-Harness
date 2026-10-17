@@ -1606,3 +1606,19 @@ test("reopenRecent restores without stealing focus; manual opens still focus", a
 	assert.deepEqual(h.focusRegions, ["editor"], "a manual open still focuses the editor");
 	await h.controller.dispose();
 });
+
+test("a delayed status poll cannot overwrite a ready event", async () => {
+	const h = build();
+	await openWorkspace(h);
+	const reply = deferred<WorkspaceLspStatusResult>();
+	h.gateway.lspStatusHandler = () => reply.promise;
+	const pending = h.controller.lspStatus();
+	h.controller.handleEvent(workspaceEvent({
+		type: "workspace.lspState", profile: "pyright", state: "ready", generation: 2,
+	}));
+	reply.resolve({ servers: [{ profile: "pyright", languageId: "python", state: "starting", generation: 1 }] });
+	await pending;
+	assert.equal(h.controller.lspStatusSnapshot().servers[0]?.state, "ready");
+	assert.equal(h.controller.lspStatusSnapshot().servers[0]?.generation, 2);
+	await h.controller.dispose();
+});

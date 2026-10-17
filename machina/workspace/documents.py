@@ -80,6 +80,11 @@ def _position_to_index(text: str, line: int, character: int, *, starts: list[int
     return index
 
 
+def position_to_index(text: str, line: int, character: int) -> int:
+    """Convert a UTF-16 cursor using the same rules as document changes."""
+    return _position_to_index(text, line, character, starts=_line_starts(text))
+
+
 def apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
     """Apply incremental LSP changes sequentially to *text*.
 

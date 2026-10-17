@@ -24,6 +24,7 @@
 
 import { sanitizeDisplay } from "../design/text.ts";
 import type { EditorStore } from "./model.ts";
+import { positionToOffset } from "./positions.ts";
 import {
 	applyWorkspaceEdit,
 	previewWorkspaceEdit,
@@ -117,6 +118,7 @@ export interface NarrowedCompletionItem {
 	detail?: string;
 	documentation?: string;
 	filterText?: string;
+	insertText?: string;
 	sortText?: string;
 	/** 1 = plain text, 2 = snippet (never advertised by this UI). */
 	insertTextFormat?: number;
@@ -157,6 +159,7 @@ function narrowCompletionItem(raw: unknown): NarrowedCompletionItem | undefined 
 	const documentation = documentationText(raw.documentation);
 	if (documentation !== undefined) item.documentation = documentation;
 	if (typeof raw.filterText === "string") item.filterText = raw.filterText;
+	if (typeof raw.insertText === "string") item.insertText = raw.insertText;
 	if (typeof raw.sortText === "string") item.sortText = raw.sortText;
 	if (typeof raw.insertTextFormat === "number" && Number.isInteger(raw.insertTextFormat)) {
 		item.insertTextFormat = raw.insertTextFormat;
@@ -686,7 +689,7 @@ export class CompletionSession {
 		if (item.malformedTextEdit) {
 			return { ok: false, reason: "invalid-item", message: "the completion item carries a malformed text edit" };
 		}
-		const insertionText = item.textEdit?.newText ?? item.label;
+		const insertionText = item.textEdit?.newText ?? item.insertText ?? item.label;
 		if (item.insertTextFormat === 2) {
 			if (!this.allowLiteralSnippets) {
 				return {
@@ -720,9 +723,15 @@ export class CompletionSession {
 		if (item.textEdit) {
 			edits.push(copyEdit(item.textEdit));
 		} else {
+			const start = copyPosition(this.positionValue);
+			const offset = positionToOffset(record.text, this.positionValue);
+			if (this.prefixValue && start.character >= this.prefixValue.length
+				&& record.text.slice(offset - this.prefixValue.length, offset) === this.prefixValue) {
+				start.character -= this.prefixValue.length;
+			}
 			edits.push({
-				range: { start: copyPosition(this.positionValue), end: copyPosition(this.positionValue) },
-				newText: item.label,
+				range: { start, end: copyPosition(this.positionValue) },
+				newText: insertionText,
 			});
 		}
 		const payload: WorkspaceEditPayload = {

@@ -863,3 +863,155 @@ test("Ctrl+Left keeps composer word motion when a requested split renders as cha
 		await app.exit();
 	}
 });
+
+test("ready events replace an earlier starting status without a manual status command", async () => {
+	const { app, client } = makeApp();
+	client.handlers.set("workspace.read", (params) => ({
+		uri: String(params.uri), text: "hello\n", revision: "r", languageId: "typescript",
+		lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 6,
+	}));
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		await openEditorFile(app);
+		client.responses.set("workspace.lspStatus", { servers: [{
+			profile: "typescript-language-server", languageId: "typescript", state: "starting", generation: 1,
+		}] });
+		const controller = internals(app).integration!.controller as unknown as {
+			lspStatus(): Promise<unknown>;
+		};
+		await controller.lspStatus();
+		const status = app as unknown as { lspStatusText(): string };
+		assert.equal(status.lspStatusText(), "starting…");
+		client.onWorkspaceEvent?.({
+			type: "workspace.lspState", workspaceId: "ws1", epoch: 1,
+			profile: "typescript-language-server", state: "ready", generation: 1,
+		});
+		assert.equal(status.lspStatusText(), "ready");
+	} finally {
+		await app.exit();
+	}
+});
+
+for (const leaveEditor of [false, true]) {
+	test(`typing ${leaveEditor ? "then leaving editor cancels" : "opens"} automatic completion`, async () => {
+		const { app, tui, client } = makeApp();
+		client.handlers.set("workspace.read", (params) => ({
+			uri: String(params.uri), text: "", revision: "r", languageId: "typescript",
+			lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 0,
+		}));
+		client.handlers.set("workspace.documentChange", (params) => ({ acceptedVersion: params.version }));
+		armCompletion(client);
+		await app.start();
+		try {
+			await waitForWorkspace(app);
+			const { integration, documentId } = await openEditorFile(app);
+			client.onWorkspaceEvent?.({
+				type: "workspace.lspState", workspaceId: "ws1", epoch: 1,
+				profile: "typescript-language-server", state: "ready", generation: 1,
+			});
+			const pane = integration.pane as unknown as { handleInput(data: string): boolean };
+			for (const key of ["a", "l"]) {
+				tui.press(key);
+				pane.handleInput(key);
+			}
+			if (leaveEditor) tui.press(F6);
+			await new Promise((resolve) => setTimeout(resolve, 220));
+			await settle();
+			const calls = client.requests.filter((r) => r.method === "workspace.intelligence" && r.params.operation === "completion");
+			assert.equal(calls.length, leaveEditor ? 0 : 1);
+			if (!leaveEditor) {
+				assert.equal(internals(app).completionSession?.state, "visible");
+				assert.deepEqual(internals(app).completionSession?.items().map((item) => item.label), ["alpha"]);
+			}
+			assert.equal(integration.store.getDocument(documentId)?.text, "al");
+		} finally {
+			scriptPicks(app, ["discard"]);
+			await app.exit();
+		}
+	});
+}
+
+test("explorer mouse previews preserve explorer focus and keep Problems open", async () => {
+	const { app } = makeApp();
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		await openEditorFile(app);
+		const state = app as unknown as {
+			openProblems(): void;
+			setFocusForRegion(region: string): void;
+			problemsOpen: boolean;
+			activeRegion: string;
+			integration: { explorerPane: { onPreviewFile(entry: unknown, focus: boolean): void } };
+		};
+		state.openProblems();
+		state.setFocusForRegion("explorer");
+		state.integration.explorerPane.onPreviewFile({ kind: "file", name: "b.ts", path: "b.ts" }, false);
+		await settle();
+		assert.equal(state.activeRegion, "explorer");
+		assert.equal(state.problemsOpen, true);
+	} finally {
+		await app.exit();
+	}
+});
+
+test("the editor completion command returns keyboard focus to its suggestions", async () => {
+	const { app, tui, client } = makeApp();
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		await openEditorFile(app);
+		armCompletion(client);
+		tui.setFocus(internals(app).editor);
+		internals(app).noteRegionFocus("chat-composer");
+		app.workspace()?.completeAtCursor?.();
+		await settle();
+		assert.equal(internals(app).activeRegion, "editor");
+		assert.equal(internals(app).completionSession?.state, "visible");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("an older completion reply does not close a newer request still loading", async () => {
+	const { app, tui, client } = makeApp();
+	let firstReply!: (value: unknown) => void;
+	let nextReply!: (value: unknown) => void;
+	const first = new Promise((resolve) => { firstReply = resolve; });
+	const next = new Promise((resolve) => { nextReply = resolve; });
+	let calls = 0;
+	client.handlers.set("workspace.intelligence", (params) => {
+		if (params.operation !== "completion") return {};
+		return ++calls === 1 ? first : next;
+	});
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		const { integration, documentId } = await openEditorFile(app);
+		tui.press(CTRL_SPACE);
+		await settle();
+		tui.press("b");
+		integration.store.insertText(documentId, "b");
+		await settle();
+		assert.equal(calls, 2);
+		const reply = (version: number) => ({
+			workspaceId: "ws1", source: "editor-buffer", uri: "file:///ws/src/a.ts",
+			documentVersion: version, serverGeneration: 1, workspaceEpoch: 1,
+			operation: "completion", state: "ready", freshness: "versioned", truncated: false,
+			result: { items: completionItems() },
+		});
+		firstReply(reply(0));
+		await settle();
+		assert.equal(internals(app).completionSession?.state, "loading");
+		nextReply(reply(1));
+		await settle();
+		assert.equal(internals(app).completionSession?.state, "visible");
+		assert.deepEqual(internals(app).completionSession?.items().map((item) => item.label), ["beta"]);
+	} finally {
+		firstReply({});
+		nextReply({});
+		scriptPicks(app, ["discard"]);
+		await app.exit();
+	}
+});

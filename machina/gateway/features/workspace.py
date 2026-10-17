@@ -177,10 +177,11 @@ async def _attach_lsp_manager(gw: Gateway, service: WorkspaceService, identity: 
 
     Without this, the service has no manager in production and reports
     "no language servers" forever even when profiles resolve. Creating the
-    manager is cheap; servers still start lazily on the first ``documentOpen``
-    for a language. Trust governs language servers (plan §14): an untrusted
-    open detaches any manager. A previous manager for the same gateway is
-    retired bounded before a new root rebinds it.
+    manager is cheap; available servers start in background as the workspace
+    opens, without waiting for a document or status command. Trust governs
+    language servers (plan §14): an untrusted open detaches any manager.
+    A previous manager for the same gateway is retired bounded before a new
+    root rebinds it.
     """
     previous = getattr(gw, "_workspace_lsp_manager", None)
     if previous is not None:
@@ -196,6 +197,7 @@ async def _attach_lsp_manager(gw: Gateway, service: WorkspaceService, identity: 
     manager = LspManager(identity.resolved_root)
     gw._workspace_lsp_manager = manager
     service.set_lsp_manager(manager)
+    service.start_language_servers()
 
 
 def _write_event(gw: Gateway, event: dict[str, Any]) -> None:

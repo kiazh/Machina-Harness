@@ -407,7 +407,8 @@ test("mouse: click selects and previews, double-click opens, glyph toggles", asy
 	const pane = new ExplorerPane(model);
 	const previews: string[] = [];
 	const opens: string[] = [];
-	pane.onPreviewFile = (item) => previews.push(item.path);
+	const previewFocus: Array<boolean | undefined> = [];
+	pane.onPreviewFile = (item, focus) => { previews.push(item.path); previewFocus.push(focus); };
 	pane.onOpenFile = (item) => opens.push(item.path);
 	await model.load();
 	await model.expand("src");
@@ -419,6 +420,7 @@ test("mouse: click selects and previews, double-click opens, glyph toggles", asy
 	assert.equal(single?.handled, true);
 	assert.equal(model.selectedId(), "src/main.ts");
 	assert.deepEqual(previews, ["src/main.ts"], "single click previews");
+	assert.deepEqual(previewFocus, [false], "mouse previews keep keyboard focus in the explorer");
 	const double = pane.handleMouse(mouse("click", 10, mainRow, 2));
 	assert.equal(double?.handled, true);
 	assert.deepEqual(opens, ["src/main.ts"], "double click opens/pins");

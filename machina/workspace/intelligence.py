@@ -209,6 +209,7 @@ def _completion_item(value: Any) -> dict[str, Any] | None:
     if isinstance(kind, int) and not isinstance(kind, bool) and 1 <= kind <= 25:
         item["kind"] = kind
     for key, limit in (
+        ("insertText", MAX_EDIT_TEXT_CHARS),
         ("detail", MAX_DETAIL_CHARS),
         ("filterText", MAX_LABEL_CHARS),
         ("sortText", MAX_LABEL_CHARS),
@@ -241,7 +242,7 @@ def _completion_item(value: Any) -> dict[str, Any] | None:
     return item
 
 
-def normalize_completion_list(result: Any) -> Normalized | None:
+def normalize_completion_list(result: Any, *, prefix: str = "") -> Normalized | None:
     """CompletionList / CompletionItem[] → bounded item payload (cap 100)."""
     if result is None:
         return None
@@ -255,6 +256,17 @@ def normalize_completion_list(result: Any) -> Normalized | None:
         return None
     if not isinstance(raw_items, (list, tuple)):
         return None
+    if prefix:
+        # Some servers return all globals. Filter before the transport cap so
+        # matching suggestions late in that list remain available to the UI.
+        prefix = prefix.lower()
+        raw_items = [
+            raw
+            for raw in raw_items
+            if isinstance(raw, Mapping)
+            and isinstance(raw.get("filterText", raw.get("label")), str)
+            and raw.get("filterText", raw.get("label")).lower().startswith(prefix)
+        ]
     items = []
     for raw in raw_items[:MAX_COMPLETION_ITEMS]:
         item = _completion_item(raw)

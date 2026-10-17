@@ -102,6 +102,7 @@ export class ProblemsPane implements Component, Focusable {
 	private workspaceRoot: string | undefined;
 	private rowBudgetValue: number;
 	private selectionValue = 0;
+	private selectedRow: ProblemRow | undefined;
 	/** Geometry from the last render, for mouse hit-testing. */
 	private lastStart = 0;
 	private lastShown = 0;
@@ -117,6 +118,22 @@ export class ProblemsPane implements Component, Focusable {
 				? Math.floor(options.rowBudget ?? PROBLEMS_PANE_DEFAULT_ROWS)
 				: PROBLEMS_PANE_DEFAULT_ROWS,
 		);
+	}
+
+	/** Follow the selected diagnostic when live updates reorder the list. */
+	private currentRows(): ProblemRow[] {
+		const rows = this.model.rows();
+		const selected = this.selectedRow;
+		if (selected) {
+			const index = rows.findIndex((row) => row.uri === selected.uri
+				&& row.producer === selected.producer && row.message === selected.message
+				&& row.line === selected.line && row.character === selected.character
+				&& row.code === selected.code);
+			if (index >= 0) this.selectionValue = index;
+		}
+		this.selectionValue = Math.max(0, Math.min(rows.length - 1, this.selectionValue));
+		this.selectedRow = rows[this.selectionValue];
+		return rows;
 	}
 
 	/** Total row budget including the header line. */
@@ -140,14 +157,16 @@ export class ProblemsPane implements Component, Focusable {
 	}
 
 	selectedIndex(): number {
+		this.currentRows();
 		return this.selectionValue;
 	}
 
 	/** Move the selection by `delta` with clamping; returns the new index. */
 	moveSelection(delta: number): number {
-		const count = this.model.rows().length;
+		const count = this.currentRows().length;
 		const amount = Number.isFinite(delta) ? Math.floor(delta) : 0;
 		this.selectionValue = count === 0 ? 0 : Math.max(0, Math.min(count - 1, this.selectionValue + amount));
+		this.selectedRow = this.model.rows()[this.selectionValue];
 		this.requestRenderCallback?.();
 		return this.selectionValue;
 	}
@@ -157,7 +176,7 @@ export class ProblemsPane implements Component, Focusable {
 			this.onCloseCallback?.();
 			return true;
 		}
-		const count = this.model.rows().length;
+		const count = this.currentRows().length;
 		if (count === 0) return false;
 		if (matchesKey(data, Key.up)) {
 			this.moveSelection(-1);
@@ -184,7 +203,7 @@ export class ProblemsPane implements Component, Focusable {
 			return true;
 		}
 		if (matchesKey(data, Key.enter)) {
-			const row = this.model.rows()[this.selectionValue];
+			const row = this.currentRows()[this.selectionValue];
 			if (row) this.onOpenCallback?.(row);
 			return true;
 		}
@@ -197,16 +216,18 @@ export class ProblemsPane implements Component, Focusable {
 		// Row 0 is the header; item rows start below it.
 		if (y <= 0 || y > this.lastShown) return undefined;
 		const index = this.lastStart + (y - 1);
-		const row = this.model.rows()[index];
+		const row = this.currentRows()[index];
 		if (!row) return undefined;
 		this.onFocusRequested?.();
 		if (event.type === "press") {
 			this.selectionValue = index;
+			this.selectedRow = row;
 			this.requestRenderCallback?.();
 			return { handled: true, focus: true };
 		}
 		if (event.type === "click") {
 			this.selectionValue = index;
+			this.selectedRow = row;
 			this.onOpenCallback?.(row);
 			return { handled: true, focus: true };
 		}
@@ -216,7 +237,7 @@ export class ProblemsPane implements Component, Focusable {
 	render(width: number): string[] {
 		const content = normalizeWidth(width);
 		const budget = Math.max(1, this.rowBudgetValue);
-		const rows = this.model.rows();
+		const rows = this.currentRows();
 		const counts = this.model.counts();
 		const omittedTotal = this.model.omitted();
 		this.selectionValue = rows.length === 0 ? 0 : Math.max(0, Math.min(rows.length - 1, this.selectionValue));
