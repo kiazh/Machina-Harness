@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Component, OverlayHandle, SelectItem, TUI } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, type Component, type OverlayHandle, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
 import type { GatewayClient } from "../src/gateway.ts";
 import type { GatewayEvent, SessionInfo } from "../src/protocol.ts";
@@ -227,7 +227,7 @@ interface Integration {
 		documents(): Array<{ id: string; uri: string; dirty: boolean }>;
 	};
 	tabs: { activeDocumentId(): string | null; count(): number };
-	pane: { handleIntelligenceKey(data: string): string; render(width: number): string[]; invalidate(): void };
+	pane: { focused: boolean; handleInput(data: string): boolean; handleIntelligenceKey(data: string): string; render(width: number): string[]; invalidate(): void };
 	view: { setView(state: unknown): void };
 }
 
@@ -263,18 +263,6 @@ async function waitForWorkspace(app: App): Promise<void> {
 		await new Promise((resolve) => setImmediate(resolve));
 	}
 	assert.ok(workspaceOpened(app), "workspace opened in the background");
-}
-
-/** Spy on transcript notices without touching the rendering path. */
-function captureNotices(app: App): Array<{ text: string; kind: unknown }> {
-	const notices: Array<{ text: string; kind: unknown }> = [];
-	const transcript = (app as unknown as { transcript: { addNotice(text: string, kind?: unknown): void } }).transcript;
-	const original = transcript.addNotice.bind(transcript);
-	transcript.addNotice = (text: string, kind?: unknown) => {
-		notices.push({ text, kind });
-		original(text, kind);
-	};
-	return notices;
 }
 
 /** Script `pick` answers by value; every call consumes one entry. */
@@ -455,11 +443,11 @@ function armCompletion(client: FakeClient): void {
 		state: "ready",
 		freshness: "versioned",
 		truncated: false,
-		result: { items: completionItems() },
+		result: { items: completionItems().map((item) => ({ ...item, textEdit: { ...item.textEdit, range: { start: { line: 0, character: 0 }, end: params.position } } })) },
 	}));
 }
 
-test("moving focus off the editor dismisses the open completion popup", async () => {
+test("moving focus off the editor dismisses the inline completion", async () => {
 	const { app, tui, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
@@ -467,15 +455,15 @@ test("moving focus off the editor dismisses the open completion popup", async ()
 	armCompletion(client);
 	tui.press(CTRL_SPACE);
 	await settle();
-	assert.ok(internals(app).completionSession, "the list is open on the editor");
+	assert.ok(internals(app).completionSession, "the suggestion is active in the editor");
 
 	tui.press(F6); // editor → explorer: the list's region loses focus
 	assert.equal(internals(app).activeRegion, "explorer");
-	assert.equal(internals(app).completionSession, undefined, "the editor-scoped list was dismissed");
+	assert.equal(internals(app).completionSession, undefined, "the editor-scoped suggestion was dismissed");
 	await app.exit();
 });
 
-test("a completion popup never consumes keys after the composer takes focus", async () => {
+test("an inline completion never consumes keys after the composer takes focus", async () => {
 	const { app, tui, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
@@ -483,7 +471,7 @@ test("a completion popup never consumes keys after the composer takes focus", as
 	armCompletion(client);
 	tui.press(CTRL_SPACE);
 	await settle();
-	assert.ok(internals(app).completionSession, "the list is open on the editor");
+	assert.ok(internals(app).completionSession, "the suggestion is active in the editor");
 
 	// Focus moved without the region seam (an overlay restore, a mouse path):
 	// the TUI now targets the composer while activeRegion still says editor.
@@ -491,149 +479,55 @@ test("a completion popup never consumes keys after the composer takes focus", as
 	tui.press(ENTER);
 	await settle();
 	assert.equal(internals(app).activeRegion, "chat-composer", "the region was reconciled from real focus");
-	assert.equal(internals(app).completionSession, undefined, "the orphaned editor popup was unmounted");
+	assert.equal(internals(app).completionSession, undefined, "the orphaned suggestion was dismissed");
 	assert.equal(integration.store.getDocument(documentId)?.text, "hello\n", "nothing was applied by the stale popup");
 	await app.exit();
 });
 
 // ─── finding 6: type-to-filter for completions ─────────────────────────────
 
-test("typed characters refilter the open list; the filtered item applies without a stale refusal", async () => {
-	const { app, tui, client } = makeApp();
-	await app.start();
-	await waitForWorkspace(app);
-	const { integration, documentId } = await openEditorFile(app);
-	armCompletion(client);
-
-	tui.press(CTRL_SPACE);
-	await settle();
-	const opened = internals(app).completionSession;
-	assert.ok(opened, "the unfiltered list is open");
-	assert.equal(opened.capturedVersion, 0);
-
-	// A printable key falls through to the editor. FakeTUI never dispatches to
-	// the focused view, so apply the same edit the view would apply.
-	tui.press("b");
-	integration.store.insertText(documentId, "b");
-	await settle();
-
-	const session = internals(app).completionSession;
-	assert.ok(session, "the session survives the refilter");
-	assert.deepEqual(session.items().map((item) => item.label), ["beta"], "the list refiltered by the typed prefix");
-	assert.equal(session.capturedVersion, 1, "the refilter re-captured the landed buffer version");
-
-	const notices = captureNotices(app);
-	tui.press(ENTER);
-	await settle();
-	assert.equal(internals(app).completionSession, undefined, "Enter accepted the filtered item");
-	assert.equal(integration.store.getDocument(documentId)?.text, "betahello\n", "the item was applied");
-	assert.equal(notices.filter((notice) => /not applied/.test(notice.text)).length, 0, "no stale refusal");
-	// The accepted edit left the buffer dirty; answer the quit review explicitly.
-	scriptPicks(app, ["discard"]);
-	await app.exit();
-});
-
-// ─── finding 5: mouse click selects the clicked row before accepting ───────
-
-test("a completion click selects the clicked row in the machine before accepting", async () => {
-	const { app, tui, client } = makeApp();
-	await app.start();
-	await waitForWorkspace(app);
-	const { integration, documentId } = await openEditorFile(app);
-	client.handlers.set("workspace.intelligence", (params) => ({
-		workspaceId: "ws1",
-		source: "editor-buffer",
-		uri: params.uri,
-		documentVersion: params.version,
-		serverGeneration: 1,
-		workspaceEpoch: 1,
-		operation: params.operation,
-		state: "ready",
-		freshness: "versioned",
-		truncated: false,
-		result: {
-			items: [
-				{ label: "alpha", textEdit: { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: "alpha" } },
-				{ label: "beta", textEdit: { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: "beta" } },
-			],
-		},
-	}));
-	tui.press(CTRL_SPACE);
-	await settle();
-	const popup = (app as unknown as { completionPopup?: { handleMouse(event: unknown): unknown } }).completionPopup;
-	assert.ok(popup, "the popup is wired");
-	popup.handleMouse({
-		type: "click",
-		button: "left",
-		x: 0,
-		y: 1, // the second presented row ("beta")
-		screenX: 0,
-		screenY: 1,
-		width: 80,
-		height: 10,
-		shift: false,
-		alt: false,
-		ctrl: false,
+for (const action of ["tab", "enter", "escape", "motion"] as const) {
+	test(`automatic ghost text has no menu and handles ${action}`, async () => {
+		const { app, tui, client } = makeApp();
+		client.handlers.set("workspace.read", (params) => ({
+			uri: String(params.uri), text: "", revision: "r", languageId: "typescript",
+			lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 0,
+		}));
+		client.handlers.set("workspace.documentChange", (params) => ({ acceptedVersion: params.version }));
+		armCompletion(client);
+		await app.start();
+		try {
+			await waitForWorkspace(app);
+			const { integration, documentId } = await openEditorFile(app);
+			client.onWorkspaceEvent?.({ type: "workspace.lspState", workspaceId: "ws1", epoch: 1,
+				profile: "typescript-language-server", state: "ready", generation: 1 });
+			for (const key of ["a", "l"]) {
+				tui.press(key);
+				integration.pane.handleInput(key);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 260));
+			await settle();
+			assert.equal(internals(app).completionSession?.inlinePreview(), "pha");
+			assert.equal((app as unknown as { completionPopup?: unknown }).completionPopup, undefined);
+			integration.pane.focused = true; // FakeTUI does not set Focusable.focused.
+			assert.ok(integration.pane.render(80).some((row) => stripTerminalSequences(row).includes("alpha")));
+			assert.equal(integration.store.getDocument(documentId)?.text, "al");
+			const key = action === "tab" ? "\t" : action === "enter" ? ENTER : action === "escape" ? ESC : "\x1b[D";
+			tui.press(key);
+			if (action === "enter" || action === "motion") integration.pane.handleInput(key);
+			assert.equal(internals(app).completionSession, undefined);
+			assert.equal(integration.store.getDocument(documentId)?.text,
+				action === "tab" ? "alpha" : action === "enter" ? "al\n" : "al");
+			if (action === "tab") {
+				integration.pane.handleInput("\x1a"); // undo the single accepted edit
+				assert.equal(integration.store.getDocument(documentId)?.text, "al");
+			}
+		} finally {
+			scriptPicks(app, ["discard"]);
+			await app.exit();
+		}
 	});
-	await settle();
-	assert.equal(internals(app).completionSession, undefined, "the click accepted");
-	assert.equal(integration.store.getDocument(documentId)?.text, "betahello\n", "the clicked row was applied, not the previous selection");
-	scriptPicks(app, ["discard"]);
-	await app.exit();
-});
-
-// ─── finding 5b: a windowed click maps to the presented row ────────────────
-
-test("a click on a scrolled completion window accepts that row, not the first item", async () => {
-	const { app, tui, client } = makeApp();
-	await app.start();
-	await waitForWorkspace(app);
-	const { integration, documentId } = await openEditorFile(app);
-	const items = Array.from({ length: 10 }, (_, index) => ({
-		label: `item-${index}`,
-		textEdit: { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: `item-${index}` },
-	}));
-	client.handlers.set("workspace.intelligence", (params) => ({
-		workspaceId: "ws1",
-		source: "editor-buffer",
-		uri: params.uri,
-		documentVersion: params.version,
-		serverGeneration: 1,
-		workspaceEpoch: 1,
-		operation: params.operation,
-		state: "ready",
-		freshness: "versioned",
-		truncated: false,
-		result: { items },
-	}));
-	tui.press(CTRL_SPACE);
-	await settle();
-	const popup = (app as unknown as { completionPopup?: { moveSelection(delta: number): number; handleMouse(event: unknown): unknown } }).completionPopup;
-	assert.ok(popup, "the popup is wired");
-	popup.moveSelection(9); // window scrolls: presented rows are 3..9
-	popup.handleMouse({
-		type: "click",
-		button: "left",
-		x: 0,
-		y: 2, // the third presented row == item index 5
-		screenX: 0,
-		screenY: 2,
-		width: 80,
-		height: 10,
-		shift: false,
-		alt: false,
-		ctrl: false,
-	});
-	await settle();
-	assert.equal(internals(app).completionSession, undefined, "the click accepted");
-	assert.equal(
-		integration.store.getDocument(documentId)?.text,
-		"item-5hello\n",
-		"the clicked row was applied, not the first item",
-	);
-	scriptPicks(app, ["discard"]);
-	await app.exit();
-});
+}
 
 // ─── finding 7: save-and-close survives a save conflict ────────────────────
 
@@ -974,43 +868,75 @@ test("the editor completion command returns keyboard focus to its suggestions", 
 	}
 });
 
-test("an older completion reply does not close a newer request still loading", async () => {
+test("a late completion response cannot resurrect ghost text after cursor motion", async () => {
 	const { app, tui, client } = makeApp();
-	let firstReply!: (value: unknown) => void;
-	let nextReply!: (value: unknown) => void;
-	const first = new Promise((resolve) => { firstReply = resolve; });
-	const next = new Promise((resolve) => { nextReply = resolve; });
-	let calls = 0;
-	client.handlers.set("workspace.intelligence", (params) => {
-		if (params.operation !== "completion") return {};
-		return ++calls === 1 ? first : next;
+	let reply!: (value: unknown) => void;
+	client.handlers.set("workspace.intelligence", () => new Promise((resolve) => { reply = resolve; }));
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		const { integration } = await openEditorFile(app);
+		tui.press(CTRL_SPACE);
+		await settle();
+		tui.press("\x1b[C");
+		integration.pane.handleInput("\x1b[C");
+		reply({ workspaceId: "ws1", source: "editor-buffer", uri: "file:///ws/src/a.ts",
+			documentVersion: 0, serverGeneration: 1, workspaceEpoch: 1,
+			operation: "completion", state: "ready", freshness: "versioned", truncated: false,
+			result: { items: [{ label: "alpha" }] } });
+		await settle();
+		assert.equal(internals(app).completionSession, undefined);
+	} finally {
+		reply?.({});
+		await app.exit();
+	}
+});
+
+for (const [text, expected] of [["a", 0], ["// alpha", 0], ['"alpha', 0], ["user.", 1]] as const) {
+	test(`automatic requests are restrained for ${JSON.stringify(text)}`, async () => {
+		const { app, tui, client } = makeApp();
+		client.handlers.set("workspace.read", (params) => ({
+			uri: String(params.uri), text: "", revision: "r", languageId: "typescript",
+			lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 0,
+		}));
+		client.handlers.set("workspace.documentChange", (params) => ({ acceptedVersion: params.version }));
+		armCompletion(client);
+		await app.start();
+		try {
+			await waitForWorkspace(app);
+			const { integration } = await openEditorFile(app);
+			client.onWorkspaceEvent?.({ type: "workspace.lspState", workspaceId: "ws1", epoch: 1,
+				profile: "typescript-language-server", state: "ready", generation: 1 });
+			for (const key of text) {
+				tui.press(key);
+				integration.pane.handleInput(key);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 260));
+			await settle();
+			assert.equal(client.requests.filter((r) => r.method === "workspace.intelligence"
+				&& r.params.operation === "completion").length, expected);
+		} finally {
+			scriptPicks(app, ["discard"]);
+			await app.exit();
+		}
 	});
+}
+
+test("switching files retires the previous inline completion before Tab", async () => {
+	const { app, tui, client } = makeApp();
+	armCompletion(client);
 	await app.start();
 	try {
 		await waitForWorkspace(app);
 		const { integration, documentId } = await openEditorFile(app);
 		tui.press(CTRL_SPACE);
 		await settle();
-		tui.press("b");
-		integration.store.insertText(documentId, "b");
-		await settle();
-		assert.equal(calls, 2);
-		const reply = (version: number) => ({
-			workspaceId: "ws1", source: "editor-buffer", uri: "file:///ws/src/a.ts",
-			documentVersion: version, serverGeneration: 1, workspaceEpoch: 1,
-			operation: "completion", state: "ready", freshness: "versioned", truncated: false,
-			result: { items: completionItems() },
-		});
-		firstReply(reply(0));
-		await settle();
-		assert.equal(internals(app).completionSession?.state, "loading");
-		nextReply(reply(1));
-		await settle();
-		assert.equal(internals(app).completionSession?.state, "visible");
-		assert.deepEqual(internals(app).completionSession?.items().map((item) => item.label), ["beta"]);
+		assert.ok(internals(app).completionSession);
+		await internals(app).openWorkspacePath("src/b.ts");
+		assert.equal(internals(app).completionSession, undefined);
+		tui.press("\t");
+		assert.equal(integration.store.getDocument(documentId)?.text, "hello\n");
 	} finally {
-		firstReply({});
-		nextReply({});
 		scriptPicks(app, ["discard"]);
 		await app.exit();
 	}

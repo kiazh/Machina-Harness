@@ -57,7 +57,7 @@ import {
 // but the package root does not re-export it. A toolkit bump that moves this
 // API fails the parity test loudly instead of silently dropping Kitty input.
 import { decodePrintableKey } from "@earendil-works/pi-tui/dist/keys.js";
-import { displayWidth, truncateDisplay } from "../design/text.ts";
+import { displayWidth, sanitizeLabelText, truncateDisplay } from "../design/text.ts";
 import { backgroundColorAnsi, isOpaqueBackground, selectionFill, selectionInk, theme } from "../design/theme.ts";
 import type { DocumentRecord, EditorViewState } from "./model.ts";
 import { EditorStore } from "./model.ts";
@@ -205,6 +205,7 @@ interface Segment {
 	col: number;
 	/** Display cells. */
 	width: number;
+	ghost?: boolean;
 	/** Offset range within the line (raw, 1:1 with the projection). */
 	from: number;
 	to: number;
@@ -314,6 +315,7 @@ export class EditorView implements Component, Focusable {
 	private readonly lineCache = new Map<string, { version: number; starts: number[] }>();
 	private readonly wrapCache = new Map<string, { version: number; contentCells: number; rows: VisualRow[] }>();
 	private lastFrame: FrameCache | null = null;
+	private inlineCompletion: { documentId: string; version: number; offset: number; text: string } | undefined;
 
 	constructor(options: EditorViewOptions) {
 		this.store = options.store;
@@ -435,6 +437,30 @@ export class EditorView implements Component, Focusable {
 		return { line: position.line + 1, column: this.cellInLine(info, cursor) + 1 };
 	}
 
+	/** Display-only suggestion, fenced to the buffer version and caret. */
+	setInlineCompletion(text?: string): void {
+		if (!text && !this.inlineCompletion) return;
+		const record = this.store.getDocument(this.activeDocumentId);
+		this.inlineCompletion = text && record && sanitizeLabelText(text) === text
+			? { documentId: record.id, version: record.version, offset: this.cursor(), text }
+			: undefined;
+		this.lastFrame = null;
+		this.requestRenderCallback();
+	}
+
+	/** Reuse lexical state so automatic suggestions stay out of prose. */
+	allowsAutomaticCompletion(): boolean {
+		const record = this.store.getDocument(this.activeDocumentId);
+		if (!record) return false;
+		const language = languageForId(record.languageId);
+		if (language === "plain") return false;
+		const starts = this.linesFor(record);
+		const position = offsetToPosition(record.text, this.cursor(), starts);
+		return !this.syntaxSpansFor(record, starts, language, position.line).some((span) =>
+			(span.kind === "comment" || span.kind === "string")
+			&& span.start < position.character && span.end >= position.character);
+	}
+
 	// --------------------------------------------------------------- render
 
 	render(width: number): string[] {
@@ -464,6 +490,10 @@ export class EditorView implements Component, Focusable {
 			anchor !== undefined && anchor !== cursor
 				? { startOffset: Math.min(anchor, cursor), endOffset: Math.max(anchor, cursor) }
 				: undefined;
+		const inline = this.inlineCompletion;
+		const ghost = this.focused && !selection && !record.readOnly
+			&& inline?.documentId === record.id && inline.version === record.version && inline.offset === cursor
+			? inline.text : undefined;
 		const activeLine = offsetToPosition(record.text, cursor, starts).line;
 		const caretRow = this.rowIndexOfOffset(record, starts, contentCells, cursor);
 		const marker = this.focused ? CURSOR_MARKER : "";
@@ -488,6 +518,7 @@ export class EditorView implements Component, Focusable {
 			this.softWrap ? "w" : "n",
 			String(this.tabWidth),
 			this.syntaxEnabled ? "s" : "p",
+			JSON.stringify(ghost),
 		].join(":");
 		if (this.lastFrame && this.lastFrame.key === cacheKey) return [...this.lastFrame.lines];
 
@@ -507,7 +538,7 @@ export class EditorView implements Component, Focusable {
 			const caretCell = this.focused && rowIndex === caretRow ? this.cellInLine(info, cursor) : undefined;
 			const windowFrom = this.softWrap ? row.fromCell : state.horizontalCellOffset;
 			const spans = highlight ? this.syntaxSpansFor(record, starts, language, row.line) : undefined;
-			const content = this.composeRow(info, windowFrom, contentCells, selection, caretCell, marker, spans, blockVisible);
+			const content = this.composeRow(info, windowFrom, contentCells, selection, caretCell, marker, spans, blockVisible, rowIndex === caretRow ? ghost : undefined);
 			lines.push(padRow(truncateDisplay(`${gutter}  ${content}`, safeWidth), safeWidth));
 		}
 		this.lastFrame = { key: cacheKey, lines };
@@ -963,7 +994,20 @@ export class EditorView implements Component, Focusable {
 		marker: string,
 		syntax: readonly SyntaxSpan[] | undefined,
 		blockVisible: boolean,
+		ghost?: string,
 	): string {
+		if (ghost && caretCell !== undefined) {
+			const preview = segmentsOfLine(ghost, this.tabWidth);
+			const width = preview.reduce((sum, segment) => sum + segment.width, 0);
+			const before = info.segments.filter((segment) => segment.col < caretCell);
+			const after = info.segments.filter((segment) => segment.col >= caretCell)
+				.map((segment) => ({ ...segment, col: segment.col + width }));
+			info = { ...info, width: info.width + width, segments: [
+				...before,
+				...preview.map((segment) => ({ ...segment, col: caretCell + segment.col, ghost: true })),
+				...after,
+			] };
+		}
 		const windowEnd = windowFrom + contentCells;
 		const windowContentTo = Math.min(info.width, windowEnd);
 		const selStart = selection ? selection.startOffset - info.start : 0;
@@ -978,6 +1022,7 @@ export class EditorView implements Component, Focusable {
 			text: string;
 			width: number;
 			style: "plain" | "selected" | "caret";
+			ghost?: boolean;
 			/** Raw line offsets when the text is the 1:1 raw slice; else undefined. */
 			from?: number;
 			to?: number;
@@ -1016,6 +1061,7 @@ export class EditorView implements Component, Focusable {
 				style: caretHere ? "caret" : isSelected(segment) ? "selected" : "plain",
 				from: segment.from,
 				to: segment.to,
+				ghost: segment.ghost,
 			});
 			emitted += segment.width;
 		}
@@ -1046,7 +1092,13 @@ export class EditorView implements Component, Focusable {
 				// Block on: inverse cell at the caret. Block off (blink phase):
 				// the same cell renders as plain text so the glyph underneath
 				// shows through; the marker still rides along for IME placement.
-				out += marker + (blockVisible ? paintCaret(part.text) : part.text);
+				const text = part.ghost ? theme.dim(part.text) : part.text;
+				out += marker + (blockVisible ? paintCaret(text) : text);
+				continue;
+			}
+			if (part.ghost) {
+				flush();
+				out += theme.dim(part.text);
 				continue;
 			}
 			if (part.style === "selected") {

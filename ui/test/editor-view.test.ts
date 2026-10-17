@@ -583,3 +583,70 @@ test("mouse caret placement clears the vertical preferred column", () => {
 		"the stale column-8 preference must not survive the mouse move",
 	);
 });
+
+test("inline completion is dim display text, preserves the caret, and never edits the document", () => {
+	const { store, doc } = freshStore("os.pa)");
+	store.setSelection(doc.id, { cursorOffset: 5 });
+	const { view } = makeView(store, doc.id);
+	view.focused = true;
+	view.setViewportRows(2);
+	view.setInlineCompletion("th");
+	const row = view.render(40)[0]!;
+	assert.match(stripTerminalSequences(row), /os.path\)/);
+	assert.ok(row.includes(theme.dim("h")), "the suggested suffix is dimmed");
+	assert.equal(stripTerminalSequences(row.split(CURSOR_MARKER)[0]!), "1  os.pa");
+	assert.equal(store.getDocument(doc.id)?.text, "os.pa)");
+	assert.equal(store.getDocument(doc.id)?.dirty, false);
+	for (const width of [0, 1, 3, 7, 8, 9, 15]) {
+		assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
+	}
+	view.setInlineCompletion(undefined);
+	assert.doesNotMatch(stripTerminalSequences(view.render(40)[0]!), /path/);
+});
+
+test("inline completion hides on focus, cursor, or document version changes", () => {
+	const { store, doc } = freshStore("pa");
+	store.setSelection(doc.id, { cursorOffset: 2 });
+	const { view } = makeView(store, doc.id);
+	view.focused = true;
+	view.setInlineCompletion("th");
+	assert.match(stripTerminalSequences(view.render(40)[0]!), /path/);
+	view.focused = false;
+	assert.doesNotMatch(stripTerminalSequences(view.render(40)[0]!), /path/);
+	view.focused = true;
+	view.handleInput("\x1b[D");
+	assert.doesNotMatch(stripTerminalSequences(view.render(40)[0]!), /path/);
+	view.handleInput("\x1b[C");
+	view.handleInput("x");
+	assert.doesNotMatch(stripTerminalSequences(view.render(40)[0]!), /path/);
+});
+
+for (const [languageId, text, allowed] of [
+	["typescript", "// user", false],
+	["typescript", "/* block\nword", false],
+	["typescript", 'const x = "word', false],
+	["typescript", 'const x = `hello\nword', false],
+	["typescript", 'const x = "hello"; user', true],
+	["python", "# user", false],
+	["python", 'value = """hello\nword', false],
+	["python", "value = user", true],
+] as const) {
+	test(`automatic completion respects ${languageId} lexical context: ${text}`, () => {
+		const { store, doc } = freshStore(text, { languageId });
+		store.setSelection(doc.id, { cursorOffset: text.length });
+		const { view } = makeView(store, doc.id);
+		assert.equal(view.allowsAutomaticCompletion(), allowed);
+	});
+}
+
+test("inline Unicode preview is clipped within the current soft-wrapped row", () => {
+	const { store, doc } = freshStore("\tpa)");
+	store.setSelection(doc.id, { cursorOffset: 3 });
+	const { view } = makeView(store, doc.id, { softWrap: true });
+	view.focused = true;
+	view.setInlineCompletion("th👩‍💻界");
+	for (const width of [1, 4, 8, 10, 16, 40]) {
+		assert.ok(view.render(width).every((row) => visibleWidth(row) <= width));
+	}
+	assert.equal(store.getDocument(doc.id)?.text, "\tpa)");
+});

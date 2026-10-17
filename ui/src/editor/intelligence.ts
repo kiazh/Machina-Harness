@@ -22,7 +22,7 @@
 //   latest-wins with version rules, a 1000-row cap with an omitted count, and
 //   unversioned entries labeled as such.
 
-import { sanitizeDisplay } from "../design/text.ts";
+import { sanitizeDisplay, sanitizeLabelText } from "../design/text.ts";
 import type { EditorStore } from "./model.ts";
 import { positionToOffset } from "./positions.ts";
 import {
@@ -720,20 +720,7 @@ export class CompletionSession {
 		// transaction's primary (caller-order last) and the caret lands after the
 		// inserted completion, not after an auto-import at the top of the file.
 		for (const extra of item.additionalTextEdits) edits.push(copyEdit(extra));
-		if (item.textEdit) {
-			edits.push(copyEdit(item.textEdit));
-		} else {
-			const start = copyPosition(this.positionValue);
-			const offset = positionToOffset(record.text, this.positionValue);
-			if (this.prefixValue && start.character >= this.prefixValue.length
-				&& record.text.slice(offset - this.prefixValue.length, offset) === this.prefixValue) {
-				start.character -= this.prefixValue.length;
-			}
-			edits.push({
-				range: { start, end: copyPosition(this.positionValue) },
-				newText: insertionText,
-			});
-		}
+		edits.push(this.primaryEdit(item, record.text));
 		const payload: WorkspaceEditPayload = {
 			label: `Accept ${item.label}`,
 			changes: [{ uri: this.uriValue, version: this.capturedVersionValue, edits }],
@@ -753,6 +740,43 @@ export class CompletionSession {
 		}
 		this.close("accepted");
 		return { ok: true, applied: result.applied };
+	}
+
+	/** A suffix preview is offered only when accepting it adds exactly that text. */
+	inlinePreview(): string | undefined {
+		const item = this.selectedItem();
+		const record = this.store.getDocument(this.documentIdValue);
+		if (this.stateValue !== "visible" || !item || !record || record.readOnly
+			|| item.malformedTextEdit || item.insertTextFormat === 2 || item.additionalTextEdits.length
+			|| record.version !== this.capturedVersionValue) return undefined;
+		const cursor = positionToOffset(record.text, this.positionValue);
+		const view = this.store.getViewState(record.id);
+		if (view?.cursorOffset !== cursor || (view.selectionAnchorOffset !== undefined
+			&& view.selectionAnchorOffset !== cursor)) return undefined;
+		const edit = this.primaryEdit(item, record.text);
+		if (edit.range.start.line !== this.positionValue.line
+			|| edit.range.end.line !== this.positionValue.line
+			|| edit.range.end.character !== this.positionValue.character) return undefined;
+		const start = positionToOffset(record.text, edit.range.start);
+		const existing = record.text.slice(start, cursor);
+		if (!edit.newText.startsWith(existing)) return undefined;
+		const suffix = edit.newText.slice(existing.length);
+		if (!suffix || sanitizeLabelText(suffix) !== suffix) return undefined;
+		return suffix;
+	}
+
+	private primaryEdit(item: NarrowedCompletionItem, text: string): LspTextEdit {
+		if (item.textEdit) return copyEdit(item.textEdit);
+		const start = copyPosition(this.positionValue);
+		const offset = positionToOffset(text, this.positionValue);
+		if (this.prefixValue && start.character >= this.prefixValue.length
+			&& text.slice(offset - this.prefixValue.length, offset) === this.prefixValue) {
+			start.character -= this.prefixValue.length;
+		}
+		return {
+			range: { start, end: copyPosition(this.positionValue) },
+			newText: item.insertText ?? item.label,
+		};
 	}
 
 	// -------------------------------------------------------------- internals

@@ -984,3 +984,44 @@ test("plain insertText completion replaces the typed prefix instead of duplicati
 	assert.equal(store.undo(doc.id).ok, true);
 	assert.equal(store.getDocument(doc.id)?.text, "os.pa");
 });
+
+test("inline preview uses the accepted edit and leaves the buffer unchanged", async () => {
+	const store = new EditorStore();
+	const doc = open(store, "os.pa");
+	store.setSelection(doc.id, { cursorOffset: 5 });
+	const session = new CompletionSession({
+		store, documentId: doc.id, uri: doc.uri, prefix: "pa", position: { line: 0, character: 5 },
+		request: async () => ok(completionPayload([{ label: "path (module)", filterText: "path", insertText: "path" }])),
+	});
+	await session.start();
+	assert.equal(session.inlinePreview(), "th");
+	assert.equal(store.getDocument(doc.id)?.text, "os.pa");
+	assert.equal(store.getDocument(doc.id)?.dirty, false);
+	assert.equal(session.accept().ok, true);
+	assert.equal(store.getDocument(doc.id)?.text, "os.path");
+});
+
+for (const [name, item, expected] of [
+	["text edit", { label: "path", textEdit: { range: { start: { line: 0, character: 3 }, end: { line: 0, character: 5 } }, newText: "path" } }, "th"],
+	["rewritten prefix", { label: "path", insertText: "PATH" }, undefined],
+	["multiline", { label: "path", insertText: "path\nnext" }, undefined],
+	["terminal control", { label: "path", insertText: "path\x1b[2J" }, undefined],
+	["snippet", { label: "path", insertText: "path$0", insertTextFormat: 2 }, undefined],
+	["extra edit", { label: "path", additionalTextEdits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: "import x;" }] }, undefined],
+] as const) {
+	test(`inline preview handles ${name} safely`, async () => {
+		const store = new EditorStore();
+		const doc = open(store, "os.pa");
+		store.setSelection(doc.id, { cursorOffset: 5 });
+		const session = new CompletionSession({
+			store, documentId: doc.id, uri: doc.uri, prefix: "pa", position: { line: 0, character: 5 },
+			request: async () => ok(completionPayload([item])),
+		});
+		await session.start();
+		assert.equal(session.inlinePreview(), expected);
+		store.setSelection(doc.id, { cursorOffset: 4 });
+		assert.equal(session.inlinePreview(), undefined, "motion invalidates the preview");
+		store.insertText(doc.id, "x");
+		assert.equal(session.inlinePreview(), undefined, "edits invalidate the preview");
+	});
+}

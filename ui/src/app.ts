@@ -28,10 +28,6 @@ import { AppShell } from "./components/AppShell.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { ProblemsPane } from "./components/ProblemsPane.ts";
-import {
-	CompletionPopup,
-	completionPopupModelFrom,
-} from "./components/IntelligencePopups.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
 import { SHORTCUT_ROWS } from "./design/shortcuts.ts";
@@ -220,14 +216,12 @@ function fenceLanguage(languageId: string): string {
 	return languageId.replace(/[^A-Za-z0-9_+.#-]/g, "");
 }
 
-/** Completion-prefix characters: the identifier run the list is filtered by. */
+/** Completion-prefix characters: the identifier run before the caret. */
 const COMPLETION_PREFIX_CHAR = /[A-Za-z0-9_$]/;
 
 /**
- * Word prefix before the caret (finding 6): the trailing identifier run at
- * `cursorOffset`, used to refilter an open completion list after a typed
- * character. Punctuation/whitespace end the run, so the filter never spans
- * tokens.
+ * Trailing identifier at `cursorOffset`, used to request matching suggestions.
+ * Punctuation/whitespace end the run, so the prefix never spans tokens.
  */
 function completionPrefixBefore(text: string, cursorOffset: number): string {
 	const offset = Math.max(0, Math.min(cursorOffset, text.length));
@@ -446,10 +440,7 @@ export class App implements FeatureHost {
 	private activeRegion: FocusRegion = "chat-composer";
 	private problemsOpen = false;
 	private completionSession: CompletionSession | undefined;
-	/** Mounted completion popup for the open session (refilter setModel seam). */
-	private completionPopup: CompletionPopup | undefined;
-	/** Orders deferred completion refilters; a newer pass supersedes older ones. */
-	private completionRefilterSeq = 0;
+	/** Debounce automatic requests without blocking local edits. */
 	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 	private quickOpenPane: QuickOpenPane | undefined;
 	private quickOpenHandle: OverlayHandle | undefined;
@@ -1661,20 +1652,18 @@ export class App implements FeatureHost {
 		}
 		const integration = this.integration;
 		if (integration && !this.workspaceUnsupported) {
-			// An editor intelligence popup (completion) owns Enter/Tab/Esc and
-			// arrows while it is open. This runs BEFORE the running-turn Esc
-			// branch: Esc dismisses the top popup and must not cancel a chat turn.
-			// Region-gated (finding 4b): a popup whose region lost focus must
-			// never consume keys from whoever owns them now.
-			if (this.activeRegion === "editor" && integration.pane.handleIntelligenceKey(data) === "consumed") {
-				this.tui.requestRender();
-				return { consume: true };
+			// Ghost text owns only Tab and Escape; Enter and arrows keep editing.
+			if (this.completionSession && this.activeRegion === "editor") {
+				if (matchesKey(data, Key.tab)
+					&& this.activeEditorContext()?.document.id === this.completionSession.documentId
+					&& this.completionSession.inlinePreview() !== undefined) {
+					this.acceptCompletion();
+					return { consume: true };
+				}
+				const dismiss = matchesKey(data, Key.escape);
+				this.clearCompletion();
+				if (dismiss) return { consume: true };
 			}
-			// Completion type-to-filter (finding 6): this key falls through to
-			// the editor, which may edit the buffer under an open list. One
-			// deferred pass re-syncs the session; without an edit (motion keys,
-			// consumed workspace keys) it no-ops on the version check.
-			if (this.completionSession && this.activeRegion === "editor") this.scheduleCompletionRefilter();
 			// The Problems pane owns Esc while focused: it closes the section
 			// instead of falling into the double-Esc prompt refill or stopping
 			// the running turn.
@@ -1753,7 +1742,7 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 		// Down on an empty composer opens the subagent menu (the same picker
-		// as /agents sessions). With text, with a completion popup, or with
+		// as /agents sessions). With text, with an inline suggestion, or with
 		// no subagents it falls through untouched to the editor's own
 		// Down handling (movement and history). Dialogs and approvals were
 		// already given the key above.
@@ -1823,10 +1812,12 @@ export class App implements FeatureHost {
 			view: { documentId: "", cursorOffset: 0, scrollLine: 0, horizontalCellOffset: 0 },
 			onChange: (documentId) => {
 				this.integration?.controller.noteEdit(documentId);
-				if (!this.completionSession) this.scheduleAutomaticCompletion();
+				this.clearCompletion();
+				this.scheduleAutomaticCompletion();
 				this.tui.requestRender();
 			},
 			requestRender: () => this.tui.requestRender(),
+			onCursorMove: () => { if (this.completionSession) this.clearCompletion(); },
 			// Editor caret shares the app's single blink phase (coordinator).
 			isCursorBlockVisible: () => this.cursorBlinkOn(),
 			// The view's clipboard seam: copy through the real system clipboard
@@ -1851,6 +1842,7 @@ export class App implements FeatureHost {
 			view,
 			requestRender: () => this.tui.requestRender(),
 			onSelectTab: () => {
+				this.clearCompletion();
 				// Tab focus refreshes the Problems projection for the new active file.
 				void this.refreshProblemsForActiveDocument();
 				this.refreshLspStatus();
@@ -2399,8 +2391,7 @@ export class App implements FeatureHost {
 			(region === "problems" && this.problemsOpen && this.workspaceLayout?.editor !== undefined);
 		this.activeRegion = visible ? region : "chat-composer";
 		if (this.activeRegion !== "editor") this.cancelAutomaticCompletion();
-		// A completion list is editor-scoped: it must not stay mounted (and
-		// keep consuming keys) after focus left the editor (finding 4a).
+		// Inline suggestions belong to the editor and disappear on focus loss.
 		if (this.activeRegion !== "editor" && this.completionSession) this.clearCompletion();
 		if (!integration || !visible) {
 			this.tui.setFocus(this.editor);
@@ -2434,7 +2425,7 @@ export class App implements FeatureHost {
 		if (this.activeRegion === next) return;
 		this.activeRegion = next;
 		if (next !== "editor") this.cancelAutomaticCompletion();
-		// A completion list is editor-scoped (finding 4a): mouse focus leaving
+		// Inline completion is editor-scoped: mouse focus leaving
 		// the editor unmounts it instead of leaving a visible orphan that could
 		// later accept a stray Enter.
 		if (next !== "editor" && this.completionSession) this.clearCompletion();
@@ -2653,7 +2644,7 @@ export class App implements FeatureHost {
 		};
 	}
 
-	/** Ctrl+Space: one explicit completion session mounted under the viewport. */
+	/** Ctrl+Space and idle typing share one version-fenced inline suggestion. */
 	private async startCompletion(automatic = false): Promise<void> {
 		this.cancelAutomaticCompletion();
 		const integration = this.integration;
@@ -2662,7 +2653,7 @@ export class App implements FeatureHost {
 		if (!automatic && this.activeRegion !== "editor") this.setFocusForRegion("editor");
 		if (this.activeRegion !== "editor") return;
 		const gen = this.captureWorkspaceFence();
-		this.completionSession?.close("superseded");
+		this.clearCompletion();
 		const session = new CompletionSession({
 			store: integration.store,
 			request: this.intelligenceRequest(),
@@ -2673,35 +2664,17 @@ export class App implements FeatureHost {
 				integration.store.getViewState(context.document.id)?.cursorOffset ?? 0),
 		});
 		this.completionSession = session;
-		// Mouse acceptance (finding 5): a click selects the clicked row in the
-		// machine first, then the popup's accept action fires. Keyboard and
-		// dismiss hookups stay unchanged.
-		const popup = new CompletionPopup({
-			onSelect: (index) => {
-				session.setSelectedIndex(index);
-			},
-		});
-		this.completionPopup = popup;
-		popup.onAction = (action) => {
-			if (action.kind === "accept") this.acceptCompletion();
-		};
 		const state = await session.start();
 		if (this.completionSession !== session || this.exiting || !this.isWorkspaceCurrent(gen)) return;
-		// Typing may have superseded this request; its newer refilter owns the popup.
-		if (state === "loading") return;
-		if (state === "visible" && (!automatic || session.itemCount() > 0)) {
-			popup.setModel(completionPopupModelFrom(session));
-			integration.pane.setIntelligence(popup, {
-				accept: () => this.acceptCompletion(),
-				dismiss: () => this.dismissCompletion(),
-				move: (direction) => {
-					session.moveSelection(direction);
-					popup.setModel(completionPopupModelFrom(session));
-					this.tui.requestRender();
-				},
-			});
-			this.tui.requestRender();
-			return;
+		if (state === "visible") {
+			// A completion that rewrites existing text, imports names or inserts
+			// snippets cannot be represented honestly as an inline suffix.
+			const preview = session.inlinePreview();
+			if (preview !== undefined) {
+				integration.view.setInlineCompletion(preview);
+				this.tui.requestRender();
+				return;
+			}
 		}
 		// Nothing to show: one quiet honest notice per explicit invocation.
 		if (!automatic && session.lastDropReason === "unavailable") this.print("Completion is unavailable here.", "info");
@@ -2725,60 +2698,6 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	private dismissCompletion(): void {
-		this.clearCompletion();
-	}
-
-	/**
-	 * Deferred type-to-filter (finding 6): a key fell through to the editor and
-	 * may have edited the buffer under an open completion list. The microtask
-	 * runs after the focused view applied the edit, so the refilter sees the
-	 * landed text/version instead of the stale pre-key state.
-	 */
-	private scheduleCompletionRefilter(): void {
-		const session = this.completionSession;
-		if (!session) return;
-		queueMicrotask(() => this.refilterCompletion(session));
-	}
-
-	/**
-	 * Re-sync an open completion session after the buffer moved on. A plain
-	 * setPrefix() is not enough: it keeps the version captured when the list
-	 * was requested, and accept() would refuse the (now) mismatched buffer as
-	 * stale. rerun() re-captures the current version and refetches for the
-	 * same caret, so the next accept passes the version gate. The existing
-	 * snapshot is refiltered optimistically while that request is in flight.
-	 */
-	private refilterCompletion(session: CompletionSession): void {
-		if (this.completionSession !== session || this.exiting) return;
-		const integration = this.integration;
-		const popup = this.completionPopup;
-		if (!integration || !popup || this.activeRegion !== "editor") return;
-		const record = integration.store.getDocument(session.documentId);
-		if (!record || session.capturedVersion === record.version) return;
-		const cursorOffset = integration.store.getViewState(session.documentId)?.cursorOffset ?? 0;
-		const prefix = completionPrefixBefore(record.text, cursorOffset);
-		const position = offsetToPosition(record.text, cursorOffset);
-		const seq = ++this.completionRefilterSeq;
-		const gen = this.captureWorkspaceFence();
-		void session.rerun(prefix, position).then((state) => {
-			// A newer refilter, a closed session, a superseded workspace or an
-			// exit owns the surface now.
-			if (this.completionSession !== session || this.exiting || seq !== this.completionRefilterSeq) return;
-			if (!this.isWorkspaceCurrent(gen)) return;
-			if (state === "visible") {
-				popup.setModel(completionPopupModelFrom(session));
-				this.tui.requestRender();
-				return;
-			}
-			this.clearCompletion();
-		}).catch(() => {
-			if (this.completionSession === session && seq === this.completionRefilterSeq) this.clearCompletion();
-		});
-		popup.setModel(completionPopupModelFrom(session));
-		this.tui.requestRender();
-	}
-
 	private cancelAutomaticCompletion(): void {
 		if (this.automaticCompletionTimer !== undefined) clearTimeout(this.automaticCompletionTimer);
 		this.automaticCompletionTimer = undefined;
@@ -2795,7 +2714,9 @@ export class App implements FeatureHost {
 		if (!selection || (selection.selectionAnchorOffset !== undefined && selection.selectionAnchorOffset !== selection.cursorOffset)) return;
 		const cursor = selection.cursorOffset;
 		const previous = context.document.text[cursor - 1] ?? "";
-		if (!COMPLETION_PREFIX_CHAR.test(previous) && previous !== ".") return;
+		const prefix = completionPrefixBefore(context.document.text, cursor);
+		const member = context.document.text[cursor - prefix.length - 1] === ".";
+		if (previous !== "." && (!COMPLETION_PREFIX_CHAR.test(previous) || (!member && prefix.length < 2))) return;
 		const { id, version } = context.document;
 		const gen = this.captureWorkspaceFence();
 		this.automaticCompletionTimer = setTimeout(() => {
@@ -2804,7 +2725,8 @@ export class App implements FeatureHost {
 				|| this.dialogs.length || this.approvalDialogs.size || this.quickOpenPane || this.completionSession) return;
 			const current = this.activeEditorContext();
 			if (current?.document.id !== id || current.document.version !== version
-				|| store.getViewState(id)?.cursorOffset !== cursor || this.lspStatusText() !== "ready") return;
+				|| store.getViewState(id)?.cursorOffset !== cursor || this.lspStatusText() !== "ready"
+				|| !this.integration?.view.allowsAutomaticCompletion()) return;
 			void this.startCompletion(true);
 		}, 150);
 	}
@@ -2813,9 +2735,7 @@ export class App implements FeatureHost {
 		this.cancelAutomaticCompletion();
 		this.completionSession?.close("dismissed");
 		this.completionSession = undefined;
-		this.completionPopup = undefined;
-		this.completionRefilterSeq += 1;
-		this.integration?.pane.setIntelligence(undefined);
+		this.integration?.view.setInlineCompletion(undefined);
 		this.tui.requestRender();
 	}
 
@@ -3040,6 +2960,7 @@ export class App implements FeatureHost {
 	private afterTabClosed(documentId: string): void {
 		const integration = this.integration;
 		if (!integration) return;
+		if (this.completionSession?.documentId === documentId) this.clearCompletion();
 		integration.view.releaseDocument(documentId);
 		const active = integration.tabs.activeDocumentId();
 		if (active) integration.view.setDocument(active);
@@ -3064,6 +2985,7 @@ export class App implements FeatureHost {
 		// must not be published into the successor's view.
 		if (!this.isWorkspaceCurrent(gen)) return;
 		if (outcome.status === "opened" || outcome.status === "focused") {
+			if (this.completionSession?.documentId !== outcome.documentId) this.clearCompletion();
 			integration.view.setDocument(outcome.documentId);
 			void this.refreshProblemsForActiveDocument();
 			this.refreshLspStatus();
@@ -3099,6 +3021,7 @@ export class App implements FeatureHost {
 		const integration = this.integration;
 		if (!integration) return;
 		const id = documentId ?? integration.tabs.activeDocumentId();
+		if (this.completionSession && this.completionSession.documentId !== id) this.clearCompletion();
 		if (!id) return;
 		const state = integration.store.getViewState(id);
 		if (state) integration.view.setView(state);
