@@ -152,6 +152,7 @@ interface Internals {
 	editor: { getText(): string; focused: boolean };
 	coordinator: { size: number; timerCount: number; isReducedMotion: boolean };
 	cursorBlinkSub: unknown;
+	cursorBlinkIdleTimer: unknown;
 	activeRegion: string;
 	setFocusForRegion(region: string): void;
 	openWorkspacePath(path: string): Promise<void>;
@@ -389,11 +390,53 @@ test("typing still edits and renders correctly with the blink phase off", async 
 		booted.tui.renderNow(true);
 		const joined = stripTerminalSequences(booted.tui.getScreenLines().join("\n"));
 		assert.ok(joined.includes("Xhello"), `the character landed in the buffer: ${joined}`);
+		assert.equal(internals(booted.app).cursorBlinkSub, undefined, "typing retires blink render demand");
+		assert.equal(internals(booted.app).coordinator.timerCount, 0);
+		const steady = capture(booted.tui);
+		assert.match(steady.screen[row]!, CARET_BLOCK, "typing immediately restores a steady visible caret");
+		t.mock.timers.tick(500);
+		assert.equal(internals(booted.app).cursorBlinkSub, undefined, "no blink while typing");
+		booted.term.onInput?.("Y");
+		await settle();
+		t.mock.timers.tick(999);
+		assert.equal(internals(booted.app).cursorBlinkSub, undefined, "each edit restarts the idle period");
+		t.mock.timers.tick(1);
+		assert.ok(internals(booted.app).cursorBlinkSub, "blink resumes after one idle second");
+		assert.equal(internals(booted.app).coordinator.timerCount, 1, "only one blink subscription resumes");
+		t.mock.timers.tick(500);
+		const resumed = capture(booted.tui);
+		assert.doesNotMatch(resumed.screen[row]!, CARET_BLOCK, "resumed blink reaches the off phase");
 	} finally {
 		// The typed edit dirtied the buffer: answer the quit review so exit
 		// settles (the review dialog would otherwise await a real user).
 		(booted.app as unknown as { pick: () => Promise<{ value: string }> }).pick = async () => ({ value: "discard" });
 		await booted.app.exit();
+		booted.restoreEnv();
+	}
+});
+
+
+test("leaving the editor cancels its pending blink restart", async (t) => {
+	t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: 1000 });
+	const booted = await boot();
+	try {
+		await internals(booted.app).openWorkspacePath("src/a.ts");
+		booted.term.onInput?.("X");
+		await settle();
+		assert.ok(internals(booted.app).cursorBlinkIdleTimer);
+		internals(booted.app).setFocusForRegion("explorer");
+		assert.equal(internals(booted.app).cursorBlinkIdleTimer, undefined);
+		t.mock.timers.tick(2000);
+		assert.equal(internals(booted.app).cursorBlinkSub, undefined);
+		assert.equal(internals(booted.app).coordinator.timerCount, 0);
+		internals(booted.app).setFocusForRegion("editor");
+		booted.term.onInput?.("Y");
+		await settle();
+		assert.ok(internals(booted.app).cursorBlinkIdleTimer, "exit will have a pending restart to cancel");
+	} finally {
+		(booted.app as unknown as { pick: () => Promise<{ value: string }> }).pick = async () => ({ value: "discard" });
+		await booted.app.exit();
+		assert.equal(internals(booted.app).cursorBlinkIdleTimer, undefined);
 		booted.restoreEnv();
 	}
 });

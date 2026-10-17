@@ -28,7 +28,7 @@ import { AppShell } from "./components/AppShell.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { ProblemsPane } from "./components/ProblemsPane.ts";
-import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, reducedMotionFromEnv } from "./design/motion.ts";
+import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
 import { SHORTCUT_ROWS } from "./design/shortcuts.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
@@ -330,6 +330,7 @@ export class App implements FeatureHost {
 	 * truth for "blinking is active" so focus changes can never stack loops.
 	 */
 	private cursorBlinkSub: AnimationSubscription | undefined;
+	private cursorBlinkIdleTimer: ReturnType<typeof setTimeout> | undefined;
 	/** Wall-clock start of the current blink phase (kept across re-subscribes). */
 	private cursorBlinkStartedAt = 0;
 	private lastPrompt = "";
@@ -872,7 +873,7 @@ export class App implements FeatureHost {
 
 	/**
 	 * The caret's current blink phase. When no blink subscription is live
-	 * there is no caret to toggle, so "on" keeps an unexpected render static;
+	 * the caret stays steadily visible, including while typing;
 	 * under reduced motion the caret is pinned on (documented policy: focus
 	 * must stay visible) and no timer exists at all.
 	 */
@@ -881,15 +882,32 @@ export class App implements FeatureHost {
 		return this.coordinator.frame(["on", "off"], CURSOR_BLINK_INTERVAL_MS, this.cursorBlinkStartedAt) === "on";
 	}
 
+	/** Retire blink render demand while editing, then restart after idle. */
+	private pauseEditorCursorBlink(): void {
+		if (this.exiting || !this.integration?.view.focused || this.coordinator.isReducedMotion) return;
+		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
+		this.cursorBlinkIdleTimer = setTimeout(() => {
+			this.cursorBlinkIdleTimer = undefined;
+			this.syncCursorBlink();
+		}, CURSOR_BLINK_RESUME_DELAY_MS);
+		this.syncCursorBlink();
+	}
+
 	/**
 	 * Reconcile the single blink subscription with the focused caret. The
 	 * stored handle guards subscribing, so repeated focus changes can never
 	 * stack loops (the coordinator also replaces by key). Retired whenever no
 	 * text surface owns the caret: explorer/problems focus, an overlay/dialog,
-	 * an empty composer or an empty editor.
+	 * an empty composer, an empty editor, or ongoing editor typing.
 	 */
 	private syncCursorBlink(): void {
-		const needed = this.cursorCaretVisible() && !this.coordinator.isReducedMotion;
+		const editorFocused = this.integration?.view.focused === true;
+		if (!editorFocused && this.cursorBlinkIdleTimer !== undefined) {
+			clearTimeout(this.cursorBlinkIdleTimer);
+			this.cursorBlinkIdleTimer = undefined;
+		}
+		const typing = editorFocused && this.cursorBlinkIdleTimer !== undefined;
+		const needed = this.cursorCaretVisible() && !this.coordinator.isReducedMotion && !typing;
 		if (needed && !this.cursorBlinkSub) {
 			this.cursorBlinkStartedAt = Date.now();
 			this.cursorBlinkSub = this.coordinator.subscribe("cursor.blink", CURSOR_BLINK_INTERVAL_MS);
@@ -1522,6 +1540,8 @@ export class App implements FeatureHost {
 		this.nowPlayingAnim = undefined;
 		this.cursorBlinkSub?.stop();
 		this.cursorBlinkSub = undefined;
+		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
+		this.cursorBlinkIdleTimer = undefined;
 		this.coordinator.dispose();
 		for (const dialog of [...this.dialogs].reverse()) dialog.cancel();
 		this.inputListenerDisposer?.();
@@ -1811,6 +1831,7 @@ export class App implements FeatureHost {
 			store,
 			view: { documentId: "", cursorOffset: 0, scrollLine: 0, horizontalCellOffset: 0 },
 			onChange: (documentId) => {
+				this.pauseEditorCursorBlink();
 				this.integration?.controller.noteEdit(documentId);
 				this.clearCompletion();
 				this.scheduleAutomaticCompletion();
@@ -2688,6 +2709,7 @@ export class App implements FeatureHost {
 		const result = session.accept();
 		this.clearCompletion();
 		if (result.ok) {
+			this.pauseEditorCursorBlink();
 			for (const application of result.applied) {
 				this.integration?.controller.noteEdit(application.documentId);
 			}

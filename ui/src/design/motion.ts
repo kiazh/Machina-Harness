@@ -29,6 +29,9 @@ export function reducedMotionFromEnv(env: NodeJS.ProcessEnv): boolean {
  */
 export const CURSOR_BLINK_INTERVAL_MS = 500;
 
+/** Keep the editor caret steady until typing has been idle for one second. */
+export const CURSOR_BLINK_RESUME_DELAY_MS = 1000;
+
 export interface AnimationSubscription {
 	stop(): void;
 }
