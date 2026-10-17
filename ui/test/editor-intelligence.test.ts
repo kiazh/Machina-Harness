@@ -1025,3 +1025,39 @@ for (const [name, item, expected] of [
 		assert.equal(session.inlinePreview(), undefined, "edits invalidate the preview");
 	});
 }
+
+for (const [source, prefix, label, kind, expected, expectedCursor] of [
+	["pri", "pri", "print", 3, "print()", 6],
+	['"hi".upp', "upp", "upper", 2, '"hi".upper()', 11],
+	["pri()", "pri", "print", 3, "print()", 5],
+	["from os import getc", "getc", "getcwd", 3, "from os import getcwd", 21],
+	["from os import (\n    getc", "getc", "getcwd", 3, "from os import (\n    getcwd", 27],
+	["def gre", "gre", "greet", 3, "def greet", 9],
+	["da", "da", "data", 6, "data", 4],
+] as const) {
+	test(`Python completion is a usable call or name in ${JSON.stringify(source)}`, async () => {
+		const store = new EditorStore();
+		const result = store.openDocument({ workspaceId: "ws", uri: "file:///w/main.py", text: source,
+			languageId: "python", revision: "r" });
+		assert.ok(result.ok);
+		const doc = result.document;
+		const cursor = source.lastIndexOf(prefix) + prefix.length;
+		store.setSelection(doc.id, { cursorOffset: cursor });
+		const lines = source.slice(0, cursor).split("\n");
+		const session = new CompletionSession({ store, documentId: doc.id, uri: doc.uri, prefix,
+			position: { line: lines.length - 1, character: lines.at(-1)!.length },
+			request: async () => ok(completionPayload([{ label, kind }])),
+		});
+		await session.start();
+		const suffix = session.inlinePreview();
+		assert.equal(suffix, label.slice(prefix.length) + (expected.endsWith("()") && !source.endsWith("()") ? "()" : ""));
+		assert.equal(session.accept().ok, true);
+		assert.equal(store.getDocument(doc.id)?.text, expected);
+		assert.equal(store.getViewState(doc.id)?.cursorOffset, expectedCursor);
+		assert.equal(store.undo(doc.id).ok, true);
+		assert.equal(store.getDocument(doc.id)?.text, source);
+		assert.equal(store.getViewState(doc.id)?.cursorOffset, cursor);
+		assert.equal(store.redo(doc.id).ok, true);
+		assert.equal(store.getViewState(doc.id)?.cursorOffset, expectedCursor);
+	});
+}

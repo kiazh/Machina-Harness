@@ -23,7 +23,7 @@
 //   unversioned entries labeled as such.
 
 import { sanitizeDisplay, sanitizeLabelText } from "../design/text.ts";
-import type { EditorStore } from "./model.ts";
+import type { DocumentRecord, EditorStore } from "./model.ts";
 import { positionToOffset } from "./positions.ts";
 import {
 	applyWorkspaceEdit,
@@ -720,7 +720,8 @@ export class CompletionSession {
 		// transaction's primary (caller-order last) and the caret lands after the
 		// inserted completion, not after an auto-import at the top of the file.
 		for (const extra of item.additionalTextEdits) edits.push(copyEdit(extra));
-		edits.push(this.primaryEdit(item, record.text));
+		const completion = this.completionEdit(item, record);
+		edits.push(completion.edit);
 		const payload: WorkspaceEditPayload = {
 			label: `Accept ${item.label}`,
 			changes: [{ uri: this.uriValue, version: this.capturedVersionValue, edits }],
@@ -738,6 +739,10 @@ export class CompletionSession {
 				refusals: result.refusals,
 			};
 		}
+		if (completion.caretBack) {
+			const cursor = this.store.getViewState(record.id)?.cursorOffset;
+			if (cursor !== undefined) this.store.setSelection(record.id, { cursorOffset: cursor - completion.caretBack });
+		}
 		this.close("accepted");
 		return { ok: true, applied: result.applied };
 	}
@@ -753,7 +758,7 @@ export class CompletionSession {
 		const view = this.store.getViewState(record.id);
 		if (view?.cursorOffset !== cursor || (view.selectionAnchorOffset !== undefined
 			&& view.selectionAnchorOffset !== cursor)) return undefined;
-		const edit = this.primaryEdit(item, record.text);
+		const { edit } = this.completionEdit(item, record);
 		if (edit.range.start.line !== this.positionValue.line
 			|| edit.range.end.line !== this.positionValue.line
 			|| edit.range.end.character !== this.positionValue.character) return undefined;
@@ -763,6 +768,23 @@ export class CompletionSession {
 		const suffix = edit.newText.slice(existing.length);
 		if (!suffix || sanitizeLabelText(suffix) !== suffix) return undefined;
 		return suffix;
+	}
+
+	/** Python calls use the server's symbol kind; imported/defined names stay names. */
+	private completionEdit(item: NarrowedCompletionItem, record: DocumentRecord): { edit: LspTextEdit; caretBack: number } {
+		const edit = this.primaryEdit(item, record.text);
+		const plain = { edit, caretBack: 0 };
+		if (record.languageId !== "python" || (item.kind !== 2 && item.kind !== 3)
+			|| item.insertTextFormat === 2 || !/^[\p{ID_Start}_][\p{ID_Continue}]*$/u.test(edit.newText)
+			|| edit.range.end.line !== this.positionValue.line
+			|| edit.range.end.character !== this.positionValue.character) return plain;
+		const end = positionToOffset(record.text, edit.range.end);
+		if (/^[ \t]*\(/u.test(record.text.slice(end))) return plain;
+		const before = record.text.slice(0, end);
+		const line = before.slice(Math.max(before.lastIndexOf("\n"), before.lastIndexOf("\r")) + 1);
+		if (/^\s*(?:from|import|def|class|async\s+def)\b|^\s*@/u.test(line)
+			|| /(?:^|[\r\n])[ \t]*from[^\r\n]*\bimport\s*\([^)]*$/u.test(before)) return plain;
+		return { edit: { ...edit, newText: `${edit.newText}()` }, caretBack: 1 };
 	}
 
 	private primaryEdit(item: NarrowedCompletionItem, text: string): LspTextEdit {

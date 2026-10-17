@@ -941,3 +941,33 @@ test("switching files retires the previous inline completion before Tab", async 
 		await app.exit();
 	}
 });
+
+test("Python ghost completion inserts a call with the cursor ready for arguments", async () => {
+	const { app, tui, client } = makeApp();
+	client.handlers.set("workspace.read", (params) => ({
+		uri: String(params.uri), text: "pri", revision: "r", languageId: "python",
+		lineEnding: "LF", encoding: "utf-8", readOnly: false, sizeBytes: 3,
+	}));
+	client.handlers.set("workspace.intelligence", (params) => ({
+		workspaceId: "ws1", source: "editor-buffer", uri: params.uri, documentVersion: params.version,
+		serverGeneration: 1, workspaceEpoch: 1, operation: "completion", state: "ready", freshness: "versioned",
+		truncated: false, result: { items: [{ label: "print", kind: 3 }] },
+	}));
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		const { integration, documentId } = await openEditorFile(app);
+		integration.pane.handleInput("\x1b[F"); // End
+		tui.press(CTRL_SPACE);
+		await settle();
+		assert.equal(internals(app).completionSession?.inlinePreview(), "nt()");
+		tui.press("\t");
+		assert.equal(integration.store.getDocument(documentId)?.text, "print()");
+		assert.equal(integration.store.getViewState(documentId)?.cursorOffset, 6);
+		integration.pane.handleInput('"hello"');
+		assert.equal(integration.store.getDocument(documentId)?.text, 'print("hello")');
+	} finally {
+		scriptPicks(app, ["discard"]);
+		await app.exit();
+	}
+});
