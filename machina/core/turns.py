@@ -416,48 +416,50 @@ async def owns_claim(session_id: uuid.UUID, token: str | None) -> bool:
         return False
 
 
-@instrumented("turns", "acquire")
-async def try_begin_turn(
-    session_id: uuid.UUID, *, turn_id: str | None = None, ttl_s: int = TURN_TTL_SECONDS
+async def _acquire_claim(
+    session_id: uuid.UUID,
+    *,
+    claim_kind: str,
+    owner: str,
+    ttl_s: int,
+    lock: asyncio.Lock,
+    contention: str,
 ) -> str | None:
-    """Claim a turn; returns the owner token, or None when busy.
+    """Shared claim/steal/cancel-reconcile state machine for a session slot.
 
-    Fails closed: DB errors (other than provable unavailability) propagate
-    instead of degrading into concurrent execution. A new turn is blocked by
-    any live claim (turn or mutation). DB-less mode enforces the same
-    single-owner rule through the token-aware local registry (AH-AUDIT-016).
+    ``try_begin_turn`` and ``begin_mutation`` differ only in the mutex, the
+    owner spelling, and the claim kind/log slugs; the durable-claim commit,
+    stale-entry eviction, and cancellation reconciliation are identical.
     """
     from machina.db.connection import db
 
-    lock = _session_lock(session_id)
     if not await _acquire_or_steal(lock, session_id, ("turn", "mutation")):
         log_event(
             "turns.claim",
             level="debug",
-            claim_kind="turn",
+            claim_kind=claim_kind,
             session_id=str(session_id),
             outcome="busy",
         )
         return None
-    owner = f"turn:{turn_id or uuid.uuid4().hex}:{uuid.uuid4().hex}"
     try:
         if db.connected:
-            claimed = await _db_claim(session_id, owner, "turn", ttl_s)
+            claimed = await _db_claim(session_id, owner, claim_kind, ttl_s)
             if not claimed:
                 try:
                     lock.release()
                 except RuntimeError:
-                    _note_lock_contention("begin_turn_claim_busy")
+                    _note_lock_contention(f"{contention}_claim_busy")
                 log_event(
                     "turns.claim",
                     level="debug",
-                    claim_kind="turn",
+                    claim_kind=claim_kind,
                     session_id=str(session_id),
                     owner_hash=_owner_hash(owner),
                     outcome="busy",
                 )
                 return None
-            if not _local_try_claim(session_id, "turn", owner):
+            if not _local_try_claim(session_id, claim_kind, owner):
                 # A live DB claim is ours, so any local entry is stale
                 # (same-process holder died without release): evict only
                 # when its token no longer holds a live claim.
@@ -465,17 +467,17 @@ async def try_begin_turn(
                 stale_token = (stale or {}).get("token")
                 if stale_token and not await owns_claim(session_id, stale_token):
                     _local_release(session_id, stale_token)
-                    _local_try_claim(session_id, "turn", owner)
+                    _local_try_claim(session_id, claim_kind, owner)
                 else:
                     await _db_release(session_id, owner)
                     try:
                         lock.release()
                     except RuntimeError:
-                        _note_lock_contention("begin_turn_stale_conflict")
+                        _note_lock_contention(f"{contention}_stale_conflict")
                     log_event(
                         "turns.claim",
                         level="debug",
-                        claim_kind="turn",
+                        claim_kind=claim_kind,
                         session_id=str(session_id),
                         owner_hash=_owner_hash(owner),
                         outcome="stale_conflict",
@@ -484,22 +486,22 @@ async def try_begin_turn(
             log_event(
                 "turns.claim",
                 level="debug",
-                claim_kind="turn",
+                claim_kind=claim_kind,
                 session_id=str(session_id),
                 owner_hash=_owner_hash(owner),
                 outcome="acquired",
             )
             return owner
         # DB-less: the local registry IS the claim (either kind blocks).
-        if not _local_try_claim(session_id, "turn", owner):
+        if not _local_try_claim(session_id, claim_kind, owner):
             try:
                 lock.release()
             except RuntimeError:
-                _note_lock_contention("begin_turn_local_busy")
+                _note_lock_contention(f"{contention}_local_busy")
             log_event(
                 "turns.claim",
                 level="debug",
-                claim_kind="turn",
+                claim_kind=claim_kind,
                 session_id=str(session_id),
                 owner_hash=_owner_hash(owner),
                 outcome="busy",
@@ -508,7 +510,7 @@ async def try_begin_turn(
         log_event(
             "turns.claim",
             level="debug",
-            claim_kind="turn",
+            claim_kind=claim_kind,
             session_id=str(session_id),
             owner_hash=_owner_hash(owner),
             outcome="acquired",
@@ -522,27 +524,48 @@ async def try_begin_turn(
         log_event(
             "turns.claim",
             level="warning",
-            claim_kind="turn",
+            claim_kind=claim_kind,
             session_id=str(session_id),
             owner_hash=_owner_hash(owner),
             outcome="cancelled",
         )
         try:
-            await _reconcile_cancelled_claim(session_id, owner, "turn")
+            await _reconcile_cancelled_claim(session_id, owner, claim_kind)
         finally:
             try:
                 lock.release()
             except RuntimeError:
-                _note_lock_contention("begin_turn_cancelled")
+                _note_lock_contention(f"{contention}_cancelled")
             _local_release(session_id, owner)
         raise
     except Exception:
         try:
             lock.release()
         except RuntimeError:
-            _note_lock_contention("begin_turn_error_cleanup")
+            _note_lock_contention(f"{contention}_error_cleanup")
         _local_release(session_id, owner)
         raise
+
+
+@instrumented("turns", "acquire")
+async def try_begin_turn(
+    session_id: uuid.UUID, *, turn_id: str | None = None, ttl_s: int = TURN_TTL_SECONDS
+) -> str | None:
+    """Claim a turn; returns the owner token, or None when busy.
+
+    Fails closed: DB errors (other than provable unavailability) propagate
+    instead of degrading into concurrent execution. A new turn is blocked by
+    any live claim (turn or mutation). DB-less mode enforces the same
+    single-owner rule through the token-aware local registry (AH-AUDIT-016).
+    """
+    return await _acquire_claim(
+        session_id,
+        claim_kind="turn",
+        owner=f"turn:{turn_id or uuid.uuid4().hex}:{uuid.uuid4().hex}",
+        ttl_s=ttl_s,
+        lock=_session_lock(session_id),
+        contention="begin_turn",
+    )
 
 
 @instrumented("turns", "release")
@@ -649,116 +672,14 @@ async def begin_mutation(session_id: uuid.UUID, *, ttl_s: int = MUTATION_TTL_SEC
     DB-less mode uses the shared local registry, so a held turn blocks a
     mutation and vice versa (AH-AUDIT-016).
     """
-    from machina.db.connection import db
-
-    lock = _mutation_session_lock(session_id)
-    if not await _acquire_or_steal(lock, session_id, ("turn", "mutation")):
-        log_event(
-            "turns.claim",
-            level="debug",
-            claim_kind="mutation",
-            session_id=str(session_id),
-            outcome="busy",
-        )
-        return None
-    owner = f"mutation:{uuid.uuid4().hex}"
-    try:
-        if db.connected:
-            claimed = await _db_claim(session_id, owner, "mutation", ttl_s)
-            if not claimed:
-                try:
-                    lock.release()
-                except RuntimeError:
-                    _note_lock_contention("begin_mutation_claim_busy")
-                log_event(
-                    "turns.claim",
-                    level="debug",
-                    claim_kind="mutation",
-                    session_id=str(session_id),
-                    owner_hash=_owner_hash(owner),
-                    outcome="busy",
-                )
-                return None
-            if not _local_try_claim(session_id, "mutation", owner):
-                stale = _local_owner(session_id)
-                stale_token = (stale or {}).get("token")
-                if stale_token and not await owns_claim(session_id, stale_token):
-                    _local_release(session_id, stale_token)
-                    _local_try_claim(session_id, "mutation", owner)
-                else:
-                    await _db_release(session_id, owner)
-                    try:
-                        lock.release()
-                    except RuntimeError:
-                        _note_lock_contention("begin_mutation_stale_conflict")
-                    log_event(
-                        "turns.claim",
-                        level="debug",
-                        claim_kind="mutation",
-                        session_id=str(session_id),
-                        owner_hash=_owner_hash(owner),
-                        outcome="stale_conflict",
-                    )
-                    return None
-            log_event(
-                "turns.claim",
-                level="debug",
-                claim_kind="mutation",
-                session_id=str(session_id),
-                owner_hash=_owner_hash(owner),
-                outcome="acquired",
-            )
-            return owner
-        if not _local_try_claim(session_id, "mutation", owner):
-            try:
-                lock.release()
-            except RuntimeError:
-                _note_lock_contention("begin_mutation_local_busy")
-            log_event(
-                "turns.claim",
-                level="debug",
-                claim_kind="mutation",
-                session_id=str(session_id),
-                owner_hash=_owner_hash(owner),
-                outcome="busy",
-            )
-            return None
-        log_event(
-            "turns.claim",
-            level="debug",
-            claim_kind="mutation",
-            session_id=str(session_id),
-            owner_hash=_owner_hash(owner),
-            outcome="acquired",
-        )
-        return owner
-    except asyncio.CancelledError:
-        # MCH-002 (mutation twin): same token-matched, bounded, shielded
-        # reconciliation as the turn path before the cancellation propagates.
-        log_event(
-            "turns.claim",
-            level="warning",
-            claim_kind="mutation",
-            session_id=str(session_id),
-            owner_hash=_owner_hash(owner),
-            outcome="cancelled",
-        )
-        try:
-            await _reconcile_cancelled_claim(session_id, owner, "mutation")
-        finally:
-            try:
-                lock.release()
-            except RuntimeError:
-                _note_lock_contention("begin_mutation_cancelled")
-            _local_release(session_id, owner)
-        raise
-    except Exception:
-        try:
-            lock.release()
-        except RuntimeError:
-            _note_lock_contention("begin_mutation_error_cleanup")
-        _local_release(session_id, owner)
-        raise
+    return await _acquire_claim(
+        session_id,
+        claim_kind="mutation",
+        owner=f"mutation:{uuid.uuid4().hex}",
+        ttl_s=ttl_s,
+        lock=_mutation_session_lock(session_id),
+        contention="begin_mutation",
+    )
 
 
 @asynccontextmanager

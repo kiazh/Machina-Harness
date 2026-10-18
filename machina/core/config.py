@@ -394,6 +394,21 @@ LEGACY_ENV_VARS: dict[str, str] = {
 }
 
 
+#: Keys whose value must be one of a fixed vocabulary. ``validate_value``
+#: normalizes case/whitespace once and raises ``"<key> must be a|b|c"``.
+_ENUM_VALIDATORS: dict[str, tuple[str, ...]] = {
+    "execution_mode": ("ask", "workspace", "sandbox", "full"),
+    "terminal_sandbox": ("disabled", "local", "docker"),
+    "embedding_backend": ("auto", "local", "onnx", "openai", "off"),
+    "optimization_semantic_cache_mode": ("off", "shadow", "wired"),
+    "optimization_warmers_prompt_cache_mode": ("off", "shadow", "wired"),
+    "optimization_compression_mode": ("off", "shadow", "wired"),
+    "optimization_compression_backend": ("llmlingua2", "none"),
+    "reranker_backend": ("auto", "cohere", "local", "http", "none"),
+    "output_policy": ("legacy", "concise"),
+}
+
+
 def validate_value(key: str, value: Any) -> Any:
     """Coerce and bounds-check *value* for *key* (AH-AUDIT-042).
 
@@ -409,15 +424,11 @@ def validate_value(key: str, value: Any) -> Any:
         from machina.memory.redaction import redact_secrets
 
         return redact_secrets(value.strip()).text
-    if key == "execution_mode":
+    choices = _ENUM_VALIDATORS.get(key)
+    if choices is not None:
         normalized = str(value).strip().lower()
-        if normalized not in ("ask", "workspace", "sandbox", "full"):
-            raise ValueError("execution_mode must be ask|workspace|sandbox|full")
-        return normalized
-    if key == "terminal_sandbox":
-        normalized = str(value).strip().lower()
-        if normalized not in ("disabled", "local", "docker"):
-            raise ValueError("terminal_sandbox must be disabled|local|docker")
+        if normalized not in choices:
+            raise ValueError(f"{key} must be {'|'.join(choices)}")
         return normalized
     if key == "reasoning_effort":
         # low/medium/high are the wire-wide transport tiers; minimal/xhigh/max
@@ -431,35 +442,6 @@ def validate_value(key: str, value: Any) -> Any:
         if normalized not in REASONING_EFFORTS + REASONING_CATALOG_EFFORTS:
             tiers = "|".join(REASONING_EFFORTS + REASONING_CATALOG_EFFORTS)
             raise ValueError(f"reasoning_effort must be ''|{tiers} (or none|off|default|auto)")
-        return normalized
-    if key == "embedding_backend":
-        normalized = str(value).strip().lower()
-        if normalized not in ("auto", "local", "onnx", "openai", "off"):
-            raise ValueError("embedding_backend must be auto|local|onnx|openai|off")
-        return normalized
-    if key in (
-        "optimization_semantic_cache_mode",
-        "optimization_warmers_prompt_cache_mode",
-        "optimization_compression_mode",
-    ):
-        normalized = str(value).strip().lower()
-        if normalized not in ("off", "shadow", "wired"):
-            raise ValueError(f"{key} must be off|shadow|wired")
-        return normalized
-    if key == "optimization_compression_backend":
-        normalized = str(value).strip().lower()
-        if normalized not in ("llmlingua2", "none"):
-            raise ValueError("optimization_compression_backend must be llmlingua2|none")
-        return normalized
-    if key == "reranker_backend":
-        normalized = str(value).strip().lower()
-        if normalized not in ("auto", "cohere", "local", "http", "none"):
-            raise ValueError("reranker_backend must be auto|cohere|local|http|none")
-        return normalized
-    if key == "output_policy":
-        normalized = str(value).strip().lower()
-        if normalized not in ("legacy", "concise"):
-            raise ValueError("output_policy must be legacy|concise")
         return normalized
     if key == "pricing_table_json":
         if not isinstance(value, str):

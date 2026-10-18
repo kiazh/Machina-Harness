@@ -135,6 +135,21 @@ class SessionManager:
         )
         return session
 
+    async def _fetch_and_cache(self, session_id: uuid.UUID) -> Session | None:
+        """Read one session row and refresh the cache (miss path)."""
+        row = await db.fetchrow(
+            """
+            SELECT id, title, agent_id, status, state_msgpack, goal, model, provider, context_budget, execution_mode, parent_session_id, is_fork, delegation_authority, created_at, last_activity
+            FROM sessions WHERE id = $1
+            """,
+            session_id,
+        )
+        if row is None:
+            return None
+        session = self._row_to_session(row)
+        await self._cache_put(session)
+        return session
+
     async def get(self, session_id: uuid.UUID) -> Session | None:
         """Get a session by ID (cached for 60 seconds).
 
@@ -145,18 +160,7 @@ class SessionManager:
         cached = await self._cache_get(session_id)
         if cached is not None:
             return cached
-        row = await db.fetchrow(
-            """
-            SELECT id, title, agent_id, status, state_msgpack, goal, model, provider, context_budget, execution_mode, parent_session_id, is_fork, delegation_authority, created_at, last_activity
-            FROM sessions WHERE id = $1
-            """,
-            session_id,
-        )
-        if row is None:
-            return None
-        session = self._row_to_session(row)
-        await self._cache_put(session)
-        return session
+        return await self._fetch_and_cache(session_id)
 
     async def get_fresh(self, session_id: uuid.UUID) -> Session | None:
         """Bypass the cache for execution-critical reads (AH-AUDIT-019).
@@ -166,18 +170,7 @@ class SessionManager:
         cache entry written by another worker. The fresh row refreshes the
         cache for presentational readers.
         """
-        row = await db.fetchrow(
-            """
-            SELECT id, title, agent_id, status, state_msgpack, goal, model, provider, context_budget, execution_mode, parent_session_id, is_fork, delegation_authority, created_at, last_activity
-            FROM sessions WHERE id = $1
-            """,
-            session_id,
-        )
-        if row is None:
-            return None
-        session = self._row_to_session(row)
-        await self._cache_put(session)
-        return session
+        return await self._fetch_and_cache(session_id)
 
     async def get_last_active(self) -> Session | None:
         """Get the most recently active session."""

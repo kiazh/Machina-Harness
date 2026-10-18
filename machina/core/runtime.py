@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -206,6 +207,22 @@ class RuntimeServices:
             cancellation: asyncio.CancelledError | None = None
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
+            async def _stage(label: str, operation: Callable[[float], Awaitable[Any]]) -> None:
+                """Run one shutdown stage under the cancellation-aware budget.
+
+                Once a stage observes cancellation, later stages get only the
+                short teardown budget; the first cancellation is re-raised
+                after every owned resource has had its bounded chance.
+                """
+                nonlocal cancellation
+                budget = min(0.1 if cancellation is not None else 5, timeout)
+                try:
+                    await operation(budget)
+                except asyncio.CancelledError as e:
+                    cancellation = e
+                except Exception:
+                    logger.exception("%s failed", label)
+
             try:
                 try:
                     leftovers = await _bounded_join(
@@ -229,47 +246,36 @@ class RuntimeServices:
                     await self._drain_essential(timeout=max(0.0, deadline - loop.time()))
                 except asyncio.CancelledError as e:
                     cancellation = e
-                try:
-                    await self.shutdown_connectors(
-                        timeout=min(0.1 if cancellation is not None else 5, timeout)
-                    )
-                except asyncio.CancelledError as e:
-                    cancellation = e
-                except Exception:
-                    logger.exception("connector shutdown failed")
-                try:
-                    # Drain agent background work BEFORE stopping the audit
-                    # writer: consolidation/learning tasks emit audit events,
-                    # and a submit after the writer stops is dropped
-                    # (observability/audit.py). Mirrors the gateway close order
-                    # (gateway/server.py) so both shutdown paths preserve the
-                    # rows (final-review gateway F5).
-                    await drain_background_tasks(
-                        timeout=min(0.1 if cancellation is not None else 5, timeout)
-                    )
-                except asyncio.CancelledError as e:
-                    cancellation = e
-                except Exception:
-                    logger.exception("background drain failed")
-                try:
+
+                await _stage(
+                    "connector shutdown",
+                    lambda budget: self.shutdown_connectors(timeout=budget),
+                )
+
+                # Drain agent background work BEFORE stopping the audit writer:
+                # consolidation/learning tasks emit audit events, and a submit
+                # after the writer stops is dropped (observability/audit.py).
+                # Mirrors the gateway close order (gateway/server.py) so both
+                # shutdown paths preserve the rows (final-review gateway F5).
+                await _stage(
+                    "background drain",
+                    lambda budget: drain_background_tasks(timeout=budget),
+                )
+
+                async def _stop_audit(budget: float) -> None:
                     from machina.observability.audit import audit_persistence
 
                     await bounded_cleanup(
-                        audit_persistence.stop(),
-                        timeout=min(0.1 if cancellation is not None else 5, timeout),
-                        label="audit stop",
+                        audit_persistence.stop(), timeout=budget, label="audit stop"
                     )
-                except asyncio.CancelledError as e:
-                    cancellation = e
-                except Exception:
-                    logger.exception("audit shutdown failed")
-                try:
+
+                await _stage("audit shutdown", _stop_audit)
+
+                async def _close_embeddings(budget: float) -> None:
                     from machina.rag.embedder import close_shared_embedder
 
                     await bounded_cleanup(
-                        close_shared_embedder(),
-                        timeout=min(0.1 if cancellation is not None else 5, timeout),
-                        label="embedder close",
+                        close_shared_embedder(), timeout=budget, label="embedder close"
                     )
                     # H19: release the active shared RAG generation through its
                     # one lifecycle helper. Closing only ``_rag_pipeline._embedder``
@@ -278,26 +284,18 @@ class RuntimeServices:
                     from machina.tools.rag import close_active_rag_pipeline
 
                     await bounded_cleanup(
-                        close_active_rag_pipeline(),
-                        timeout=min(0.1 if cancellation is not None else 5, timeout),
-                        label="rag pipeline close",
+                        close_active_rag_pipeline(), timeout=budget, label="rag pipeline close"
                     )
-                except asyncio.CancelledError as e:
-                    cancellation = e
-                except Exception:
-                    logger.exception("embedder shutdown failed")
-                try:
+
+                await _stage("embedder shutdown", _close_embeddings)
+
+                async def _close_db(budget: float) -> None:
                     from machina.db.connection import db
 
-                    await bounded_cleanup(
-                        db.close(),
-                        timeout=min(0.1 if cancellation is not None else 5, timeout),
-                        label="database close",
-                    )
-                except asyncio.CancelledError as e:
-                    cancellation = e
-                except Exception:
-                    logger.exception("database shutdown failed")
+                    await bounded_cleanup(db.close(), timeout=budget, label="database close")
+
+                await _stage("database shutdown", _close_db)
+
                 if cancellation is not None:
                     raise cancellation
             finally:
