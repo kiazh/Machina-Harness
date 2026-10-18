@@ -27,6 +27,18 @@ _PRIVATE_PARTS = {".git", ".aws", ".ssh", ".machina", "__pycache__"}
 _PRIVATE_FILES = {".env", ".env.local", ".npmrc", ".pypirc", "id_rsa", "id_ed25519"}
 
 
+def _private_parts_blocked(parts: tuple[str, ...]) -> bool:
+    """Whether any path component names private material (one policy)."""
+    lowered = [part.lower() for part in parts]
+    if any(part in _PRIVATE_PARTS for part in lowered):
+        return True
+    return any(
+        part in _PRIVATE_FILES or part.startswith(".env.")
+        for part in lowered
+        if part != ".env.example"
+    )
+
+
 def _base_dir() -> Path:
     from machina.core.execution_context import execution_context
 
@@ -111,13 +123,19 @@ def _full_mode() -> bool:
     return execution_context().mode == "full"
 
 
-def resolve_path(path: str, *, allow_outside: bool = False) -> Path:
+def resolve_path(path: str, *, allow_outside: bool = False, probe: bool = True) -> Path:
     """Resolve *path* relative to the base directory and verify it stays inside.
 
     In full mode (explicit session grant) with ``allow_outside=True``, absolute
     host paths outside the workspace are permitted — private files
     (.ssh/.aws/.env/credentials) stay blocked everywhere. Returns the
     resolved :class:`~pathlib.Path` on success.
+
+    ``probe=False`` skips the descriptor probe for callers that immediately
+    repeat the same regular-file/identity check through
+    :func:`_open_secure_read` (``read_file``, ``search_files``) or that only
+    classify directory entries (``list_files``). Containment, private-name,
+    and symlink-canonicalization policy still always run.
     """
     base = _base_dir()
     raw = Path(path)
@@ -138,11 +156,7 @@ def resolve_path(path: str, *, allow_outside: bool = False) -> Path:
             parts = candidate.relative_to(base).parts
         except ValueError:
             parts = candidate.parts
-    if any(part.lower() in _PRIVATE_PARTS for part in parts) or any(
-        part.lower() in _PRIVATE_FILES or part.lower().startswith(".env.")
-        for part in parts
-        if part.lower() != ".env.example"
-    ):
+    if _private_parts_blocked(parts):
         raise ValueError(f"Path '{path}' is private")
 
     outside = not candidate.is_relative_to(base)
@@ -152,7 +166,7 @@ def resolve_path(path: str, *, allow_outside: bool = False) -> Path:
 
     # Re-stat with O_NOFOLLOW semantics where possible to catch TOCTOU swaps.
     nofollow = getattr(os, "O_NOFOLLOW", 0)
-    if nofollow and candidate.exists() and not candidate.is_dir():
+    if probe and nofollow and candidate.exists() and not candidate.is_dir():
         # F13: reject non-regular files (FIFO/device/socket) before any
         # blocking open. A writer-less named pipe blocks a plain O_RDONLY
         # open forever, freezing the event loop; the async tool timeout
@@ -727,15 +741,21 @@ async def read_file(
         raise ToolError(f"max_size must be >= 1, got {max_size}")
     effective_max = min(max_size, _READ_MAX_PAGE_BYTES)
     try:
-        # Full mode: broker-authorized absolute host paths permitted.
-        file_path = resolve_path(path, allow_outside=True)
+        # Full mode: broker-authorized absolute host paths permitted. The
+        # secure open below repeats the descriptor identity and regular-file
+        # checks, so resolve_path's probe open would be a duplicate open.
+        file_path = resolve_path(path, allow_outside=True, probe=False)
     except ValueError as e:
         raise ToolError(f"{e}") from e
 
-    if not file_path.exists():
-        raise ToolError(f"File not found: {path}")
-    if not file_path.is_file():
+    try:
+        file_status = file_path.stat()
+    except OSError:
+        raise ToolError(f"File not found: {path}") from None
+    if stat.S_ISDIR(file_status.st_mode):
         raise ToolError(f"Not a file: {path}")
+    if not stat.S_ISREG(file_status.st_mode):
+        raise ToolError(f"Path '{path}' is not a regular file")
 
     try:
 
@@ -1077,19 +1097,24 @@ async def list_files(path: str = ".", pattern: str = "*") -> str:
             lines = []
             for f in sorted(files)[:200]:
                 try:
-                    resolve_path(str(f), allow_outside=True)
+                    # This listing only names/classifies entries; the probe
+                    # open is unnecessary (containment, private-name, and
+                    # symlink policy still run).
+                    resolve_path(str(f), allow_outside=True, probe=False)
                 except ValueError:
                     continue
-                # Skip symlink dirs (and any symlink) to avoid escape.
                 try:
-                    if f.is_symlink():
-                        continue
+                    entry_status = os.lstat(f)
                 except OSError:
                     continue
-                if f.is_file():
-                    size = f.stat().st_size
-                    lines.append(f"{f.relative_to(dir_path)} ({size} bytes)")
-                elif f.is_dir():
+                # Skip symlink dirs (and any symlink) to avoid escape.
+                if stat.S_ISLNK(entry_status.st_mode):
+                    continue
+                if stat.S_ISREG(entry_status.st_mode):
+                    lines.append(
+                        f"{f.relative_to(dir_path)} ({entry_status.st_size} bytes)"
+                    )
+                elif stat.S_ISDIR(entry_status.st_mode):
                     lines.append(f"{f.relative_to(dir_path)}/ (dir)")
             lines.append("(Listing limited to 200 matches and 4096 inspected entries.)")
             return "\n".join(lines)

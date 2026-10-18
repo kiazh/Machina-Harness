@@ -140,7 +140,9 @@ def credential_store_paths() -> frozenset[Path]:
     return frozenset(stores)
 
 
-def _is_credential_store(value: str, root: Path) -> bool:
+def _is_credential_store(
+    value: str, root: Path, stores: frozenset[Path] | None = None
+) -> bool:
     """Exact resolved store identity (plus its atomic temp/backup siblings).
 
     The store file IS the secret: when a workspace contains the store, its
@@ -149,8 +151,11 @@ def _is_credential_store(value: str, root: Path) -> bool:
     replace (``<name>.<rand>.tmp``), lock, generation, or backups gate too.
     Comparison is case-folded, matching the case-insensitive aliasing the
     policy already fails closed on for `.git`/`.machina`.
+
+    ``stores`` lets hot per-file callers resolve the store set once instead
+    of re-importing and re-resolving both stores for every candidate.
     """
-    stores = credential_store_paths()
+    stores = credential_store_paths() if stores is None else stores
     if not stores:
         return False
     candidate = Path(str(value).replace("\\", "/")).expanduser()
@@ -172,7 +177,9 @@ def _is_credential_store(value: str, root: Path) -> bool:
     return False
 
 
-def sensitive_path(value: str, root: Path | None = None) -> bool:
+def sensitive_path(
+    value: str, root: Path | None = None, *, stores: frozenset[Path] | None = None
+) -> bool:
     """Shared sensitive-path identity for credential material (R01).
 
     This is the ONE definition of "sensitive path" used both by the policy's
@@ -185,9 +192,13 @@ def sensitive_path(value: str, root: Path | None = None) -> bool:
     is not a revspec) and backup/editor spellings of a name are matched
     through their decoration, so `git show HEAD:credentials` and `.env~`
     gate like `cat credentials`.
+
+    ``root`` and ``stores`` let a caller scanning many files resolve the
+    configured project root and the credential-store identity once, instead
+    of once per candidate.
     """
     root = root if root is not None else workspace_root()
-    if _is_credential_store(value, root):
+    if _is_credential_store(value, root, stores):
         return True
     text = value.replace("\\", "/")
     path = Path(text).expanduser()

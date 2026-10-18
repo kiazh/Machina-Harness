@@ -20,7 +20,7 @@ import httpx
 from machina.core.config import config
 from machina.core.exceptions import ToolError, ValidationError
 from machina.observability.diagnostics import record_failure
-from machina.permissions.policy import sensitive_path
+from machina.permissions.policy import credential_store_paths, sensitive_path, workspace_root
 from machina.tools.base import registry
 
 logger = logging.getLogger(__name__)
@@ -582,17 +582,23 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
 
     def _collect_files() -> list[dict[str, object]]:
         files: list[dict[str, object]] = []
+        # Resolve the project root and credential-store identity once per
+        # search; each candidate used to re-import and re-resolve both stores.
+        sensitive_root = workspace_root()
+        sensitive_stores = credential_store_paths()
         for f in dir_path.glob(glob_pattern):
             if len(files) >= _SEARCH_MAX_FILES:
                 break
             try:
-                resolved = resolve_path(str(f))
+                # _open_secure_read below repeats the descriptor identity and
+                # regular-file checks; skip the duplicate probe open.
+                resolved = resolve_path(str(f), probe=False)
             except ValueError:
                 continue
             # R01: every file a search opens is checked against the shared
             # sensitive-path definition — the tool's narrower private list
             # alone let `credentials`/`production.env` leak into results.
-            if sensitive_path(str(resolved)):
+            if sensitive_path(str(resolved), sensitive_root, stores=sensitive_stores):
                 continue
             # H18: capture the validated file's identity through the same
             # protected descriptor traversal the ordinary file tools use
