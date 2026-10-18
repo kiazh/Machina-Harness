@@ -285,7 +285,7 @@ class HybridSearch:
         rows = await db.fetch(
             """
             SELECT id, session_id, agent_id, chunk_type, payload_msgpack,
-                   token_count, embedding, created_at, accessed_at,
+                   token_count, created_at, accessed_at,
                    ts_rank(to_tsvector('english', search_text), to_tsquery('english', $2)) AS rank
             FROM context_chunks
             WHERE session_id = $1
