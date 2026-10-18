@@ -216,6 +216,7 @@ def _clone_with_size_limit(args: list[str], *, parent: Path, target: Path) -> No
     except OSError as exc:
         _abort_clone(parent, "could not clone that repository", exc)
     deadline = time.monotonic() + CLONE_TIMEOUT
+    interval = 0.1
     try:
         while True:
             returncode = process.poll()
@@ -240,7 +241,12 @@ def _clone_with_size_limit(args: list[str], *, parent: Path, target: Path) -> No
                 process.kill()
                 process.communicate()
                 _abort_clone(parent, "repository exceeds the clone size limit")
-            time.sleep(0.1)
+            time.sleep(interval)
+            # Back off to 0.5 s: a full tree walk every 100 ms across a
+            # multi-minute clone is thousands of redundant walks in the
+            # normal under-cap case, while sub-second detection keeps the
+            # disk-cap overshoot small.
+            interval = min(interval * 2, 0.5)
     finally:
         if process.poll() is None:
             process.kill()

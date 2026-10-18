@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -281,7 +281,6 @@ async def evaluate_request(
             iterations=iterations,
             tool_calls_made=tool_calls_made,
             effective_budget=effective_budget,
-            counter=counter,
         )
         if gate is not None:
             return gate
@@ -396,7 +395,6 @@ async def _wired_gate(
     iterations: int,
     tool_calls_made: list[dict[str, Any]] | None,
     effective_budget: int,
-    counter: Callable[[Sequence[Mapping[str, Any]]], int],
 ) -> RequestGate | None:
     """Project the request. ``None`` means degrade to the legacy path."""
     try:
@@ -457,7 +455,10 @@ async def _wired_gate(
         return gate
 
     planned = list(result.planned_messages)
-    request_tokens = counter(planned)
+    # project_request measured this exact plan with the same counter closure
+    # (ProjectionResult.estimated_tokens), so the hard guard reuses it instead
+    # of paying a second full serialize+tokenize pass per wired request.
+    request_tokens = int(result.estimated_tokens)
     failure = None
     if request_tokens > effective_budget:
         # The projector measured a fit; this is the final hard-guard

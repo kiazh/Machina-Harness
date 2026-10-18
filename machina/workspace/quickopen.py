@@ -32,6 +32,7 @@ lexicographically).
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import stat
@@ -76,15 +77,22 @@ def _is_subsequence(needle: str, haystack: str) -> bool:
     return False
 
 
-def match_score(name: str, needle: str) -> int | None:
-    """Ranking tier for one basename, or ``None`` when it does not match.
+@functools.lru_cache(maxsize=32_768)
+def _entry_parts(path: str) -> tuple[str, str, str]:
+    """Return ``(name, directory, folded_name)`` for one root-relative path.
 
-    ``0`` exact, ``1`` prefix, ``2`` substring, ``3`` subsequence (all
-    case-insensitive); an empty needle matches everything (tier ``4``).
+    The index is capped at 20k entries, so deriving these once per path moves
+    a casefold and two ``rsplit`` calls out of every keystroke query.
     """
+    name = path.rsplit("/", 1)[-1]
+    directory = path.rsplit("/", 1)[0] if "/" in path else ""
+    return name, directory, name.casefold()
+
+
+def _score_folded(folded: str, needle: str) -> int | None:
+    """Ranking tier for one casefolded basename, or ``None`` on no match."""
     if not needle:
         return 4
-    folded = name.casefold()
     if folded == needle:
         return 0
     if folded.startswith(needle):
@@ -94,6 +102,15 @@ def match_score(name: str, needle: str) -> int | None:
     if _is_subsequence(needle, folded):
         return 3
     return None
+
+
+def match_score(name: str, needle: str) -> int | None:
+    """Ranking tier for one basename, or ``None`` when it does not match.
+
+    ``0`` exact, ``1`` prefix, ``2`` substring, ``3`` subsequence (all
+    case-insensitive); an empty needle matches everything (tier ``4``).
+    """
+    return _score_folded(name.casefold(), needle)
 
 
 def rank_entries(
@@ -107,11 +124,10 @@ def rank_entries(
     needle = query.casefold()
     scored: list[tuple[int, int, str, QuickOpenEntry]] = []
     for path in entries:
-        name = path.rsplit("/", 1)[-1]
-        score = match_score(name, needle)
+        name, directory, folded = _entry_parts(path)
+        score = _score_folded(folded, needle)
         if score is None:
             continue
-        directory = path.rsplit("/", 1)[0] if "/" in path else ""
         scored.append(
             (
                 score,

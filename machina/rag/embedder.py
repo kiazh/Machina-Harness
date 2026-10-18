@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import importlib as _importlib
 import logging
@@ -581,24 +582,25 @@ class EmbeddingSettings:
     reason: str = ""  # why unavailable when kind == "none"
 
 
-def local_embedder_available() -> bool:
-    """Whether the optional model2vec runtime is importable."""
+@functools.cache
+def _importable(module_name: str) -> bool:
+    """Whether an optional runtime is importable (probed once per process)."""
     try:
         from importlib.util import find_spec
 
-        return find_spec("model2vec") is not None
+        return find_spec(module_name) is not None
     except Exception:
         return False
+
+
+def local_embedder_available() -> bool:
+    """Whether the optional model2vec runtime is importable."""
+    return _importable("model2vec")
 
 
 def onnx_embedder_available() -> bool:
     """Whether the optional fastembed runtime (in-process ONNX) is importable."""
-    try:
-        from importlib.util import find_spec
-
-        return find_spec("fastembed") is not None
-    except Exception:
-        return False
+    return _importable("fastembed")
 
 
 #: Provider prefixes that mark an API model id (``openai/text-embedding-3-small``):

@@ -10,6 +10,7 @@ line breaks; conversion to Python string indices is explicit and bounded.
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +49,50 @@ def _line_starts(text: str) -> list[int]:
             starts.append(index + 1)
         index += 1
     return starts
+
+
+def _update_line_starts(starts: list[int], start: int, end: int, new_text: str) -> list[int]:
+    """Advance line starts across one sequential edit (LSP line breaks).
+
+    ``starts`` describes the text *before* the replacement of
+    ``[start, end)`` with ``new_text``. Line beginnings inside the replaced
+    span disappear, later beginnings shift by the edit delta, and beginnings
+    introduced by ``new_text`` are inserted — equivalent to
+    :func:`_line_starts` on the result but without rescanning the document
+    for every change in a batch.
+    """
+    line_index = bisect.bisect_right(starts, start) - 1
+    delta = len(new_text) - (end - start)
+    head = starts[: line_index + 1]
+    tail = [offset + delta for offset in starts[line_index + 1 :] if offset > end]
+    inserted: list[int] = []
+    index = 0
+    length = len(new_text)
+    while index < length:
+        char = new_text[index]
+        if char == "\r":
+            if index + 1 < length and new_text[index + 1] == "\n":
+                index += 1
+            inserted.append(start + index + 1)
+        elif char == "\n":
+            inserted.append(start + index + 1)
+        index += 1
+    return head + inserted + tail
+
+
+def _straddles_crlf(text: str, start: int, end: int, new_text: str) -> bool:
+    """Whether this edit can merge adjacent CR/LF characters into one CRLF.
+
+    The incremental line-start update treats the prefix/suffix breaks as
+    unchanged. A CRLF formed *across* an edit boundary breaks that
+    assumption (e.g. text ending in ``\\r`` plus inserted text starting with
+    ``\\n``), so callers rescan in that rare case instead.
+    """
+    left = text[start - 1] if start > 0 else ""
+    first = new_text[0] if new_text else (text[end] if end < len(text) else "")
+    right = text[end] if end < len(text) else ""
+    last = new_text[-1] if new_text else (text[start - 1] if start > 0 else "")
+    return (left == "\r" and first == "\n") or (last == "\r" and right == "\n")
 
 
 def _line_end(text: str, start: int) -> int:
@@ -95,6 +140,7 @@ def apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
     if len(changes) > MAX_CHANGES_PER_REQUEST:
         raise ValueError("too many changes")
     updated = text
+    starts = _line_starts(text)
     for change in changes:
         if not isinstance(change, dict):
             raise ValueError("change must be an object")
@@ -106,7 +152,6 @@ def apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
         end = span.get("end")
         if not isinstance(start, dict) or not isinstance(end, dict):
             raise ValueError("range requires start and end")
-        starts = _line_starts(updated)
         try:
             start_index = _position_to_index(
                 updated, int(start["line"]), int(start["character"]), starts=starts
@@ -118,7 +163,12 @@ def apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
             raise ValueError("change range is invalid") from error
         if end_index < start_index:
             raise ValueError("change range is inverted")
-        updated = updated[:start_index] + new_text + updated[end_index:]
+        if _straddles_crlf(updated, start_index, end_index, new_text):
+            updated = updated[:start_index] + new_text + updated[end_index:]
+            starts = _line_starts(updated)
+        else:
+            updated = updated[:start_index] + new_text + updated[end_index:]
+            starts = _update_line_starts(starts, start_index, end_index, new_text)
     return updated
 
 
