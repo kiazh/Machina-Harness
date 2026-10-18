@@ -386,15 +386,7 @@ class Orchestrator:
             logger.exception("Delegation to %s failed", agent_name)
             raw_detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
             detail = _redacted(raw_detail)
-            try:
-                tokens = await self._charged_child_tokens(child.id, agent_name)
-            except DelegationAccountingError as accounting_error:
-                # R4-029: spend unknown — close the row before re-raising so
-                # the parent stops spending without a stranded delegation.
-                await self._close_row_with_unknown_spend(
-                    message_id, status="error", response=f"Error: {accounting_error}"
-                )
-                raise
+            tokens = await self._settle_child_tokens(message_id, child.id, agent_name)
             await self._record_end(
                 message_id, status="error", response=f"{type(e).__name__}: {detail}", tokens=tokens
             )
@@ -441,16 +433,9 @@ class Orchestrator:
                     # Optional fallback preserves the primary outcome; report no payload.
                     record_failure("orchestrator.delegate.build", _cleanup_error)
 
-        try:
-            tokens = await self._charged_child_tokens(child.id, agent_name, response.tokens_used)
-        except DelegationAccountingError as accounting_error:
-            # R4-029: the child already ran; the spend cannot be read. Close
-            # the row with NULL tokens (explicitly unknown, never zero) and
-            # re-raise so the parent stops spending.
-            await self._close_row_with_unknown_spend(
-                message_id, status="error", response=f"Error: {accounting_error}"
-            )
-            raise
+        tokens = await self._settle_child_tokens(
+            message_id, child.id, agent_name, response.tokens_used
+        )
         pauses = getattr(response, "needs_approval", None)
         pauses = (
             [dict(pause) for pause in pauses if isinstance(pause, dict)]
@@ -494,6 +479,27 @@ class Orchestrator:
             status=status,
             needs_approval=pauses,
         )
+
+    async def _settle_child_tokens(
+        self,
+        message_id: uuid.UUID | None,
+        child_id: uuid.UUID,
+        agent_name: str,
+        known_tokens: int = 0,
+    ) -> int:
+        """Read the child's charged tokens; close the row when spend is unknown.
+
+        R4-029: an unreadable spend must close the delegation row with NULL
+        tokens (explicitly unknown, never zero) before re-raising, so the
+        parent stops spending without a stranded delegation.
+        """
+        try:
+            return await self._charged_child_tokens(child_id, agent_name, known_tokens)
+        except DelegationAccountingError as accounting_error:
+            await self._close_row_with_unknown_spend(
+                message_id, status="error", response=f"Error: {accounting_error}"
+            )
+            raise
 
     async def _charged_child_tokens(
         self, session_id: uuid.UUID, agent_name: str, known_tokens: int = 0

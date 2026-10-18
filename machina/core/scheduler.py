@@ -943,6 +943,112 @@ class JobRunner:
         if task is not None and not task.done():
             task.cancel()
 
+    async def _execute_no_agent_job(self, job: Job) -> None:
+        """Run an administrator-configured script job under the broker.
+
+        Split out of ``_execute``: claim lifecycle stays in the caller; this
+        method owns the review/approval/run path and its result chunk.
+        """
+        # AH-AUDIT-009 trust model: no-agent scripts are
+        # administrator-configured (human-transport jobs_create
+        # only — no agent-accessible tool creates script jobs), but
+        # path validation is NOT a sandbox: every run is
+        # broker-governed, bound to the exact script content,
+        # interpreter, cwd, backend, and session authority. Changed
+        # content revalidates; headless pause parks the job.
+        from machina.core.assembler import get_token_count
+        from machina.core.context import context_manager
+        from machina.core.job_scripts import review_script, run_job_script, scripts_root
+        from machina.memory.redaction import redact_secrets
+        from machina.permissions.broker import (
+            ApprovalDenied as _ScriptDenied,
+        )
+        from machina.permissions.broker import NeedsApproval as _ScriptNeeds
+        from machina.permissions.broker import permission_broker as _script_broker
+        from machina.permissions.policy import build_request as _script_req
+
+        review = review_script(job.script_path or "")
+        job_scripts_root = scripts_root()
+        target = review.target
+        script_content = review.content
+        import sys as _sys
+
+        interpreter = _sys.executable if target.suffix.lower() == ".py" else "/usr/bin/bash"
+        from machina.core.execution_context import resolve_execution_context
+
+        script_context = await resolve_execution_context(
+            str(job.session_id) if job.session_id else None, "job_script"
+        )
+        script_proposal = _script_req(
+            operation="process.exec",
+            targets=[
+                str(target),
+                *(str(job_scripts_root / name) for name, _ in review.dependencies),
+            ],
+            argv=[interpreter, str(target)],
+            cwd=str(target.parent),
+            # Reversible byte-to-text mapping binds the exact source
+            # without corrupting BOMs or declared Python encodings.
+            content=review.approval_content,
+            mode=script_context.mode,
+            backend=script_context.backend,
+            agent_id=job.agent_name,
+            session_id=str(job.session_id),
+            capabilities=["job-script"],
+            tool="job_script",
+            timeout=30,
+        )
+        approval_id = ""
+        try:
+            await _script_broker.guard(script_proposal)
+            approval_id = script_proposal.approval_id or ""
+        except _ScriptNeeds as _need:
+            _ap = _need.approval
+            err = PermissionError(
+                f"needs_approval: job paused awaiting human approval; "
+                f"request {_ap.get('request_id')} "
+                f"({script_proposal.operation}); resolve via approvals "
+                "then resume (fresh claim revalidates)."
+            )
+            try:
+                err.approval_request_id = _ap.get("request_id", "")  # type: ignore[attr-defined]
+            except Exception as _boundary_error:
+                # Optional fallback preserves the primary outcome; report no payload.
+                record_failure("scheduler._execute", _boundary_error)
+            raise err from None
+        except _ScriptDenied as _denied:
+            raise RuntimeError(f"script denied: {_denied.reason}") from None
+        script_outcome = "failed"
+        try:
+            output = redact_secrets(
+                await run_job_script(
+                    job.script_path or "",
+                    approved_content=script_content,
+                    approved_path=target,
+                    approved_review=review,
+                )
+            ).text
+            script_outcome = "completed"
+        except asyncio.CancelledError:
+            script_outcome = "cancelled"
+            raise
+        finally:
+            if approval_id:
+                try:
+                    await _script_broker.complete(approval_id, script_outcome)
+                except Exception as _boundary_error:
+                    # Optional fallback preserves the primary outcome; report no payload.
+                    record_failure("scheduler._execute", _boundary_error)
+        if output:
+            await context_manager.add_chunk(
+                session_id=job.session_id,
+                agent_id=job.agent_name,
+                chunk_type="result",
+                payload={"content": output, "job_id": str(job.id)},
+                token_count=get_token_count(output),
+            )
+        return
+
     @instrumented("scheduler", "execute")
     async def _execute(self, job: Job, ownership_lost: asyncio.Event | None = None) -> None:
         if job.session_id is None:
@@ -966,104 +1072,7 @@ class JobRunner:
             # its claim while another turn starts on the same session.
             claim_renewal = self._start_claim_renewal(job, job_turn, ownership_lost)
             if getattr(job, "no_agent", False):
-                # AH-AUDIT-009 trust model: no-agent scripts are
-                # administrator-configured (human-transport jobs_create
-                # only — no agent-accessible tool creates script jobs), but
-                # path validation is NOT a sandbox: every run is
-                # broker-governed, bound to the exact script content,
-                # interpreter, cwd, backend, and session authority. Changed
-                # content revalidates; headless pause parks the job.
-                from machina.core.assembler import get_token_count
-                from machina.core.context import context_manager
-                from machina.core.job_scripts import review_script, run_job_script, scripts_root
-                from machina.memory.redaction import redact_secrets
-                from machina.permissions.broker import (
-                    ApprovalDenied as _ScriptDenied,
-                )
-                from machina.permissions.broker import NeedsApproval as _ScriptNeeds
-                from machina.permissions.broker import permission_broker as _script_broker
-                from machina.permissions.policy import build_request as _script_req
-
-                review = review_script(job.script_path or "")
-                job_scripts_root = scripts_root()
-                target = review.target
-                script_content = review.content
-                import sys as _sys
-
-                interpreter = _sys.executable if target.suffix.lower() == ".py" else "/usr/bin/bash"
-                from machina.core.execution_context import resolve_execution_context
-
-                script_context = await resolve_execution_context(
-                    str(job.session_id) if job.session_id else None, "job_script"
-                )
-                script_proposal = _script_req(
-                    operation="process.exec",
-                    targets=[
-                        str(target),
-                        *(str(job_scripts_root / name) for name, _ in review.dependencies),
-                    ],
-                    argv=[interpreter, str(target)],
-                    cwd=str(target.parent),
-                    # Reversible byte-to-text mapping binds the exact source
-                    # without corrupting BOMs or declared Python encodings.
-                    content=review.approval_content,
-                    mode=script_context.mode,
-                    backend=script_context.backend,
-                    agent_id=job.agent_name,
-                    session_id=str(job.session_id),
-                    capabilities=["job-script"],
-                    tool="job_script",
-                    timeout=30,
-                )
-                approval_id = ""
-                try:
-                    await _script_broker.guard(script_proposal)
-                    approval_id = script_proposal.approval_id or ""
-                except _ScriptNeeds as _need:
-                    _ap = _need.approval
-                    err = PermissionError(
-                        f"needs_approval: job paused awaiting human approval; "
-                        f"request {_ap.get('request_id')} "
-                        f"({script_proposal.operation}); resolve via approvals "
-                        "then resume (fresh claim revalidates)."
-                    )
-                    try:
-                        err.approval_request_id = _ap.get("request_id", "")  # type: ignore[attr-defined]
-                    except Exception as _boundary_error:
-                        # Optional fallback preserves the primary outcome; report no payload.
-                        record_failure("scheduler._execute", _boundary_error)
-                    raise err from None
-                except _ScriptDenied as _denied:
-                    raise RuntimeError(f"script denied: {_denied.reason}") from None
-                script_outcome = "failed"
-                try:
-                    output = redact_secrets(
-                        await run_job_script(
-                            job.script_path or "",
-                            approved_content=script_content,
-                            approved_path=target,
-                            approved_review=review,
-                        )
-                    ).text
-                    script_outcome = "completed"
-                except asyncio.CancelledError:
-                    script_outcome = "cancelled"
-                    raise
-                finally:
-                    if approval_id:
-                        try:
-                            await _script_broker.complete(approval_id, script_outcome)
-                        except Exception as _boundary_error:
-                            # Optional fallback preserves the primary outcome; report no payload.
-                            record_failure("scheduler._execute", _boundary_error)
-                if output:
-                    await context_manager.add_chunk(
-                        session_id=job.session_id,
-                        agent_id=job.agent_name,
-                        chunk_type="result",
-                        payload={"content": output, "job_id": str(job.id)},
-                        token_count=get_token_count(output),
-                    )
+                await self._execute_no_agent_job(job)
                 return
             prompt = job.prompt or DEFAULT_HEARTBEAT_PROMPT
             agent = await self._build_agent(

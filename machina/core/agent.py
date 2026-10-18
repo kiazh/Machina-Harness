@@ -65,7 +65,13 @@ from machina.core.tool_views import (
     flush_pending_chunks,
     mark_turn_accepted,
 )
-from machina.core.turn_flow import collect_pauses, stagnation_step, stopped_response
+from machina.core.turn_flow import (
+    collect_pauses,
+    failed_response,
+    pause_response,
+    stagnation_step,
+    stopped_response,
+)
 from machina.core.usage import provider_identity, usage_store
 from machina.db.lazy import LazyDb
 from machina.memory.consolidator import MemoryConsolidator
@@ -282,6 +288,23 @@ def _tool_outcome(item: dict[str, Any]) -> str:
     if item.get("_failed") or preview.startswith("Error:"):
         return "failed"
     return "completed"
+
+
+def _assistant_chunk(
+    session_id: uuid.UUID, agent_id: str, content: str, *, interrupted: bool = False
+) -> dict[str, Any]:
+    """Pending-chunk record for one assistant message (all loops)."""
+    payload: dict[str, Any] = {"content": content}
+    if interrupted:
+        payload["interrupted"] = True
+    return {
+        "id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "chunk_type": "assistant_message",
+        "payload": payload,
+        "token_count": get_token_count(content),
+    }
 
 
 class BaseReActAgent:
@@ -1501,6 +1524,59 @@ class BaseReActAgent:
         """Single batch insert; fail-open retention + C1 identity checks (tool_views)."""
         return await flush_pending_chunks(pending_chunks, store=context_manager, db=_context_db)
 
+    async def _finish_turn_completion(
+        self,
+        session_id: uuid.UUID,
+        user_message: str,
+        content: str,
+        tool_calls_made: list[dict[str, Any]],
+        total_tokens: int,
+        iterations: int,
+        pending_chunks: list[dict[str, Any]],
+    ) -> AgentResponse:
+        """Persist and attribute one accepted, tool-free completion.
+
+        ``run`` and ``run_stream`` shared this whole block; only the terminal
+        event shape differs at the call sites.
+        """
+        pending_chunks.append(_assistant_chunk(session_id, self.agent_id, content))
+        await self._flush_pending_chunks(pending_chunks)
+        await session_manager.update_activity(session_id)
+        audit_log(
+            "agent_run_complete",
+            session_id=str(session_id),
+            iterations=iterations,
+            total_tokens=total_tokens,
+            tool_calls_count=len(tool_calls_made),
+        )
+        self._schedule_memory_consolidation(session_id)
+        completed = AgentResponse(
+            content=content,
+            tool_calls=tool_calls_made,
+            tokens_used=total_tokens,
+            iterations=iterations,
+        )
+        self._schedule_learning_review(session_id, user_message, completed)
+        # T0: attribute the accepted completion for cost views.
+        await mark_turn_accepted(session_id, self.agent_id, usage_store)
+        return completed
+
+    async def _append_assistant_content(
+        self,
+        session_id: uuid.UUID,
+        content: str,
+        pending_chunks: list[dict[str, Any]],
+    ) -> None:
+        """Queue one non-empty assistant message and flush it safely."""
+        if not content:
+            return
+        pending_chunks.append(_assistant_chunk(session_id, self.agent_id, content))
+        try:
+            await self._flush_pending_chunks(pending_chunks)
+        except asyncio.CancelledError:
+            await self._flush_pending_cancellation_safe(pending_chunks, session_id)
+            raise
+
     async def _flush_pending_cancellation_safe(
         self,
         pending_chunks: list[dict[str, Any]],
@@ -1908,13 +1984,7 @@ class ReActAgent(BaseReActAgent):
                             iteration=iteration,
                         )
                         self._schedule_memory_consolidation(session_id)
-                        return AgentResponse(
-                            content="LLM provider error. Check server logs.",
-                            outcome="failed",
-                            tool_calls=tool_calls_made,
-                            tokens_used=total_tokens,
-                            iterations=iteration + 1,
-                        )
+                        return failed_response(tool_calls_made, total_tokens, iteration + 1)
 
                     total_tokens += response.usage.get("total_tokens", 0)
                     metrics.record_tokens(
@@ -1923,54 +1993,18 @@ class ReActAgent(BaseReActAgent):
                         response.usage.get("completion_tokens", 0),
                     )
                     if not response.tool_calls:
-                        content = response.content or ""
-                        pending_chunks.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "session_id": session_id,
-                                "agent_id": self.agent_id,
-                                "chunk_type": "assistant_message",
-                                "payload": {"content": content},
-                                "token_count": get_token_count(content),
-                            }
+                        return await self._finish_turn_completion(
+                            session_id,
+                            user_message,
+                            response.content or "",
+                            tool_calls_made,
+                            total_tokens,
+                            iteration + 1,
+                            pending_chunks,
                         )
-                        await self._flush_pending_chunks(pending_chunks)
-                        await session_manager.update_activity(session_id)
-                        audit_log(
-                            "agent_run_complete",
-                            session_id=str(session_id),
-                            iterations=iteration + 1,
-                            total_tokens=total_tokens,
-                            tool_calls_count=len(tool_calls_made),
-                        )
-                        # Consolidate memories after successful run
-                        self._schedule_memory_consolidation(session_id)
-                        completed = AgentResponse(
-                            content=content,
-                            tool_calls=tool_calls_made,
-                            tokens_used=total_tokens,
-                            iterations=iteration + 1,
-                        )
-                        self._schedule_learning_review(session_id, user_message, completed)
-                        # T0: attribute the accepted completion for cost views.
-                        await mark_turn_accepted(session_id, self.agent_id, usage_store)
-                        return completed
-                    if response.content:
-                        pending_chunks.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "session_id": session_id,
-                                "agent_id": self.agent_id,
-                                "chunk_type": "assistant_message",
-                                "payload": {"content": response.content},
-                                "token_count": get_token_count(response.content),
-                            }
-                        )
-                        try:
-                            await self._flush_pending_chunks(pending_chunks)
-                        except asyncio.CancelledError:
-                            await self._flush_pending_cancellation_safe(pending_chunks, session_id)
-                            raise
+                    await self._append_assistant_content(
+                        session_id, response.content, pending_chunks
+                    )
                     batch_start = len(tool_calls_made)
                     try:
                         await self._execute_tool_calls(
@@ -1984,12 +2018,8 @@ class ReActAgent(BaseReActAgent):
                     total_tokens += sum(entry.get("delegated_tokens", 0) for entry in batch)
                     pauses = collect_pauses(batch)
                     if pauses:
-                        return AgentResponse(
-                            content="Waiting for approval.",
-                            tool_calls=tool_calls_made,
-                            tokens_used=total_tokens,
-                            iterations=iteration + 1,
-                            needs_approval=pauses,
+                        return pause_response(
+                            tool_calls_made, total_tokens, iteration + 1, pauses
                         )
                     # S3.1(d) stagnation hook: shared batch tail (turn_flow owns the
                     # guarded wiring access; stagnation-only, never a cap).
@@ -2130,14 +2160,9 @@ class ReActAgent(BaseReActAgent):
                         if streamed_text:
                             content = "".join(streamed_text)
                             pending_chunks.append(
-                                {
-                                    "id": str(uuid.uuid4()),
-                                    "session_id": session_id,
-                                    "agent_id": self.agent_id,
-                                    "chunk_type": "assistant_message",
-                                    "payload": {"content": content, "interrupted": True},
-                                    "token_count": get_token_count(content),
-                                }
+                                _assistant_chunk(
+                                    session_id, self.agent_id, content, interrupted=True
+                                )
                             )
                         await self._flush_pending_cancellation_safe(pending_chunks, session_id)
                         raise
@@ -2170,71 +2195,30 @@ class ReActAgent(BaseReActAgent):
                         self._schedule_memory_consolidation(session_id)
                         yield StreamEvent(
                             type="done",
-                            response=AgentResponse(
-                                content="LLM provider error. Check server logs.",
-                                outcome="failed",
-                                tool_calls=tool_calls_made,
-                                tokens_used=total_tokens,
-                                iterations=iteration + 1,
+                            response=failed_response(
+                                tool_calls_made, total_tokens, iteration + 1
                             ),
                         )
                         return
 
                     response = final_response
                     if not response.tool_calls:
-                        content = response.content or ""
-                        pending_chunks.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "session_id": session_id,
-                                "agent_id": self.agent_id,
-                                "chunk_type": "assistant_message",
-                                "payload": {"content": content},
-                                "token_count": get_token_count(content),
-                            }
+                        completed = await self._finish_turn_completion(
+                            session_id,
+                            user_message,
+                            response.content or "",
+                            tool_calls_made,
+                            total_tokens,
+                            iteration + 1,
+                            pending_chunks,
                         )
-                        await self._flush_pending_chunks(pending_chunks)
-                        await session_manager.update_activity(session_id)
-                        audit_log(
-                            "agent_run_complete",
-                            session_id=str(session_id),
-                            iterations=iteration + 1,
-                            total_tokens=total_tokens,
-                            tool_calls_count=len(tool_calls_made),
-                        )
-                        self._schedule_memory_consolidation(session_id)
-                        completed = AgentResponse(
-                            content=content,
-                            tool_calls=tool_calls_made,
-                            tokens_used=total_tokens,
-                            iterations=iteration + 1,
-                        )
-                        self._schedule_learning_review(session_id, user_message, completed)
-                        # T0: attribute the accepted completion for cost views.
-                        await mark_turn_accepted(session_id, self.agent_id, usage_store)
-                        yield StreamEvent(
-                            type="done",
-                            response=completed,
-                        )
+                        yield StreamEvent(type="done", response=completed)
                         return
 
                     # Execute tool calls with streaming events.
-                    if response.content:
-                        pending_chunks.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "session_id": session_id,
-                                "agent_id": self.agent_id,
-                                "chunk_type": "assistant_message",
-                                "payload": {"content": response.content},
-                                "token_count": get_token_count(response.content),
-                            }
-                        )
-                        try:
-                            await self._flush_pending_chunks(pending_chunks)
-                        except asyncio.CancelledError:
-                            await self._flush_pending_cancellation_safe(pending_chunks, session_id)
-                            raise
+                    await self._append_assistant_content(
+                        session_id, response.content, pending_chunks
+                    )
                     batch_start = len(tool_calls_made)
                     # AH-015: run_stream previously held ALL history in pending until
                     # the final done event — a CancelledError bypassed `except
@@ -2265,12 +2249,8 @@ class ReActAgent(BaseReActAgent):
                     if pauses:
                         yield StreamEvent(
                             type="done",
-                            response=AgentResponse(
-                                content="Waiting for approval.",
-                                tool_calls=tool_calls_made,
-                                tokens_used=total_tokens,
-                                iterations=iteration + 1,
-                                needs_approval=pauses,
+                            response=pause_response(
+                                tool_calls_made, total_tokens, iteration + 1, pauses
                             ),
                         )
                         return

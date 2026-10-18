@@ -104,3 +104,34 @@ def stopped_response(
         tokens_used=tokens,
         iterations=iterations,
     )
+
+
+def failed_response(
+    tool_calls: list[dict[str, Any]],
+    tokens: int,
+    iterations: int,
+) -> AgentResponse:
+    """The shared provider-failure response shape for both loops."""
+    return AgentResponse(
+        content="LLM provider error. Check server logs.",
+        outcome="failed",
+        tool_calls=tool_calls,
+        tokens_used=tokens,
+        iterations=iterations,
+    )
+
+
+def pause_response(
+    tool_calls: list[dict[str, Any]],
+    tokens: int,
+    iterations: int,
+    pauses: list[dict],
+) -> AgentResponse:
+    """The shared approval-pause response shape for both loops."""
+    return AgentResponse(
+        content="Waiting for approval.",
+        tool_calls=tool_calls,
+        tokens_used=tokens,
+        iterations=iterations,
+        needs_approval=pauses,
+    )
