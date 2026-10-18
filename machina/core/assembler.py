@@ -27,6 +27,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# tiktoken's Rust regex engine has aborted the process on very large single
+# encodes. Sections are bounded here, and TokenCounter counts in chunks below.
+_MAX_SECTION_CHARS = 200_000
+
 
 # ── deterministic fallback token heuristic ────────────────────────────────
 #
@@ -53,6 +57,8 @@ logger = logging.getLogger(__name__)
 # (CJK, kana, hangul, emoji, mixed) and is never 4x low; ASCII keeps the
 # historic chars/4 basis. Tool results and prose may still be undercounted by
 # up to roughly 2x, so the fallback is a degraded mode, not a replacement.
+_MAX_ENCODE_CHARS = 32_768
+
 _WEIGHTED_CHAR_RANGES: tuple[tuple[int, int, int], ...] = (
     (0x1F000, 0x1FAFF, 12),  # emoji, pictographs, skin-tone modifiers
     (0x2600, 0x27BF, 12),  # miscellaneous symbols and dingbats (❤, ✅, ...)
@@ -134,7 +140,11 @@ def _notify_fallback(reason: str) -> None:
     try:
         from machina.observability.instrumentation import log_event
     except Exception as error:
-        logger.debug("token counter fallback engaged (%s): no instrumentation (%s)", reason, error)
+        logger.debug(
+            "token counter fallback engaged (%s): no instrumentation (%s)",
+            reason,
+            error,
+        )
         return
     try:
         log_event("tokens.count", level="debug", basis="fallback", reason=reason)
@@ -158,6 +168,7 @@ class TokenCounter:
         self._encoding_failed = False
         self._available = _TIKTOKEN_AVAILABLE
         self._init_lock = threading.Lock()
+        self._count_cache: dict[str, int] = {}
 
     def _get_encoding(self) -> Any | None:
         """Lazily load the configured encoding, or None when unavailable."""
@@ -204,13 +215,43 @@ class TokenCounter:
         return "special_token_literal"
 
     def count(self, text: str) -> int:
-        """Return the number of tokens in *text*."""
-        tokens = self._encode_or_none(text)
-        if tokens is not None:
-            return len(tokens)
-        reason = self._fallback_reason()
-        _notify_fallback(reason)
-        return _fallback_token_count(text)
+        """Return the number of tokens in *text*.
+
+        Large strings are counted in bounded chunks. A single very large
+        tiktoken encode has aborted the process in the Rust regex engine; the
+        chunked path keeps the same counting basis for ordinary strings while
+        avoiding that failure mode. Chunk boundaries can shift a token by a
+        small amount, which is acceptable for budgeting and storage estimates.
+        """
+        if not text:
+            return 0
+        limit = _MAX_ENCODE_CHARS
+        if len(text) <= limit:
+            cached = self._count_cache.get(text)
+            if cached is not None:
+                return cached
+            tokens = self._encode_or_none(text)
+            if tokens is not None:
+                result = len(tokens)
+                if len(self._count_cache) < 256:
+                    self._count_cache[text] = result
+                return result
+            reason = self._fallback_reason()
+            _notify_fallback(reason)
+            result = _fallback_token_count(text)
+            if len(self._count_cache) < 256:
+                self._count_cache[text] = result
+            return result
+        total = 0
+        for start in range(0, len(text), limit):
+            chunk = text[start : start + limit]
+            tokens = self._encode_or_none(chunk)
+            if tokens is None:
+                reason = self._fallback_reason()
+                _notify_fallback(reason)
+                return _fallback_token_count(text)
+            total += len(tokens)
+        return total
 
     def truncate(self, text: str, max_tokens: int) -> str:
         """Return the longest prefix of *text* that fits in *max_tokens* tokens.
@@ -277,12 +318,13 @@ class PromptAssembler:
         query: str,
         *,
         omitted_evidence: int = 0,
+        skip_conversation: bool = False,
     ) -> str:
         """Assemble a prompt within the token budget.
 
         Keep the system instructions and current query first, then use any
-        remaining space for the goal, the latest compaction summary, recent
-        activity, and retrieved context — in that priority order.
+        remaining space for the goal, the latest compaction summary,
+        recent activity, and retrieved context — in that priority order.
         ``omitted_evidence`` discloses budget-dropped retrieved entries so a
         trimmed section is never mistaken for the full evidence set.
         """
@@ -296,9 +338,13 @@ class PromptAssembler:
         def add(key: str, value: str, cap: int | None = None) -> None:
             if not value:
                 return
-            # None when the value contains a literal special token; the
-            # char-based fallback below keeps assembly alive (m2).
-            encoded = _token_counter._encode_or_none(value)
+            if len(value) > _MAX_SECTION_CHARS:
+                value = value[:_MAX_SECTION_CHARS] + "\n[section truncated for token budgeting]"
+            # Avoid one very large tiktoken encode; long sections use the
+            # chunked counter and truncate path below.
+            encoded = (
+                _token_counter._encode_or_none(value) if len(value) <= _MAX_ENCODE_CHARS else None
+            )
 
             def prefix(tokens: int) -> str:
                 if encoded is not None:
@@ -313,11 +359,11 @@ class PromptAssembler:
                             return ""
                         candidate = _token_counter._encoding.decode(encoded[:tokens])
                     return candidate
+                if len(value) > _MAX_ENCODE_CHARS:
+                    return truncate_to_tokens(value, tokens)
                 return _fallback_prefix(value, tokens)
 
-            value_tokens = (
-                len(encoded) if encoded is not None else max(1, _fallback_token_count(value))
-            )
+            value_tokens = len(encoded) if encoded is not None else max(1, get_token_count(value))
             upper = min(value_tokens, cap) if cap is not None else value_tokens
             if upper == value_tokens:
                 sections[key] = value
@@ -353,13 +399,23 @@ class PromptAssembler:
         # token budget.
         summary_chunk = self._latest_compaction_summary(recent_chunks, retrieved_chunks)
         if summary_chunk is not None:
-            add("summary", f"\n\n## Compacted Context\n{self._compress_chunk(summary_chunk)}")
+            add(
+                "summary",
+                f"\n\n## Compacted Context\n{self._compress_chunk(summary_chunk)}",
+            )
         if recent_chunks:
-            recent_parts = [
-                self._compress_chunk(chunk)
-                for chunk in reversed(recent_chunks[:3])
-                if not self._is_compaction_summary(chunk)
-            ]
+            if skip_conversation:
+                # Native history owns conversation rows; render the full
+                # bounded activity window with hot/cold tool pruning.
+                recent_parts = self._recent_activity(recent_chunks, skip_conversation=True)
+            else:
+                # Compatibility path for callers that render conversation
+                # inline: preserve the original newest-three behavior.
+                recent_parts = [
+                    self._compress_chunk(chunk)
+                    for chunk in reversed(recent_chunks[:3])
+                    if not self._is_compaction_summary(chunk)
+                ]
             if recent_parts:
                 add("recent", "\n\n## Recent Activity\n" + "\n".join(recent_parts))
         if retrieved_chunks or omitted_evidence:
@@ -441,14 +497,77 @@ class PromptAssembler:
             if isinstance(created, datetime) and created.tzinfo is None:
                 created = created.replace(tzinfo=UTC)
             candidates.append(
-                (created or datetime(1, 1, 1, tzinfo=UTC), str(getattr(chunk, "id", "")), payload)
+                (
+                    created or datetime(1, 1, 1, tzinfo=UTC),
+                    str(getattr(chunk, "id", "")),
+                    payload,
+                )
             )
         if not candidates:
             return None
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
         return {"type": "compression_summary", "payload": candidates[0][2]}
 
-    def _compress_chunk(self, chunk_data: dict[str, Any]) -> str:
+    def _recent_activity(
+        self, recent_chunks: list[dict[str, Any]], skip_conversation: bool
+    ) -> list[str]:
+        """Render hot tool output and one-line tombstones for cold calls.
+
+        ``recent_chunks`` is newest-first. The hot window is the newest three
+        user turns; tool/result rows inside it retain a useful result preview,
+        while older rows become compact tombstones. Conversation rows are
+        skipped when native history owns them, but still delimit the hot
+        window.
+        """
+        hot_cutoff = len(recent_chunks) - 1
+        users_seen = 0
+        for index, chunk in enumerate(recent_chunks):
+            if chunk.get("type") in ("user_message", "user"):
+                users_seen += 1
+                if users_seen >= 3:
+                    hot_cutoff = index
+                    break
+        parts: list[str] = []
+        for index in range(len(recent_chunks) - 1, -1, -1):
+            chunk = recent_chunks[index]
+            chunk_type = chunk.get("type")
+            if self._is_compaction_summary(chunk):
+                continue
+            if skip_conversation and chunk_type in (
+                "user_message",
+                "assistant_message",
+            ):
+                continue
+            hot = index <= hot_cutoff
+            if hot:
+                parts.append(self._compress_chunk(chunk, hot=True))
+            elif chunk_type in ("tool_call", "result"):
+                parts.append(self._cold_tombstone(chunk))
+            else:
+                parts.append(self._compress_chunk(chunk))
+        return parts
+
+    @staticmethod
+    def _cold_tombstone(chunk: dict[str, Any]) -> str:
+        """One-line replacement for a tool row outside the hot window."""
+        payload = chunk.get("payload", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        chunk_type = chunk.get("type", "tool")
+        tool = payload.get("tool", payload.get("name", chunk_type))
+        args = payload.get("args", {})
+        if isinstance(args, dict) and args:
+            args_str = ", ".join(f"{k}={v}" for k, v in args.items())[:120]
+            call = f"{tool}({args_str})"
+        else:
+            call = str(tool)
+        status = payload.get("status", payload.get("state", "ok"))
+        result = payload.get("result", payload.get("content", payload.get("result_preview", "")))
+        pruned = len(result) if isinstance(result, str) else 0
+        suffix = f"{pruned:,} chars pruned" if pruned else "output pruned"
+        return f"[Tool: {call} -> {status} ({suffix})]"
+
+    def _compress_chunk(self, chunk_data: dict[str, Any], *, hot: bool = False) -> str:
         """Compress a context chunk into minimal text for the LLM."""
         chunk_type = chunk_data.get("type", "unknown")
         payload = chunk_data.get("payload", {})
@@ -458,18 +577,24 @@ class PromptAssembler:
         if chunk_type in ("tool_call", "user_message"):
             tool = payload.get("tool", payload.get("content", "unknown"))
             args = payload.get("args", {})
-            if args:
+            if isinstance(args, dict) and args:
                 args_str = ", ".join(f"{k}={v}" for k, v in args.items())
                 base = f"[{chunk_type}] {tool}({args_str})"
             else:
                 base = f"[{chunk_type}] {tool}"
             if chunk_type != "tool_call":
                 return base
-            return base + self._artifact_pointer(payload)
+            rendered = base + self._artifact_pointer(payload)
+            if hot:
+                result = payload.get("result", payload.get("result_preview", ""))
+                if isinstance(result, str) and result:
+                    preview = result[:2000] + ("..." if len(result) > 2000 else "")
+                    rendered += f"\n  -> {preview}"
+            return rendered
         elif chunk_type in ("result", "assistant_message"):
             status = payload.get("status", "ok")
             result = payload.get("result", payload.get("content", ""))
-            limit = 500 if payload.get("agent") else 200
+            limit = 2000 if hot else (500 if payload.get("agent") else 200)
             if isinstance(result, str) and len(result) > limit:
                 result = result[:limit] + "..."
             return f"  -> {status}: {result}"
@@ -555,8 +680,10 @@ class PromptAssembler:
                     f"constraints: {'; '.join(validated['constraints']) or '(none)'}",
                     f"read-only scope: {validated['read_only_scope'] or '(none)'}",
                 ]
-                for finding in validated["findings"]:
-                    lines.append(f"finding ({finding['count']}): {finding['finding']}")
+                lines.extend(
+                    f"finding ({finding['count']}): {finding['finding']}"
+                    for finding in validated["findings"]
+                )
                 if validated["unresolved_questions"]:
                     lines.append("open: " + "; ".join(validated["unresolved_questions"]))
                 lines.append(f"next: {validated['next_action']}")

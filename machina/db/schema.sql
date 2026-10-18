@@ -230,6 +230,13 @@ CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_content_trgm ON memories
     USING GIN (content gin_trgm_ops);
 
+-- FTS index for the memories keyword arm (matches the context_chunks
+-- pattern): without it the FTS half of the OR predicate is a full scan
+-- with a per-row to_tsvector evaluation, rechecking rows the trigram
+-- index could never serve through the disjunction.
+CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
+    USING GIN (to_tsvector('english', content));
+
 -- Full-text search index for BM25 hybrid search
 CREATE INDEX IF NOT EXISTS idx_context_chunks_fts ON context_chunks
     USING GIN (to_tsvector('english', search_text));
@@ -451,6 +458,7 @@ ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS usage_basis TEXT;
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION CHECK (cost_usd >= 0);
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS price_version TEXT;
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS accepted BOOLEAN;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cache_source TEXT;
 CREATE INDEX IF NOT EXISTS idx_llm_usage_session ON llm_usage(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_agent ON llm_usage(agent_id, created_at DESC);
 -- Delegation attribution upgrades are applied by delegation_schema.sql.
@@ -500,6 +508,69 @@ CREATE INDEX IF NOT EXISTS idx_tool_artifacts_session
     ON tool_artifacts(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_artifacts_expiry
     ON tool_artifacts(expires_at) WHERE expires_at IS NOT NULL;
+
+-- ─── Optimization: semantic response cache (Tier 2) ───────────────────────
+-- Fixed 1536 width matches the existing pgvector storage width; embedding
+-- backends zero-pad to it. Only scope/task/tool hashes and response text are
+-- stored — never prompts, previews, or credentials. session_id has no FK so
+-- cache rows can be vacuumed independently of session deletion.
+CREATE TABLE IF NOT EXISTS semantic_cache_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope_fingerprint TEXT NOT NULL,
+    session_id UUID,
+    agent_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    task_class TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    tool_schema_hash TEXT NOT NULL DEFAULT '',
+    workspace_root TEXT NOT NULL DEFAULT '',
+    embedding_space TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,
+    response_content TEXT NOT NULL,
+    response_model TEXT NOT NULL,
+    finish_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_hit_at TIMESTAMPTZ,
+    hit_count INT NOT NULL DEFAULT 0 CHECK (hit_count >= 0),
+    UNIQUE (scope_fingerprint, request_hash, embedding_space)
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_scope_expiry
+    ON semantic_cache_entries(scope_fingerprint, expires_at);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_session
+    ON semantic_cache_entries(session_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_embedding
+    ON semantic_cache_entries USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_expiry
+    ON semantic_cache_entries(expires_at);
+ALTER TABLE semantic_cache_entries
+    ADD COLUMN IF NOT EXISTS workspace_root TEXT NOT NULL DEFAULT '';
+
+-- ─── Optimization: bounded shadow telemetry ────────────────────────────────
+-- Hashes, counts, and decisions only. No prompt or response bodies.
+CREATE TABLE IF NOT EXISTS optimization_shadow_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subsystem TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason_codes TEXT[] NOT NULL DEFAULT '{}',
+    session_id UUID,
+    agent_id TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    task_class TEXT NOT NULL DEFAULT '',
+    request_hash TEXT NOT NULL DEFAULT '',
+    tokens_before INT NOT NULL DEFAULT 0 CHECK (tokens_before >= 0),
+    tokens_after INT NOT NULL DEFAULT 0 CHECK (tokens_after >= 0),
+    similarity DOUBLE PRECISION,
+    latency_ms DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_optimization_shadow_created
+    ON optimization_shadow_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_optimization_shadow_subsystem
+    ON optimization_shadow_events(subsystem, created_at DESC);
 
 -- ─── Agent Beliefs (Gap 2: Identity Model) ─────────────────────────────────
 

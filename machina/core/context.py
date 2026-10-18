@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,7 +27,7 @@ from machina.observability.instrumentation import instrument, instrumented, log_
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ContextChunk", "ContextManager", "context_manager"]
+__all__ = ["ContinuityWindow", "ContextChunk", "ContextManager", "context_manager"]
 
 db = LazyDb()
 
@@ -43,6 +44,17 @@ _MAX_IMAGE_CONTEXT_BYTES = MAX_TOTAL_IMAGE_BYTES + 8192
 # of the session's live `compression_summary` chunks are scanned (bound below)
 # and only the first usable one is carried — never a collection.
 _SUMMARY_RECOVERY_SCAN_LIMIT = 5
+_CONTINUITY_SUMMARY_CHARS = 4_000
+
+
+@dataclass(frozen=True)
+class ContinuityWindow:
+    """Active native user/assistant history after the compaction boundary."""
+
+    messages: list[dict[str, str]]
+    summary: str | None
+    boundary_id: str | None
+    compacted: bool
 
 
 def _summary_payload_is_usable(chunk_type: Any, payload: Any) -> bool:
@@ -768,24 +780,38 @@ class ContextManager:
         )
         return [self._row_to_chunk(r) for r in rows]
 
-    async def get_transcript_chunks(self, session_id: uuid.UUID) -> list[ContextChunk]:
+    async def get_transcript_chunks(
+        self,
+        session_id: uuid.UUID,
+        *,
+        limit: int | None = None,
+        include_embedding: bool = True,
+    ) -> list[ContextChunk]:
         """Read the retained transcript, newest first, including archived originals.
 
         One statement provides a consistent snapshot during compaction. Prefer
         the earliest archived original over compacted copies of an ID; reading history
         never resurrects context or changes the model's active prompt budget.
+
+        ``include_embedding=False`` avoids transferring 1536-dimensional
+        vectors for readers that only need transcript text (resume/export).
+        ``limit`` is applied after archive dedupe, so the newest visible rows
+        are returned without materializing the full transcript.
         """
+        embedding_column = "embedding" if include_embedding else "NULL::vector AS embedding"
+        limit_sql = " LIMIT $2" if limit is not None else ""
+        params: tuple[Any, ...] = (session_id, limit) if limit is not None else (session_id,)
         rows = await db.fetch(
-            """
+            f"""
             WITH transcript AS (
                 SELECT id, session_id, agent_id, chunk_type, payload_msgpack,
-                       token_count, embedding, created_at, accessed_at, event_seq,
+                       token_count, {embedding_column}, created_at, accessed_at, event_seq,
                        1 AS source_priority, created_at AS saved_at, id AS source_id
                 FROM context_chunks WHERE session_id = $1
                   AND chunk_type IN ('user_message', 'assistant_message', 'tool_call', 'compression_summary')
                 UNION ALL
                 SELECT chunk_id, session_id, COALESCE(agent_id, 'harness'), chunk_type,
-                       payload_msgpack, token_count, embedding,
+                       payload_msgpack, token_count, {embedding_column},
                        COALESCE(original_created_at, archived_at), NULL::timestamptz,
                        NULL::bigint,
                        0, archived_at, id
@@ -796,9 +822,9 @@ class ContextManager:
                 ORDER BY id, source_priority, saved_at ASC NULLS LAST, source_id ASC
             )
             SELECT * FROM deduplicated
-            ORDER BY created_at DESC NULLS LAST, event_seq DESC NULLS LAST, id DESC
-            """,
-            session_id,
+            ORDER BY created_at DESC NULLS LAST, event_seq DESC NULLS LAST, id DESC{limit_sql}
+            """,  # nosec B608 # Fixed column/limit fragments only; values are bound.
+            *params,
         )
         return [self._row_to_chunk(row) for row in rows]
 
@@ -844,6 +870,150 @@ class ContextManager:
             before_id = last.id
             before_seq = last.event_seq if last.event_seq is not None else NULL_EVENT_SEQ_DESC
         return all_chunks
+
+    async def get_continuity_history(
+        self,
+        session_id: uuid.UUID,
+        *,
+        context_budget: int,
+        boundary_id: str | None = None,
+        summary: str | None = None,
+    ) -> ContinuityWindow:
+        """Load the append-only active history for a native message pipeline.
+
+        The active start is anchored at the persisted compaction boundary, so
+        the prefix remains append-only between compactions (the provider KV
+        cache sees stable token positions). When the high watermark is crossed,
+        retain a clean user-aligned tail at the low watermark and return the
+        evicted slice summarized. The caller persists the new boundary and
+        summary atomically in session state.
+        """
+        boundary_time = None
+        if boundary_id is not None:
+            boundary_row = await db.fetchrow(
+                """
+                SELECT created_at FROM context_chunks
+                WHERE session_id = $1 AND id = $2::uuid
+                """,
+                session_id,
+                boundary_id,
+            )
+            if boundary_row is not None:
+                boundary_time = boundary_row["created_at"]
+        # Once a boundary exists, the SQL scan starts at that timestamp so a
+        # long transcript does not re-read every historical user/assistant row
+        # on each turn. Python still checks the exact boundary id below, which
+        # also handles same-timestamp batches.
+        rows = await db.fetch(
+            """
+            SELECT id, payload_msgpack, chunk_type, token_count
+            FROM context_chunks
+            WHERE session_id = $1
+              AND chunk_type IN ('user', 'user_message', 'assistant', 'assistant_message')
+              AND (
+                    $2::timestamptz IS NULL
+                    OR COALESCE(created_at, '0001-01-01 00:00:00+00'::timestamptz)
+                       >= COALESCE($2::timestamptz, '0001-01-01 00:00:00+00'::timestamptz)
+                  )
+            ORDER BY created_at ASC, event_seq ASC NULLS LAST, id ASC
+            """,
+            session_id,
+            boundary_time,
+        )
+        all_active: list[dict[str, Any]] = []
+        boundary_index: int | None = None
+        for row in rows:
+            payload = msgpack.unpackb(row["payload_msgpack"], raw=False)
+            content = payload.get("content") if isinstance(payload, dict) else None
+            if not isinstance(content, str) or not content.strip():
+                continue
+            entry = {
+                "id": str(row["id"]),
+                "role": ("user" if row["chunk_type"] in ("user", "user_message") else "assistant"),
+                "content": content,
+                "tokens": max(1, int(row["token_count"] or 0)),
+            }
+            if boundary_id is not None and entry["id"] == str(boundary_id):
+                boundary_index = len(all_active)
+            all_active.append(entry)
+        # Boundary rows are included, so the next turn starts on the same
+        # user turn that anchored the retained tail. A boundary removed by an
+        # older compressor cannot make history disappear; fall back to the
+        # durable transcript and let this turn establish a fresh anchor.
+        active = all_active
+        if boundary_id is not None and boundary_index is not None:
+            active = all_active[boundary_index:]
+
+        high_tokens = max(1, min(8000, int(context_budget) // 3))
+        low_tokens = max(1, min(4000, int(context_budget) // 6))
+        total_tokens = sum(row["tokens"] for row in active)
+        compacted = total_tokens > high_tokens or len(active) > 50
+        evicted: list[dict[str, Any]] = []
+        retained = active
+        if compacted:
+            evicted, retained = self._split_continuity(active, low_tokens, 25)
+        if not retained:
+            return ContinuityWindow(
+                messages=[{"role": row["role"], "content": row["content"]} for row in active],
+                summary=summary,
+                boundary_id=boundary_id,
+                compacted=False,
+            )
+        new_boundary = retained[0]["id"] if compacted and evicted else boundary_id
+        new_summary = summary
+        if evicted:
+            new_summary = self._fold_continuity_summary(summary, evicted)
+        return ContinuityWindow(
+            messages=[{"role": row["role"], "content": row["content"]} for row in retained],
+            summary=new_summary,
+            boundary_id=new_boundary,
+            compacted=bool(evicted),
+        )
+
+    @staticmethod
+    def _split_continuity(
+        messages: list[dict[str, Any]], target_tokens: int, target_messages: int
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Retain the newest clean user-aligned tail at the low watermark."""
+        retained: list[dict[str, Any]] = []
+        total = 0
+        for row in reversed(messages):
+            exceeded = total + row["tokens"] > target_tokens or len(retained) >= target_messages
+            # ``retained[-1]`` is the oldest retained turn while walking
+            # backwards. Only cut once that anchor is a user message, so the
+            # retained slice always starts a clean turn even when the newest
+            # row is an assistant reply.
+            if retained and exceeded and retained[-1]["role"] == "user":
+                break
+            retained.append(row)
+            total += row["tokens"]
+        retained.reverse()
+        while retained and retained[0]["role"] != "user":
+            retained.pop(0)
+        if not retained:
+            return [], messages
+        split = len(messages) - len(retained)
+        return messages[:split], retained
+
+    @staticmethod
+    def _fold_continuity_summary(previous: str | None, evicted: list[dict[str, Any]]) -> str:
+        """Fold evicted turns into a bounded deterministic continuity summary.
+
+        The durable transcript remains authoritative; this is the stable prefix
+        anchor sent while the older turns are outside the active window. It is
+        intentionally deterministic and bounded so compaction never adds a
+        provider round-trip to the turn path.
+        """
+        parts = []
+        if previous and previous.strip():
+            parts.append(previous.strip())
+        for row in evicted:
+            label = "User" if row["role"] == "user" else "Assistant"
+            parts.append(f"{label}: {row['content'].strip()}")
+        text = "\n\n".join(parts)
+        if len(text) > _CONTINUITY_SUMMARY_CHARS:
+            text = "…" + text[-_CONTINUITY_SUMMARY_CHARS:]
+        return text
 
     async def get_recent_context(
         self, session_id: uuid.UUID, limit: int = 10
@@ -1335,22 +1505,21 @@ class ContextManager:
             tsquery,
             top_k,
         )
-        result = []
-        for row in rows:
-            result.append(
-                (
-                    ContextChunk(
-                        id=row["chunk_id"],
-                        session_id=session_id,
-                        agent_id=row.get("agent_id") or "harness",
-                        chunk_type=row.get("chunk_type") or "document",
-                        payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
-                        token_count=row.get("token_count") or 0,
-                        created_at=row.get("original_created_at") or row["archived_at"],
-                    ),
-                    float(row["similarity"]),
-                )
+        result = [
+            (
+                ContextChunk(
+                    id=row["chunk_id"],
+                    session_id=session_id,
+                    agent_id=row.get("agent_id") or "harness",
+                    chunk_type=row.get("chunk_type") or "document",
+                    payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
+                    token_count=row.get("token_count") or 0,
+                    created_at=row.get("original_created_at") or row["archived_at"],
+                ),
+                float(row["similarity"]),
             )
+            for row in rows
+        ]
         return result
 
     async def search_archive_dense(
@@ -1376,22 +1545,21 @@ class ContextManager:
             session_id,
             top_k,
         )
-        result = []
-        for row in rows:
-            result.append(
-                (
-                    ContextChunk(
-                        id=row["chunk_id"],
-                        session_id=session_id,
-                        agent_id=row.get("agent_id") or "harness",
-                        chunk_type=row.get("chunk_type") or "document",
-                        payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
-                        token_count=row.get("token_count") or 0,
-                        created_at=row.get("original_created_at") or row["archived_at"],
-                    ),
-                    float(row["similarity"]),
-                )
+        result = [
+            (
+                ContextChunk(
+                    id=row["chunk_id"],
+                    session_id=session_id,
+                    agent_id=row.get("agent_id") or "harness",
+                    chunk_type=row.get("chunk_type") or "document",
+                    payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
+                    token_count=row.get("token_count") or 0,
+                    created_at=row.get("original_created_at") or row["archived_at"],
+                ),
+                float(row["similarity"]),
             )
+            for row in rows
+        ]
         return result
 
     async def evict_old_chunks(

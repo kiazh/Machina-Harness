@@ -358,6 +358,9 @@ def fetch_catalog_for_account(*, force: bool = False, base_url: str = "") -> lis
 def _read_codex_cache() -> list[CatalogModel]:
     """Read the Codex CLI's ``models_cache.json`` (read-only local hint)."""
     global _codex_cache
+    now = time.monotonic()
+    if _codex_cache is not None and now - _codex_cache[0] < _CODEX_CACHE_TTL_SECONDS:
+        return _codex_cache[1]
     codex_home = Path(
         os.environ.get("CODEX_HOME", "").strip() or str(Path.home() / ".codex")
     ).expanduser()
@@ -366,9 +369,6 @@ def _read_codex_cache() -> list[CatalogModel]:
         stat = path.stat()
     except OSError:
         return []
-    now = time.monotonic()
-    if _codex_cache is not None and now - _codex_cache[0] < _CODEX_CACHE_TTL_SECONDS:
-        return _codex_cache[1]
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
         models = parse_catalog(payload, source="codex-cache") if stat.st_size else []
@@ -420,12 +420,6 @@ def cached_catalog(account_id: str = "", base_url: str = "") -> list[CatalogMode
     if models:
         return models
     return _fallback_models()
-
-
-def catalog_source(account_id: str = "", base_url: str = "") -> str:
-    """Source tag for :func:`cached_catalog` without materializing entries."""
-    models = cached_catalog(account_id, base_url)
-    return models[0].source if models else "none"
 
 
 def find_model(slug: str | None, models: list[CatalogModel] | None = None) -> CatalogModel | None:

@@ -105,8 +105,7 @@ def parse_repo_url(url: str) -> RepoSource:
     if len(segments) < 2:
         raise RepoInstallError("repo link must name an owner and repository")
     owner, repo = segments[0], segments[1]
-    if repo.endswith(".git"):
-        repo = repo[: -len(".git")]
+    repo = repo.removesuffix(".git")
     if (
         not _OWNER_RE.fullmatch(owner)
         or not _REPO_RE.fullmatch(repo)
@@ -554,9 +553,7 @@ def scan_repo(repo: Path, source: RepoSource, revision: str) -> RepoPlan:
             continue
         if top == "agents" and relative.endswith(".md") and len(parts) == 2:
             plan.agents.append(relative)
-        elif top == "commands" and relative.endswith(".md"):
-            plan.commands.append(relative)
-        elif (
+        elif (top == "commands" and relative.endswith(".md")) or (
             top == ".opencode"
             and len(parts) > 1
             and parts[1] == "commands"

@@ -25,6 +25,9 @@ from typing import Any
 
 from machina.core.background_tasks import join_agent_background_tasks
 from machina.core.cron import next_cron_time
+from machina.core.optimization.policy import OptimizationMode, effective_mode
+from machina.core.optimization.semantic_cache import SemanticCache
+from machina.core.optimization.shadow import prune_shadow_events
 from machina.db.connection import db, parse_command_count
 from machina.observability.diagnostics import record_failure
 from machina.observability.instrumentation import instrument, instrumented, log_event
@@ -149,9 +152,7 @@ def _finish_next_run(kind: str, expr: str | None, db_now) -> Any:
 
 def _finish_fencing_ok(status: str, current: Any, claim_token: Any) -> bool:
     """Canonical token fencing: token-owned running rows need exact token."""
-    if status == "running" and current is not None and claim_token != current:
-        return False
-    return True
+    return not (status == "running" and current is not None and claim_token != current)
 
 
 def _optional_col(row: Any, name: str) -> Any:
@@ -543,6 +544,7 @@ class JobRunner:
         self._agent_factory = agent_factory  # (agent_name, session_id) -> agent, for tests
         self._poll_seconds = poll_seconds
         self._task: asyncio.Task | None = None
+        self._maintenance_task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
         self._quarantined: set[asyncio.Task] = set()
         self._finalizers: set[asyncio.Task] = set()
@@ -562,6 +564,29 @@ class JobRunner:
         if self._task is None or self._task.done():
             self._stopping.clear()
             self._task = asyncio.create_task(self._loop(), name="machina-job-runner")
+            self._maintenance_task = asyncio.create_task(
+                self._maintenance_loop(), name="machina-optimization-maintenance"
+            )
+
+    def _semantic_cache_active(self) -> bool:
+        try:
+            return effective_mode("semantic_cache") is not OptimizationMode.OFF
+        except Exception:
+            return False
+
+    async def _maintenance_loop(self) -> None:
+        """Vacuum expired cache rows and prune shadow telemetry."""
+        while not self._stopping.is_set():
+            try:
+                if self._semantic_cache_active():
+                    await SemanticCache().vacuum()
+                await prune_shadow_events()
+            except Exception as error:
+                record_failure("scheduler.optimization_maintenance", error)
+            try:
+                await asyncio.wait_for(self._stopping.wait(), timeout=3600)
+            except TimeoutError:
+                pass
 
     async def stop(self) -> None:
         """Cancel the poll loop, then drain quarantined work bounded (M3).
@@ -572,6 +597,14 @@ class JobRunner:
         shutdown grace to settle lease release and outcome recording.
         """
         self._stopping.set()
+        maintenance = self._maintenance_task
+        self._maintenance_task = None
+        if maintenance is not None:
+            maintenance.cancel()
+            try:
+                await maintenance
+            except (asyncio.CancelledError, Exception) as _boundary_error:
+                record_failure("scheduler.optimization_maintenance_stop", _boundary_error)
         if self._task is not None:
             self._task.cancel()
             try:

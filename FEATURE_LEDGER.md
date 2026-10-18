@@ -224,6 +224,18 @@ v1.0.0 gate stays open until DB/Docker/staging verification per
 | Gateway completion | `message.complete` carries `needsApproval` summary when the turn ends paused (parity with HTTP `done`) | protocol schema `needsApproval?`, UI `transcript` reconciliation |
 | TUI contract | `transcript.apply` explicitly handles `turn.started`, `needs_approval`/`permission.required`, `approval.resolved`, `approval.resumed`, `turn.ownership_lost`, `turn.cleanup_pending`; `app.onEvent` notices `approval.resumed`/`turn.started` | `npm --prefix ui test` (87 passed, 3 DB-skipped), `typecheck`, `lint` |
 
+## Gated optimization/caching (2026-10-17)
+
+| Boundary | Change | Proof |
+|---|---|---|
+| Semantic response cache | Additive `semantic_cache_entries` table (1536-d embedding, exact scope fingerprint, session/workspace/tool/authority/revision guards, TTL/vacuum) and a Tier-2 lookup on the central call seam before the provider call; the exact provider cache remains inside the transport. Default `off`; `shadow` computes without serving; `wired` is limited to read-only auxiliary purposes. Cache hits return zero-usage `cache_source="semantic"` responses; invalid/tool/secret/code responses are never stored. | `tests/test_optimization_db.py`, `tests/test_optimization_semantic_cache.py`, `tests/test_optimization_integration.py`, `tests/test_optimization_core.py` |
+| Cache attribution | `llm_usage.cache_source` labels billed rows (`exact` provider hits). Semantic hit/miss counts are recorded in `optimization_shadow_events` because cache hits bypass reservations by design. Provider exact-cache responses are labeled through `LLMResponse.__post_init__`, preserving the existing `cache_hit` boolean. | `tests/test_usage.py`, `tests/test_te_usage_ledger.py`, `tests/test_optimization_core.py` |
+| Capability registry | `machina/core/optimization/capabilities.py` composes the existing context-window, prompt-cache, and dated price metadata; unknown routes are `verified_complete=False` and the `prefix-plan` economics fail closed. Verified Anthropic cache TTL is exposed without inventing read/write multipliers. | `tests/test_optimization_core.py`, `tests/test_optimization_integration.py` |
+| Shadow telemetry + operations | Additive `optimization_shadow_events` (hashes/counts/decisions only), retention pruning, scheduler vacuum, gateway/API free-warmup scheduling, and read-only `machina optimization status` / `prefix-plan`. Prompt-cache wired mode enforces the minimum stable-prefix threshold; synthetic keepalive is not implemented. | `tests/test_optimization_db.py`, `tests/test_optimization_integration.py`, `tests/test_runtime_migrations.py` |
+| Streaming + auxiliary surfaces | Learned compression is applied on both `UsageStore.complete_call` and `agent._stream_llm_with_retry`; semantic cache remains auxiliary-only because interactive turns carry tool schemas and do not satisfy its no-tools contract. | `tests/test_optimization_integration.py` |
+| Learned compression | Protected-span selection, anchor-retention and embedding-drift guards, latency timeout, shadow/wired modes, and optional lazy LLMLingua-2 adapter. Deterministic reducers remain the default; every failure reverts to the original request. | `tests/test_optimization_compression.py`, `tests/test_optimization_integration.py` |
+| Resume continuity | Native user/assistant history after a durable sawtooth compaction boundary (high 8k/50, low 4k/25); evicted turns fold into a bounded summary stored atomically in session state; cold tool output becomes one-line tombstones in the dynamic tail. | `tests/test_resume_continuity.py` |
+
 ## Intent routing fix (dogfood iteration, 2026-10-13)
 
 | Boundary | Change | Proof |

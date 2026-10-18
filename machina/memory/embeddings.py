@@ -29,8 +29,7 @@ def _shared_embedder():
 def _space_kind(embedder: Any) -> str:
     """Backend label from the embedder class (``OnnxEmbedder`` -> ``onnx``)."""
     name = type(embedder).__name__
-    if name.endswith("Embedder"):
-        name = name[: -len("Embedder")]
+    name = name.removesuffix("Embedder")
     return name.lower() or "unknown"
 
 

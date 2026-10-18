@@ -67,7 +67,7 @@ async def export_markdown(session: Session) -> str:
     """
     from machina.memory.redaction import redact_secrets as _redact
 
-    chunks = await context_manager.get_transcript_chunks(session.id)
+    chunks = await context_manager.get_transcript_chunks(session.id, include_embedding=False)
     # AH-AUDIT-012: title/goal are outward-facing export fields subject to
     # the same structured redaction policy as message content. Raw stored
     # conversation (DB chunks) is intentionally untouched.

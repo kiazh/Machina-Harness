@@ -25,6 +25,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from importlib import import_module
 from typing import Any
 
 from fastapi import FastAPI
@@ -166,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     load_plugins()
     runner = None
+    warmers_task = None
     rpc_gw = None
     primary_error: BaseException | None = None
     try:
@@ -177,6 +179,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
                 runner = JobRunner()
                 runner.start()
+                config_module = import_module("machina.core.config")
+                warmers_task = import_module(
+                    "machina.core.optimization.warmers.startup"
+                ).schedule_startup_warmers(
+                    provider=config_module.config.get("provider"),
+                    model=config_module.config.get("model"),
+                )
             # Create a single _RpcGateway for all RPC dispatches
             rpc_gw = _RpcGateway()
             app.state._rpc_gateway = rpc_gw
@@ -205,6 +214,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if runner is not None:
             await _cleanup_stage("job_runner_stop", runner.stop, 10)
+        if warmers_task is not None:
+            warmers_task.cancel()
+
+            async def _stop_warmers() -> None:
+                try:
+                    await warmers_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            await _cleanup_stage("optimization_warmers_stop", _stop_warmers, 2)
+        try:
+            shadow_module = import_module("machina.core.optimization.shadow")
+            await _cleanup_stage("optimization_shadow_drain", shadow_module.drain_shadow_tasks, 2)
+        except Exception:
+            pass
         if rpc_gw is not None:
             await _cleanup_stage("gateway_close", rpc_gw.close, 10)
         await _cleanup_stage("runtime_shutdown", runtime_services.shutdown, 15)

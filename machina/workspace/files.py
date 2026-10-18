@@ -273,7 +273,7 @@ class WorkspaceFiles:
             raise WorkspaceError("denied", "path contains a NUL byte")
         if len(rel) > MAX_PATH_CHARS:
             raise WorkspaceError("denied", f"path exceeds {MAX_PATH_CHARS} characters")
-        if rel.startswith("/") or rel.startswith("\\") or os.path.isabs(rel):
+        if rel.startswith(("/", "\\")) or os.path.isabs(rel):
             raise WorkspaceError("denied", "path must be relative to the workspace root")
         if len(rel) >= 2 and rel[1] == ":":
             raise WorkspaceError("denied", "path must not carry a drive/volume prefix")

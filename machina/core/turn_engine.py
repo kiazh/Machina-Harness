@@ -466,7 +466,7 @@ class TurnEngine:
             limit = self._max_tool_result_chars
             truncated = len(result) > limit
             payload: dict[str, Any] = {
-                "id": match_id if match_id else f"{self.spec.turn_id}-{self._tool_count}",
+                "id": match_id or f"{self.spec.turn_id}-{self._tool_count}",
                 "name": event.tool_name,
                 "result": result[:limit],
                 "truncated": truncated,

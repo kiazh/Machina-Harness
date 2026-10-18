@@ -286,9 +286,7 @@ def _marker_owner_alive(pid: int, data: dict) -> bool:
             return True
         return age <= _MARKER_MAX_AGE_SECONDS
     current = _process_started(pid)
-    if not current or current == recorded:
-        return True
-    return False
+    return not current or current == recorded
 
 
 def _terminate_chain(child_pid: object, child_started: str) -> None:

@@ -72,8 +72,8 @@ def _parse(source: str) -> tuple[int, list[str], bool]:
     return loc, imports, entry
 
 
-def _local_module(root: str, rel: str) -> str:
-    mod = rel[: -len(".py")] if rel.endswith(".py") else rel
+def _local_module(rel: str) -> str:
+    mod = rel.removesuffix(".py")
     return mod.replace(os.sep, ".")
 
 
@@ -126,7 +126,7 @@ def build_repomap(root: str, cache: ContentHashCache | None = None) -> RepoMap:
             if _is_test(rel):
                 m.test_files.append(rel)
             if imports:
-                m.import_edges[_local_module(m.root, rel)] = sorted(set(imports))
+                m.import_edges[_local_module(rel)] = sorted(set(imports))
     m.files.sort()
     m.entry_points.sort()
     m.test_files.sort()

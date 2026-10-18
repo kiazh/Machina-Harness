@@ -28,6 +28,8 @@ from machina.core.config import config
 from machina.core.context import context_manager
 from machina.core.execution_context import begin_turn_scope, end_turn_scope
 from machina.core.models import Session
+from machina.core.optimization.shadow import drain_shadow_tasks
+from machina.core.optimization.warmers.startup import schedule_startup_warmers
 from machina.core.provider import PROVIDERS
 from machina.core.runtime import RuntimeServices, runtime_services
 from machina.core.session import session_manager
@@ -199,6 +201,7 @@ class Gateway:
         self.closing = False
         self._db_ready = False
         self._job_runner = None
+        self._warmers_task = None
         self._turns: dict[str, asyncio.Task[None]] = {}
         self._turn_tokens: dict[str, str] = {}
         self._turn_ownership_lost: dict[str, asyncio.Event] = {}
@@ -380,6 +383,14 @@ class Gateway:
         """
         from machina.core.runtime import _bounded_join
 
+        if self._warmers_task is not None:
+            self._warmers_task.cancel()
+            try:
+                await self._warmers_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._warmers_task = None
+        await drain_shadow_tasks()
         if self._job_runner is not None:
             try:
                 await asyncio.wait_for(self._job_runner.stop(), timeout=timeout)
@@ -584,6 +595,10 @@ class Gateway:
 
             audit_persistence.start()
             self._start_job_runner()
+            # Free local warmers run once, off the request path. The helper
+            # skips itself when disabled or when tests disable the scheduler;
+            # it never makes a synthetic provider call.
+            self._warmers_task = schedule_startup_warmers(provider=self.provider, model=self.model)
         payload = {
             "version": __version__,
             "protocolVersion": self.protocol_version,
@@ -689,11 +704,13 @@ class Gateway:
         session = await self.get_session(params)
         self._opened_session_id = session.id
         with instrument("session", "resume", session_id=str(session.id)) as span:
-            chunks = await context_manager.get_transcript_chunks(session.id)
-            # W5: get_transcript_chunks has no LIMIT; the REST session endpoint
-            # bounds history at 200 chunks (machina/api/routes/sessions.py). Slice
-            # the newest-first snapshot to the same bound so resume cannot return
-            # an unbounded payload (or force an unbounded JSON serialization).
+            chunks = await context_manager.get_transcript_chunks(
+                session.id,
+                limit=MAX_RESUME_HISTORY_CHUNKS,
+                include_embedding=False,
+            )
+            # Keep the defensive slice for test doubles and older context
+            # implementations; the real query is already bounded.
             history = history_from_chunks(chunks[:MAX_RESUME_HISTORY_CHUNKS])
             span.note(history_chunks=len(history))
         return {
@@ -809,11 +826,10 @@ class Gateway:
                 # restart (Config.get checks env first). Sync both so a saved
                 # default survives restarts and live config.get reads.
                 env_key = f"MACHINA_{key.upper()}"
-                os.environ[env_key] = value
                 try:
-                    from machina.security.env_file import set_env_values
+                    from machina.security.env_file import sync_env_shadow
 
-                    set_env_values({env_key: value})
+                    sync_env_shadow(env_key, value)
                 except (OSError, ValueError) as e:
                     logger.warning(
                         "config.set: .env sync failed for %s (%s)",

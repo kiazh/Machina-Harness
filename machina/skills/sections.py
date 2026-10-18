@@ -311,9 +311,9 @@ def _relevant_diagnostics(
     """Keep A1 binding diagnostics that name this declared section/heading."""
     relevant = []
     for diagnostic in diagnostics:
-        if f"'{section_id}'" in diagnostic.message:
-            relevant.append(diagnostic)
-        elif heading and f"'{heading}'" in diagnostic.message:
+        names_section = f"'{section_id}'" in diagnostic.message
+        names_heading = bool(heading) and f"'{heading}'" in diagnostic.message
+        if names_section or names_heading:
             relevant.append(diagnostic)
     return tuple(relevant)
 

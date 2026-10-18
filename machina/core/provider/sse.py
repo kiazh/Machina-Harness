@@ -37,8 +37,7 @@ def sse_field(line: str, field: str) -> str | None:
     prefix = field + ":"
     if line.startswith(prefix):
         value = line[len(prefix) :]
-        if value.startswith(" "):
-            value = value[1:]
+        value = value.removeprefix(" ")
         return value
     if line == field:
         return ""

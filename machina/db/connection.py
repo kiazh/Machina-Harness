@@ -56,6 +56,7 @@ ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS usage_basis TEXT;
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION CHECK (cost_usd >= 0);
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS price_version TEXT;
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS accepted BOOLEAN;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS cache_source TEXT;
 """
 
 _TOOL_ARTIFACTS_MIGRATION = """
@@ -88,6 +89,67 @@ CREATE INDEX IF NOT EXISTS idx_tool_artifacts_session
     ON tool_artifacts(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_artifacts_expiry
     ON tool_artifacts(expires_at) WHERE expires_at IS NOT NULL;
+"""
+
+# Optimization cache + shadow telemetry (2026-10-17). Additive and idempotent;
+# schema.sql carries the same DDL for new installations. No prompt/response
+# bodies are stored in the shadow table; the semantic cache stores response
+# text only after secret screening.
+_OPTIMIZATION_MIGRATION = """
+CREATE TABLE IF NOT EXISTS semantic_cache_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope_fingerprint TEXT NOT NULL,
+    session_id UUID,
+    agent_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    task_class TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    tool_schema_hash TEXT NOT NULL DEFAULT '',
+    workspace_root TEXT NOT NULL DEFAULT '',
+    embedding_space TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,
+    response_content TEXT NOT NULL,
+    response_model TEXT NOT NULL,
+    finish_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_hit_at TIMESTAMPTZ,
+    hit_count INT NOT NULL DEFAULT 0 CHECK (hit_count >= 0),
+    UNIQUE (scope_fingerprint, request_hash, embedding_space)
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_scope_expiry
+    ON semantic_cache_entries(scope_fingerprint, expires_at);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_session
+    ON semantic_cache_entries(session_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_embedding
+    ON semantic_cache_entries USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_expiry
+    ON semantic_cache_entries(expires_at);
+ALTER TABLE semantic_cache_entries
+    ADD COLUMN IF NOT EXISTS workspace_root TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS optimization_shadow_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subsystem TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason_codes TEXT[] NOT NULL DEFAULT '{}',
+    session_id UUID,
+    agent_id TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    task_class TEXT NOT NULL DEFAULT '',
+    request_hash TEXT NOT NULL DEFAULT '',
+    tokens_before INT NOT NULL DEFAULT 0 CHECK (tokens_before >= 0),
+    tokens_after INT NOT NULL DEFAULT 0 CHECK (tokens_after >= 0),
+    similarity DOUBLE PRECISION,
+    latency_ms DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_optimization_shadow_created
+    ON optimization_shadow_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_optimization_shadow_subsystem
+    ON optimization_shadow_events(subsystem, created_at DESC);
 """
 
 
@@ -305,6 +367,7 @@ class Database:
             await conn.execute(_MEMORY_EMBEDDING_SPACE_MIGRATION)
             await conn.execute(_USAGE_LEDGER_MIGRATION)
             await conn.execute(_TOOL_ARTIFACTS_MIGRATION)
+            await conn.execute(_OPTIMIZATION_MIGRATION)
 
     # Standalone growth-migration entry point; migration tests apply it, no production caller. Kept (R4-106).
     async def initialize_growth_schema(self) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib
 import json
 import logging
 import uuid
@@ -346,6 +347,16 @@ class SessionManager:
                 await conn.execute("DELETE FROM context_archive WHERE session_id = $1", session_id)
                 result = await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
         await self._cache_invalidate(session_id)
+
+        # Session deletion is also a semantic-cache invalidation boundary:
+        # cached answers must not outlive the conversation they were scoped to.
+        try:
+            cache_module = importlib.import_module("machina.core.optimization.semantic_cache")
+            await cache_module.SemanticCache().invalidate(session_id=session_id)
+        except Exception:
+            # Cache cleanup is additive; the durable delete above already
+            # succeeded and must not be reported as failed.
+            pass
 
         return parse_command_count(result) > 0
 

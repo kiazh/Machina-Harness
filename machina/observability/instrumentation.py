@@ -191,13 +191,7 @@ def _digest(value: object) -> str:
 
 def _is_body_key(key: str) -> bool:
     lowered = key.lower()
-    return (
-        lowered in _BODY_KEYS
-        or lowered.endswith("_body")
-        or lowered.endswith("_content")
-        or lowered.endswith("_text")
-        or lowered.endswith("_prompt")
-    )
+    return lowered in _BODY_KEYS or lowered.endswith(("_body", "_content", "_text", "_prompt"))
 
 
 def _sanitize_value(key: str, value: object, depth: int = 0) -> object:
@@ -404,7 +398,7 @@ def _emit(event: str, level: str, fields: dict[str, Any]) -> None:
 class _Span:
     """Context manager implementing instrumentation for one operation."""
 
-    __slots__ = ("component", "operation", "fields", "_started", "_closed")
+    __slots__ = ("_closed", "_started", "component", "fields", "operation")
 
     def __init__(self, component: str, operation: str, fields: dict[str, Any]) -> None:
         self.component = component

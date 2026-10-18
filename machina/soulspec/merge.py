@@ -23,7 +23,7 @@ class SoulSpecMerger:
         """Merge override into base, returning a new SoulSpec."""
         base, override = deepcopy(base), deepcopy(override)
         # Scalar fields: override wins
-        name = override.name if override.name else base.name
+        name = override.name or base.name
         version = override.version if override.version is not None else base.version
 
         # Persona: recursive merge
@@ -93,8 +93,8 @@ class SoulSpecMerger:
                 )
 
         return SoulSpec.Persona(
-            name=override.name if override.name else base.name,
-            description=override.description if override.description else base.description,
+            name=override.name or base.name,
+            description=override.description or base.description,
             values=values,
             traits=traits,
             voice=voice,
@@ -178,8 +178,8 @@ class SoulSpecMerger:
         permissions = SoulSpecMerger._merge_permissions(base.permissions, override.permissions)
 
         return SoulSpec.Config(
-            model=override.model if override.model else base.model,
-            provider=override.provider if override.provider else base.provider,
+            model=override.model or base.model,
+            provider=override.provider or base.provider,
             context_budget=override.context_budget
             if override.context_budget is not None
             else base.context_budget,

@@ -253,6 +253,9 @@ def pinned_fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = CONNE
             raw.settimeout(_remaining())
             raw.connect((target_ip, port))
             if parsed.scheme == "https":
+                # Constructed per request: the default context is cheap
+                # relative to the pinned fetch itself, and call sites/tests
+                # patch the constructor as the single TLS customization seam.
                 ctx = ssl.create_default_context()
                 raw.settimeout(_remaining())
                 sock = ctx.wrap_socket(raw, server_hostname=hostname)

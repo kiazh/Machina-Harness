@@ -60,12 +60,14 @@ One authoritative accounting path (`machina/core/usage.py`, `llm_usage` table):
   does not imply cache behavior.
 - With `prompt_cache_enabled` on (default **off**, existing pilot), Anthropic
   requests get explicit `cache_control` breakpoints on the system block (when
-  present), the last tool schema, and the **conversation tail** — the last
-  message's final content block. Tool continuations append messages, so each
-  iteration can read the previous prefix from cache; the 4-breakpoint budget
-  is enforced. OpenRouter marks the system tail when present and otherwise
-  the conversation tail for Anthropic-routed models only. Off-path payloads
-  remain byte-identical (pinned by `tests/test_e1_prompt_cache.py`).
+  present), the last tool schema, the **last stable history message**, and the
+  **conversation tail** — the last message's final content block. The stable
+  history marker lets the next user turn reuse the append-only prefix; the
+  tail marker lets tool continuations within the turn append to the cache; the
+  4-breakpoint budget is enforced. OpenRouter marks the system tail when
+  present and otherwise the conversation tail for Anthropic-routed models
+  only. Off-path payloads remain byte-identical (pinned by
+  `tests/test_e1_prompt_cache.py`).
 - The debug log line for attached breakpoints states the saving is
   unmeasured; use the ledger's cache columns to evaluate real turns before
   changing any default.
@@ -164,16 +166,52 @@ reasoning budgets are untouched.
 All keys are validated (`machina/core/config.py`) and settable through the
 normal config surface.
 
-## What is deliberately not enabled
+## Resume continuity
 
-- **Learned compression / LLMLingua-style pruning** — needs local model
-  evaluation and hardware-cost accounting; not shipped.
+A resumed session is the same conversation, not a fresh one. Before each turn
+the agent loads durable user/assistant turns after the session's current
+compaction boundary and sends them as native `user`/`assistant` messages — not
+as one flattened Markdown history section. Static instructions stay in the
+system message, the stable compaction anchor follows it, active history is
+append-only between compactions, and only the dynamic tail (hot tool activity,
+retrieved context, goal, live query) changes per step. Native roles preserve
+strict provider turn boundaries and keep the cached prefix stable.
+
+The history uses a sawtooth high/low watermark:
+
+- high: `min(8000, context_budget / 3)` tokens or 50 messages;
+- low: `min(4000, context_budget / 6)` tokens or 25 messages.
+
+Below high, every turn after the boundary is returned unchanged. Above high,
+the newest clean user-aligned tail at low is retained; the evicted slice is
+folded into a bounded deterministic summary (the durable transcript remains
+authoritative), and the new boundary and summary are merged atomically into
+`session.state`. If that state write fails, the turn still uses the folded
+window and retries the durable update next turn. If the boundary row was
+removed, loading falls back to the durable transcript rather than dropping
+history.
+
+`## Recent Activity` in the dynamic tail keeps up to 2,000 characters of tool
+output for the newest three user turns and replaces older tool rows with
+single-line tombstones. The live query appears once in `## Current Query` and
+is never duplicated in history. Older detail is not replayed implicitly;
+session recall/archive remains the explicit recovery path.
+
+Token counting is chunked for large inputs so a single huge tool result or
+document cannot trigger a process-level tiktoken encode abort.
+
+## What is deliberately not enabled by default
+
+- **Learned compression / LLMLingua-style pruning** — implemented as an
+  opt-in protected-span path (`optimization_compression_mode`); deterministic
+  reducers remain the default. See [optimization](optimization.md).
 - **Model routing / reasoning-effort adaptation** — requires calibrated
   low-risk task classes and escalation cost measurement.
-- **Semantic answer caching** — unsafe for mutable tasks, code edits, and
-  permissions without task-identity machinery.
-- **Cache warmers / keepalives** — economics (and privacy) unproven; the plan
-  says keep them off initially.
+- **Interactive semantic answer caching** — the semantic cache is limited to
+  read-only auxiliary calls; interactive turns carry tool schemas and do not
+  satisfy the no-tools cache contract.
+- **Synthetic cache keepalives** — not implemented; harness warmers only load
+  local tokenizer/embedding/capability state.
 - **Progressive native-tool schema deferral** — a behavioral change to every
   request; MCP already ships lazy schema discovery, and the native path needs
   provider-native deferral support and measurement first.

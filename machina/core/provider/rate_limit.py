@@ -102,7 +102,7 @@ class RateLimitBinding:
     """
 
     _rate_limit_key: str = "default"
-    _rate_limiter_override: Any = None
+    _rate_limiter_override: Any
 
     @property
     def _rate_limiter(self) -> AsyncTokenBucket:

@@ -88,8 +88,7 @@ def _provider_name(provider) -> str:
         return provider.lower()
     try:
         name = type(provider).__name__
-        if name.endswith("Provider"):
-            name = name[: -len("Provider")]
+        name = name.removesuffix("Provider")
         return name.lower()
     except Exception:
         return ""

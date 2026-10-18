@@ -168,7 +168,7 @@ class DocumentMirrorStore:
         if epoch != self.epoch:
             raise WorkspaceError("denied", "stale workspace epoch; the workspace was reopened")
 
-    def _enforce_budgets(self, uri: str, size: int, *, replacing: int) -> None:
+    def _enforce_budgets(self, size: int, *, replacing: int) -> None:
         if size > self.per_file_bytes:
             raise WorkspaceError(
                 "too-large",
@@ -211,7 +211,7 @@ class DocumentMirrorStore:
                 server_generation=self._generation,
                 state="ready",
             )
-        self._enforce_budgets(uri, size, replacing=existing.byte_size if existing else 0)
+        self._enforce_budgets(size, replacing=existing.byte_size if existing else 0)
         self._mirrors[uri] = _Mirror(
             uri=uri,
             language_id=language_id,
@@ -264,7 +264,7 @@ class DocumentMirrorStore:
             raise WorkspaceError(
                 "unsupported-encoding", "text contains code points that are not valid UTF-8"
             ) from error
-        self._enforce_budgets(uri, size, replacing=mirror.byte_size)
+        self._enforce_budgets(size, replacing=mirror.byte_size)
         mirror.text = updated
         mirror.byte_size = size
         mirror.version = version

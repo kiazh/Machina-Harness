@@ -16,12 +16,18 @@ from typing import Any
 
 from rich.console import Console
 
-from machina.core.assembler import PromptAssembler, get_token_count
+from machina.core.assembler import get_token_count
 from machina.core.background_tasks import consolidation_inflight as _consolidation_inflight
 from machina.core.background_tasks import joined_teardown
 from machina.core.background_tasks import pending_learning_reviews as _pending_learning_reviews
 from machina.core.config import config
 from machina.core.context import context_manager
+from machina.core.continuity import (
+    build_context_messages,
+    finish_usage,
+    make_dynamic_assembler,
+    prepare_continuity,
+)
 from machina.core.exceptions import (
     DatabaseError,
     DelegationAccountingError,
@@ -443,6 +449,7 @@ class BaseReActAgent:
         except Exception:
             pass
         # S3.1(b) END stream section-token log
+        messages = await usage_store.prepare_stream(self, session_id, messages, tools)
         last_exception: Exception | None = None
         for attempt in range(2):  # 1 initial + 1 retry
             emitted = False
@@ -538,10 +545,7 @@ class BaseReActAgent:
         failed: bool = False,
         model: str | None = None,
     ) -> None:
-        try:
-            await usage_store.finish(reservation, usage, failed=failed, model=model)
-        except Exception as e:
-            raise DatabaseError("usage accounting unavailable") from e
+        await finish_usage(reservation, usage, failed=failed, model=model)
 
     async def _prepare_context(
         self,
@@ -597,13 +601,17 @@ class BaseReActAgent:
             images = await context_manager.get_latest_images(session_id, self.agent_id)
         visual_tokens = len(images) * IMAGE_TOKEN_RESERVE
 
-        assembler = PromptAssembler(
-            max(
-                1,
-                session.context_budget
-                - _request_context_tokens([], self._tool_defs(), self.provider)
-                - visual_tokens,
-            )
+        # The dynamic tail is bounded because active history is native; it
+        # carries only hot tool activity, retrieved context, goal, and query.
+        assembler = make_dynamic_assembler(session, self._tool_defs(), self.provider, visual_tokens)
+
+        # Fetch continuity before appending the live user message, so the
+        # current query is rendered once rather than duplicated in history.
+        history_messages, summary, recent = await prepare_continuity(
+            session_id,
+            session,
+            context=context_manager,
+            sessions=session_manager,
         )
         if pending_chunks is not None:
             pending_chunks.append(
@@ -624,7 +632,6 @@ class BaseReActAgent:
                 payload=payload,
                 token_count=get_token_count(user_message) + submitted_visual_tokens,
             )
-        recent = await context_manager.get_recent_context(session_id, limit=10)
         retrieved_chunks: list[tuple] = []
 
         # Retrieve relevant long-term memories (optional). memory_enabled
@@ -739,16 +746,19 @@ class BaseReActAgent:
             {tool.name for tool in self._tool_defs()},
             triage=getattr(self, "_last_triage", None),  # advisory; None = unchanged
         )
-        prompt = assemble_turn_prompt(
-            assembler,
+        messages = build_context_messages(
             system_prompt,
+            summary,
+            history_messages,
+            assembler,
             session.goal,
             recent,
             retrieved_chunks,
             user_message,
-            omitted_evidence=omitted_evidence,
+            omitted_evidence,
+            images,
+            session.context_budget,
         )
-        messages = build_turn_messages(prompt, images)
         return session, messages
 
     def _append_tool_messages(

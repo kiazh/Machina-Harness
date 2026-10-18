@@ -403,10 +403,16 @@ class MemoryConsolidator:
         candidates_with_embedding = [c for c in eligible if c.embedding]
         candidates_without_embedding = [c for c in eligible if not c.embedding]
 
-        # Existing memories are needed by both dedup paths; fetch once.
+        # Existing memories are needed by both dedup paths; fetch once. This
+        # path reads only content/id, so the vector column is projected away.
         existing_memories = (
-            await self.store.search(agent_id=agent_id, limit=1000) if eligible else []
+            await self.store.search(agent_id=agent_id, limit=1000, include_embedding=False)
+            if eligible
+            else []
         )
+        # Normalize each stored memory once: the map answers both the
+        # duplicate check and the access-bump target lookup.
+        existing_by_content = {_normalize(m.content): m for m in existing_memories}
 
         # Batch check for duplicates using SQL vector similarity
         # instead of O(n*m) nested loop cosine similarity.
@@ -415,7 +421,7 @@ class MemoryConsolidator:
             # the HNSW index for O(log n) similarity search per candidate,
             # avoiding the O(n*m) nested loop over all existing memories.
             # Intra-batch seen tracking prevents duplicates within this batch.
-            seen_norms: set[str] = {_normalize(m.content) for m in existing_memories}
+            seen_norms: set[str] = set(existing_by_content)
             seen_embeddings: list[list[float]] = []
             for candidate in candidates_with_embedding:
                 is_duplicate = False
@@ -424,10 +430,7 @@ class MemoryConsolidator:
                     logger.warning("Skipping empty normalized memory content (batch dedup)")
                     continue
                 if key in seen_norms:
-                    match = next(
-                        (m for m in existing_memories if _normalize(m.content) == key),
-                        None,
-                    )
+                    match = existing_by_content.get(key)
                     if match is not None and getattr(match, "id", None) is not None:
                         try:
                             await self.store.update_access(match.id)
@@ -466,14 +469,14 @@ class MemoryConsolidator:
         # Candidates whose embedding is still missing (no provider, embedding
         # failure, or empty content) stay on normalized-content dedup against
         # stored memories and within this batch.
-        seen = {_normalize(m.content) for m in existing_memories}
+        seen = set(existing_by_content)
         for candidate in candidates_without_embedding:
             key = _normalize(candidate.content)
             if not key:
                 logger.warning("Skipping empty normalized memory content")
                 continue
             if key in seen:
-                match = next((m for m in existing_memories if _normalize(m.content) == key), None)
+                match = existing_by_content.get(key)
                 if match is not None and getattr(match, "id", None) is not None:
                     try:
                         await self.store.update_access(match.id)
@@ -567,8 +570,11 @@ class MemoryConsolidator:
         eligible = [c for c in candidates if c.importance >= 0.2]
         if not eligible:
             return []
-        existing_memories = await self.store.search(agent_id=agent_id, limit=1000)
-        seen = {_normalize(m.content) for m in existing_memories}
+        existing_memories = await self.store.search(
+            agent_id=agent_id, limit=1000, include_embedding=False
+        )
+        existing_by_content = {_normalize(m.content): m for m in existing_memories}
+        seen = set(existing_by_content)
         seen_embeddings: list[list[float]] = []
         new_memories: list[MemoryEntry] = []
         for memory in eligible:
@@ -577,7 +583,7 @@ class MemoryConsolidator:
                 logger.warning("Skipping empty normalized memory content (from_text)")
                 continue
             if key in seen:
-                match = next((m for m in existing_memories if _normalize(m.content) == key), None)
+                match = existing_by_content.get(key)
                 if match is not None and getattr(match, "id", None) is not None:
                     try:
                         await self.store.update_access(match.id)

@@ -158,9 +158,7 @@ def _grant_live(grant: dict, *, now: datetime | None = None) -> bool:
     exp = _parse_ts(raw)
     if exp is None:
         return False
-    if exp <= (now or _utcnow()):
-        return False
-    return True
+    return exp > (now or _utcnow())
 
 
 def _agent_principal(principal: str) -> bool:

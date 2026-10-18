@@ -554,7 +554,7 @@ class OAuthCredentialStore:
                     raise TimeoutError("oauth store lock acquisition timed out")
                 try:
                     index = self._read_index()
-                    current, current_gen, floor = _index_floor(index, key)
+                    current, _current_gen, floor = _index_floor(index, key)
                     if (
                         max_config_revision is not None
                         and current is not None

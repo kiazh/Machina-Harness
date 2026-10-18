@@ -8,8 +8,10 @@ errors and missing usage keep the conservative reservation.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -17,12 +19,36 @@ from machina.core.assembler import get_token_count
 from machina.core.config import config
 from machina.core.exceptions import DatabaseError, UsageBudgetExceededError, ValidationError
 from machina.core.metrics import metrics
+from machina.core.optimization.cache_context import (
+    AUXILIARY_READ_ONLY_PURPOSES,
+    CacheContext,
+)
+from machina.core.optimization.canonicalizer import canonicalize
+from machina.core.optimization.compression.learned import (
+    compressor_revision,
+    maybe_compress_request,
+)
+from machina.core.optimization.policy import (
+    OptimizationMode,
+    effective_mode,
+    evaluate_semantic_cache,
+)
+from machina.core.optimization.semantic_cache import SemanticCache
+from machina.core.optimization.shadow import ShadowEvent, schedule_shadow
 from machina.core.pricing import estimate_cost, parse_overrides
 from machina.db.lazy import LazyDb, parse_command_count
 
 logger = logging.getLogger(__name__)
 
 db = LazyDb()
+
+
+def _row_int(row: Any, key: str, default: int = 0) -> int:
+    """Tolerate old mocks/rows that predate an additive ledger column."""
+    try:
+        return int(row[key])
+    except (KeyError, TypeError, ValueError):
+        return default
 
 
 def provider_identity(provider: Any) -> str:
@@ -75,6 +101,49 @@ def _check_limit(
         )
 
 
+def _auto_cache_context(
+    provider: Any,
+    session_id: uuid.UUID | None,
+    agent_id: str,
+    messages: list[dict[str, Any]],
+    tools: list[Any] | None,
+    *,
+    purpose: str,
+    max_tokens: int,
+    temperature: float | None,
+) -> Any | None:
+    """Build the conservative auxiliary context only when caching is active.
+
+    Interactive turns must pass an explicit context from the agent loop: the
+    accounting seam does not know their task scope or input revision, and a
+    missing guard fact must not be guessed.
+    """
+    try:
+        if effective_mode("semantic_cache") is OptimizationMode.OFF:
+            return None
+        if purpose not in AUXILIARY_READ_ONLY_PURPOSES:
+            return None
+        context = CacheContext.for_auxiliary(
+            session_id=session_id,
+            agent_id=agent_id,
+            provider=provider_identity(provider),
+            model=str(getattr(provider, "model", "") or ""),
+            purpose=purpose,
+            messages=messages,
+            tools=tools,
+            temperature=0.0 if temperature is None else float(temperature),
+            max_tokens=max_tokens,
+            compressor_revision=compressor_revision(),
+            workspace_root=str(config.get("workspace_root") or ""),
+        )
+        if bool(config.get("optimization_semantic_cache_allow_cross_session_aux")):
+            context = context.stateless()
+        return context
+    except Exception:
+        # An optimization-context failure must never prevent the call.
+        return None
+
+
 class UsageStore:
     async def complete_call(
         self,
@@ -93,7 +162,118 @@ class UsageStore:
         ``purpose`` labels the call's role in the task (agent loop, context
         summary, memory rerank, ...) so the ledger can attribute auxiliary
         spend. It is accounting metadata only — never sent to the provider.
+        Semantic-cache context is built only for the read-only auxiliary
+        allowlist; interactive turns do not enter this cache.
         """
+        call_messages = messages
+        canonical = None
+        semantic_cache = None
+        semantic_eligibility = None
+        cache_context = _auto_cache_context(
+            provider,
+            session_id,
+            agent_id,
+            messages,
+            tools,
+            purpose=purpose,
+            max_tokens=max_tokens,
+            # The provider defaults to 0.7 when no temperature is passed;
+            # a context that assumed 0.0 would make the cache ineligible
+            # facts disagree with the wire request.
+            temperature=kwargs.get("temperature", 0.7),
+        )
+
+        if cache_context is not None:
+            try:
+                canonical = canonicalize(messages, tools)
+                semantic_eligibility = evaluate_semantic_cache(
+                    cache_context, canonical, tools_present=bool(tools)
+                )
+                if semantic_eligibility.mode is OptimizationMode.OFF:
+                    semantic_cache = None
+                elif semantic_eligibility.should_compute:
+                    semantic_cache = SemanticCache()
+                    started = time.monotonic()
+                    hit = await asyncio.wait_for(
+                        semantic_cache.lookup(
+                            cache_context,
+                            canonical,
+                            threshold=float(
+                                config.get("optimization_semantic_cache_similarity_threshold")
+                            ),
+                            record_hit=semantic_eligibility.should_serve,
+                        ),
+                        timeout=2.0,
+                    )
+                    latency_ms = (time.monotonic() - started) * 1000
+                    schedule_shadow(
+                        ShadowEvent(
+                            subsystem="semantic_cache",
+                            decision=("would_hit" if hit else "miss")
+                            if not semantic_eligibility.should_serve
+                            else ("hit" if hit else "miss"),
+                            reason_codes=(
+                                ("similarity",)
+                                if hit
+                                else tuple(str(reason) for reason in semantic_eligibility.reasons)
+                            ),
+                            mode=str(semantic_eligibility.mode),
+                            session_id=cache_context.session_id,
+                            agent_id=cache_context.agent_id,
+                            provider=cache_context.provider,
+                            model=cache_context.model,
+                            task_class=cache_context.task_class,
+                            request_hash=canonical.request_hash,
+                            similarity=hit.similarity if hit else None,
+                            latency_ms=latency_ms,
+                            tokens_before=max(1, canonical.char_count // 4),
+                            tokens_after=0 if hit else max(1, canonical.char_count // 4),
+                        )
+                    )
+                    if hit and semantic_eligibility.should_serve:
+                        return hit.response
+                else:
+                    schedule_shadow(
+                        ShadowEvent(
+                            subsystem="semantic_cache",
+                            decision="skipped",
+                            reason_codes=tuple(
+                                str(reason) for reason in semantic_eligibility.reasons
+                            ),
+                            mode=str(semantic_eligibility.mode),
+                            session_id=cache_context.session_id,
+                            agent_id=cache_context.agent_id,
+                            provider=cache_context.provider,
+                            model=cache_context.model,
+                            task_class=cache_context.task_class,
+                            request_hash=canonical.request_hash,
+                        )
+                    )
+            except Exception:
+                # Optimization is additive. Any failure falls back to the
+                # unoptimized provider call.
+                semantic_cache = None
+                semantic_eligibility = None
+
+        try:
+            if effective_mode("compression") is not OptimizationMode.OFF:
+                if canonical is None:
+                    canonical = canonicalize(messages, tools)
+                compression = await maybe_compress_request(
+                    messages,
+                    tools,
+                    provider=provider,
+                    model=str(getattr(provider, "model", "") or ""),
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    request_hash=canonical.request_hash if canonical else "",
+                    task_class=getattr(cache_context, "task_class", "") if cache_context else "",
+                )
+                if compression.applied:
+                    call_messages = list(compression.messages)
+        except Exception:
+            call_messages = messages
+
         reservation = None
         if session_id is not None:
             model = str(getattr(provider, "model", "unknown"))
@@ -110,7 +290,7 @@ class UsageStore:
                     agent_id,
                     provider_name,
                     model,
-                    messages,
+                    call_messages,
                     tools or [],
                     reservation_max_tokens,
                     purpose=purpose,
@@ -120,7 +300,7 @@ class UsageStore:
             except Exception as e:
                 raise DatabaseError("usage accounting unavailable") from e
         call_kwargs = {
-            "messages": messages,
+            "messages": call_messages,
             "tools": tools or [],
             "session_id": session_id,
             "agent_id": agent_id,
@@ -146,16 +326,84 @@ class UsageStore:
                 if getattr(response, "cache_hit", False)
                 else getattr(response, "usage", {})
             )
+            cache_source = getattr(response, "cache_source", "none")
             await await_joined(
                 self.finish(
                     reservation,
                     usage,
                     model=getattr(response, "model", None),
+                    cache_source=cache_source if cache_source in ("exact", "semantic") else None,
                 )
             )
         except Exception as e:
             raise DatabaseError("usage accounting unavailable") from e
+
+        if (
+            semantic_cache is not None
+            and semantic_eligibility is not None
+            and semantic_eligibility.should_serve
+            and not getattr(response, "cache_hit", False)
+            and canonical is not None
+            and cache_context is not None
+        ):
+            try:
+                stored = await asyncio.wait_for(
+                    semantic_cache.store(
+                        cache_context,
+                        canonical,
+                        response,
+                        ttl_seconds=int(config.get("optimization_semantic_cache_ttl_seconds")),
+                        max_entries=int(config.get("optimization_semantic_cache_max_entries")),
+                    ),
+                    timeout=2.0,
+                )
+                schedule_shadow(
+                    ShadowEvent(
+                        subsystem="semantic_cache",
+                        decision="stored" if stored else "store_skipped",
+                        reason_codes=(("stored",) if stored else ("response_invalid",)),
+                        mode=str(semantic_eligibility.mode),
+                        session_id=cache_context.session_id,
+                        agent_id=cache_context.agent_id,
+                        provider=cache_context.provider,
+                        model=cache_context.model,
+                        task_class=cache_context.task_class,
+                        request_hash=canonical.request_hash,
+                        tokens_before=int(
+                            (getattr(response, "usage", {}) or {}).get("prompt_tokens", 0) or 0
+                        ),
+                    )
+                )
+            except Exception:
+                pass
         return response
+
+    async def prepare_stream(
+        self,
+        agent: Any,
+        session_id: uuid.UUID | None,
+        messages: list[dict[str, Any]],
+        tools: list[Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Apply gated learned compression before a streaming provider call.
+
+        The streaming path bypasses ``complete_call``, so it must use the same
+        compression policy explicitly. Any failure returns the original
+        messages unchanged.
+        """
+        provider = getattr(agent, "provider", None)
+        try:
+            result = await maybe_compress_request(
+                messages,
+                tools,
+                provider=provider,
+                model=str(getattr(provider, "model", "") or ""),
+                session_id=session_id,
+                agent_id=str(getattr(agent, "agent_id", "") or ""),
+            )
+            return list(result.messages) if result.applied else messages
+        except Exception:
+            return messages
 
     async def reserve(
         self,
@@ -278,6 +526,7 @@ class UsageStore:
         *,
         failed: bool = False,
         model: str | None = None,
+        cache_source: str | None = None,
     ) -> bool:
         """Complete a reservation. Returns False if already finished (no row with status='reserved').
 
@@ -363,7 +612,8 @@ class UsageStore:
             "UPDATE llm_usage SET status = $2, prompt_tokens = $3, completion_tokens = $4, "
             "accounted_tokens = COALESCE($5, reserved_tokens), model = COALESCE($6, model), "
             "cache_read_tokens = $7, cache_write_tokens = $8, usage_basis = $9, "
-            "cost_usd = $10, price_version = $11, completed_at = now() "
+            "cost_usd = $10, price_version = $11, "
+            "cache_source = COALESCE($12, cache_source), completed_at = now() "
             "WHERE id = $1 AND status = 'reserved'",
             reservation_id,
             "error" if failed else "complete",
@@ -376,6 +626,7 @@ class UsageStore:
             basis,
             cost_usd,
             price_version,
+            cache_source,
         )
         # S2 observe-only hook: record the exact persisted figures onto the
         # owning turn span. Only rows actually written are attributed.
@@ -448,6 +699,7 @@ class UsageStore:
             "COALESCE(SUM(completion_tokens), 0) AS completion_tokens, "
             "COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, "
             "COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens, "
+            "COUNT(*) FILTER (WHERE cache_source = 'exact') AS exact_cache_hits, "
             "COUNT(*) FILTER (WHERE prompt_tokens IS NULL) AS unknown_calls, "
             "COUNT(*) FILTER (WHERE usage_basis = 'local_estimate') AS estimated_calls, "
             "COUNT(*) FILTER (WHERE accepted) AS accepted_completions, "
@@ -485,6 +737,7 @@ class UsageStore:
                 "knownCompletionTokens": int(row["completion_tokens"]),
                 "cacheReadTokens": int(row["cache_read_tokens"]),
                 "cacheWriteTokens": int(row["cache_write_tokens"]),
+                "exactCacheHits": _row_int(row, "exact_cache_hits"),
                 "unknownCalls": int(row["unknown_calls"]),
                 "estimatedCalls": int(row["estimated_calls"]),
                 "acceptedCompletions": accepted,

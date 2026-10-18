@@ -256,9 +256,7 @@ def _reduce_csv(text: str, budget: int) -> list[tuple[int, str]] | None:
 def _reduce_diff(text: str, budget: int) -> list[tuple[int, str]] | None:
     lines = text.splitlines()
     hunks = [line for line in lines if _HUNK_RE.match(line)]
-    file_headers = [
-        line for line in lines if line.startswith("diff --git") or line.startswith("+++ ")
-    ]
+    file_headers = [line for line in lines if line.startswith(("diff --git", "+++ "))]
     added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++"))
     removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
     if not hunks and not file_headers:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 from machina.core.config import config
@@ -35,13 +34,10 @@ def sync_execution_mode_env(mode: str, *, persist: bool) -> None:
     restarts. A failed ``.env`` write only warns (the in-process value already
     took effect).
     """
-    os.environ[_EXECUTION_MODE_ENV] = mode
-    if not persist:
-        return
     try:
-        from machina.security.env_file import set_env_values
+        from machina.security.env_file import sync_env_shadow
 
-        set_env_values({_EXECUTION_MODE_ENV: mode})
+        sync_env_shadow(_EXECUTION_MODE_ENV, mode, persist=persist)
     except (OSError, ValueError) as error:
         logger.warning(
             "execution_mode: .env sync failed for %s (%s)",

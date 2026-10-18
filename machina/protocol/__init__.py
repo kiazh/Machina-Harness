@@ -11,6 +11,33 @@ PROTOCOL_VERSION = SCHEMA["version"]
 LEGACY_NAMES = {"needs_approval": "permission.required", "approval.resolved": "permission.resolved"}
 
 
+_BASE_FIELDS = {
+    "type": "string",
+    "protocolVersion": "number",
+    "sessionId": "string",
+    "turnId": "string",
+}
+
+
+def _build_event_plans() -> dict[str, tuple[frozenset[str], tuple[tuple[str, str, bool], ...]]]:
+    """Precompute per-event validation plans once.
+
+    ``validate_event`` runs on every emitted frame (one per token delta on the
+    streaming path), so the field merge, ``allowed`` set, and required/optional
+    split are frozen at import instead of rebuilt per call.
+    """
+    plans = {}
+    for name, declared in SCHEMA["events"].items():
+        fields = {**_BASE_FIELDS, **declared}
+        allowed = frozenset(key.removesuffix("?") for key in fields)
+        checks = tuple((raw.removesuffix("?"), kind, not raw.endswith("?")) for raw, kind in fields.items())
+        plans[name] = (allowed, checks)
+    return plans
+
+
+_EVENT_PLANS = _build_event_plans()
+
+
 def _matches(value: Any, kind: str) -> bool:
     if "|" in kind:
         return any(_matches(value, choice) for choice in kind.split("|"))
@@ -27,22 +54,15 @@ def _matches(value: Any, kind: str) -> bool:
 
 def validate_event(data: dict[str, Any]) -> None:
     name = data.get("type")
-    if name not in SCHEMA["events"] or data.get("protocolVersion") != PROTOCOL_VERSION:
+    plan = _EVENT_PLANS.get(name)
+    if plan is None or data.get("protocolVersion") != PROTOCOL_VERSION:
         raise ValueError("unsupported protocol event or version")
-    fields = {
-        "type": "string",
-        "protocolVersion": "number",
-        "sessionId": "string",
-        "turnId": "string",
-        **SCHEMA["events"][name],
-    }
-    allowed = {key.removesuffix("?") for key in fields}
-    if set(data) - allowed:
+    allowed, checks = plan
+    if data.keys() - allowed:
         raise ValueError("undeclared protocol field")
-    for raw, kind in fields.items():
-        key = raw.removesuffix("?")
+    for key, kind, required in checks:
         if key not in data:
-            if not raw.endswith("?"):
+            if required:
                 raise ValueError(f"missing protocol field {key}")
         elif not _matches(data[key], kind):
             raise ValueError(f"invalid protocol field {key}")

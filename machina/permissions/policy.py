@@ -803,8 +803,8 @@ def _sensitive_capabilities(req: ActionRequest) -> list[str]:
             "set-mppreference",
             "set-executionpolicy",
         }
-        or first == "chmod"
-        and "777" in argv
+        or (first == "chmod"
+        and "777" in argv)
     ):
         found.append("privilege_escalation")
     if first in {
@@ -1070,8 +1070,8 @@ def decide(req: ActionRequest, grants: list[dict] | None = None) -> Decision:
             return Decision("allowed", "scope grant covers target", req)
     if (
         req.operation in ("file.write", "process.exec")
-        or req.targets
-        and not all(_inside_workspace(t, req_root) for t in req.targets)
+        or (req.targets
+        and not all(_inside_workspace(t, req_root) for t in req.targets))
     ):
         return Decision("pending", "write/exec or out-of-scope access requires approval", req)
     return Decision("pending", "action requires approval", req)

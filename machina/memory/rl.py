@@ -85,23 +85,12 @@ class MemoryReward:
             relevance = outcome.get("relevance", 0.0) if isinstance(outcome, dict) else 0.0
             redundancy = outcome.get("redundancy", 0.0) if isinstance(outcome, dict) else 0.0
             return relevance - redundancy
-        elif action == MemoryAction.DELETE:
-            staleness = outcome.get("staleness", 0.0) if isinstance(outcome, dict) else 0.0
-            return staleness
-        elif action == MemoryAction.UPDATE:
+        if action == MemoryAction.DELETE:
+            return outcome.get("staleness", 0.0) if isinstance(outcome, dict) else 0.0
+        if action in (MemoryAction.UPDATE, MemoryAction.RETRIEVE, MemoryAction.SUMMARIZE):
             relevance = outcome.get("relevance", 0.0) if isinstance(outcome, dict) else 0.0
             redundancy = outcome.get("redundancy", 0.0) if isinstance(outcome, dict) else 0.0
             return relevance - redundancy
-        elif action == MemoryAction.RETRIEVE:
-            relevance = outcome.get("relevance", 0.0) if isinstance(outcome, dict) else 0.0
-            redundancy = outcome.get("redundancy", 0.0) if isinstance(outcome, dict) else 0.0
-            return relevance - redundancy
-        elif action == MemoryAction.SUMMARIZE:
-            relevance = outcome.get("relevance", 0.0) if isinstance(outcome, dict) else 0.0
-            redundancy = outcome.get("redundancy", 0.0) if isinstance(outcome, dict) else 0.0
-            return relevance - redundancy
-        elif action == MemoryAction.NOOP:
-            return 0.0
         return 0.0
 
     def compute_trajectory_reward(

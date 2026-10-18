@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 from machina.core.config import (
@@ -46,7 +45,7 @@ from machina.core.session import session_manager
 from machina.gateway.errors import INVALID_PARAMS, RpcError
 from machina.gateway.features._common import _bool, _str
 from machina.security import providers as store
-from machina.security.env_file import set_env_values
+from machina.security.env_file import sync_env_shadow
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -183,11 +182,8 @@ def _sync_reasoning_effort_env(effort: str, *, persist: bool) -> None:
     process environment always, and ``.env`` for the durable path; a failed
     ``.env`` write only warns (the in-process value already applies).
     """
-    os.environ[_REASONING_EFFORT_ENV] = effort
-    if not persist:
-        return
     try:
-        set_env_values({_REASONING_EFFORT_ENV: effort})
+        sync_env_shadow(_REASONING_EFFORT_ENV, effort, persist=persist)
     except (OSError, ValueError) as error:
         logger.warning(
             "reasoning_effort: .env sync failed for %s (%s)",

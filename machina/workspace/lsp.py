@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from machina.core.child_process import group_members, kill_tree, sanitized_env
+from machina.workspace.intelligence import strip_terminal_escapes
 
 __all__ = [
     "LSP_CONTENT_MODIFIED",
@@ -374,17 +375,10 @@ class LspFraming:
 
 # --- log sanitizing ---------------------------------------------------------
 
-_UNSAFE_LOG_RE = re.compile(
-    r"\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI sequences
-    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
-    r"|\x1b[@-Z\\-_]"  # other escapes
-    r"|[\x00-\x08\x0b-\x1f\x7f-\x9f]"  # control chars except \n and \t
-)
-
-
-def _sanitize_log(text: str) -> str:
-    """Strip terminal escapes and control characters from server logs."""
-    return _UNSAFE_LOG_RE.sub("", text)
+# Escape/control-character stripping follows the shared intelligence policy.
+# The unbounded form is required here: stderr_text() also feeds
+# wait_for_stderr(), and a marker can legitimately sit past any display bound.
+_sanitize_log = strip_terminal_escapes
 
 
 def _consume_future_exception(future: asyncio.Future[Any]) -> None:
@@ -1528,10 +1522,7 @@ class LspManager:
 
     async def restart(self, profile: LspProfile | str) -> LspConnection:
         """Manual restart: stops, resets the restart budget, and re-initializes."""
-        if isinstance(profile, str):
-            resolved = self._resolve(profile, None)
-        else:
-            resolved = profile
+        resolved = self._resolve(profile, None) if isinstance(profile, str) else profile
         if resolved is None:
             raise LspUnavailableError("no language server profile to restart")
         key = (str(self.root), resolved.profile_id)

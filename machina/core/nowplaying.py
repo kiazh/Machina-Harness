@@ -768,7 +768,7 @@ def send_now_playing_command(action: str) -> dict[str, Any]:
     # CLI adapters understand the same transport verbs.
     found = _cli_binary()
     if found is not None:
-        path, flavor = found
+        path, _flavor = found
         verb = {"toggle": "togglePlay", "next": "nextTrack", "previous": "previousTrack"}[action]
         code, _, _ = _run([path, verb], _CLI_TIMEOUT_S)
         if code == 0:

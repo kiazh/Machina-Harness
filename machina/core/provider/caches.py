@@ -12,27 +12,21 @@ from cachetools import TTLCache
 
 from machina.core.models import LLMResponse, ToolDefinition
 
-# ---------------------------------------------------------------------------
-# In-memory LLM response cache — eliminates duplicate POSTs from retries with
-# identical payloads. Keys include the provider, effective request, and caller
-# identity when one was supplied; entries are TTL- and size-bounded.
-#
-# Residual sharing (N4, final pass): callers passing neither session_id nor
-# agent_id stay identity-free — including the main agent path, which reaches
-# complete() through usage.complete_call WITHOUT identity kwargs. Identical
-# requests from two sessions can share one cached body within the TTL; the
-# second reservation re-attributes cached usage (conservative over-count).
-# ---------------------------------------------------------------------------
+# In-memory LLM response cache: deduplicates retrying POSTs with identical
+# payloads. Keys include provider, effective request, and caller identity when
+# supplied; entries are TTL/size-bounded. Identity-free callers (main agent
+# path; N4) can share one cached body within the TTL — the second reservation
+# re-attributes cached usage (conservative over-count).
 _RESPONSE_CACHE_TTL = 60  # seconds
 _RESPONSE_CACHE_MAXSIZE = 256
 _RESPONSE_CACHE: TTLCache = TTLCache(maxsize=_RESPONSE_CACHE_MAXSIZE, ttl=_RESPONSE_CACHE_TTL)
 
 
 def _caller_identity(session_id: uuid.UUID | None, agent_id: str | None) -> str | None:
-    """Cache-scoping discriminator derived from the accounting caller, if any.
+    """Cache-scoping discriminator from the accounting caller, if any.
 
-    A cached response bypasses reserve/finish, so serving one caller's answer
-    to a different caller would silently under-count usage for the second one.
+    A cached response bypasses reserve/finish, so cross-caller reuse would
+    silently under-count the second caller's usage.
     """
     if session_id is None and agent_id is None:
         return None
@@ -46,26 +40,32 @@ def _cache_key(
     request: dict[str, Any] | None = None,
     identity: str | None = None,
 ) -> str:
-    """Build a cache key from the request parameters and caller identity."""
+    """Build a cache key from the request parameters and caller identity.
+
+    The conversation is hashed once; ``messages``/``tools`` are dropped from
+    the mirrored wire ``request`` so nothing is serialized twice.
+    """
+    digest = json.dumps(messages, sort_keys=True, default=str)
+    messages_digest = hashlib.sha256(digest.encode()).hexdigest()
+    if request:
+        request = {k: v for k, v in request.items() if k not in ("messages", "tools")}
     raw = json.dumps(
         {
-            "messages": messages,
+            "messages": messages_digest,
             "tools": tools,
             "model": model,
             "request": request,
             "identity": identity,
         },
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(raw.encode()).hexdigest()
+        sort_keys=True, default=str,
+    ).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _copy_cached_response(value: Any, *, cache_hit: bool = False) -> Any:
-    """Defensive copy so no caller can mutate shared cache state.
-    ``LLMResponse`` carries mutable containers (tool_calls list, raw dict,
-    usage dict); handing the stored object out would let one caller's edits
-    poison every later cache hit.
+    """Defensive copy: LLMResponse carries mutable containers (tool_calls,
+    raw, usage), and handing the stored object out would let one caller's
+    edits poison every later cache hit.
     """
     if isinstance(value, LLMResponse):
         return LLMResponse(

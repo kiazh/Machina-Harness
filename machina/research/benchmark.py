@@ -367,8 +367,8 @@ def _architecture() -> dict:
     )
 
     root = _REPO_ROOT / "machina"
-    total_deferred = sum(_deferred_import_count(p) for p in root.rglob("*.py"))
     files = list(root.rglob("*.py"))
+    total_deferred = sum(_deferred_import_count(p) for p in files)
     total_loc = sum(len(f.read_text(encoding="utf-8").splitlines()) for f in files)
     god = {}
     for rel, ceiling in GOD_FILE_CEILINGS:
@@ -496,7 +496,7 @@ def _ui() -> dict:
     for line in out.stdout.splitlines():
         stripped = line.strip()
         for key in ("pass", "fail", "skipped"):
-            if stripped.startswith(f"ℹ {key}") or stripped.startswith(f"# {key}"):
+            if stripped.startswith((f"ℹ {key}", f"# {key}")):
                 counts[key] = int(stripped.split()[-1])
     return {"counts": counts, "wall_seconds": round(elapsed, 1), "exit_code": out.returncode}
 

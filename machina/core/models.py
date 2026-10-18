@@ -87,6 +87,19 @@ class LLMResponse:
     #: True when this response came from the local response cache rather than
     #: a provider call. Accounting uses it to avoid billing a cache hit.
     cache_hit: bool = False
+    #: Cache tier that produced this response: ``"none"``, ``"exact"``, or
+    #: ``"semantic"``. Older constructors omit it; accounting treats a bare
+    #: ``cache_hit=True`` as an exact hit for backward compatibility.
+    cache_source: str = "none"
+
+    def __post_init__(self) -> None:
+        """Keep the legacy ``cache_hit`` boolean and the tier label coherent."""
+        if self.cache_hit and self.cache_source == "none":
+            self.cache_source = "exact"
+        elif not self.cache_hit and self.cache_source != "none":
+            # A caller can construct a semantic hit explicitly with
+            # ``cache_source="semantic"``; keep ``cache_hit`` true for it.
+            self.cache_hit = True
 
 
 @dataclass

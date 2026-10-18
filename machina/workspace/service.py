@@ -241,10 +241,6 @@ class WorkspaceService:
         return self._epoch
 
     @property
-    def client_generation(self) -> int:
-        return self._generation
-
-    @property
     def trusted(self) -> bool:
         return bool(self._identity is not None and self._identity.trusted)
 

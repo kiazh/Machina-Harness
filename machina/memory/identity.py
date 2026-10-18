@@ -14,6 +14,7 @@ Containment quarantines affected memories when drift is detected.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import importlib as _importlib
@@ -127,11 +128,14 @@ def _content_tokens(text: str) -> list[str]:
     return re.findall(_WORD_TOKEN + r"|[.!?\r\n]+", lowered, flags=re.UNICODE)
 
 
+@functools.lru_cache(maxsize=256)
 def _fact_pattern(fact: str) -> re.Pattern[str] | None:
     """Whole-word (or whole-phrase) matcher for a known fact.
 
     The final word accepts a plural suffix ("API" matches "APIs") without
-    enabling arbitrary substring matches.
+    enabling arbitrary substring matches. Pure function of the fact string;
+    compiled patterns are cached because relevance/consistency recompute the
+    same facts on every store add (~9 µs compile each).
     """
     words = [re.escape(part) for part in re.findall(_WORD_TOKEN, str(fact).lower())]
     if not words:

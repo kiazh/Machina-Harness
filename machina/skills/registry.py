@@ -880,9 +880,7 @@ class SkillRegistry(SkillSource):
             previous = previous.replace(tzinfo=UTC)
         if current is not None and current.tzinfo is None:
             current = current.replace(tzinfo=UTC)
-        if current is None:
-            current = previous
-        elif previous is not None and previous > current:
+        if current is None or (previous is not None and previous > current):
             current = previous
         return current.isoformat() if isinstance(current, datetime) else None
 

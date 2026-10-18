@@ -288,7 +288,7 @@ def _append_span(
     return span
 
 
-def _close_span(turn: TurnTrace, span: Span, status: str | None = None) -> None:
+def _close_span(span: Span, status: str | None = None) -> None:
     if span.ended_ms is not None:
         return
     if status is not None:
@@ -304,7 +304,7 @@ def _close_span(turn: TurnTrace, span: Span, status: str | None = None) -> None:
 def _close_open_spans(turn: TurnTrace, status: str) -> None:
     for span in turn.spans:
         if span.ended_ms is None:
-            _close_span(turn, span, status if status != STATUS_OK else STATUS_OK)
+            _close_span(span, status if status != STATUS_OK else STATUS_OK)
 
 
 # ─── turn lifecycle ─────────────────────────────────────────────────────────
@@ -541,7 +541,7 @@ def _child_span(kind: str, name: str, attributes: dict[str, Any]) -> Iterator[Sp
         yield span
     except BaseException:
         try:
-            _close_span(turn, span, STATUS_ERROR)
+            _close_span(span, STATUS_ERROR)
             _emit(
                 "span_ended",
                 {"turn_id": turn.turn_id, "span_id": span.id, "status": span.status},
@@ -551,7 +551,7 @@ def _child_span(kind: str, name: str, attributes: dict[str, Any]) -> Iterator[Sp
         raise
     else:
         try:
-            _close_span(turn, span)
+            _close_span(span)
             _emit(
                 "span_ended",
                 {"turn_id": turn.turn_id, "span_id": span.id, "status": span.status},
@@ -740,7 +740,7 @@ def note_finish(
             )
             if model:
                 span.attributes["model"] = str(model)
-            _close_span(turn, span, STATUS_ERROR if failed else None)
+            _close_span(span, STATUS_ERROR if failed else None)
             _emit(
                 "span_ended",
                 {"turn_id": turn.turn_id, "span_id": span.id, "status": span.status},

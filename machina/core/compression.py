@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from machina.core.assembler import get_token_count
+from machina.core.assembler import get_token_count, truncate_to_tokens
 from machina.core.checkpoint import (
     CHECKPOINT_VERSION,
     CompactionCheckpoint,
@@ -68,8 +68,7 @@ def _checkpoint_chunk(
         f"constraints: {'; '.join(validated['constraints']) or '(none)'}",
         f"read-only scope: {validated['read_only_scope'] or '(none)'}",
     ]
-    for f in validated["findings"]:
-        lines.append(f"finding ({f['count']}): {f['finding']}")
+    lines.extend(f"finding ({f['count']}): {f['finding']}" for f in validated["findings"])
     if validated["unresolved_questions"]:
         lines.append("open: " + "; ".join(validated["unresolved_questions"]))
     lines.append(f"next: {validated['next_action']}")
@@ -531,9 +530,7 @@ class ContextCompressor:
         """
         try:
             # Build a text representation of the chunks
-            text_parts = []
-            for chunk in chunks:
-                text_parts.append(self._chunk_to_text(chunk))
+            text_parts = [self._chunk_to_text(chunk) for chunk in chunks]
 
             summary_prompt = (
                 "Summarize the following conversation context concisely. "
@@ -656,8 +653,7 @@ class ContextCompressor:
         for g in groups:
             g_tokens = sum(_effective(chunks[i]) for i in g)
             if current_tokens + g_tokens <= target_tokens:
-                for i in sorted(g):
-                    selected.append(chunks[i])
+                selected.extend(chunks[i] for i in sorted(g))
                 current_tokens += g_tokens
             else:
                 # Try to truncate the group as a unit within remaining budget.
@@ -721,11 +717,8 @@ class ContextCompressor:
         no-fit result, never an oversized payload labeled guaranteed. Clears
         the embedding when content changes (AH-014).
         """
-        from machina.core.assembler import TokenCounter as _TC
-
         if max_tokens <= 0:
             return None
-        counter = _TC()
         # Tool protocol chunks keep their shape: truncate values, keep keys.
         is_tool = chunk.chunk_type in ("tool_call", "result")
         # Deep copy so nested dict truncation never aliases the original chunk.
@@ -737,7 +730,7 @@ class ContextCompressor:
                 return ""
             if get_token_count(s) <= budget_tokens:
                 return s
-            return counter.truncate(s, budget_tokens)
+            return truncate_to_tokens(s, budget_tokens)
 
         # Budget per string field: split evenly (at least 1 token each).
         str_keys = [k for k, v in payload.items() if isinstance(v, str)]
@@ -852,8 +845,9 @@ class ContextCompressor:
                     f"constraints: {'; '.join(cp['constraints']) or '(none)'}",
                     f"read-only scope: {cp['read_only_scope'] or '(none)'}",
                 ]
-                for f in cp["findings"]:
-                    lines.append(f"finding ({f['count']}): {f['finding']}")
+                lines.extend(
+                    f"finding ({f['count']}): {f['finding']}" for f in cp["findings"]
+                )
                 if cp["unresolved_questions"]:
                     lines.append("open: " + "; ".join(cp["unresolved_questions"]))
                 lines.append(f"next: {cp['next_action']}")

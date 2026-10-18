@@ -28,6 +28,7 @@ from machina.cli.auth import app as auth_app
 from machina.cli.growth import app as growth_app
 from machina.cli.interop import app as harnesses_app
 from machina.cli.launcher import launch_ui
+from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
 from machina.cli.providers import app as providers_app
 from machina.core.background_tasks import drain_background_tasks
@@ -56,6 +57,7 @@ app.add_typer(growth_app, name="growth")
 app.add_typer(harnesses_app, name="harnesses")
 app.add_typer(harnesses_app, name="interop")
 app.add_typer(providers_app, name="providers")
+app.add_typer(optimization_app, name="optimization")
 
 
 def _apply_cli_mode(mode: str) -> str:
@@ -136,11 +138,10 @@ def _sync_env_shadow(key: str, value: str) -> None:
     update only warns, never fails the command.
     """
     env_key = f"MACHINA_{key.upper()}"
-    os.environ[env_key] = value
     try:
-        from machina.security.env_file import set_env_values
+        from machina.security.env_file import sync_env_shadow
 
-        set_env_values({env_key: value})
+        sync_env_shadow(env_key, value)
     except (OSError, ValueError) as error:
         console.print(
             f"[yellow]Could not update .env ({escape(type(error).__name__)}); "
@@ -1365,7 +1366,6 @@ def _doctor_interop_line(key: str, result: object) -> str:
 def doctor():
     """Check Machina dependencies and configuration."""
     import importlib.util
-    import shutil
     import sys
 
     from machina.cli.launcher import MIN_NODE_VERSION, _node_version, ui_dir

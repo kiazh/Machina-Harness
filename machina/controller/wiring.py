@@ -291,7 +291,7 @@ def target_bytes(tool: Any, args: Any, result: Any = None) -> tuple[str, int]:
         if name not in _ELIGIBLE:
             return (name, 1)
         if name == "session_recall_window":
-            return (f"{argv.get('session_id', '')}:{argv.get('chunk_id', '')}" or name, 0)
+            return (f"{argv.get('session_id', '')}:{argv.get('chunk_id', '')}", 0)
         keys = _TARGET_KEYS.get(name, ())
         parts = [str(argv[k]) for k in keys if argv.get(k)]
         target = "|".join(parts)

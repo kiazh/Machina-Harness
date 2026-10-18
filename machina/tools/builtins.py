@@ -104,7 +104,10 @@ async def _search_web_results(query: str, limit: int = 5) -> list[tuple[str, str
             # configured loopback address (e.g. a self-hosted container on
             # localhost) is allowed. Private ranges, link-local/metadata IPs
             # and non-HTTP schemes stay rejected by the policy.
-            if not _is_safe_url(probe, allow_loopback=True):
+            # DNS resolution inside _is_safe_url blocks for up to 3 s; run it
+            # in a worker thread so one configured instance cannot stall the
+            # shared event loop.
+            if not await asyncio.to_thread(_is_safe_url, probe, allow_loopback=True):
                 raise ValidationError(f"SearXNG URL rejected by security policy: {searxng_url}")
         except ValidationError:
             searxng_url = None

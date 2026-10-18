@@ -31,7 +31,7 @@ _FREE_BASE_DELAY = 4.0  # free tier starts slower
 
 def _is_free_model(model: str) -> bool:
     m = (model or "").lower()
-    return m == "openrouter/free" or m.endswith(":free") or m.endswith("/free")
+    return m == "openrouter/free" or m.endswith((":free", "/free"))
 
 
 def _quota_exhausted(resp: httpx.Response) -> bool:
@@ -270,7 +270,7 @@ class ReservationSettlement:
     finish cannot issue a second write.
     """
 
-    __slots__ = ("reservation_id", "_store", "_settled")
+    __slots__ = ("_settled", "_store", "reservation_id")
 
     def __init__(self, reservation_id, store=None) -> None:
         self.reservation_id = reservation_id
@@ -314,12 +314,8 @@ class ReservationSettlement:
 # (god-file discipline); re-exported so existing import paths keep working.
 # ---------------------------------------------------------------------------
 from machina.core.provider.prompt_cache import (  # noqa: E402, F401
-    _ephemeral_cache_control,
     _log_prompt_cache_breakpoints,
-    _mark_last_tool_breakpoint,
     _mark_message_tail_breakpoint,
-    _mark_openrouter_system_breakpoint,
     _openrouter_anthropic_model,
-    _openrouter_wire_messages,
     _prompt_cache_breakpoints_enabled,
 )

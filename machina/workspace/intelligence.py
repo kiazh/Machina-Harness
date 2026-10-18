@@ -83,9 +83,19 @@ _UNSAFE_LOG_RE = re.compile(
 )
 
 
+def strip_terminal_escapes(text: str) -> str:
+    """Strip terminal escapes/control characters (no length bound).
+
+    Used by log-facing consumers that need to scan the whole text (for
+    example the workspace LSP stderr ring, whose markers may sit past any
+    display bound), not just render a bounded preview.
+    """
+    return _UNSAFE_LOG_RE.sub("", text)
+
+
 def sanitize_log_text(text: str, limit: int = MAX_LOG_DETAIL_CHARS) -> str:
     """Strip terminal escapes/control characters and bound a log-only string."""
-    return _UNSAFE_LOG_RE.sub("", text)[:limit]
+    return strip_terminal_escapes(text)[:limit]
 
 
 # ─── normalization ───────────────────────────────────────────────────────────

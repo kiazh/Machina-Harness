@@ -473,10 +473,12 @@ class MemoryRetriever:
         )
         fetch_limit = min(max(limit * SPARSE_OVERFETCH, 32), SPARSE_FETCH_CEILING)
         params.append(fetch_limit)
+        # Keyword/ILIKE retrieval reads only content and metadata; the vector
+        # is skipped so rows do not pay a pgvector text parse per candidate.
         rows = await db.fetch(
             f"""
             SELECT id, session_id, agent_id, content, category, importance,
-                   created_at, last_accessed, access_count, embedding,
+                   created_at, last_accessed, access_count,
                    explicitly_important, base_strength,
                    ({match_expr}) AS keyword_matches
             FROM memories
@@ -544,10 +546,13 @@ class MemoryRetriever:
                     source="sparse",
                 )
 
+        # Authority tier is an O(len(content)) classification; compute it once
+        # per merged memory and reuse it for demotion and the rank key.
+        tiers = {memory_id: authority_tier(rm.memory.content) for memory_id, rm in merged.items()}
         # Authority demotion: catalog/echo content keeps its evidence but
         # cannot occupy the top slots over a real instruction.
-        for rm in merged.values():
-            if authority_tier(rm.memory.content) != 0:
+        for memory_id, rm in merged.items():
+            if tiers[memory_id] != 0:
                 rm.score *= CATALOG_DEMOTION_FACTOR
 
         def _rank_key(rm: RetrievedMemory) -> tuple:
@@ -563,7 +568,7 @@ class MemoryRetriever:
                 strength = 1.0
             return (
                 -rm.score,
-                authority_tier(memory.content),
+                tiers[memory.id],
                 -timestamp,
                 -memory.importance,
                 -strength,
@@ -616,6 +621,7 @@ Return ONLY the JSON array, no other text."""
                         {"role": "user", "content": rerank_prompt},
                     ],
                     tools=[],
+                    temperature=0.0,
                     purpose="memory_rerank",
                 ),
                 timeout=10.0,

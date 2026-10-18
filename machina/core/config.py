@@ -91,7 +91,9 @@ def _startup_env_path() -> str | None:
     try:
         return str(find_env_file())
     except (OSError, ValueError):
-        logger.warning("environment file could not be resolved")
+        # Keep config import a leaf: logging here invokes the global redactor,
+        # which imports the security/provider stack (including httpx) during
+        # module initialization. Secret lookup surfaces a clear error later.
         return None
 
 
@@ -223,6 +225,30 @@ DEFAULTS: dict[str, Any] = {
     # Expected saving is unmeasured and bounded by each model's minimum
     # cacheable prompt length plus real-turn prefix stability.
     "prompt_cache_enabled": False,
+    # ── Optimization / caching (2026-10-17); response-path modes OFF ───────
+    # Every response-path subsystem is independently gated. "off" is a no-op,
+    # "shadow" computes and records a decision but sends the original request,
+    # and "wired" may serve/compress after its promotion gate passes. Free
+    # local startup warmers default ON because they never call a provider.
+    # No setting here may change model/provider selection or authority.
+    "optimization_emergency_disabled": False,
+    "optimization_semantic_cache_mode": "off",
+    "optimization_semantic_cache_similarity_threshold": 0.975,
+    "optimization_semantic_cache_ttl_seconds": 86400,
+    "optimization_semantic_cache_max_entries": 10000,
+    "optimization_semantic_cache_allow_cross_session_aux": False,
+    "optimization_warmers_startup_enabled": True,
+    "optimization_warmers_prompt_cache_mode": "off",
+    "optimization_warmers_min_prefix_tokens": 4096,
+    "optimization_compression_mode": "off",
+    "optimization_compression_backend": "llmlingua2",
+    "optimization_compression_min_trigger_tokens": 8192,
+    "optimization_compression_trigger_ratio": 0.5,
+    "optimization_compression_target_ratio": 0.6,
+    "optimization_compression_min_ratio": 0.4,
+    "optimization_compression_min_embedding_similarity": 0.88,
+    "optimization_compression_max_latency_ms": 75,
+    "optimization_shadow_retention_days": 30,
     "theme": "codex",
     # Transparent canvas: ON renders the UI on the terminal's own default
     # background (no background SGR anywhere; foreground styling is unchanged
@@ -411,6 +437,20 @@ def validate_value(key: str, value: Any) -> Any:
         if normalized not in ("auto", "local", "onnx", "openai", "off"):
             raise ValueError("embedding_backend must be auto|local|onnx|openai|off")
         return normalized
+    if key in (
+        "optimization_semantic_cache_mode",
+        "optimization_warmers_prompt_cache_mode",
+        "optimization_compression_mode",
+    ):
+        normalized = str(value).strip().lower()
+        if normalized not in ("off", "shadow", "wired"):
+            raise ValueError(f"{key} must be off|shadow|wired")
+        return normalized
+    if key == "optimization_compression_backend":
+        normalized = str(value).strip().lower()
+        if normalized not in ("llmlingua2", "none"):
+            raise ValueError("optimization_compression_backend must be llmlingua2|none")
+        return normalized
     if key == "reranker_backend":
         normalized = str(value).strip().lower()
         if normalized not in ("auto", "cohere", "local", "http", "none"):
@@ -510,6 +550,12 @@ def _check_int_bounds(key: str, val: int) -> None:
         "artifact_max_per_session": (0, 100_000),
         "artifact_max_chars": (1000, 100_000_000),
         "retrieval_token_budget": (0, 1_000_000),
+        "optimization_semantic_cache_ttl_seconds": (0, 31_536_000),
+        "optimization_semantic_cache_max_entries": (0, 1_000_000),
+        "optimization_warmers_min_prefix_tokens": (0, 1_000_000),
+        "optimization_compression_min_trigger_tokens": (0, 10_000_000),
+        "optimization_compression_max_latency_ms": (1, 10_000),
+        "optimization_shadow_retention_days": (0, 3650),
     }
     if key in bounds:
         lo, hi = bounds[key]
@@ -522,6 +568,18 @@ def _check_float_bounds(key: str, val: float) -> None:
     if key == "temperature" and not 0.0 <= val <= 2.0:
         raise ValueError(f"temperature must be in range 0.0..2.0, got {val}")
     if key in ("compression_threshold", "compression_target_ratio") and not 0.0 < val <= 1.0:
+        raise ValueError(f"{key} must be in range 0.0<..1.0, got {val}")
+    if (
+        key
+        in (
+            "optimization_semantic_cache_similarity_threshold",
+            "optimization_compression_trigger_ratio",
+            "optimization_compression_target_ratio",
+            "optimization_compression_min_ratio",
+            "optimization_compression_min_embedding_similarity",
+        )
+        and not 0.0 < val <= 1.0
+    ):
         raise ValueError(f"{key} must be in range 0.0<..1.0, got {val}")
     if key == "reranker_timeout" and not 1.0 <= val <= 120.0:
         raise ValueError(f"reranker_timeout must be in range 1..120, got {val}")
@@ -585,6 +643,25 @@ class Config:
     rrf_keyword_weight: float = 1.0
     rrf_dense_weight: float = 0.25
     prompt_cache_enabled: bool = False
+    # Optimization/caching modes (see DEFAULTS for the contract).
+    optimization_emergency_disabled: bool = False
+    optimization_semantic_cache_mode: str = "off"
+    optimization_semantic_cache_similarity_threshold: float = 0.975
+    optimization_semantic_cache_ttl_seconds: int = 86400
+    optimization_semantic_cache_max_entries: int = 10000
+    optimization_semantic_cache_allow_cross_session_aux: bool = False
+    optimization_warmers_startup_enabled: bool = True
+    optimization_warmers_prompt_cache_mode: str = "off"
+    optimization_warmers_min_prefix_tokens: int = 4096
+    optimization_compression_mode: str = "off"
+    optimization_compression_backend: str = "llmlingua2"
+    optimization_compression_min_trigger_tokens: int = 8192
+    optimization_compression_trigger_ratio: float = 0.5
+    optimization_compression_target_ratio: float = 0.6
+    optimization_compression_min_ratio: float = 0.4
+    optimization_compression_min_embedding_similarity: float = 0.88
+    optimization_compression_max_latency_ms: int = 75
+    optimization_shadow_retention_days: int = 30
     theme: str = "codex"
     # Transparent canvas (default OFF = opaque theme background); contract in
     # DEFAULTS. Config.save() reads getattr(self, key) once per DEFAULTS key, so

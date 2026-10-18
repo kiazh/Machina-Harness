@@ -162,7 +162,6 @@ class QuickOpenIndex:
         self.directory_caps: list[str] = []
         self.unreadable = 0
         self.skipped_symlinks = 0
-        self.scanned_directories = 0
 
     @property
     def scanned(self) -> int:
@@ -267,7 +266,6 @@ class QuickOpenIndex:
         stop = False
         while pending and not stop:
             rel_dir = pending.pop()
-            self.scanned_directories += 1
             try:
                 iterator = os.scandir(self.root if not rel_dir else self.root / rel_dir)
             except OSError:

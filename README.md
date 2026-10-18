@@ -708,6 +708,7 @@ scripts/            Operator script mount point and setup guidance
 | [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, and shortcuts |
 | [UI design](docs/design/TUI_DESIGN.md) / [themes](docs/design/THEME_COLORS.md) | Interface behavior, appearance, and color roles |
 | [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, saved tool output, recovery, and usage accounting |
+| [Optimization and caching](docs/optimization.md) | Gated semantic cache, prompt-cache warming, compression, and shadow rollouts |
 | [Personality and growth](docs/PERSONALITY_GROWTH.md) | Preferences, feedback, rollback, and SoulSpec identities |
 | [Bundled skills](docs/ECC_SKILLS.md) / [specialist agents](docs/ECC_AGENTS.md) | Included ECC collections and how they are mapped |
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |

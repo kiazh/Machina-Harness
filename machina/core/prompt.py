@@ -58,6 +58,7 @@ __all__ = [
     "output_policy_section",
     "_output_policy_section",
     "assemble_turn_prompt",
+    "build_native_turn_messages",
     "wrap_prompt_with_images",
     "build_turn_messages",
     "prompt_section_tokens",
@@ -443,8 +444,9 @@ def assemble_turn_prompt(
     query: str,
     *,
     omitted_evidence: int = 0,
+    skip_conversation: bool = False,
 ) -> str:
-    """Assemble the turn prompt via ``PromptAssembler`` (verbatim move)."""
+    """Assemble the ephemeral dynamic tail via ``PromptAssembler``."""
     return assembler.assemble(
         system_prompt=system_prompt,
         goal=goal,
@@ -452,7 +454,78 @@ def assemble_turn_prompt(
         retrieved_chunks=retrieved_chunks,
         query=query,
         omitted_evidence=omitted_evidence,
+        skip_conversation=skip_conversation,
     )
+
+
+def build_native_turn_messages(
+    system_prompt: str,
+    summary: str | None,
+    history: list[dict[str, Any]],
+    dynamic_tail: str,
+    images: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Build a native role-message turn.
+
+    Static instructions, the stable compaction anchor, and the append-only
+    active history precede the per-step dynamic tail. Keeping history in
+    native ``user``/``assistant`` messages preserves ChatML-style role
+    boundaries and a stable provider-cache prefix instead of flattening prior
+    turns into one Markdown user message. ``dynamic_tail`` owns Recent
+    Activity, retrieved context, the goal, and the live query.
+    """
+    messages: list[dict[str, Any]] = []
+    if system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt})
+    if summary and summary.strip():
+        summary_text = summary.strip()
+        if len(summary_text) > 8000:
+            summary_text = "…" + summary_text[-8000:]
+        messages.append(
+            {
+                "role": "user",
+                "content": "[Session Compaction Checkpoint]\n"
+                "Earlier turns were compacted. Continue from this summary.",
+            }
+        )
+        messages.append({"role": "assistant", "content": summary_text})
+    for entry in history:
+        role = entry.get("role")
+        content = entry.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str):
+            continue
+        if not content.strip():
+            continue
+        if messages and messages[-1].get("role") == role:
+            # Some interrupted turns can leave adjacent same-role rows; merge
+            # them so strict alternating-role providers keep accepting the
+            # prefix after a resume.
+            messages[-1]["content"] = f"{messages[-1]['content']}\n\n{content.strip()}"
+        else:
+            messages.append({"role": role, "content": content})
+    tail_messages = build_turn_messages(dynamic_tail, images)
+    tail = tail_messages[0]
+    if messages and messages[-1].get("role") == tail.get("role"):
+        # An interrupted prior turn can leave history ending on a user row.
+        # Merge the live tail into it so strict alternating-role providers
+        # still accept the request (images stay as content blocks).
+        previous = messages[-1].get("content")
+        current = tail.get("content")
+        if isinstance(previous, str) and isinstance(current, str):
+            messages[-1]["content"] = f"{previous}\n\n{current}"
+        elif isinstance(current, list):
+            messages[-1]["content"] = (
+                [{"type": "text", "text": previous}, *current]
+                if isinstance(previous, str)
+                else [*previous, *current]
+            )
+        elif isinstance(previous, list) and isinstance(current, str):
+            messages[-1]["content"] = [*previous, {"type": "text", "text": current}]
+        else:
+            messages.extend(tail_messages)
+    else:
+        messages.extend(tail_messages)
+    return messages
 
 
 def wrap_prompt_with_images(prompt: str, images: list[dict[str, str]]) -> list[dict[str, Any]]:

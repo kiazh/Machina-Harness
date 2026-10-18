@@ -22,6 +22,7 @@ __all__ = [
     "read_env_values",
     "remove_env_values",
     "set_env_values",
+    "sync_env_shadow",
 ]
 
 # Curated provider keys offered by the `/keys` menu and `machina setup`.
@@ -65,6 +66,22 @@ def _checkout_root() -> Path | None:
     if (root / "pyproject.toml").is_file() or (root / ".git").exists():
         return root
     return None
+
+
+def sync_env_shadow(env_key: str, value: str, *, persist: bool = True) -> None:
+    """Set ``env_key`` in-process; mirror it into ``.env`` when durable.
+
+    ``Config.get`` reads ``MACHINA_<KEY>`` (env / ``.env``) before the config
+    file, so a saved default must update both or a stale shadow silently wins
+    (mode, reasoning-effort and model/provider writes all face this). The
+    process environment is always updated first; the ``.env`` write may raise
+    ``OSError``/``ValueError``, which callers report without failing the
+    durable write that already succeeded.
+    """
+    os.environ[env_key] = value
+    if not persist:
+        return
+    set_env_values({env_key: value})
 
 
 def _allowed_roots() -> tuple[Path, ...]:
@@ -130,7 +147,7 @@ def _validate_key(key: str) -> str:
 def _normalize_key_token(raw: str) -> str:
     """Upper-case a dotenv key token; '' when it is not a well-formed KEY."""
     token = raw.strip()
-    if token.startswith("export ") or token.startswith("export\t"):
+    if token.startswith(("export ", "export\t")):
         token = token[6:].lstrip()
     return token.upper() if _KEY_RE_CI.match(token) else ""
 
@@ -146,10 +163,7 @@ def find_env_file(start: Path | None = None) -> Path:
     override = os.environ.get("MACHINA_ENV_FILE", "").strip()
     if override:
         p = Path(override).expanduser()
-        if not p.is_absolute():
-            p = (Path.cwd() / p).resolve()
-        else:
-            p = Path(os.path.abspath(p))
+        p = (Path.cwd() / p).resolve() if not p.is_absolute() else Path(os.path.abspath(p))
         if p.name != ".env" and not p.name.endswith(".env") and not p.is_file():
             raise ValueError(
                 f"MACHINA_ENV_FILE must end with .env or be an existing file: {override!r}"
