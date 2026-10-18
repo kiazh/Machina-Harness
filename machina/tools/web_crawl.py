@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from machina.core.exceptions import ToolError, ValidationError
 from machina.db.connection import db
-from machina.memory.redaction import redact_secrets
+from machina.memory.redaction import redact_secrets, redacted_excerpt
 from machina.rag.loaders import Document
 from machina.tools.agents import active_agent_scope
 from machina.tools.base import registry
@@ -163,7 +163,7 @@ async def web_crawl(
                     else "saved to this session"
                 )
                 lines.append(f"\n{saved}. {stored_page} ({state})")
-                lines.append(redact_secrets(content).text[:1200].replace("\n", " "))
+                lines.append(redacted_excerpt(content).replace("\n", " "))
                 if wants_links:
                     for link in _extract_links(html, page):
                         if attempted + len(queue) >= page_budget:

@@ -29,7 +29,7 @@ SEAMS: tuple[tuple[str, str, str, str, str], ...] = (
         "gateway",
         "rpc",
         "machina.gateway.server",
-        "Gateway.handle_line",
+        "Gateway.handle_message",
         "instrument",
     ),
     (

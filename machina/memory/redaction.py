@@ -28,6 +28,7 @@ __all__ = [
     "redact_secrets",
     "redact_value",
     "redact_diagnostic",
+    "redacted_excerpt",
 ]
 
 
@@ -507,6 +508,20 @@ _default_redactor = SecretRedactor()
 def redact_secrets(text: str) -> RedactionResult:
     """Convenience function to redact secrets using the default redactor."""
     return _default_redactor.redact(text)
+
+
+def redacted_excerpt(
+    text: str, limit: int = 1200, *, margin: int = 16_384
+) -> str:
+    """Bounded display excerpt with fail-safe redaction.
+
+    Display paths used to redact the whole (up to 60k) fetched page for a
+    1.2k-char preview. Redacting ``limit + margin`` keeps a straddling
+    token/PEM match inside the redacted input (realistic keys are far below
+    the margin) while avoiding a second full-document pass. Always redact
+    before slicing: slicing first could expose a secret across the cut.
+    """
+    return redact_secrets(text[: limit + margin]).text[:limit]
 
 
 def redact_diagnostic(text: object) -> str:

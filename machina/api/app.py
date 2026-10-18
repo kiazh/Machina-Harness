@@ -21,7 +21,6 @@ the other request models, ``_serialize_event`` / ``_redact_value``,
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -136,7 +135,7 @@ class _RpcGateway:
         # refresh from the live connection state on every call.
         self._gateway._db_ready = db.connected
         frame = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
-        await self._gateway.handle_line(json.dumps(frame))
+        await self._gateway.handle_message(frame)
         response = self._responses.pop(rid, None)
         if response is None:
             raise RpcError(-32603, "no response from gateway")

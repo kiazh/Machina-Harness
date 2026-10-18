@@ -8,7 +8,7 @@ import msgpack
 
 from machina.core.exceptions import ToolError, ValidationError
 from machina.db.connection import db
-from machina.memory.redaction import redact_secrets
+from machina.memory.redaction import redact_secrets, redacted_excerpt
 from machina.rag.loaders import Document
 from machina.tools.agents import active_agent_scope
 from machina.tools.base import registry
@@ -135,7 +135,7 @@ async def web_research(query: str, limit: int = 3) -> str:
                 lines.extend(
                     (
                         f"\n{saved}. {title} — {stored_url} ({state})",
-                        redact_secrets(content).text[:1200].replace("\n", " "),
+                        redacted_excerpt(content).replace("\n", " "),
                     )
                 )
             except Exception as error:

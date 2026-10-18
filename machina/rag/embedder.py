@@ -772,9 +772,28 @@ def resolve_embedding_settings() -> EmbeddingSettings:
     embeddings reference uses the qualified spelling. Availability is an
     import spec check only — no model loads.
     """
-    backend = (_config_value("embedding_backend", "auto") or "auto").strip().lower()
-    model = _config_value("embedding_model").strip()
-    base_url = _config_value("embedding_base_url").strip()
+    return _resolve_embedding_settings(
+        (_config_value("embedding_backend", "auto") or "auto").strip().lower(),
+        _config_value("embedding_model").strip(),
+        _config_value("embedding_base_url").strip(),
+        bool(_config_value("openai_api_key")),
+        bool(_config_value("openrouter_api_key")),
+        onnx_embedder_available(),
+        local_embedder_available(),
+    )
+
+
+@functools.lru_cache(maxsize=16)
+def _resolve_embedding_settings(
+    backend: str,
+    model: str,
+    base_url: str,
+    has_openai_key: bool,
+    has_openrouter_key: bool,
+    onnx_available: bool,
+    local_available: bool,
+) -> EmbeddingSettings:
+    """Pure resolution for one configuration/availability tuple (cached)."""
     if backend not in ("auto", "local", "onnx", "openai", "off"):
         return EmbeddingSettings(
             "none", backend=backend, reason=f"unknown embedding_backend {backend!r}"
@@ -784,7 +803,7 @@ def resolve_embedding_settings() -> EmbeddingSettings:
             "none", backend=backend, reason="embedding_backend=off (dense retrieval disabled)"
         )
     if backend == "openai":
-        if not (_config_value("openai_api_key") or _config_value("openrouter_api_key") or base_url):
+        if not (has_openai_key or has_openrouter_key or base_url):
             return EmbeddingSettings(
                 "none", backend=backend, reason="embedding_backend=openai but no key or base_url"
             )
@@ -796,7 +815,7 @@ def resolve_embedding_settings() -> EmbeddingSettings:
             backend=backend,
         )
     if backend == "onnx":
-        if not onnx_embedder_available():
+        if not onnx_available:
             return EmbeddingSettings(
                 "none",
                 model=model or OnnxEmbedder.DEFAULT_MODEL,
@@ -805,7 +824,7 @@ def resolve_embedding_settings() -> EmbeddingSettings:
             )
         return EmbeddingSettings("onnx", model=model or OnnxEmbedder.DEFAULT_MODEL, backend=backend)
     if backend == "local":
-        if not local_embedder_available():
+        if not local_available:
             return EmbeddingSettings(
                 "none",
                 model=model or LocalEmbedder.DEFAULT_MODEL,
@@ -823,13 +842,13 @@ def resolve_embedding_settings() -> EmbeddingSettings:
             base_url=base_url,
             backend=backend,
         )
-    if onnx_embedder_available() and _model_fits_onnx(model):
+    if onnx_available and _model_fits_onnx(model):
         return EmbeddingSettings("onnx", model=model or OnnxEmbedder.DEFAULT_MODEL, backend=backend)
-    if local_embedder_available() and _model_fits_local(model):
+    if local_available and _model_fits_local(model):
         return EmbeddingSettings(
             "local", model=model or LocalEmbedder.DEFAULT_MODEL, backend=backend
         )
-    if _config_value("openai_api_key") or _config_value("openrouter_api_key"):
+    if has_openai_key or has_openrouter_key:
         return EmbeddingSettings(
             "openai",
             model=_api_model_for_endpoint(model, _api_endpoint("")) or OpenAIEmbedder.DEFAULT_MODEL,

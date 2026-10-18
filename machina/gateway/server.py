@@ -314,7 +314,10 @@ class Gateway:
             logger.warning("Parse error: %s", e)
             self._send_error(None, PARSE_ERROR, f"parse error: {e}")
             return
+        await self.handle_message(message)
 
+    async def handle_message(self, message: Any) -> None:
+        """Answer one already-parsed JSON-RPC frame."""
         rid = message.get("id") if isinstance(message, dict) else None
         if (
             not isinstance(message, dict)
