@@ -49,6 +49,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from machina import fsops
 from machina.workspace.models import (
     CONFLICT_FILE_EXISTS,
     CONFLICT_MISSING_ON_DISK,
@@ -152,48 +153,18 @@ revision_registry = RevisionRegistry()
 
 def _dir_fd_supported() -> bool:
     """Whether this platform supports dir_fd-anchored file operations."""
-    try:
-        supported = os.supports_dir_fd
-    except AttributeError:
-        return False
-    return all(function in supported for function in (os.open, os.rename, os.stat))
+    return fsops.dir_fd_supported(os.open, os.rename, os.stat)
 
 
-def _nofollow() -> int:
-    return getattr(os, "O_NOFOLLOW", 0)
-
-
-def _nonblock() -> int:
-    return getattr(os, "O_NONBLOCK", 0)
-
-
-def _dir_flags() -> int:
-    return os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow()
+_nofollow = fsops.nofollow
+_nonblock = fsops.nonblock
+_dir_flags = fsops.dir_flags
+_close_quietly = fsops.close_quietly
 
 
 def _fsync_dir_best_effort(directory: Path) -> None:
     """Persist a rename on POSIX; unavailable directory fsync is not fatal."""
-    try:
-        dir_fd = _os_open(directory, _dir_flags())
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-    finally:
-        try:
-            os.close(dir_fd)
-        except OSError:
-            pass
-
-
-def _close_quietly(fd: int) -> None:
-    """Close *fd*, ignoring an already-closed/invalid descriptor."""
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+    fsops.fsync_dir_best_effort(directory, opener=_os_open)
 
 
 def _components(rel: str) -> list[str]:

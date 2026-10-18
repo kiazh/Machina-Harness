@@ -13,6 +13,7 @@ from fnmatch import fnmatch
 from itertools import islice
 from pathlib import Path
 
+from machina import fsops
 from machina.core.config import config
 from machina.core.exceptions import ToolError
 from machina.tools.base import registry
@@ -286,29 +287,12 @@ def _secure_mkdir_parents(file_path: Path, *, inside_base: bool) -> None:
 
 def _fsync_dir_best_effort(directory: Path) -> None:
     """Persist a rename on POSIX; unavailable directory fsync is not fatal."""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    try:
-        dir_fd = os.open(directory, flags)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-    finally:
-        try:
-            os.close(dir_fd)
-        except OSError:
-            pass
+    fsops.fsync_dir_best_effort(directory)
 
 
 def _dir_fd_supported() -> bool:
     """Whether this platform supports dir_fd-anchored file operations."""
-    try:
-        supported = os.supports_dir_fd
-    except AttributeError:
-        return False
-    return all(f in supported for f in (os.open, os.rename, os.stat, os.unlink, os.mkdir))
+    return fsops.dir_fd_supported(os.open, os.rename, os.stat, os.unlink, os.mkdir)
 
 
 def _traversal_error(display: str, part: str, dir_fd: int) -> ValueError:
@@ -798,6 +782,56 @@ async def read_file(
         raise ToolError(f"Error reading file: {e}") from e
 
 
+def _write_probe_flags() -> int:
+    """Probe/write flags shared by the anchored and pathname write paths.
+
+    ``O_CREAT`` without ``O_TRUNC``: the descriptor is validated before any
+    content changes. ``O_NONBLOCK`` keeps a FIFO swapped in after the stat
+    from blocking the open; ``O_NOFOLLOW`` fails closed on a symlink target.
+    """
+    return os.O_WRONLY | os.O_CREAT | fsops.nonblock() | fsops.nofollow()
+
+
+def _reject_unsafe_leaf(info: os.stat_result, display: str) -> None:
+    """Refuse a pre-existing symlink or non-regular write target."""
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError(f"Path '{display}' is not accessible (symlink?)")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"Path '{display}' is not a regular file")
+
+
+def _check_writable_fd(fd: int, *, display: str, existed_before: bool) -> int | None:
+    """Validate the write-probe descriptor; return the mode to preserve.
+
+    Shared by both write paths: the target must be a regular file and must
+    not be a hard-link alias to outside content. An existing file's
+    permission bits survive the atomic replace. An fstat failure is
+    tolerated (the open itself already succeeded).
+    """
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"Path '{display}' is not a regular file")
+        if info.st_nlink > 1:
+            raise ValueError(f"Path '{display}' has multiple hard links; refusing write")
+        return stat.S_IMODE(info.st_mode) if existed_before else None
+    except ValueError:
+        raise
+    except OSError:
+        return None
+
+
+def _remove_rejected_empty_leaf(
+    stat_leaf: Callable[[], os.stat_result], unlink_leaf: Callable[[], None]
+) -> None:
+    """Best-effort removal of an empty file O_CREAT created at a rejected target."""
+    try:
+        if stat_leaf().st_size == 0:
+            unlink_leaf()
+    except OSError:
+        pass
+
+
 def _write_anchored_inside(file_path: Path, content: str, display: str) -> str:
     """Write *content* to an inside-base *file_path* via a pinned dir fd.
 
@@ -815,45 +849,21 @@ def _write_anchored_inside(file_path: Path, content: str, display: str) -> str:
     leaf = file_path.name
     dir_fd = _open_parent_dir_fd(parent, display=display)
     try:
-        nofollow = getattr(os, "O_NOFOLLOW", 0)
         try:
             st_before = os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
         except OSError:
             existed_before = False
         else:
             existed_before = True
-            if stat.S_ISLNK(st_before.st_mode):
-                raise ValueError(f"Path '{display}' is not accessible (symlink?)")
-            if not stat.S_ISREG(st_before.st_mode):
-                raise ValueError(f"Path '{display}' is not a regular file")
-        # Open WITHOUT O_TRUNC: the descriptor is validated before any
-        # content changes (same contract as the legacy probe). O_NONBLOCK
-        # keeps a FIFO swapped in after the stat from blocking the open;
-        # the descriptor is re-checked for S_ISREG below.
-        nonblock = getattr(os, "O_NONBLOCK", 0)
-        flags = os.O_WRONLY | os.O_CREAT | nonblock | nofollow
+            _reject_unsafe_leaf(st_before, display)
         try:
-            fd = _os_open(leaf, flags, 0o600, dir_fd=dir_fd)
+            fd = _os_open(leaf, _write_probe_flags(), 0o600, dir_fd=dir_fd)
         except OSError as e:
             # ELOOP = symlink with O_NOFOLLOW; EEXIST races, etc.
             raise ValueError(f"Path '{display}' is not accessible (symlink?)") from e
         try:
             _verify_fd_at(fd, dir_fd, leaf, display=display)
-            # Hard-link escape: an inside name with nlink > 1 may point at
-            # outside content via another name; refuse agent writes.
-            mode = None
-            try:
-                target_info = os.fstat(fd)
-                if not stat.S_ISREG(target_info.st_mode):
-                    raise ValueError(f"Path '{display}' is not a regular file")
-                if target_info.st_nlink > 1:
-                    raise ValueError(f"Path '{display}' has multiple hard links; refusing write")
-                if existed_before:
-                    mode = stat.S_IMODE(target_info.st_mode)
-            except ValueError:
-                raise
-            except OSError:
-                pass
+            mode = _check_writable_fd(fd, display=display, existed_before=existed_before)
             # Close the probe descriptor before the rename: Windows cannot
             # replace a file that is still open.
             try:
@@ -871,11 +881,10 @@ def _write_anchored_inside(file_path: Path, content: str, display: str) -> str:
             if not existed_before:
                 # Best-effort removal of an empty file O_CREAT may have
                 # created at a rejected target; never touches content.
-                try:
-                    if os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False).st_size == 0:
-                        os.unlink(leaf, dir_fd=dir_fd)
-                except OSError:
-                    pass
+                _remove_rejected_empty_leaf(
+                    lambda: os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False),
+                    lambda: os.unlink(leaf, dir_fd=dir_fd),
+                )
             raise
         return f"Successfully wrote {len(content)} characters to {display}"
     finally:
@@ -925,19 +934,10 @@ async def write_file(path: str, content: str) -> str:
             if inside:
                 # Re-check after mkdir (a component could have been swapped).
                 _reject_symlink_components(file_path)
-            nofollow = getattr(os, "O_NOFOLLOW", 0)
-            # Open first WITHOUT O_TRUNC: the descriptor is validated before
-            # any content changes, and the content itself is written to a
-            # same-directory temp file that only replaces the target once it
-            # is complete and fsynced (5.2 — rejected actions have no effects;
-            # ENOSPC mid-write cannot destroy the original). O_NONBLOCK
-            # prevents a regular-to-FIFO swap from blocking the probe.
-            nonblock = getattr(os, "O_NONBLOCK", 0)
-            flags = os.O_WRONLY | os.O_CREAT | nonblock
-            if nofollow:
-                # If the target exists as a symlink, fail closed instead of
-                # following the link (AH-003 truncating-write race).
-                flags |= nofollow
+            # Shared probe/write policy (no O_TRUNC, nonblocking, nofollow):
+            # the descriptor is validated before any content changes, and the
+            # complete content only replaces the target after fsync.
+            flags = _write_probe_flags()
             # Existence probe BEFORE O_CREAT: if validation below rejects the
             # open, a newly created empty file is removed so rejection has no
             # residual effects (best effort; content is never written first).
@@ -947,10 +947,7 @@ async def write_file(path: str, content: str) -> str:
             except OSError:
                 existed_before = False
             if existed_before:
-                if stat.S_ISLNK(st_before.st_mode):
-                    raise ValueError(f"Path '{path}' is not accessible (symlink?)")
-                if not stat.S_ISREG(st_before.st_mode):
-                    raise ValueError(f"Path '{path}' is not a regular file")
+                _reject_unsafe_leaf(st_before, path)
             try:
                 fd = _os_open(file_path, flags, 0o600)
             except OSError as e:
@@ -958,21 +955,7 @@ async def write_file(path: str, content: str) -> str:
                 raise ValueError(f"Path '{path}' is not accessible (symlink?)") from e
             try:
                 _verify_fd_matches_path(fd, file_path, check_base=inside)
-                # Hard-link escape: an inside name with nlink > 1 may point at
-                # outside content via another name; refuse agent writes.
-                mode = None
-                try:
-                    target_info = os.fstat(fd)
-                    if not stat.S_ISREG(target_info.st_mode):
-                        raise ValueError(f"Path '{path}' is not a regular file")
-                    if target_info.st_nlink > 1:
-                        raise ValueError(f"Path '{path}' has multiple hard links; refusing write")
-                    if existed_before:
-                        mode = stat.S_IMODE(target_info.st_mode)
-                except ValueError:
-                    raise
-                except OSError:
-                    pass
+                mode = _check_writable_fd(fd, display=path, existed_before=existed_before)
                 # Close the probe descriptor before the rename: Windows cannot
                 # replace a file that is still open.
                 try:
@@ -986,13 +969,9 @@ async def write_file(path: str, content: str) -> str:
                 except OSError:
                     pass
                 if not existed_before:
-                    # Best-effort removal of an empty file O_CREAT may have
-                    # created at a rejected target; never touches content.
-                    try:
-                        if os.lstat(file_path).st_size == 0:
-                            os.unlink(file_path)
-                    except OSError:
-                        pass
+                    _remove_rejected_empty_leaf(
+                        lambda: os.lstat(file_path), lambda: os.unlink(file_path)
+                    )
                 raise
             return f"Successfully wrote {len(content)} characters to {path}"
 
