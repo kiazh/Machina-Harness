@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -22,11 +21,16 @@ from machina.core.provider.caches import _cache_get, _cache_key, _cache_put, _ca
 from machina.core.provider.rate_limit import RateLimitBinding
 from machina.core.provider.reasoning import _resolve_effort, normalize_reasoning_effort
 from machina.core.provider.specs import ProviderSpec
-from machina.core.provider.sse import sse_data
+from machina.core.provider.streaming import (
+    OpenAIStreamState,
+    begin_stream_usage,
+    complete_stream,
+    fail_stream,
+    openai_stream_events,
+)
 from machina.core.provider.transport import (
     ReservationSettlement,
     _post_with_retry,
-    _stream_error_message,
     _stream_with_retry,
     _tools_payload,
     _truncated_stream_error,
@@ -34,7 +38,7 @@ from machina.core.provider.transport import (
     _validate_params,
 )
 from machina.core.provider.usage_map import parse_openai_usage
-from machina.core.usage import _estimate_tokens, usage_store
+from machina.core.usage import usage_store
 
 
 # ---------------------------------------------------------------------------
@@ -225,124 +229,53 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         if tools:
             payload["tools"] = _tools_payload(tools)
 
-        audit_log(
-            "llm_stream_start", provider=self.spec.name, model=model, message_count=len(messages)
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name=self.spec.name,
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            session_id=session_id,
+            agent_id=agent_id,
         )
-
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id, agent_id, self.spec.name, model, messages, tools or [], max_tokens
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
         start = time.monotonic()
-        content_parts: list[str] = []
-        tool_calls_by_index: dict[int, dict[str, str]] = {}
-        stream_usage: dict[str, int] = {}
-        resolved_model = model
-        saw_terminal = False
+        state = OpenAIStreamState(resolved_model=model)
         try:
             async with _stream_with_retry(self.client, "/chat/completions", payload) as resp:
                 resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    data = sse_data(line)
-                    if data is None:
-                        continue
-                    if data.strip() == "[DONE]":
-                        saw_terminal = True
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(chunk, dict):
-                        continue
-                    if chunk.get("error"):
-                        # Explicit error frame: fail the stream honestly
-                        # instead of reporting a truncated success.
-                        raise ProviderError(_stream_error_message(chunk, resolved_model))
-                    resolved_model = chunk.get("model") or resolved_model
-                    # The usage chunk arrives with an empty choices list.
-                    if chunk.get("usage"):
-                        stream_usage = chunk["usage"]
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        continue
-                    if choices[0].get("finish_reason"):
-                        saw_terminal = True
-                    delta = choices[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if content:
-                        content_parts.append(content)
-                        yield StreamEvent(type="text", content=content)
-                    for tc_delta in delta.get("tool_calls", []):
-                        idx = tc_delta.get("index", 0)
-                        if idx not in tool_calls_by_index:
-                            tool_calls_by_index[idx] = {"id": "", "name": "", "arguments": ""}
-                        tc = tool_calls_by_index[idx]
-                        if tc_delta.get("id"):
-                            tc["id"] = tc_delta["id"]
-                        func = tc_delta.get("function", {})
-                        if func.get("name"):
-                            tc["name"] = func["name"]
-                        if func.get("arguments"):
-                            frag = func["arguments"]
-                            if isinstance(frag, dict):
-                                frag = json.dumps(frag)
-                            tc["arguments"] += frag
-            if not saw_terminal:
-                raise _truncated_stream_error(self.spec.name, resolved_model)
-        except BaseException as e:
+                async for event in openai_stream_events(resp, state):
+                    yield event
+            if not state.saw_terminal:
+                raise _truncated_stream_error(self.spec.name, state.resolved_model)
+        except BaseException as exc:
             # GeneratorExit/CancelledError are BaseException: settle before
             # re-raising so an early close cannot strand the reservation.
-            _record_llm_call(resolved_model, (time.monotonic() - start) * 1000, is_error=True)
-            await settlement.fail()
-            if not isinstance(e, Exception):
-                raise
-            audit_log("llm_stream_error", provider=self.spec.name, model=model, error=str(e))
+            await fail_stream(
+                settlement,
+                provider_name=self.spec.name,
+                audit_model=model,
+                resolved_model=state.resolved_model,
+                started=start,
+                error=exc,
+            )
             raise
 
-        tool_calls: list[dict] = []
-        for idx in sorted(tool_calls_by_index.keys()):
-            tc = tool_calls_by_index[idx]
-            tool_calls.append(
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {"name": tc["name"], "arguments": tc["arguments"] or "{}"},
-                }
-            )
-        full_content = "".join(content_parts)
-        usage = parse_openai_usage(stream_usage)
-        if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
-            # Estimates support turn accounting and display, but must never
-            # release the conservative durable reservation as vendor usage.
-            usage = {
-                "prompt_tokens": _estimate_tokens(messages, tools or [], 0),
-                "completion_tokens": _estimate_tokens(
-                    [{"role": "assistant", "content": full_content, "tool_calls": tool_calls}],
-                    [],
-                    0,
-                ),
-                "estimated": True,
-            }
-        usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
-        _record_llm_call(
-            resolved_model,
-            (time.monotonic() - start) * 1000,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
+        response = await complete_stream(
+            settlement,
+            provider_name=self.spec.name,
+            requested_model=model,
+            resolved_model=state.resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(state.content_parts),
+            tool_calls=state.tool_calls(),
+            usage=parse_openai_usage(state.stream_usage),
+            started=start,
+            missing_usage="estimate",
+            total_tokens="sum",
         )
-        await settlement.settle(usage, model=resolved_model)
-        audit_log(
-            "llm_stream_complete", provider=self.spec.name, model=model, tool_calls=len(tool_calls)
-        )
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content=full_content, model=resolved_model, usage=usage, tool_calls=tool_calls
-            ),
-        )
+        yield StreamEvent(type="done", response=response)
 
     async def close(self) -> None:
         await self.client.aclose()

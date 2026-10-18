@@ -20,6 +20,7 @@ from machina.core.provider.base import LLMProvider
 from machina.core.provider.caches import _cache_get, _cache_key, _cache_put, _caller_identity
 from machina.core.provider.rate_limit import RateLimitBinding
 from machina.core.provider.reasoning import _resolve_effort, normalize_reasoning_effort
+from machina.core.provider.streaming import begin_stream_usage, complete_stream, fail_stream
 from machina.core.provider.transport import (
     ReservationSettlement,
     _stream_with_retry,
@@ -223,26 +224,16 @@ class OllamaProvider(LLMProvider, RateLimitBinding):
         if think is not None:
             payload["think"] = think
 
-        audit_log(
-            "llm_stream_start",
-            provider="ollama",
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name="ollama",
             model=model or self.model,
-            message_count=len(messages),
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            session_id=session_id,
+            agent_id=agent_id,
         )
-
-        # Reserve usage if session_id and agent_id are provided
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id,
-                agent_id,
-                "ollama",
-                model or self.model,
-                messages,
-                tools or [],
-                max_tokens,
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
         start = time.monotonic()
 
         content_parts: list[str] = []
@@ -325,46 +316,29 @@ class OllamaProvider(LLMProvider, RateLimitBinding):
                     f"Ollama stream ended without a terminal done frame for {model or self.model}"
                 )
         except BaseException as e:
-            _record_llm_call(resolved_model, (time.monotonic() - start) * 1000, is_error=True)
-            await settlement.fail()
-            if not isinstance(e, Exception):
-                raise
-            audit_log(
-                "llm_stream_error", provider="ollama", model=model or self.model, error=str(e)
+            await fail_stream(
+                settlement,
+                provider_name="ollama",
+                audit_model=model or self.model,
+                resolved_model=resolved_model,
+                started=start,
+                error=e,
             )
             raise
 
-        full_content = "".join(content_parts)
-
-        # Normalize the incrementally collected figures (no cache categories
-        # exist for local models; the ledger still labels the basis).
-        usage = parse_ollama_usage(usage.get("prompt_tokens"), usage.get("completion_tokens"))
-
-        _record_llm_call(
-            resolved_model,
-            (time.monotonic() - start) * 1000,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
+        response = await complete_stream(
+            settlement,
+            provider_name="ollama",
+            requested_model=model or self.model,
+            resolved_model=resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(content_parts),
+            tool_calls=tool_calls,
+            usage=parse_ollama_usage(usage.get("prompt_tokens"), usage.get("completion_tokens")),
+            started=start,
         )
-        # Finish usage reservation
-        await settlement.settle(usage, model=resolved_model)
-
-        audit_log(
-            "llm_stream_complete",
-            provider="ollama",
-            model=resolved_model,
-            tool_calls=len(tool_calls),
-        )
-
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content=full_content,
-                model=resolved_model,
-                usage=usage,
-                tool_calls=tool_calls,
-            ),
-        )
+        yield StreamEvent(type="done", response=response)
 
     async def close(self) -> None:
         # Close the shared client (it will be recreated if needed)

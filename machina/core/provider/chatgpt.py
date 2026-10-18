@@ -48,22 +48,19 @@ from machina import __version__
 from machina.core.background_tasks import joined_teardown
 from machina.core.config import config
 from machina.core.exceptions import ProviderError, RateLimitError
-from machina.core.metrics import metrics
 from machina.core.models import LLMResponse, StreamEvent, ToolDefinition
-from machina.core.provider._log import logger
-from machina.core.provider.audit import audit_log
 from machina.core.provider.base import LLMProvider
 from machina.core.provider.catalog import validate_effort, validate_model_slug
 from machina.core.provider.rate_limit import RateLimitBinding
 from machina.core.provider.sse import sse_data
+from machina.core.provider.streaming import begin_stream_usage, complete_stream, fail_stream
 from machina.core.provider.transport import (
-    ReservationSettlement,
     _truncated_stream_error,
     _validate_messages,
     _validate_params,
 )
 from machina.core.provider.usage_map import parse_chatgpt_usage
-from machina.core.usage import _estimate_tokens, usage_store
+from machina.core.usage import usage_store
 from machina.security import chatgpt_auth
 
 _PROVIDER_NAME = "chatgpt"
@@ -492,25 +489,16 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         resolved_model = model or self.model
         validate_model_slug(resolved_model, account_id=self._account_hint())
         payload = self._payload(messages, resolved_model, tools, reasoning_effort)
-        audit_log(
-            "llm_stream_start",
-            provider=_PROVIDER_NAME,
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name=_PROVIDER_NAME,
             model=resolved_model,
-            message_count=len(messages),
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            session_id=session_id,
+            agent_id=agent_id,
         )
-
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id,
-                agent_id,
-                _PROVIDER_NAME,
-                resolved_model,
-                messages,
-                tools or [],
-                max_tokens,
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
 
         content_parts: list[str] = []
         call_accumulator = _FunctionCallAccumulator()
@@ -588,65 +576,33 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
             if not saw_terminal:
                 raise _truncated_stream_error(_PROVIDER_NAME, resolved_model)
         except BaseException as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            metrics.record_llm_call(
-                session_id="", model=resolved_model, duration_ms=duration_ms, is_error=True
-            )
-            await settlement.fail()
-            if not isinstance(exc, Exception):
-                raise
-            audit_log(
-                "llm_stream_error",
-                provider=_PROVIDER_NAME,
-                model=resolved_model,
-                error=str(exc),
+            await fail_stream(
+                settlement,
+                provider_name=_PROVIDER_NAME,
+                audit_model=resolved_model,
+                resolved_model=resolved_model,
+                started=start,
+                error=exc,
             )
             raise
 
-        tool_calls = call_accumulator.result()
-        full_content = "".join(content_parts)
-        usage = _map_usage(stream_usage)
-        if not usage["prompt_tokens"] and not usage["completion_tokens"]:
-            # Estimates support display/accounting but must never release the
-            # durable reservation as vendor usage (same rule as direct.py).
-            usage = {
-                "prompt_tokens": _estimate_tokens(messages, tools or [], 0),
-                "completion_tokens": _estimate_tokens(
-                    [{"role": "assistant", "content": full_content, "tool_calls": tool_calls}],
-                    [],
-                    0,
-                ),
-                "estimated": True,
-            }
-            usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
-        duration_ms = (time.monotonic() - start) * 1000
-        metrics.record_llm_call(
-            session_id="",
-            model=resolved_model,
-            duration_ms=duration_ms,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
+        response = await complete_stream(
+            settlement,
+            provider_name=_PROVIDER_NAME,
+            requested_model=resolved_model,
+            resolved_model=resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(content_parts),
+            tool_calls=call_accumulator.result(),
+            usage=_map_usage(stream_usage),
+            started=start,
+            missing_usage="estimate",
+            total_tokens="keep",
+            audit_model=resolved_model,
+            debug_label="chatgpt",
         )
-        await settlement.settle(usage, model=resolved_model)
-        audit_log(
-            "llm_stream_complete",
-            provider=_PROVIDER_NAME,
-            model=resolved_model,
-            tool_calls=len(tool_calls),
-        )
-        if logger.isEnabledFor(20):  # DEBUG — stable fields only, never token values.
-            logger.debug(
-                "chatgpt stream complete model=%s tool_calls=%d", resolved_model, len(tool_calls)
-            )
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content=full_content,
-                model=resolved_model,
-                usage=usage,
-                tool_calls=tool_calls,
-            ),
-        )
+        yield StreamEvent(type="done", response=response)
 
     async def complete(
         self,

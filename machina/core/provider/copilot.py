@@ -27,7 +27,6 @@ GitHub token is long-lived and a revoked one surfaces as a typed 401.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 import uuid
@@ -39,23 +38,24 @@ import httpx
 from machina import __version__
 from machina.core.background_tasks import joined_teardown
 from machina.core.exceptions import ProviderError, RateLimitError, ValidationError
-from machina.core.metrics import metrics
 from machina.core.models import LLMResponse, StreamEvent, ToolDefinition
-from machina.core.provider._log import logger
-from machina.core.provider.audit import audit_log
 from machina.core.provider.base import LLMProvider
 from machina.core.provider.rate_limit import RateLimitBinding
-from machina.core.provider.sse import sse_data
+from machina.core.provider.streaming import (
+    OpenAIStreamState,
+    begin_stream_usage,
+    complete_stream,
+    fail_stream,
+    openai_stream_events,
+)
 from machina.core.provider.transport import (
-    ReservationSettlement,
-    _stream_error_message,
     _tools_payload,
     _truncated_stream_error,
     _validate_messages,
     _validate_params,
 )
 from machina.core.provider.usage_map import parse_openai_usage
-from machina.core.usage import _estimate_tokens, usage_store
+from machina.core.usage import usage_store
 from machina.security import copilot_auth
 
 _PROVIDER_NAME = "copilot"
@@ -219,30 +219,19 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
         if not resolved_model:
             raise ValidationError("copilot provider requires a model id")
         payload = self._payload(messages, resolved_model, temperature, max_tokens, tools, True)
-        audit_log(
-            "llm_stream_start",
-            provider=_PROVIDER_NAME,
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name=_PROVIDER_NAME,
             model=resolved_model,
-            message_count=len(messages),
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            session_id=session_id,
+            agent_id=agent_id,
         )
 
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id,
-                agent_id,
-                _PROVIDER_NAME,
-                resolved_model,
-                messages,
-                tools or [],
-                max_tokens,
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
-
-        content_parts: list[str] = []
         accumulator = _ToolCallAccumulator()
-        stream_usage: dict[str, Any] = {}
-        saw_terminal = False
+        state = OpenAIStreamState(resolved_model=resolved_model)
         start = time.monotonic()
         try:
             tokens = await self._resolve_tokens()
@@ -275,123 +264,45 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
                     raise ProviderError(
                         f"copilot provider HTTP {response.status_code} for {resolved_model}: {body}"
                     )
-                async for line in response.aiter_lines():
-                    data = sse_data(line)
-                    if data is None:
-                        continue
-                    data = data.strip()
-                    if not data:
-                        continue
-                    if data == "[DONE]":
-                        saw_terminal = True
-                        continue
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(chunk, dict):
-                        continue
-                    if chunk.get("error"):
-                        # Explicit error frame: the Copilot gateway can answer
-                        # HTTP 200 and then stream an ``{"error": ...}`` frame
-                        # instead of choices. Ignoring it let a later ``[DONE]``
-                        # close the call as a successful empty/partial
-                        # completion (H12); fail the stream honestly with the
-                        # same typed error as the direct/openrouter transports.
-                        # The ordinary error path below (metrics, audit,
-                        # reservation) accounts the failed call; already-yielded
-                        # text is never re-counted as a completed response.
-                        raise ProviderError(_stream_error_message(chunk, resolved_model))
-                    usage = chunk.get("usage")
-                    if isinstance(usage, dict):
-                        stream_usage = usage
-                    choices = chunk.get("choices")
-                    choice = (
-                        choices[0]
-                        if isinstance(choices, list) and choices and isinstance(choices[0], dict)
-                        else None
-                    )
-                    if choice is None:
-                        continue
-                    delta = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
-                    text = delta.get("content")
-                    if isinstance(text, str) and text:
-                        content_parts.append(text)
-                        yield StreamEvent(type="text", content=text)
-                    for call in delta.get("tool_calls") or []:
-                        if isinstance(call, dict):
-                            index = call.get("index")
-                            accumulator.add(
-                                index if isinstance(index, int) else 0,
-                                call,
-                            )
-                    finish = choice.get("finish_reason")
-                    if isinstance(finish, str) and finish:
-                        saw_terminal = True
-            if not saw_terminal:
+                async for event in openai_stream_events(
+                    response,
+                    state,
+                    add_tool_call=accumulator.add,
+                    stop_on_done=False,
+                    track_model=False,
+                ):
+                    yield event
+            if not state.saw_terminal:
                 raise _truncated_stream_error(_PROVIDER_NAME, resolved_model)
         except BaseException as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            metrics.record_llm_call(
-                session_id="", model=resolved_model, duration_ms=duration_ms, is_error=True
-            )
-            await settlement.fail()
-            if not isinstance(exc, Exception):
-                raise
-            audit_log(
-                "llm_stream_error",
-                provider=_PROVIDER_NAME,
-                model=resolved_model,
-                error=str(exc),
+            await fail_stream(
+                settlement,
+                provider_name=_PROVIDER_NAME,
+                audit_model=resolved_model,
+                resolved_model=resolved_model,
+                started=start,
+                error=exc,
             )
             raise
 
-        tool_calls = accumulator.result()
-        full_content = "".join(content_parts)
-        usage = parse_openai_usage(stream_usage)
-        if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
-            usage = {
-                "prompt_tokens": _estimate_tokens(messages, tools or [], 0),
-                "completion_tokens": _estimate_tokens(
-                    [{"role": "assistant", "content": full_content, "tool_calls": tool_calls}],
-                    [],
-                    0,
-                ),
-                "estimated": True,
-            }
-        usage["total_tokens"] = max(
-            usage.get("total_tokens", 0),
-            usage["prompt_tokens"] + usage["completion_tokens"],
+        response_obj = await complete_stream(
+            settlement,
+            provider_name=_PROVIDER_NAME,
+            requested_model=resolved_model,
+            resolved_model=resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(state.content_parts),
+            tool_calls=accumulator.result(),
+            usage=parse_openai_usage(state.stream_usage),
+            started=start,
+            missing_usage="estimate",
+            total_tokens="max",
+            audit_model=resolved_model,
+            debug_label="copilot",
+            raw={"provider": _PROVIDER_NAME, "version": __version__},
         )
-        duration_ms = (time.monotonic() - start) * 1000
-        metrics.record_llm_call(
-            session_id="",
-            model=resolved_model,
-            duration_ms=duration_ms,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-        )
-        await settlement.settle(usage, model=resolved_model)
-        audit_log(
-            "llm_stream_complete",
-            provider=_PROVIDER_NAME,
-            model=resolved_model,
-            tool_calls=len(tool_calls),
-        )
-        if logger.isEnabledFor(20):  # DEBUG — stable fields only, never token values.
-            logger.debug(
-                "copilot stream complete model=%s tool_calls=%d", resolved_model, len(tool_calls)
-            )
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content=full_content,
-                model=resolved_model,
-                usage=usage,
-                tool_calls=tool_calls,
-                raw={"provider": _PROVIDER_NAME, "version": __version__},
-            ),
-        )
+        yield StreamEvent(type="done", response=response_obj)
 
     async def complete(
         self,

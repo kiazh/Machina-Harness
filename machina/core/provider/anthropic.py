@@ -29,6 +29,7 @@ from machina.core.provider.reasoning import (
     normalize_reasoning_effort,
 )
 from machina.core.provider.sse import sse_data, sse_event
+from machina.core.provider.streaming import begin_stream_usage, complete_stream, fail_stream
 from machina.core.provider.transport import (
     ReservationSettlement,
     _log_prompt_cache_breakpoints,
@@ -377,25 +378,16 @@ class AnthropicProvider(LLMProvider, RateLimitBinding):
             messages, model, temperature, max_tokens, tools, reasoning_effort, True
         )
 
-        audit_log(
-            "llm_stream_start",
-            provider=self.PROVIDER_NAME,
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name=self.PROVIDER_NAME,
             model=model,
-            message_count=len(messages),
+            messages=messages,
+            tools=tools,
+            max_tokens=payload["max_tokens"],
+            session_id=session_id,
+            agent_id=agent_id,
         )
-
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id,
-                agent_id,
-                self.PROVIDER_NAME,
-                model,
-                messages,
-                tools or [],
-                payload["max_tokens"],
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
         start = time.monotonic()
 
         text_parts: list[str] = []
@@ -510,11 +502,14 @@ class AnthropicProvider(LLMProvider, RateLimitBinding):
         except BaseException as e:
             # GeneratorExit/CancelledError bypass ``except Exception``; settle
             # before re-raising so an early close cannot strand the reservation.
-            _record_llm_call(resolved_model, (time.monotonic() - start) * 1000, is_error=True)
-            await settlement.fail()
-            if not isinstance(e, Exception):
-                raise
-            audit_log("llm_stream_error", provider=self.PROVIDER_NAME, model=model, error=str(e))
+            await fail_stream(
+                settlement,
+                provider_name=self.PROVIDER_NAME,
+                audit_model=model,
+                resolved_model=resolved_model,
+                started=start,
+                error=e,
+            )
             raise
 
         tool_calls = [
@@ -549,33 +544,23 @@ class AnthropicProvider(LLMProvider, RateLimitBinding):
         # message_delta carries the cumulative output count; it wins over any
         # placeholder in message_start.
         stream_usage["output_tokens"] = output_tokens
-        usage = parse_anthropic_usage(stream_usage)
-        _record_llm_call(
-            resolved_model,
-            (time.monotonic() - start) * 1000,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-        )
-        await settlement.settle(usage, model=resolved_model)
-        audit_log(
-            "llm_stream_complete",
-            provider=self.PROVIDER_NAME,
-            model=model,
-            tool_calls=len(tool_calls),
-        )
         raw: dict[str, Any] = {}
         if native_content:
             raw[PROVIDER_CONTENT_KEY] = native_content
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content="".join(text_parts),
-                model=resolved_model,
-                usage=usage,
-                raw=raw,
-                tool_calls=tool_calls,
-            ),
+        response = await complete_stream(
+            settlement,
+            provider_name=self.PROVIDER_NAME,
+            requested_model=model,
+            resolved_model=resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(text_parts),
+            tool_calls=tool_calls,
+            usage=parse_anthropic_usage(stream_usage),
+            started=start,
+            raw=raw,
         )
+        yield StreamEvent(type="done", response=response)
 
     async def close(self) -> None:
         await self.client.aclose()

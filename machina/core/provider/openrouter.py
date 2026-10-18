@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -27,13 +26,18 @@ from machina.core.provider.caches import (
 from machina.core.provider.prompt_cache import openrouter_cache_wiring
 from machina.core.provider.rate_limit import RateLimitBinding
 from machina.core.provider.reasoning import _resolve_effort, normalize_reasoning_effort
-from machina.core.provider.sse import sse_data
+from machina.core.provider.streaming import (
+    OpenAIStreamState,
+    begin_stream_usage,
+    complete_stream,
+    fail_stream,
+    openai_stream_events,
+)
 from machina.core.provider.transport import (
     ReservationSettlement,
     _is_free_model,
     _log_prompt_cache_breakpoints,
     _post_with_retry,
-    _stream_error_message,
     _stream_with_retry,
     _tools_payload,
     _truncated_stream_error,
@@ -357,96 +361,29 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
             "openrouter", model, system=marks[0], tools=marks[1], tail=marks[2]
         )
 
-        audit_log(
-            "llm_stream_start", provider="openrouter", model=model, message_count=len(messages)
+        settlement = await begin_stream_usage(
+            store=usage_store,
+            provider_name="openrouter",
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=payload_max,
+            session_id=session_id,
+            agent_id=agent_id,
         )
-
-        # Reserve usage if session_id and agent_id are provided
-        reservation_id = None
-        if session_id is not None and agent_id is not None:
-            reservation_id = await usage_store.reserve(
-                session_id,
-                agent_id,
-                "openrouter",
-                model,
-                messages,
-                tools or [],
-                payload_max,
-            )
-        settlement = ReservationSettlement(reservation_id, usage_store)
         start = time.monotonic()
-
-        content_parts: list[str] = []
-        tool_calls_by_index: dict[int, dict[str, str]] = {}
-        stream_usage: dict[str, int] = {}
-        resolved_model = model
-        saw_terminal = False
+        state = OpenAIStreamState(resolved_model=model)
 
         for cand in candidates:
             payload["model"] = cand
-            resolved_model = cand
-            content_parts = []
-            tool_calls_by_index = {}
-            stream_usage = {}
-            saw_terminal = False
+            state = OpenAIStreamState(resolved_model=cand)
             try:
                 async with _stream_with_retry(self.client, "/chat/completions", payload) as resp:
                     resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        data = sse_data(line)
-                        if data is None:
-                            continue
-                        if data.strip() == "[DONE]":
-                            saw_terminal = True
-                            break
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(chunk, dict):
-                            continue
-                        # An explicit error frame (HTTP 200 + SSE error body)
-                        # must fail the stream, not silently truncate it.
-                        if chunk.get("error"):
-                            raise ProviderError(_stream_error_message(chunk, resolved_model))
-                        resolved_model = chunk.get("model") or resolved_model
-                        # The usage chunk arrives with an empty choices list.
-                        if chunk.get("usage"):
-                            stream_usage = chunk["usage"]
-                        choices = chunk.get("choices", [])
-                        if not choices:
-                            continue
-                        if choices[0].get("finish_reason"):
-                            saw_terminal = True
-                        delta = choices[0].get("delta", {})
-
-                        # Text content
-                        content = delta.get("content", "")
-                        if content:
-                            content_parts.append(content)
-                            yield StreamEvent(type="text", content=content)
-
-                        # Tool calls — accumulate deltas by index
-                        tc_deltas = delta.get("tool_calls", [])
-                        for tc_delta in tc_deltas:
-                            idx = tc_delta.get("index", 0)
-                            if idx not in tool_calls_by_index:
-                                tool_calls_by_index[idx] = {"id": "", "name": "", "arguments": ""}
-                            tc = tool_calls_by_index[idx]
-                            if tc_delta.get("id"):
-                                tc["id"] = tc_delta["id"]
-                            func = tc_delta.get("function", {})
-                            if func.get("name"):
-                                tc["name"] = func["name"]
-                            if func.get("arguments"):
-                                frag = func["arguments"]
-                                if isinstance(frag, dict):
-                                    # Some gateways emit structured args; stringify
-                                    # before concatenating the streamed fragments.
-                                    frag = json.dumps(frag)
-                                tc["arguments"] += frag
-                    if not saw_terminal:
-                        raise _truncated_stream_error("openrouter", resolved_model)
+                    async for event in openai_stream_events(resp, state):
+                        yield event
+                    if not state.saw_terminal:
+                        raise _truncated_stream_error("openrouter", state.resolved_model)
                 # Success — stop trying fallbacks.
                 break
             except Exception as e:
@@ -454,21 +391,20 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
                     # Account-wide daily quota exhausted: no free candidate can
                     # succeed, so stop now instead of sleeping through the rest
                     # of the chain and burning more of the quota.
-                    _record_llm_call(
-                        resolved_model, (time.monotonic() - start) * 1000, is_error=True
-                    )
-                    await settlement.fail()
-                    audit_log(
-                        "llm_stream_rate_limited",
-                        provider="openrouter",
-                        model=cand,
-                        error=str(e),
+                    await fail_stream(
+                        settlement,
+                        provider_name="openrouter",
+                        audit_model=cand,
+                        resolved_model=state.resolved_model,
+                        started=start,
+                        error=e,
+                        audit_event="llm_stream_rate_limited",
                     )
                     raise
                 status = None
                 if isinstance(e, httpx.HTTPStatusError) and e.response is not None:
                     status = e.response.status_code
-                nothing_yielded = not content_parts and not tool_calls_by_index
+                nothing_yielded = not state.content_parts and not state.tool_calls_by_index
                 retryable = status in (429, 404) and nothing_yielded and cand != candidates[-1]
                 if retryable:
                     logger.warning(
@@ -476,18 +412,20 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
                     )
                     # Discard any partial state so a throttled candidate cannot
                     # contaminate the next one.
-                    content_parts = []
-                    tool_calls_by_index = {}
-                    stream_usage = {}
+                    state = OpenAIStreamState(resolved_model=cand)
                     try:
                         await asyncio.sleep(2.0)
-                    except BaseException:
+                    except BaseException as pause_exc:
                         # Cancel/close while waiting for the next fallback
                         # candidate must settle the shared reservation.
-                        _record_llm_call(
-                            resolved_model, (time.monotonic() - start) * 1000, is_error=True
+                        await fail_stream(
+                            settlement,
+                            provider_name="openrouter",
+                            audit_model=cand,
+                            resolved_model=state.resolved_model,
+                            started=start,
+                            error=pause_exc,
                         )
-                        await settlement.fail()
                         raise
                     continue
                 if (
@@ -502,109 +440,57 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
                         "free stream model %s 404 with tools, retrying without tools", cand
                     )
                     payload.pop("tools", None)
-                    content_parts = []
-                    tool_calls_by_index = {}
-                    stream_usage = {}
-                    saw_terminal = False
+                    state = OpenAIStreamState(resolved_model=cand)
                     try:
                         async with _stream_with_retry(
                             self.client, "/chat/completions", payload
                         ) as resp2:
                             resp2.raise_for_status()
-                            async for line in resp2.aiter_lines():
-                                d2 = sse_data(line)
-                                if d2 is None:
-                                    continue
-                                if d2.strip() == "[DONE]":
-                                    saw_terminal = True
-                                    break
-                                try:
-                                    ch2 = json.loads(d2)
-                                except json.JSONDecodeError:
-                                    continue
-                                if isinstance(ch2, dict) and ch2.get("error"):
-                                    raise ProviderError(_stream_error_message(ch2, resolved_model))
-                                resolved_model = ch2.get("model") or resolved_model
-                                if ch2.get("usage"):
-                                    stream_usage = ch2["usage"]
-                                chs = ch2.get("choices", [])
-                                if not chs:
-                                    continue
-                                if chs[0].get("finish_reason"):
-                                    saw_terminal = True
-                                dl2 = chs[0].get("delta", {})
-                                c2 = dl2.get("content", "")
-                                if c2:
-                                    content_parts.append(c2)
-                                    yield StreamEvent(type="text", content=c2)
-                            if not saw_terminal:
-                                raise _truncated_stream_error("openrouter", resolved_model)
+                            async for event in openai_stream_events(resp2, state):
+                                yield event
+                            if not state.saw_terminal:
+                                raise _truncated_stream_error("openrouter", state.resolved_model)
                         break
                     except Exception as e2:
                         e = e2
-                _record_llm_call(resolved_model, (time.monotonic() - start) * 1000, is_error=True)
-                await settlement.fail()
-                audit_log("llm_stream_error", provider="openrouter", model=cand, error=str(e))
+                await fail_stream(
+                    settlement,
+                    provider_name="openrouter",
+                    audit_model=cand,
+                    resolved_model=state.resolved_model,
+                    started=start,
+                    error=e,
+                )
                 raise e
             except BaseException as exc:
                 # GeneratorExit/CancelledError at a text yield or inside the
                 # SDK stream bypass ``except Exception``; settle before the
                 # generator closes so the reservation is not stranded.
-                _record_llm_call(resolved_model, (time.monotonic() - start) * 1000, is_error=True)
-                await settlement.fail()
-                if not isinstance(exc, Exception):
-                    raise
+                await fail_stream(
+                    settlement,
+                    provider_name="openrouter",
+                    audit_model=cand,
+                    resolved_model=state.resolved_model,
+                    started=start,
+                    error=exc,
+                )
                 raise
 
-        # Build final tool calls list
-        tool_calls: list[dict] = []
-        for idx in sorted(tool_calls_by_index.keys()):
-            tc = tool_calls_by_index[idx]
-            tool_calls.append(
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": tc["arguments"] or "{}",
-                    },
-                }
-            )
-
-        full_content = "".join(content_parts)
-        usage = parse_openai_usage(stream_usage)
-        if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
-            # This transport never estimated streamed usage; report the
-            # missing figures honestly instead of fabricating counts. The
-            # ledger keeps the conservative reservation for missing usage.
-            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        usage["total_tokens"] = max(
-            usage.get("total_tokens", 0),
-            usage["prompt_tokens"] + usage["completion_tokens"],
+        response = await complete_stream(
+            settlement,
+            provider_name="openrouter",
+            requested_model=model,
+            resolved_model=state.resolved_model,
+            messages=messages,
+            tools=tools,
+            content="".join(state.content_parts),
+            tool_calls=state.tool_calls(),
+            usage=parse_openai_usage(state.stream_usage),
+            started=start,
+            missing_usage="zero",
+            total_tokens="max",
         )
-
-        _record_llm_call(
-            resolved_model,
-            (time.monotonic() - start) * 1000,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-        )
-        # Finish usage reservation
-        await settlement.settle(usage, model=resolved_model)
-
-        audit_log(
-            "llm_stream_complete", provider="openrouter", model=model, tool_calls=len(tool_calls)
-        )
-
-        yield StreamEvent(
-            type="done",
-            response=LLMResponse(
-                content=full_content,
-                model=resolved_model,
-                usage=usage,
-                tool_calls=tool_calls,
-            ),
-        )
+        yield StreamEvent(type="done", response=response)
 
     async def close(self) -> None:
         # Close the shared client (it will be recreated if needed)
