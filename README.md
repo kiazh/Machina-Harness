@@ -8,13 +8,13 @@ Machina is a terminal AI workspace: chat beside your code, delegate to specialis
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
-> **How to read this README.** [The hook](#the-hook-what-makes-this-harness-different) is the five-minute version of why the project exists and what is technically interesting about it. [One session, end to end](#one-session-end-to-end) shows the whole system in motion. The [deep dives](#deep-dive-1-context-management) are self-contained explanations of how the machinery works. The [rebuild guide](#rebuild-it-conceptually) is a blueprint for building your own. The [reference](#reference) is for installation and operations.
+> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
 **Release status:** 0.2.0 development release candidate. See [release evidence and remaining deployment gates](docs/verification/RELEASE_READINESS.md) before operating a public service.
 
 ## Contents
 
-- [The hook](#the-hook-what-makes-this-harness-different) — why this harness is interesting
+- [Technical overview](#technical-overview) — the problems a harness must solve
 - [One session, end to end](#one-session-end-to-end) — the whole system in a worked example
 - [Feature tour](#feature-tour) — the headline capabilities
 - [Deep dive 1: Context management](#deep-dive-1-context-management) — the model's working set
@@ -24,37 +24,49 @@ Machina is a terminal AI workspace: chat beside your code, delegate to specialis
 - [Deep dive 5: Providers and accounting](#deep-dive-5-providers-and-accounting) — one interface, many models
 - [Deep dive 6: Surfaces and integrations](#deep-dive-6-surfaces-and-integrations) — TUI, CLI, HTTP, MCP, skills, jobs
 - [Reliability and testing](#reliability-and-testing) — how the project is kept honest
-- [Rebuild it conceptually](#rebuild-it-conceptually) — a blueprint for building your own
+- [Conceptual blueprint](#conceptual-blueprint) — how to build a harness like this
 - [Get started](#get-started) — install and run
 - [Reference](#reference) — commands, providers, configuration, API, Docker, development
 
-## The hook: what makes this harness different
+## Technical overview
 
-Every agent demo eventually hits the same wall.
+A chat API solves one problem: given a sequence of messages, return a completion. An agent harness solves the problems around it.
 
-The conversation gets long. A test run produces a megabyte of output. The process restarts. A tool wants to delete a file. The model that felt brilliant in a five-minute demo starts repeating itself, forgetting decisions, and asking for permission to do the wrong thing.
-
-Machina is built around that wall.
-
-A model call is easy. A **harness** is hard: it has to decide what the model sees, what it remembers, what it is allowed to do, and what happens when something fails halfway through. Machina treats those as four first-class systems rather than glue code around a chat endpoint.
-
-| The hard problem | The naive version | What Machina does |
+| Problem | Why it is hard | The design position |
 |---|---|---|
-| **Context is finite and expensive** | Resend the transcript until the provider truncates it | Stores typed context chunks, sends a budgeted *projection*, compacts at safe boundaries, and keeps large tool results recoverable as artifacts |
-| **Memory is not chat history** | Dump embeddings into a vector table and hope | Runs a memory lifecycle: extract, score, dedupe, redact, attach provenance, approve, retrieve, reinforce, decay |
-| **Tools are dangerous** | Ask "are you sure?" with a tool name | Binds approval to a canonical cryptographic digest of the exact action, revalidates at execution, and consumes it once |
-| **Processes die and humans are slow** | Hold a transaction open and hope | Uses turn leases, durable jobs, resumable approvals, and explicit pause states across every surface |
-| **Every surface drifts** | Reimplement the loop in the CLI, UI, and API | Runs one core behind four adapters: terminal UI, CLI, HTTP, and MCP |
+| **What the model sees** | The context window is finite, priced per token, and degrades when it is filled with irrelevant or repetitive material. The naive approach resends the transcript until the provider truncates it. | Store typed events, build a budgeted projection for each request, compact at safe boundaries, and keep large results recoverable as artifacts. |
+| **What the system remembers** | A transcript is episodic. Durable knowledge has to survive the session that produced it, stay correctable, and remain retrievable without drowning the current instruction. | Run a memory lifecycle: extract, score, categorize, deduplicate, redact, attach provenance, optionally approve, retrieve with relevance first, and decay reversibly. |
+| **What the agent may do** | A tool call is a real action on a real machine. A tool name is not a security boundary. | Canonicalize the exact action, bind approval to a digest of every material field, revalidate at execution, and consume the approval once. |
+| **What happens when something interrupts** | Processes crash, users take time to approve, and scheduled jobs restart mid-flight. A held transaction does not survive any of that. | Use turn leases with fencing, durable jobs, resumable approvals, and explicit pause states. |
+| **How the surfaces stay consistent** | Reimplementing the loop in each surface produces four subtly different harnesses. | Keep one core behind the terminal UI, CLI, HTTP/SSE, and MCP adapters, and test parity between them. |
 
-### The two flagship ideas
+The central design claim is that an agent harness is a **state-management system**, not a prompt-engineering system. The model is the only stateless component. Everything else exists to give it a coherent, bounded, auditable view of durable state.
 
-**Context is a working set, not a transcript.** The model is stateless; every request is its whole world. That world is small, expensive, and degrades when cluttered. Machina stores the full conversation in PostgreSQL, but sends only a curated view. Older material is summarized into a checkpoint, originals are archived, oversized tool output is stored verbatim as an artifact, and the model receives a deterministic smaller view plus a handle it can use to recover the details. If the original could not be stored, Machina says so instead of pretending the text is recoverable.
+```mermaid
+flowchart TB
+    UI[Terminal UI] --> GW[Gateway]
+    CLI[CLI] --> CORE[Core runtime]
+    API[HTTP API + SSE] --> CORE
+    MCP[MCP server] --> CORE
+    GW --> CORE
+    CORE <--> MODEL[Provider adapters]
+    CORE <--> DB[(PostgreSQL + pgvector)]
+    CORE --> BROKER[Permission broker]
+    BROKER --> TOOLS[Files, terminal, web, MCP tools]
+    TOOLS --> CORE
+```
 
-**Memory is a lifecycle, not a vector bucket.** Chat history answers "what just happened?" Memory answers "what should still be true next week?" Machina extracts candidate memories after turns, scores their importance, removes duplicates, redacts secrets, records provenance, optionally queues them for human approval, and retrieves them with hybrid search. Retrieval is relevance-first; recency and importance only break ties. Forgetting is a retrieval weight, not silent deletion, so a memory can be inspected, corrected, or restored.
+### The two core systems
 
-### What a reviewer should look at
+**Context: storage versus working set.** The durable transcript is an event log. The prompt is a projection of that log, assembled for one request. The two have different requirements. The log must be complete, ordered, and recoverable. The working set must be small, relevant, and cheap. Compaction is the bridge: it replaces old events with a checkpoint and archives the originals. Artifacts handle the case where one event is too large to send but too important to lose. Projection decides which evidence fits and discloses what was omitted. The result is a cache hierarchy for attention: durable storage, a bounded working set, and an explicit recovery path.
 
-| If you review for… | Start here | The interesting part |
+**Memory: claims versus facts.** A memory is not a transcript line and not a document. It is a durable claim extracted from experience, with a category, an importance, a source, and a history of use. The lifecycle is extraction, scoring, deduplication, redaction, provenance, optional approval, hybrid retrieval, reinforcement, and decay. The design assumes memories can be wrong. That is why inspection, correction, forgetting, and approval exist. The goal is not to remember everything; it is to keep the useful subset trustworthy and retrievable.
+
+Both systems share the same discipline: **store the original, project a bounded view, and be explicit about what was lost.** Context applies that discipline to the conversation; memory applies it to knowledge.
+
+### Engineering map
+
+| Area | Where to start | Why it is hard |
 |---|---|---|
 | **Distributed systems** | [Turn ownership](#turn-ownership-and-cancellation), [jobs](machina/core/scheduler.py), [approval resume](machina/core/approval_resume.py) | Exactly-once effects across crashes, restarts, and human waits; leases, fencing, and cancellation-safe cleanup |
 | **ML / inference infrastructure** | [Context](#deep-dive-1-context-management), [memory](#deep-dive-2-memory-management), [usage ledger](docs/TOKEN_EFFICIENCY.md) | Bounded prompts with honest recovery, hybrid retrieval, token accounting that distinguishes missing data from zero |
@@ -148,6 +160,18 @@ flowchart LR
     L --> B
     K -- no --> B
 ```
+
+### The mental model
+
+Think of the system as three layers with different jobs:
+
+1. **Durable storage** holds everything that happened. It must be complete, ordered, and recoverable. It is allowed to be large.
+2. **The working set** is what the model sees this turn. It must be small, relevant, and within budget. It is allowed to be lossy, but only if the loss is disclosed and the original is recoverable.
+3. **Attention** is the model's actual capacity to use the working set. It is not a database field; it is the reason padding a prompt with irrelevant text is counterproductive even when the tokens fit.
+
+Most context bugs come from collapsing these layers. Sending the transcript confuses storage with the working set. Summarizing without archiving confuses the working set with storage. Truncating without a handle makes the loss invisible. The pipeline above keeps the layers separate.
+
+The budget is also not one number. It is a set of reserved envelopes: system instructions and tool schemas, recent native turns, skills, memory, documents, and artifacts. The sum must leave room for the model's output. A section that overflows is trimmed by policy, not by whichever string happens to be last.
 
 Each stage exists because the one before it is not enough on its own.
 
@@ -257,7 +281,21 @@ RAG has its own reading budget (`retrieval_token_budget`, default 6,000 tokens).
 | Projection produces an empty fit | Keep the first entry even at zero budget, so protected evidence is not silently erased |
 | Provider context limit differs from estimate | Use the session's effective window and the provider's configured limit, not a global guess |
 
-### Rebuild it: the context manager in six steps
+### What breaks if a stage is missing
+
+| Missing stage | What eventually happens |
+|---|---|
+| Typed events | You cannot budget, deduplicate, or recover; every optimization becomes a string heuristic |
+| Token measurement | The request silently exceeds the window, and the provider truncates the part that mattered |
+| Compaction | The session becomes unusable, or you delete history and lose the task |
+| Continuity | The recent dialogue loses its shape, prompt caches break, and answers become disjointed |
+| Artifacts | Large results are lost or re-fetched; the model cannot recover the one detail it needs |
+| Reducers | The window fills with repetitive output and the decisive line is buried |
+| Projection | Duplicate evidence crowds out the instruction, and the model cannot tell what was omitted |
+
+### Design principles for a context manager
+
+The implementation follows from six decisions, listed in dependency order: each one makes the next possible.
 
 1. **Store events, not prompts.** Every message, tool call, result, and document becomes a typed row with a token count and stable ordering.
 2. **Always build a projection.** Never send the table. Budget in priority order and disclose what did not fit.
@@ -265,6 +303,8 @@ RAG has its own reading budget (`retrieval_token_budget`, default 6,000 tokens).
 4. **Preserve before lossy publication.** Store the original artifact first. If that fails, keep the old behavior and say nothing about recovery.
 5. **Compact with a checkpoint.** Summarize objective, constraints, findings, and next action; archive originals; replace exact IDs transactionally; keep a recent native tail.
 6. **Make continuity explicit.** Persist the boundary and summary; keep the prefix append-only between compactions; start the retained tail on a user turn.
+
+The order matters. Without typed events you cannot measure tokens; without measurement you cannot budget; without budgeting, compaction and projection are guesswork. The invariant that ties the stages together is **store the original before publishing a lossy view**.
 
 Read the implementation in [`core/context.py`](machina/core/context.py), [`core/compression.py`](machina/core/compression.py), [`core/continuity.py`](machina/core/continuity.py), [`core/artifacts.py`](machina/core/artifacts.py), [`core/reducers.py`](machina/core/reducers.py), and [`core/projection.py`](machina/core/projection.py). The contract-level map is [docs/TOKEN_EFFICIENCY.md](docs/TOKEN_EFFICIENCY.md).
 
@@ -289,6 +329,19 @@ Machina treats memory as a lifecycle with its own data model, safety rules, and 
 RAG stands for retrieval-augmented generation: selected source passages are added to the prompt instead of expecting the model to know your documents already.
 
 They share retrieval machinery where useful, but they are not the same table, the same lifecycle, or the same authority.
+
+### The mental model
+
+Memory is not a second transcript and it is not a knowledge graph of everything. It is a **small set of durable claims** that the system believes are worth carrying forward. Each claim has four properties that matter as much as its text:
+
+- **Category** — is this a preference, a decision, a fact, an event, or something transient?
+- **Provenance** — where did it come from, and who or what asserted it?
+- **Confidence and importance** — how strongly should it compete for attention?
+- **History** — when was it last used, and has it been reinforced or contradicted?
+
+Retrieval is then a ranking problem: given the current task, which few claims are relevant enough to justify their tokens? Relevance comes first. Importance, recency, and strength are tie-breakers. A memory that is important but irrelevant is still noise.
+
+Forgetting is a feature, not a failure. A system that can only add memories eventually becomes a hoarder: retrieval quality falls, contradictions accumulate, and users lose trust. Decay keeps the store useful without destroying the audit trail.
 
 ### The memory lifecycle
 
@@ -364,7 +417,22 @@ Machina also stores agent-owned preferences and lessons ("growth"). These are no
 - It is **not** infallible. Memories can be incomplete or wrong; the inspection, correction, and forgetting controls exist for that reason.
 - It is **not** shared across installations. Persistence is local to the configured database, and the HTTP surface uses a shared API key rather than per-user accounts.
 
-### Rebuild it: the memory system in six steps
+### What breaks if a stage is missing
+
+| Missing stage | What eventually happens |
+|---|---|
+| Categorization | Preferences, facts, and transient chatter compete in one ranking |
+| Scoring | Every sentence is equally memorable, so the store fills with noise |
+| Deduplication | The same claim accumulates in slightly different forms and dominates retrieval |
+| Redaction | Secrets become durable and retrievable |
+| Provenance | A wrong memory cannot be traced or corrected |
+| Approval (when enabled) | The store becomes an unreviewed write path |
+| Relevance-first ranking | High-importance but irrelevant memories crowd out the current instruction |
+| Reversible decay | The only way to remove a memory is deletion, which destroys the audit trail |
+
+### Design principles for a memory system
+
+The lifecycle is a sequence of filters. Each one removes a different kind of error before it becomes durable.
 
 1. **Separate the tables.** Context chunks, memories, and documents have different lifecycles. Do not overload one table.
 2. **Extract after the turn.** Read only new chunks, advance a watermark only on complete processing, and make retries idempotent.
@@ -372,6 +440,8 @@ Machina also stores agent-owned preferences and lessons ("growth"). These are no
 4. **Redact and attach provenance before the write.** A memory without a source is a rumor.
 5. **Retrieve with a relevance-first policy.** Use recency and importance as tie-breakers, never as a substitute for relevance.
 6. **Make forgetting reversible.** Decay the retrieval weight; keep the row; provide inspect, forget, and restore paths.
+
+The result is not a database of everything the user ever said. It is a small, reviewable set of claims that can be retrieved when relevant and corrected when wrong.
 
 Read the implementation in [`memory/consolidator.py`](machina/memory/consolidator.py), [`memory/store.py`](machina/memory/store.py), [`memory/retriever.py`](machina/memory/retriever.py), [`memory/approval.py`](machina/memory/approval.py), and [`memory/growth.py`](machina/memory/growth.py).
 
@@ -388,6 +458,17 @@ An agent with tools is a program that can change your machine. "Are you sure?" i
 - **Waits that hold resources.** A human takes ten minutes; the database transaction or turn lease must not be held open.
 
 Machina's answer is a small permission kernel: every action is canonicalized, hashed, decided, and executed as a separate step.
+
+### The mental model
+
+Think of an approval as a **single-use capability for one exact action**, not as a role or a blanket permission. The capability has an identity: the canonical digest. Everything else follows from that idea:
+
+- If the action changes, the identity changes, and the old capability no longer applies.
+- If the capability is replayed, the system can see that it was already consumed.
+- If the decision is durable, a restart does not erase it.
+- If the wait is a state rather than a blocked thread, the process can release its resources.
+
+The broker is a reference monitor: every effect goes through it, it sees the exact action, and it fails closed when it cannot decide.
 
 ### The request flow
 
@@ -458,13 +539,30 @@ The same pause semantics exist on every surface:
 
 No SQL transaction is held across a human wait. Compute and approval deadlines are tracked separately: a human thinking for ten minutes does not consume the turn's compute budget, but the approval itself is still bounded by `approval_timeout`.
 
-### Rebuild it: the permission kernel in five steps
+### Why each control exists
+
+| Control | The failure it prevents |
+|---|---|
+| Effect declarations | Safety inferred from a tool name |
+| Canonicalization | Approving one path while executing another |
+| Versioned digest | Replay and silent field substitution |
+| Durable approval | The pause dying with the process |
+| Revalidation at execution | A changed action running under an old approval |
+| One-time consumption | Reusing a grant |
+| Human principal | The agent approving itself |
+| Releasing resources during the wait | Connection and lease exhaustion |
+
+### Design principles for a permission kernel
+
+The kernel is small on purpose. Its job is to turn an ambiguous request into one exact action, decide that action, and make the decision durable.
 
 1. **Declare effects.** A tool says what it reads, writes, executes, or contacts; do not infer safety from a name.
 2. **Canonicalize the action.** Resolve paths against one workspace root; separate argv from shell text; normalize targets.
 3. **Hash every material field.** Length-prefix the fields; version the digest; fail closed on old versions.
 4. **Separate decision from execution.** Persist the proposal; revalidate at execution; consume once.
 5. **Make the human wait explicit.** Pause, persist, release resources, and resume through a fresh fenced claim.
+
+The test of the design is not the happy path. It is whether a changed argument, a changed directory, a replayed approval, or a second consumer is rejected for a specific, explainable reason.
 
 Read [`permissions/policy.py`](machina/permissions/policy.py), [`permissions/broker.py`](machina/permissions/broker.py), [`permissions/store.py`](machina/permissions/store.py), and [`core/approval_resume.py`](machina/core/approval_resume.py). The threat model is in [SECURITY.md](SECURITY.md).
 
@@ -488,6 +586,12 @@ claim session lease
   post-turn: compaction, memory consolidation, growth, optional learning review
 ```
 
+### The mental model
+
+A turn is a **transaction over a conversation**, and the model is a stateless function called inside it. The transaction has an owner, a budget, a commit point, and a cleanup path. Tool calls are effects inside the transaction: they must be decided, executed, and recorded without pretending they are just another message.
+
+This framing explains most of the loop's design. Ownership prevents two transactions from interleaving. Fencing prevents an old transaction from committing after a new one started. Cancellation is a rollback path, not an error. Maintenance runs after commit because it is bookkeeping, not part of the user's answer.
+
 ### Turn ownership and cancellation
 
 Two writers on one session produce corrupted history. Machina uses a durable turn claim (a lease) plus fencing tokens (monotonic ownership markers). The gateway, REST API, CLI, scheduler, and delegation all go through the same coordinator. If a worker loses ownership, its effects are cancelled and the terminal success event is not emitted. A crash leaves an expired claim that another worker can reclaim.
@@ -509,7 +613,20 @@ The parent can inspect the child's result without merging every child message in
 
 When the answer is complete, the turn releases its lease and then performs enabled maintenance **after ownership is released**: automatic compaction, memory consolidation, growth updates, and optional skill-learning review. This ordering is deliberate. Maintenance must not extend the critical path or hold the session against the next user turn.
 
-### Rebuild it: the agent loop in five steps
+### Why each control exists
+
+| Control | The failure it prevents |
+|---|---|
+| Durable lease | Two writers corrupting one session |
+| Fencing token | A stale worker committing after losing ownership |
+| Cancellation as an outcome | False failures and leaked leases |
+| Bounded loops | Runaway tool calls and unbounded spend |
+| Post-commit maintenance | Maintenance blocking the next user turn |
+| Child authority cap | Delegation becoming a privilege escalation |
+
+### Design principles for the agent loop
+
+The loop is a state machine, not a while-loop around a model call. Each transition has an owner, a budget, and a defined failure behavior.
 
 1. **One owner per session.** Use a lease with a fencing token, not an in-process lock.
 2. **Build the agent from data.** Role, tools, model, and limits live in a definition; intersect with session authority.
@@ -517,11 +634,17 @@ When the answer is complete, the turn releases its lease and then performs enabl
 4. **Bound every loop.** Tokens, requests, wall time, approval time, and tool output all need ceilings.
 5. **Release before maintenance.** The user sees the answer; compaction and memory extraction happen after.
 
+The difference between a demo and a harness is here: the demo handles the successful path; the harness defines what happens on the other paths.
+
 ## Deep dive 5: Providers and accounting
 
 ### One interface, many dialects
 
 Every provider speaks a slightly different dialect: message shapes, tool-call formats, streaming events, reasoning controls, cache accounting, and error semantics. Machina puts them behind a provider interface and a factory. The runtime asks for a completion; the adapter handles the wire format.
+
+The mental model is a **translation boundary**, not a place to store policy. The runtime should be able to say "complete this request with these tools" without knowing how a vendor encodes tool calls, streaming chunks, or cache usage. Everything provider-specific is normalized at the edge: message shape, stop reason, usage fields, and errors.
+
+Two rules keep the boundary honest. Missing usage is a distinct state, not zero; a provider that does not report cache reads has not reported zero cache reads. And a model ID is a request, not a guarantee: the resolved model, the account's access, and the actual price can all differ. Accounting records what happened, not what was asked for.
 
 | Provider ID | Credential or connection | Bundled default |
 |---|---|---|
@@ -578,6 +701,8 @@ Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `hi
 | **MCP client** | stdio or HTTP | Bring external tools into Machina's catalog |
 
 Every surface shares the same agent factory, turn coordinator, permission broker, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
+
+The mental model is an **adapter over shared semantics**, not an implementation of the harness. The surfaces differ in transport, authentication, and interaction style. They must not differ in what a turn means, what an approval authorizes, or what a usage record contains. The test of a surface is parity: pause the same action in two surfaces and the approval identity should be the same.
 
 ### Skills: catalog first, bodies on demand
 
@@ -641,6 +766,10 @@ Some terminals or operating systems intercept shortcuts; the slash commands are 
 
 ## Reliability and testing
 
+### The mental model
+
+Reliability is a property of the failure paths, not the happy path. The design question is not "does a turn work?" but "what happens when the provider times out, the lease is lost, the approval never comes, the artifact store is full, or the schema is one version behind?" Each of those has a defined behavior, and the test suite exists to keep those behaviors from regressing.
+
 ### The source of truth
 
 PostgreSQL with pgvector is the durable store for sessions, context, archives, memories, documents, approvals, jobs, usage, and artifacts. Schema initialization is explicit (`machina init`); additive runtime migrations handle compatible upgrades. The gateway does not self-migrate, so a code + schema deployment must run initialization before starting workers. That is documented in [OPERATIONS.md](OPERATIONS.md) because ignoring it is a real outage.
@@ -674,192 +803,157 @@ The suite is not just feature coverage. It includes:
 - **Embeddings and reranking are optional.** Search is keyword-only by default and reports its degraded mode rather than fabricating vectors.
 - **Prompt caching is opt-in.** The project does not claim savings it has not measured.
 
-## Rebuild it conceptually
+## Conceptual blueprint
 
-You do not need Machina's full surface area to build the same idea. Here is the smallest coherent version, in the order that keeps the system honest.
+This section describes the concepts and the order of decisions, not an implementation. The point is to show what has to be true for a harness to behave like this, and why each layer exists.
 
-### Step 0: Pick the invariants
+### 1. Choose the invariants first
 
-Write these down before writing code:
+Write these down before choosing a database, a framework, or a model provider:
 
-1. The model is stateless. Every request must be assembled from durable state.
+1. The model is stateless. Every request is assembled from durable state.
 2. The transcript is an event log. The prompt is a projection of it.
-3. Nothing lossy is published before the original is stored.
+3. Nothing is published as recoverable before the original is stored.
 4. An approval binds to an exact canonical action, not a tool name.
 5. A turn has exactly one owner.
 6. Every optional subsystem degrades honestly and never fabricates success.
 
-### Step 1: Model the event log
+These are not implementation details. They are the rules that make failures diagnosable. If you break one, the symptom appears much later as "the model forgot" or "the agent did something unexpected," and there is no clean place to look. The invariants turn vague misbehavior into a specific violated contract.
 
-A minimal schema:
+### 2. Model durable state around questions
 
-```sql
-CREATE TABLE sessions (
-    id UUID PRIMARY KEY,
-    title TEXT,
-    state JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+A useful way to design the schema is to ask what question each record answers:
 
-CREATE TABLE context_chunks (
-    id UUID PRIMARY KEY,
-    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    chunk_type TEXT NOT NULL,          -- user | assistant | tool_call | tool_result | document | summary
-    payload JSONB NOT NULL,
-    token_count INT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+| Record | Question it answers | Why it must be durable |
+|---|---|---|
+| **Session** | What conversation is this, and what state belongs to it? | Resume, ownership, pinning, and cancellation |
+| **Context event** | What happened, in what order, and what did it cost? | Replay, budgeting, compaction, and audit |
+| **Artifact** | What was the exact original of a large result? | Recovery after truncation, without re-running the tool |
+| **Memory** | What claim should survive this session? | Cross-session recall, correction, and forgetting |
+| **Approval** | What exact action did a human authorize? | Safe execution and an auditable decision |
+| **Usage record** | What did each model call consume? | Budgets, cost attribution, and capacity planning |
+| **Job** | What work is scheduled or in flight? | Restart-safe automation and delegation |
 
-CREATE TABLE artifacts (
-    id UUID PRIMARY KEY,
-    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    content_revision INT NOT NULL,
-    complete BOOLEAN NOT NULL,
-    upstream_truncated BOOLEAN,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+The relationships matter as much as the records. Events belong to sessions. Artifacts are referenced by events. Memories carry provenance back to the sessions and chunks that produced them. Approvals reference the canonical action, not a chat message. Usage rows reference the model call and the session or agent that caused it. The result is a graph of evidence, not a pile of tables: every derived view can be traced back to an original.
 
-CREATE TABLE memories (
-    id UUID PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    category TEXT NOT NULL,
-    importance REAL NOT NULL,
-    embedding VECTOR(1536),
-    provenance JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+### 3. Make the turn a transaction
 
-Add indexes for `(session_id, created_at, id)` and a vector index on memory embeddings. The `VECTOR` column assumes the pgvector extension is installed.
+A turn needs a beginning, a commit point, and a cleanup path:
 
-### Step 2: Build the turn loop
+- **Claim.** Acquire a lease for the session. The lease answers "who may write?" and carries a fencing token so a stale worker cannot commit after ownership moved.
+- **Assemble.** Build the working set from durable state.
+- **Act.** Call the model. For each tool request, decide, execute, and record.
+- **Commit.** Persist the final answer, usage, and any state changes.
+- **Release.** Free the lease.
+- **Maintain.** Do compaction, consolidation, and other optional work after the commit, never inside it.
 
-```python
-async def run_turn(session_id, user_text):
-    lease = await claim_turn(session_id)
-    try:
-        await append_chunk(session_id, "user", user_text)
-        while True:
-            prompt = await assemble_prompt(session_id)
-            response = await provider.complete(prompt, tools=allowed_tools())
-            if response.tool_calls:
-                for call in response.tool_calls:
-                    decision = await broker.check(call)
-                    if decision.pending:
-                        await pause_for_approval(call, decision)
-                        return
-                    result = await execute(call)
-                    await append_tool_result(session_id, call, result)
-                continue
-            await append_chunk(session_id, "assistant", response.text)
-            return response.text
-    finally:
-        await release_turn(lease)
-```
+The exact sequence is less important than the failure behavior at each stage. A crash before commit leaves a reclaimable lease. A crash after commit leaves a complete turn. A cancellation releases the lease without recording a false failure. A lost lease cancels effects and prevents a stale success. This is the difference between a loop that works in a demo and one that survives a laptop lid closing.
 
-The important details are not in the sketch: leases, fencing, cancellation, usage accounting, and cleanup. Add them one at a time, with tests.
+### 4. Design the working set as a budget
 
-### Step 3: Build the context assembler
+The prompt is a resource-allocation problem, not a string concatenation. Decide the budget for each section before deciding the content:
 
-```python
-async def assemble_prompt(session_id):
-    system = load_system_prompt()
-    skills = select_skill_catalog_and_sections(task)
-    history = await recent_native_turns(session_id)
-    memory = await retrieve_memories(task, limit=5)
-    docs = await retrieve_documents(task, budget=6000)
-    evidence = project(memory + docs, token_budget=remaining())
-    return fit(system, skills, history, evidence, model_window())
-```
+- system instructions and tool schemas: fixed and protected;
+- recent native turns: reserved for continuity;
+- skills: catalog first, bodies on demand;
+- memory: relevance-ranked;
+- documents: relevance-ranked with their own retrieval budget;
+- artifacts and reduced views: bounded, with handles.
 
-Rules:
+Then apply three rules:
 
-- Budget every section, not just the total.
-- Deduplicate exact repeated evidence.
-- Keep tool-call groups together.
-- Disclose omitted evidence.
-- Never let a summary outrank the latest explicit user instruction.
+1. **Deduplicate exact evidence.** Repetition wastes budget and dilutes attention.
+2. **Preserve groups.** A tool call and its result must travel together; a summary must not be separated from the constraints it summarizes.
+3. **Disclose omissions.** If evidence did not fit, say so. Silent truncation teaches the model that the visible set is complete when it is not.
 
-### Step 4: Add compaction
+The model cannot reason about evidence it cannot see, but it also cannot reason well when the evidence is buried. Budgeting is how you choose what deserves attention.
 
-Store a checkpoint with a stable shape:
+### 5. Compact with a checkpoint
 
-```json
-{
-  "objective": "Fix the failing test suite",
-  "expected_artifact": "A passing test run",
-  "constraints": ["Do not change public APIs"],
-  "read_only_scope": "src/legacy/**",
-  "findings": [{"count": 1, "finding": "The failure is in the retry path"}],
-  "unresolved_questions": ["Is the timeout budget configurable?"],
-  "next_action": "Patch the retry guard and rerun the focused tests"
-}
-```
+When the working set crosses its threshold, do not ask the model to "summarize the conversation" and hope. Replace a defined set of old events with a checkpoint that answers:
 
-Compact only at a safe boundary. Archive originals. Replace exact IDs in one transaction. Keep a recent native tail. Persist the continuity boundary.
+- What is the objective?
+- What artifact or outcome is expected?
+- What constraints and read-only scopes apply?
+- What findings are established, and how many times were they seen?
+- What is unresolved?
+- What is the next action?
 
-### Step 5: Add artifacts and reducers
+Then archive the originals, replace the exact IDs in one transaction, keep a recent native tail, and persist a continuity boundary so the next request has a stable prefix. Retain one rule above all: the latest explicit user instruction outranks the checkpoint.
 
-When a tool result exceeds a threshold:
+A summary without these properties is just another lossy message. A checkpoint is a contract about what was lost and what still matters.
 
-1. Store it verbatim.
-2. If the store fails, use the old bounded behavior and say nothing about recovery.
-3. Otherwise, produce a deterministic view and include the artifact handle.
-4. Reauthorize every read; bind paging cursors to the revision.
+### 6. Treat recovery as part of the data model
 
-Start with one reducer for the format you see most (usually test output). Add formats only when you can keep the "no net saving means no change" rule.
+Large outputs create a tension: the model needs the information, but the window cannot hold it. The resolution is not "truncate harder." It is:
 
-### Step 6: Add memory
+- store the original verbatim;
+- publish a deterministic reduced view;
+- attach a handle;
+- authorize every read;
+- disclose completeness.
 
-Start with explicit memories, not automatic extraction:
+This implies three commitments:
 
-- A `remember` tool that writes a scored, categorized, redacted row.
-- A `recall` tool that retrieves hybrid results.
-- A review command to inspect and forget.
+- **Store before publish.** If storage fails, fall back to bounded behavior and do not claim recovery.
+- **Deterministic reduction.** The same input produces the same view; no model call, no hidden variability.
+- **Revision-bound cursors.** A page must refer to the same revision, scope, and filters; otherwise page two can silently read different evidence.
 
-Only then add post-turn consolidation. Automatic extraction is where a memory system becomes noisy; the watermark, dedupe, and approval queue are what keep it trustworthy.
+The conceptual test is simple: if the user asks "what did the tool actually print?", the system should answer with the original, not with a plausible reconstruction.
 
-### Step 7: Add the permission broker
+### 7. Build memory as a lifecycle with a review surface
 
-```python
-action = normalize(tool_call, workspace_root)
-action.digest = sha256_versioned(
-    action.mode, action.backend, action.operation, action.tool,
-    sorted(action.capabilities), action.argv, action.shell_payload,
-    action.cwd, action.targets, action.content_digest,
-    action.network, action.timeout, action.workspace_root,
-)
-decision = policy.evaluate(action)
-if decision == "pending":
-    approval = persist_pending(action)
-    raise PausedForApproval(approval.id)
-if decision == "allowed":
-    revalidate(action)
-    consume_once(action)
-    execute(action)
-```
+Memory is where a harness becomes opinionated. A workable design has six stages:
 
-Test the failure cases, not just the happy path: changed argument, changed directory, changed workspace, replay, wrong principal, expired approval, concurrent consumption.
+1. **Capture** new conversation material.
+2. **Extract** candidate claims with categories and importance.
+3. **Deduplicate** against existing claims.
+4. **Redact and attach provenance** before persistence.
+5. **Approve** if the installation wants human control.
+6. **Retrieve and reinforce** with a relevance-first policy.
 
-### Step 8: Add surfaces
+Two decisions deserve emphasis:
 
-Build the CLI first. It forces the core to be usable without a UI. Then add HTTP/SSE for integrations. Then add the terminal UI. Keep the semantics identical: the same pause shape, the same approval identity, the same exit codes, the same usage records.
+- **Forgetting should be reversible.** Decay the retrieval weight rather than deleting the row; keep inspection, correction, and restore paths.
+- **Relevance should outrank importance.** A high-importance memory that does not match the query is noise. Recency and importance are tie-breakers, not the primary ranking.
 
-### Step 9: Add observability and ratchets
+The deeper point: memory is a claim, not a fact. The system should record where the claim came from, how confident it is, and whether a human has reviewed it. That is what lets a wrong memory be corrected instead of silently propagating.
 
-Before the codebase grows, add:
+### 8. Make authority a first-class object
 
-- A usage ledger with missing/unknown as first-class states.
-- Audit records for every permission decision.
-- A test that fails when a module grows past its agreed size.
-- A test that fails when an import crosses a layer boundary.
-- A performance test with a generous but real threshold.
+Do not model permission as a boolean attached to a tool. Model it as a canonical action:
 
-Ratchets are cheap. Retrofitting them after a codebase has drifted is not.
+- What operation, tool, arguments, working directory, targets, and network destinations are involved?
+- What execution backend and timeout apply?
+- What workspace identity applies?
+- What content, exactly, will be written?
 
-### Minimum viable vs. Machina
+Canonicalize those fields, hash them, and treat the hash as the identity of the request. Then policy decides whether the action may proceed. A pending action becomes a durable approval. A human decision is recorded against the digest. Execution revalidates the digest and consumes the approval once.
+
+This prevents "approve the tool, execute something else." It also produces a natural audit record: the thing the human approved and the thing that ran are the same object.
+
+### 9. Keep one core behind every surface
+
+A terminal UI, a CLI, an HTTP API, and an MCP server have different transports and different user experiences. They should not have different semantics. Put the agent factory, turn coordinator, permission broker, and accounting in one core. Make each surface an adapter:
+
+- the terminal UI renders events and approval cards;
+- the CLI exposes headless commands and exit codes;
+- HTTP maps the same events to SSE and REST;
+- MCP exposes a bounded subset as tools.
+
+Then test parity: the same pause must produce the same approval identity, the same usage record, and the same resume behavior on every surface.
+
+### 10. Operate it like a system
+
+The least visible layer is the one that keeps the rest honest:
+
+- **Observability:** audit decisions, trace turn stages, record usage, and distinguish missing data from zero.
+- **Failure semantics:** every optional subsystem needs a defined degraded mode.
+- **Migration discipline:** initialize the schema explicitly; make runtime migrations additive and idempotent.
+- **Tests as ratchets:** architecture boundaries, file-size ceilings, import counts, and performance thresholds should fail the build when they drift.
+- **Redaction:** secrets must be removed at the boundary, not trusted never to appear.
+
+### Minimum viable vs. production harness
 
 | Concern | Weekend prototype | Production harness |
 |---|---|---|
@@ -869,6 +963,16 @@ Ratchets are cheap. Retrofitting them after a codebase has drifted is not.
 | Concurrency | One process, one lock | Leases, fencing, cancellation-safe cleanup |
 | Surfaces | CLI | TUI, CLI, HTTP/SSE, MCP with parity tests |
 | Reliability | Try/except | Failure injection, real-database tests, architecture and performance ratchets |
+
+### The order is the point
+
+You can build these in a different order, but the dependency structure is real:
+
+- Context without recovery is truncation with extra steps.
+- Memory without provenance and review is a rumor engine.
+- Permissions without canonicalization are a dialog, not a control.
+- A turn loop without ownership is a race.
+- Surface parity without a shared core is four implementations waiting to diverge.
 
 ## Get started
 
