@@ -1,31 +1,874 @@
 # Machina
 
-**An AI workspace in your terminal, with memory, tools, and a choice of models.**
+**A self-hosted AI agent harness where context and memory are engineered, not improvised.**
 
-Machina helps you work on code, research questions, and automate recurring tasks. Chat beside your files, ask specialist agents to help, and return to saved conversations later. You run the application and its database yourself; connect a cloud AI provider, a supported subscription account, or a local model.
+Machina is a terminal AI workspace: chat beside your code, delegate to specialist agents, automate recurring work, and return to the same conversations after a restart. It runs on your machine and your PostgreSQL database, and it can talk to cloud providers, subscription accounts, or local models.
+
+**In one sentence:** Machina keeps the model's working set small, its long-term memory governed, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
-- **Work in one place.** Chat, edit files, browse your project, and review changes in the terminal.
-- **Keep useful context.** Save conversations, search documents, and carry preferences and lessons into future work.
-- **Choose your AI.** Switch providers and models, including local models through Ollama.
-- **Give agents practical tools.** Read and write files, run commands, research the web, and connect external services.
-- **Control sensitive actions.** Review approvals and choose how much authority each session has.
-- **Build on the same backend.** Use the interactive UI, command line, HTTP API, or integrations with other AI tools.
+> **How to read this README.** [The hook](#the-hook-what-makes-this-harness-different) is the five-minute version of why the project exists and what is technically interesting about it. [One session, end to end](#one-session-end-to-end) shows the whole system in motion. The [deep dives](#deep-dive-1-context-management) are self-contained explanations of how the machinery works. The [rebuild guide](#rebuild-it-conceptually) is a blueprint for building your own. The [reference](#reference) is for installation and operations.
 
 **Release status:** 0.2.0 development release candidate. See [release evidence and remaining deployment gates](docs/verification/RELEASE_READINESS.md) before operating a public service.
 
 ## Contents
 
-- [Get started](#get-started): requirements, installation, and your first conversation
-- [Features](#features): workspace, saved sessions, context, search, skills, agents, and automation
-- [How it works](#how-it-works): the agent loop, architecture, and where data goes
-- [Providers and models](#providers-and-models): connections, credentials, and model selection
-- [Permissions and security](#permissions-and-security): modes, approvals, scripts, and secrets
-- [Configuration](#configuration): settings, defaults, and environment variables
-- [HTTP API and Docker](#http-api-and-docker): application integration and deployment
-- [Development](#development): tests, CI, and the source tree
-- [Documentation](#documentation) · [Troubleshooting](#troubleshooting) · [License and credits](#license-and-credits)
+- [The hook](#the-hook-what-makes-this-harness-different) — why this harness is interesting
+- [One session, end to end](#one-session-end-to-end) — the whole system in a worked example
+- [Feature tour](#feature-tour) — the headline capabilities
+- [Deep dive 1: Context management](#deep-dive-1-context-management) — the model's working set
+- [Deep dive 2: Memory management](#deep-dive-2-memory-management) — knowledge that survives sessions
+- [Deep dive 3: The permission kernel](#deep-dive-3-the-permission-kernel) — approvals that bind to an exact action
+- [Deep dive 4: The agent loop](#deep-dive-4-the-agent-loop) — turns, tools, delegation, and recovery
+- [Deep dive 5: Providers and accounting](#deep-dive-5-providers-and-accounting) — one interface, many models
+- [Deep dive 6: Surfaces and integrations](#deep-dive-6-surfaces-and-integrations) — TUI, CLI, HTTP, MCP, skills, jobs
+- [Reliability and testing](#reliability-and-testing) — how the project is kept honest
+- [Rebuild it conceptually](#rebuild-it-conceptually) — a blueprint for building your own
+- [Get started](#get-started) — install and run
+- [Reference](#reference) — commands, providers, configuration, API, Docker, development
+
+## The hook: what makes this harness different
+
+Every agent demo eventually hits the same wall.
+
+The conversation gets long. A test run produces a megabyte of output. The process restarts. A tool wants to delete a file. The model that felt brilliant in a five-minute demo starts repeating itself, forgetting decisions, and asking for permission to do the wrong thing.
+
+Machina is built around that wall.
+
+A model call is easy. A **harness** is hard: it has to decide what the model sees, what it remembers, what it is allowed to do, and what happens when something fails halfway through. Machina treats those as four first-class systems rather than glue code around a chat endpoint.
+
+| The hard problem | The naive version | What Machina does |
+|---|---|---|
+| **Context is finite and expensive** | Resend the transcript until the provider truncates it | Stores typed context chunks, sends a budgeted *projection*, compacts at safe boundaries, and keeps large tool results recoverable as artifacts |
+| **Memory is not chat history** | Dump embeddings into a vector table and hope | Runs a memory lifecycle: extract, score, dedupe, redact, attach provenance, approve, retrieve, reinforce, decay |
+| **Tools are dangerous** | Ask "are you sure?" with a tool name | Binds approval to a canonical cryptographic digest of the exact action, revalidates at execution, and consumes it once |
+| **Processes die and humans are slow** | Hold a transaction open and hope | Uses turn leases, durable jobs, resumable approvals, and explicit pause states across every surface |
+| **Every surface drifts** | Reimplement the loop in the CLI, UI, and API | Runs one core behind four adapters: terminal UI, CLI, HTTP, and MCP |
+
+### The two flagship ideas
+
+**Context is a working set, not a transcript.** The model is stateless; every request is its whole world. That world is small, expensive, and degrades when cluttered. Machina stores the full conversation in PostgreSQL, but sends only a curated view. Older material is summarized into a checkpoint, originals are archived, oversized tool output is stored verbatim as an artifact, and the model receives a deterministic smaller view plus a handle it can use to recover the details. If the original could not be stored, Machina says so instead of pretending the text is recoverable.
+
+**Memory is a lifecycle, not a vector bucket.** Chat history answers "what just happened?" Memory answers "what should still be true next week?" Machina extracts candidate memories after turns, scores their importance, removes duplicates, redacts secrets, records provenance, optionally queues them for human approval, and retrieves them with hybrid search. Retrieval is relevance-first; recency and importance only break ties. Forgetting is a retrieval weight, not silent deletion, so a memory can be inspected, corrected, or restored.
+
+### What a reviewer should look at
+
+| If you review for… | Start here | The interesting part |
+|---|---|---|
+| **Distributed systems** | [Turn ownership](#turn-ownership-and-cancellation), [jobs](machina/core/scheduler.py), [approval resume](machina/core/approval_resume.py) | Exactly-once effects across crashes, restarts, and human waits; leases, fencing, and cancellation-safe cleanup |
+| **ML / inference infrastructure** | [Context](#deep-dive-1-context-management), [memory](#deep-dive-2-memory-management), [usage ledger](docs/TOKEN_EFFICIENCY.md) | Bounded prompts with honest recovery, hybrid retrieval, token accounting that distinguishes missing data from zero |
+| **Security / systems** | [Permission kernel](#deep-dive-3-the-permission-kernel), [SECURITY.md](SECURITY.md) | TOCTOU-resistant approvals, canonical digests, confused-deputy resistance, redaction boundaries |
+| **Product / UX** | [Surfaces](#surfaces), [workspace](docs/design/WORKSPACE.md) | The same semantics across a terminal UI, a CLI, HTTP/SSE, and an MCP server |
+| **Testing / rigor** | [Reliability](#reliability-and-testing) | 6,400+ backend tests, real-PostgreSQL suites, architecture ratchets, and performance gates |
+
+### At a glance
+
+| Metric | This checkout |
+|---|---|
+| Python backend | ~105,000 lines across 282 files |
+| Backend tests | 6,464 passed, 2 skipped (DevTools suite, real PostgreSQL) |
+| Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
+| Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
+| Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
+| CLI cold start | `machina version` measured at ~0.6 seconds on the development machine |
+
+Counts are snapshots, not promises. The release gates live in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
+
+## One session, end to end
+
+Here is what the machinery feels like in practice. Suppose you ask Machina to fix a failing test suite.
+
+1. **The turn starts with ownership.** Machina claims the session with a lease so two surfaces cannot write the same conversation at once. It builds an agent from its definition (role, tools, model) intersected with the session's authority.
+2. **The prompt is assembled, not dumped.** The model receives the system instructions, two relevant skills, the recent conversation, a few high-relevance memories, and selected document excerpts. Everything is fitted to the model's input budget before the request is sent.
+3. **A big tool result does not flood the window.** `pytest` produces 1.2 MB of output. Machina stores the verbatim result as an artifact first, then publishes a deterministic reducer view: the pass/fail counts, the failing test names, and the decisive stack-trace lines, plus an `artifact_read` handle. The model can page or search the original later instead of re-running the tests.
+4. **The context crosses its threshold.** At a safe turn boundary, automatic compaction archives the replaced chunks and writes a checkpoint: objective, expected artifact, constraints, findings, open questions, and next action. Recent chunks stay native; the summary anchors the older work. The next request targets a much smaller working set.
+5. **A risky action pauses.** The agent asks to edit a file outside the workspace. The permission broker canonicalizes the action, hashes every material field, and creates a durable approval. The terminal UI shows the exact arguments, working directory, backend, timeout, and a redacted content preview. You approve it once. Execution revalidates the digest and consumes the approval.
+6. **The turn ends with accounting.** Usage is recorded by provider, model, purpose, session, and agent. Input, cached input, cache writes, and output are normalized. Unknown prices stay unknown rather than becoming zero.
+7. **Memory is consolidated.** In the background, an extractor reads the new conversation chunks and proposes durable memories: a decision ("the project uses PostgreSQL because of pgvector"), a preference, a fact. Candidates are scored, deduplicated, redacted, given provenance, and stored.
+8. **A week later, a new session asks "which database did we choose?"** The transcript is not replayed. Hybrid retrieval finds the decision memory, relevance-first, and adds it to the prompt with its provenance. The answer survives the session that produced it.
+
+That is the whole thesis: **the transcript is an event log, the prompt is a projection, and memory is a separate, governed lifecycle.**
+
+## Feature tour
+
+| Capability | What it gives you | Deep dive |
+|---|---|---|
+| **Context management** | Long tasks stay coherent inside a finite window; large outputs remain recoverable | [Context](#deep-dive-1-context-management) |
+| **Long-term memory** | Preferences, decisions, and lessons carry across sessions without replaying history | [Memory](#deep-dive-2-memory-management) |
+| **Permission kernel** | Sensitive actions are approved once, for an exact canonical action, and revalidated | [Permissions](#deep-dive-3-the-permission-kernel) |
+| **Agent orchestration** | Main agents delegate to specialists with inherited authority and separate accounting | [Agent loop](#deep-dive-4-the-agent-loop) |
+| **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
+| **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
+| **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
+| **Durable automation** | Interval, cron, heartbeat, and operator-approved script jobs that survive restarts | [Surfaces](#jobs-that-survive-restarts) |
+| **Observability** | Audit events, traces, metrics, usage accounting, and redaction at the boundary | [Reliability](#reliability-and-testing) |
+
+Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, artifacts, memory, skills, delegation, and MCP. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
+
+## Deep dive 1: Context management
+
+### The problem in plain language
+
+The model has a **desk**. It can only read what is on the desk. The desk is small, it is expensive to rent, and the model pays less attention when it is covered in papers.
+
+A naive agent keeps every sheet forever. Eventually the desk overflows: the provider rejects the request, silently truncates it, or the model loses the thread. The usual fixes are equally bad: delete old work, summarize everything into mush, or resend the same huge tool output on every turn.
+
+Machina is the librarian. It keeps the archive in the basement (PostgreSQL and the artifact store), puts a curated folder on the desk, summarizes old folders, and labels anything it removed so the model can ask for it back.
+
+### The vocabulary
+
+| Term | Meaning here |
+|---|---|
+| **Token** | The unit models read and bill. Roughly four English characters, but very different for code, CJK text, and emoji. |
+| **Context window** | The maximum tokens a model can read and write in one request. |
+| **Chunk** | The storage unit: a message, tool call, tool result, document, or summary, with a type, payload, token count, and timestamp. |
+| **Working set** | The subset of chunks actually sent to the model this turn. |
+| **Projection** | The deterministic process that builds the working set: dedupe, budget, preserve required groups, disclose omissions. |
+| **Compaction** | Replacing older chunks with a summary checkpoint while keeping originals in the archive. |
+| **Artifact** | A verbatim, durable copy of a large tool result with paged, authorized recovery. |
+| **Reducer** | A deterministic, format-aware smaller view of a large output. No model call. |
+
+### The pipeline
+
+```mermaid
+flowchart LR
+    A[New turn] --> B[Assemble instructions,<br/>skills, recent history]
+    B --> C[Add memory and RAG evidence]
+    C --> D[Project to token budget]
+    D --> E[Send to model]
+    E --> F[Tool result]
+    F --> G{Too large?}
+    G -- yes --> H[Store verbatim artifact]
+    H --> I[Deterministic reducer view]
+    I --> J[Append bounded result + handle]
+    G -- no --> J
+    J --> K{Threshold crossed?}
+    K -- yes --> L[Archive originals<br/>write checkpoint]
+    L --> B
+    K -- no --> B
+```
+
+Each stage exists because the one before it is not enough on its own.
+
+### 1. Storage: typed chunks, not a blob
+
+Conversation state lives in PostgreSQL. Each row is a typed chunk with a token count and ordering metadata. The main tables are:
+
+- `context_chunks` — live conversation, tool activity, documents, and summaries.
+- `context_archive` — originals displaced by compaction or eviction.
+- `tool_artifacts` — verbatim oversized tool results.
+- `sessions` — session metadata, pins, and atomically updated state fields.
+
+Typed storage is what makes the rest possible. You cannot budget, deduplicate, summarize, or recover what you cannot identify.
+
+### 2. Measurement: tokens are not characters
+
+Token counts drive every decision, so Machina counts with `tiktoken` (a tokenizer library) when available and falls back to a deterministic multilingual heuristic when it is not. The fallback is documented and bounded: CJK, kana, hangul, and emoji get realistic weights instead of the old "four characters per token" assumption, and non-empty text can never count as zero. It is a degraded mode, not a precision claim, and the code says so.
+
+### 3. Compaction: summarize, preserve, archive
+
+Automatic compaction runs at a **safe turn boundary**, never in the middle of a tool call. It takes a durable mutation claim so two workers cannot compact the same session at once. If the session is busy, compaction defers to a later boundary instead of queueing behind live work.
+
+The defaults are deliberately conservative:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `compression_enabled` | `true` | Allow older context to be compressed |
+| `compression_threshold` | `0.8` | Trigger when the estimated request reaches 80% of the budget |
+| `compression_target_ratio` | `0.5` | Aim to leave roughly half the window free |
+| `compression_preserve_recent` | `3` | Keep the newest chunks native |
+| `auto_compaction_enabled` | `true` | Check after turns |
+
+The output is a **checkpoint**, not free-form prose. It records the objective, expected artifact, constraints, read-only scope, findings (with counts), unresolved questions, and next action. The prompt also states that the latest explicit user instruction overrides the checkpoint. That sentence matters: a summary is a fallback, not a higher authority than the human.
+
+The replacement is transactional and exact:
+
+1. Snapshot the exact chunk IDs being replaced.
+2. Archive the originals.
+3. Write the summary chunk.
+4. Replace only those IDs in one transaction.
+
+Concurrent inserts survive. A stale snapshot aborts instead of deleting someone else's work. A no-progress guard stops the system from compacting forever without shrinking the prompt.
+
+### 4. Continuity: the conversation must not "reset"
+
+Compaction is not the same as continuity. If every request only sees "summary + last three chunks", the model loses the natural shape of the recent dialogue and providers lose a stable prefix for prompt caching.
+
+Machina keeps a separate **native continuity window**:
+
+- The window starts at a persisted compaction boundary, so the prefix stays append-only between compactions.
+- It triggers at a high watermark: `min(8,000 tokens, context_budget / 3)` or more than 50 messages.
+- It retains the newest clean, user-aligned tail at a low watermark: `min(4,000 tokens, context_budget / 6)` or 25 messages.
+- Evicted turns fold into a bounded deterministic summary (4,000 characters max), stored atomically in session state with the boundary ID.
+- Older cold tool output in the dynamic tail becomes one-line tombstones so it is not paid for repeatedly.
+
+This is the "sawtooth": a stable prefix, a periodic fold, and a recent tail that always starts on a user turn. It is boring by design. Boring is what you want in continuity code.
+
+### 5. Artifacts: store before you lose anything
+
+A tool result can be larger than the entire context window. Blind truncation is destructive: the model may need the one stack trace that was cut off.
+
+Machina's rule is **store before publish**:
+
+1. Persist the original verbatim as an artifact.
+2. Only then publish a smaller view.
+3. Include a handle in the model-visible text.
+4. Reauthorize every read against the session ancestry.
+
+Artifacts support character paging, literal search, and metadata inspection through `artifact_read`, `artifact_search`, and `artifact_describe`. Handles are opaque UUIDs, not bearer tokens. Reads are checked again on every call. A session can read artifacts in its delegation tree, never unrelated sessions. Cursors bind the artifact revision, scope, filters, order, and retention observed when the cursor was issued; a stale cursor is rejected explicitly instead of silently paging a different evidence basis.
+
+The defaults are 30 days of retention, 500 artifacts per session, and 2,000,000 characters per artifact. Quotas **refuse new stores** rather than evicting live evidence. If storage fails, is disabled, or the result exceeds the limit, the caller keeps its ordinary bounded output and no recovery claim is made. A producer that had already truncated its own output is recorded as `upstream_truncated=true`; completeness is never invented.
+
+### 6. Reducers: smaller views without a model call
+
+A reducer turns a large, structured result into a bounded view that preserves the decision-relevant parts:
+
+| Format | What the view keeps |
+|---|---|
+| Test output | Pass/fail counts, failing test names, decisive failure blocks, zero-collected flags |
+| Logs | Repetition groups, `ERROR`/`WARN` lines verbatim, counts |
+| JSON | Outline, types, counts, a verbatim head that preserves lexical forms such as large integers |
+| CSV | Row count, numeric min/max, missingness, samples |
+| Diff | File and hunk counts, representative changes |
+| Code | Structural outline rather than the whole file |
+| Anything else | Head + tail with an explicit omission seam |
+
+Reducers are deterministic, never call a model, and fail open: if parsing fails or the view is not smaller, the original behavior is kept. A reduced view is published only when the exact original was durably retained first. The head-and-tail fallback always keeps the verdict tail, because the last line of a test run is often the most important one.
+
+### 7. Projection: fit the evidence, disclose the omissions
+
+The final working set is a projection, not a concatenation. Two deterministic passes run over memory facts, RAG excerpts, and archived-context hits:
+
+1. **Exact deduplication.** Entries whose text is byte-identical after whitespace folding are the same evidence; the first occurrence wins. Conflicting statements and different versions are preserved. Only literal repetition is removed.
+2. **Token-budgeted coverage.** Entries stay in priority order (memory, then RAG, then archive) until the budget is spent. Compaction and checkpoint summaries are protected and always survive. Omitted entries are counted and disclosed to the model, so a trimmed view is never mistaken for the full evidence set.
+
+RAG has its own reading budget (`retrieval_token_budget`, default 6,000 tokens). Lower-ranked excerpts that do not fit are omitted and reported, not silently dropped.
+
+### 8. Failure semantics you can reason about
+
+| Failure | Behavior |
+|---|---|
+| Artifact store unavailable or quota full | Keep the ordinary bounded output; do not claim recoverability |
+| Result already truncated upstream | Mark it as such; never call it the exact original |
+| Compaction cannot acquire the claim | Defer to a later boundary; never block the live turn |
+| Continuity history read fails | Fall back to the recent window; the turn continues |
+| Summary missing or degenerate | Scan a bounded number of recent summary rows for a usable one; never fabricate |
+| Projection produces an empty fit | Keep the first entry even at zero budget, so protected evidence is not silently erased |
+| Provider context limit differs from estimate | Use the session's effective window and the provider's configured limit, not a global guess |
+
+### Rebuild it: the context manager in six steps
+
+1. **Store events, not prompts.** Every message, tool call, result, and document becomes a typed row with a token count and stable ordering.
+2. **Always build a projection.** Never send the table. Budget in priority order and disclose what did not fit.
+3. **Measure before cutting.** Use a real tokenizer when possible; make the fallback deterministic and documented.
+4. **Preserve before lossy publication.** Store the original artifact first. If that fails, keep the old behavior and say nothing about recovery.
+5. **Compact with a checkpoint.** Summarize objective, constraints, findings, and next action; archive originals; replace exact IDs transactionally; keep a recent native tail.
+6. **Make continuity explicit.** Persist the boundary and summary; keep the prefix append-only between compactions; start the retained tail on a user turn.
+
+Read the implementation in [`core/context.py`](machina/core/context.py), [`core/compression.py`](machina/core/compression.py), [`core/continuity.py`](machina/core/continuity.py), [`core/artifacts.py`](machina/core/artifacts.py), [`core/reducers.py`](machina/core/reducers.py), and [`core/projection.py`](machina/core/projection.py). The contract-level map is [docs/TOKEN_EFFICIENCY.md](docs/TOKEN_EFFICIENCY.md).
+
+## Deep dive 2: Memory management
+
+### The problem in plain language
+
+Context is what the model is thinking about. **Memory is what the system knows.**
+
+Mixing them is the most common design mistake in agent systems. If you call the transcript "memory", you get an agent that can quote last Tuesday's conversation but cannot answer "what did we decide about the database?" without replaying everything. If you call a vector table "memory", you get an agent that retrieves plausible text with no notion of whether it is a preference, a decision, a fact, an event, or something the user explicitly retracted.
+
+Machina treats memory as a lifecycle with its own data model, safety rules, and retrieval policy.
+
+### Three different things
+
+| Store | Answers | Lifetime | Example |
+|---|---|---|---|
+| **Context** | What just happened in this session? | Current turn / compacted window | The failing test output from ten minutes ago |
+| **Memory** | What should still be true next week? | Durable, with decay and review | "This project uses PostgreSQL because of pgvector" |
+| **Documents (RAG)** | What do the indexed sources say? | Until the document is removed | The architecture section of a PDF you indexed |
+
+RAG stands for retrieval-augmented generation: selected source passages are added to the prompt instead of expecting the model to know your documents already.
+
+They share retrieval machinery where useful, but they are not the same table, the same lifecycle, or the same authority.
+
+### The memory lifecycle
+
+```mermaid
+flowchart LR
+    T[Conversation chunks] --> C[Consolidation]
+    C --> E[Extract candidates]
+    E --> S[Score importance]
+    S --> D[Deduplicate]
+    D --> R[Redact secrets<br/>attach provenance]
+    R --> A{Approval enabled?}
+    A -- yes --> P[Pending queue]
+    P --> W[Store + embed]
+    A -- no --> W
+    W --> Q[Hybrid retrieval]
+    Q --> U[Prompt evidence]
+    U --> F[Access feedback]
+    F --> W
+```
+
+### 1. Extraction: durable, not chatty
+
+After a turn, consolidation reads conversation chunks that have not been processed yet. A watermark (`mem_consolidated_up_to`) makes repeated runs idempotent. The extractor is instructed to propose durable material:
+
+- **Preferences** — "the user prefers concise explanations."
+- **Decisions** — "PostgreSQL was chosen over MongoDB for vector search."
+- **Facts** — "the service listens on port 8000."
+- **Events / outcomes** — "the migration was completed on Friday."
+
+The schema also supports a `transient` category, but the extractor is explicitly told to skip small talk and ephemeral state.
+
+Each candidate gets an importance score, a category, and a source. The watermark only advances on a fully processed contiguous range. A partial extraction leaves the range retryable; it never claims success it did not achieve.
+
+### 2. Safety before storage
+
+Memory is a durable write, so it gets the same suspicion as any other write:
+
+- **Secret redaction** runs before storage and before embedding. If redaction cannot be completed, a marker replaces the content. This is a safeguard, not permission to put credentials in prompts.
+- **Provenance** records where the memory came from (session, agent, source), so a retrieved fact can be audited rather than treated as gospel.
+- **Identity gates and quarantine** can hold suspicious or low-trust entries out of normal retrieval.
+- **Approval is optional** (`memory_approval_enabled`, default `false`). When enabled, writes go to a pending queue and a human approves or rejects them. CLI controls include `memory-pending`, `memory-approve`, `memory-reject`, and bulk variants.
+
+### 3. Deduplication: the same fact should not accumulate
+
+Candidates are normalized (lowercased, whitespace-collapsed, punctuation-trimmed) and compared. A cosine similarity at or above `0.85` is treated as a duplicate. The goal is not aggressive merging; it is preventing a long-running installation from storing the same preference twenty times with slightly different wording.
+
+### 4. Retrieval: relevance first, everything else as a tie-breaker
+
+Memory retrieval is hybrid:
+
+1. Dense vector search over embeddings, when an embedder is configured.
+2. Sparse keyword search over the memory text.
+3. Merge the candidate sets.
+4. Re-rank with the configured reranker, if any.
+5. Return the top K (default 5), scoped to the agent and filtered by persona/authority.
+
+The ranking contract is explicit: **relevance is primary**. Keyword matches are scored as a fraction of the query terms. Catalog or echo content (a memory that merely repeats a tool description, for example) is demoted, never silently dropped. Recency, importance, and a forgetting-curve strength only break ties. This stops a highly "important" but irrelevant memory from crowding out the instruction the user just gave.
+
+If no embedder is configured, retrieval degrades honestly to keyword-only and reports that mode. An empty result and a total retrieval outage are different states; the latter raises a typed error instead of claiming "no relevant memory exists."
+
+### 5. Reinforcement and forgetting
+
+Each memory tracks `importance`, `base_strength`, `last_accessed`, and `access_count`. Access updates the reinforcement signal. Forgetting is implemented as a **retrieval weight**, not a scheduled deletion: a faded memory becomes less likely to surface, but it remains inspectable, correctable, and restorable. That is a deliberate tradeoff. Silent deletion is cheap and impossible to audit; decay is slightly more complex and much easier to trust.
+
+### 6. Growth and personality are bounded
+
+Machina also stores agent-owned preferences and lessons ("growth"). These are not model weights and they do not grant authority. They are bounded notes with revisions, feedback, and rollback. The related RSI feature adjusts saved strategy guidance and retrieval policy from recorded outcomes; it does not retrain the model, change tool permissions, or make an agent more powerful. `/growth` exposes the state; `rollback` restores an earlier revision.
+
+### 7. What memory is not
+
+- It is **not** a transcript archive. Use sessions and documents for that.
+- It is **not** a fine-tune. Nothing here changes model weights.
+- It is **not** infallible. Memories can be incomplete or wrong; the inspection, correction, and forgetting controls exist for that reason.
+- It is **not** shared across installations. Persistence is local to the configured database, and the HTTP surface uses a shared API key rather than per-user accounts.
+
+### Rebuild it: the memory system in six steps
+
+1. **Separate the tables.** Context chunks, memories, and documents have different lifecycles. Do not overload one table.
+2. **Extract after the turn.** Read only new chunks, advance a watermark only on complete processing, and make retries idempotent.
+3. **Score and categorize.** Not every sentence deserves to be remembered; importance and category drive later ranking.
+4. **Redact and attach provenance before the write.** A memory without a source is a rumor.
+5. **Retrieve with a relevance-first policy.** Use recency and importance as tie-breakers, never as a substitute for relevance.
+6. **Make forgetting reversible.** Decay the retrieval weight; keep the row; provide inspect, forget, and restore paths.
+
+Read the implementation in [`memory/consolidator.py`](machina/memory/consolidator.py), [`memory/store.py`](machina/memory/store.py), [`memory/retriever.py`](machina/memory/retriever.py), [`memory/approval.py`](machina/memory/approval.py), and [`memory/growth.py`](machina/memory/growth.py).
+
+## Deep dive 3: The permission kernel
+
+### The problem in plain language
+
+An agent with tools is a program that can change your machine. "Are you sure?" is not a security model. The interesting failures are not a user clicking the wrong button; they are:
+
+- **Time-of-check to time-of-use.** You approve "run the tests", and by execution time the command has changed.
+- **Confused deputy.** A web page, a skill, or a remote MCP server convinces the agent to do something the human never approved.
+- **Replay.** An old approval is reused for a new action.
+- **Surface drift.** The CLI approves one thing and the HTTP API executes another.
+- **Waits that hold resources.** A human takes ten minutes; the database transaction or turn lease must not be held open.
+
+Machina's answer is a small permission kernel: every action is canonicalized, hashed, decided, and executed as a separate step.
+
+### The request flow
+
+```mermaid
+flowchart LR
+    A[Tool call] --> B[Normalize action]
+    B --> C[Canonical v2 digest]
+    C --> D{Mode policy}
+    D -- allow --> E[Execute with bound context]
+    D -- deny --> F[Structured denial]
+    D -- review --> G[Durable approval]
+    G --> H[Human decision]
+    H -- approve --> I[Revalidate digest]
+    I --> E
+    H -- deny --> F
+    E --> J[Mark consumed / completed]
+```
+
+### What an approval binds
+
+An approval is not a tool name. It is a capability token for **one canonical action**. The v2 digest is a length-prefixed SHA-256 over every material field:
+
+- mode and execution backend
+- operation and concrete tool name
+- sorted capabilities
+- exact argv (never a bare shell string when argv is available)
+- shell payload, when applicable
+- canonical working directory and targets
+- content digest for writes
+- network declarations, including the opaque-network flag
+- timeout
+- workspace identity
+
+Length-prefixing matters. Separator-joined fields can collide: `["echo", "a|b"]` and `["echo", "a", "b"]` must not hash the same. The digest version is part of the hash, so old approvals fail closed and require a fresh decision.
+
+### Modes are presets, not security claims
+
+| Mode | Behavior |
+|---|---|
+| `ask` (default) | Routine project actions can proceed; risky or unclassified actions require review |
+| `workspace` | Project work can proceed; actions crossing configured boundaries require review |
+| `sandbox` | Terminal commands run through the configured Docker sandbox |
+| `full` | An explicit session grant allows host operations without further approval, including destructive actions |
+
+`ask` does **not** mean "ask before every write." Tools declare effects and the broker checks the specific action. Routine project work is allowed; opaque execution, boundary crossings, and sensitive capabilities are not. Host execution is never a sandbox merely because a workspace is open.
+
+Command classification follows the same principle. Literal commands joined by `;`, newlines, `&&`, `||`, or pipes can be routine. Expansion, redirection, background jobs, compound syntax, or unknown commands require review. Even a redirection such as `2>/dev/null` changes the classification. Quoted operators remain ordinary argument text.
+
+### The approval lifecycle
+
+1. **Proposal.** The broker normalizes the action and computes the digest.
+2. **Decision.** The policy returns allowed, denied, or pending.
+3. **Durable pending record.** A pending request stores the canonical proposal and a sanitized display card.
+4. **Human resolution.** Approve, deny, cancel, or expire. The human principal is recorded.
+5. **Execution.** The backend receives a broker-stamped immutable execution context, revalidates the digest, and consumes the approval exactly once.
+6. **Audit.** Approval and execution are separate recorded steps.
+
+An agent principal can never approve its own request. Remote RPC cannot gain host control: `approvals.resolve` requires a human principal and a session binding. A denial is a structured result, not a prompt loop that asks again forever.
+
+### Pausing without holding the world open
+
+The same pause semantics exist on every surface:
+
+- **Terminal UI:** an approval card with the exact arguments, working directory, backend, timeout, network declarations, and a redacted content preview/diff for edits. Allow once or deny.
+- **HTTP:** `needs_approval` events, `GET /api/v1/approvals`, `POST /api/v1/approvals/{id}/resolve`, then an explicit `/resume` with the reviewed arguments. Resolving and executing are separate operations.
+- **Headless CLI:** exits with code `3` and a structured pause instead of waiting forever.
+- **Scheduler jobs:** park in a durable `paused_approval` state, excluded from due claims, and resume only through `jobs.resume`.
+
+No SQL transaction is held across a human wait. Compute and approval deadlines are tracked separately: a human thinking for ten minutes does not consume the turn's compute budget, but the approval itself is still bounded by `approval_timeout`.
+
+### Rebuild it: the permission kernel in five steps
+
+1. **Declare effects.** A tool says what it reads, writes, executes, or contacts; do not infer safety from a name.
+2. **Canonicalize the action.** Resolve paths against one workspace root; separate argv from shell text; normalize targets.
+3. **Hash every material field.** Length-prefix the fields; version the digest; fail closed on old versions.
+4. **Separate decision from execution.** Persist the proposal; revalidate at execution; consume once.
+5. **Make the human wait explicit.** Pause, persist, release resources, and resume through a fresh fenced claim.
+
+Read [`permissions/policy.py`](machina/permissions/policy.py), [`permissions/broker.py`](machina/permissions/broker.py), [`permissions/store.py`](machina/permissions/store.py), and [`core/approval_resume.py`](machina/core/approval_resume.py). The threat model is in [SECURITY.md](SECURITY.md).
+
+## Deep dive 4: The agent loop
+
+### The shape of a turn
+
+```text
+claim session lease
+  build agent = definition ∩ session authority
+  assemble prompt = system + skills + recent context + memory + RAG
+  loop:
+      call provider (stream)
+      for each tool call:
+          broker decision → allow / deny / pause
+          execute with bounded output
+          store artifact if large; publish reduced view
+          append result to context
+      stop when the model returns a final answer or a budget/timeout ends the turn
+  finalize: usage, save, release lease
+  post-turn: compaction, memory consolidation, growth, optional learning review
+```
+
+### Turn ownership and cancellation
+
+Two writers on one session produce corrupted history. Machina uses a durable turn claim (a lease) plus fencing tokens (monotonic ownership markers). The gateway, REST API, CLI, scheduler, and delegation all go through the same coordinator. If a worker loses ownership, its effects are cancelled and the terminal success event is not emitted. A crash leaves an expired claim that another worker can reclaim.
+
+Cancellation is treated as a first-class outcome, not a failure. Expected `CancelledError` from an already-cancelled task is not recorded as an error; cleanup still runs; the lease is released in an independent `finally`.
+
+### Delegation
+
+A subagent is not a second copy of the main agent. It is a child session with:
+
+- its own model/provider choice from the definition,
+- tools intersected with the parent's authority (`cap_child_authority`),
+- its own usage accounting,
+- the same broker, coordinator, and cancellation path.
+
+The parent can inspect the child's result without merging every child message into its own transcript. Delegation can run sequentially or in parallel. Creating a subagent does not bypass a budget, an approval, or a tool restriction.
+
+### Post-turn maintenance
+
+When the answer is complete, the turn releases its lease and then performs enabled maintenance **after ownership is released**: automatic compaction, memory consolidation, growth updates, and optional skill-learning review. This ordering is deliberate. Maintenance must not extend the critical path or hold the session against the next user turn.
+
+### Rebuild it: the agent loop in five steps
+
+1. **One owner per session.** Use a lease with a fencing token, not an in-process lock.
+2. **Build the agent from data.** Role, tools, model, and limits live in a definition; intersect with session authority.
+3. **Make every tool call a transaction.** Decide, execute, record, and consume separately.
+4. **Bound every loop.** Tokens, requests, wall time, approval time, and tool output all need ceilings.
+5. **Release before maintenance.** The user sees the answer; compaction and memory extraction happen after.
+
+## Deep dive 5: Providers and accounting
+
+### One interface, many dialects
+
+Every provider speaks a slightly different dialect: message shapes, tool-call formats, streaming events, reasoning controls, cache accounting, and error semantics. Machina puts them behind a provider interface and a factory. The runtime asks for a completion; the adapter handles the wire format.
+
+| Provider ID | Credential or connection | Bundled default |
+|---|---|---|
+| `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| `xai` | `XAI_API_KEY` | `grok-4` |
+| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` |
+| `google` | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
+| `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
+| `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
+| `chatgpt` | `machina auth login` | Choose from the account's model catalog |
+| `copilot` | `machina auth copilot login` | Choose a model available to your account |
+| `ollama` | A running Ollama service | `llama3.1`; the model must be installed |
+| `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
+
+Model IDs are application defaults, not a guarantee of account access, pricing, or tool support.
+
+### Usage is normalized, not guessed
+
+The usage ledger records one row per model call with:
+
+- **Logical input** = uncached input + cache reads + cache writes.
+- **Output** tokens.
+- **Usage basis**: provider, provider-partial, local estimate, missing, or failed.
+- **Attribution**: requested model, resolved model, purpose (agent, compression summary, memory rerank, consolidation, skill learning), session, and agent.
+- **Cost** only when a dated price record or explicit override exists. Unknown price stays `NULL`, never zero and never a sibling model's rate.
+
+Missing usage is not the same as zero usage. Estimates never release a conservative reservation and are never presented as bills. Retries and auxiliary calls count toward cost; only a natural, successful turn-final completion is marked as an accepted completion.
+
+### Budgets and caching
+
+Session and agent limits can cap tokens or request counts (`0` means unlimited). These are application budgets, not a replacement for a provider-side spending limit.
+
+Prompt caching is opt-in (`prompt_cache_enabled`, default `false`). Where a provider supports it, Machina adds cache markers to stable prefixes for supported paths. The off-path payload stays byte-identical. No fixed savings or speedup is promised; the ledger's cache columns exist so the claim can be measured on real turns.
+
+### Reasoning effort
+
+Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `high`; some catalogs expose additional tiers. An unset value means "provider default." A higher tier is not a promise of a better answer.
+
+## Deep dive 6: Surfaces and integrations
+
+### Surfaces
+
+| Surface | Transport | Why it exists |
+|---|---|---|
+| **Terminal UI** | JSON-RPC over stdio to the gateway | Interactive work beside the code, streaming, approval cards, editor, explorer |
+| **CLI** | Direct calls into the shared services | Scripting, headless work, automation, recovery |
+| **HTTP API** | REST + server-sent events | Integrations, dashboards, remote clients |
+| **MCP server** | Model Context Protocol | Let other assistants use a bounded slice of Machina |
+| **MCP client** | stdio or HTTP | Bring external tools into Machina's catalog |
+
+Every surface shares the same agent factory, turn coordinator, permission broker, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
+
+### Skills: catalog first, bodies on demand
+
+A skill is an instruction package, usually a `SKILL.md` file. It is guidance, not executable code and not a permission grant.
+
+The context-window problem with skills is obvious: a large catalog can consume more prompt than the task. Machina keeps a compact catalog in the prompt and loads the body only when needed (`skill_read`). Stage-aware loading means a planning stage gets planning instructions and prerequisites, not every later implementation or review section. Routing uses metadata (task types, languages, tools, exclusions, sections) and deterministic ranking, so matching does not require another model call. Malformed metadata is rejected or ignored; instructions can never expand authority.
+
+Learning new skills after turns is opt-in (`learning_review_enabled`, default `false`). When enabled, proposals can be auto-applied under a per-agent daily cap or staged for review. Published learned skills have revisions and a revert path.
+
+### MCP: catalog-first tool use
+
+MCP tools are not injected wholesale into every request. The agent:
+
+1. Lists the available tool catalog.
+2. Reads a selected tool's description.
+3. Requests a specific call.
+
+This keeps remote schemas out of prompts until they are relevant. Remote tool calls still go through ordinary approvals. Server-provided descriptions and results are data, never authority. A namespaced allowlist entry such as `firecrawl__firecrawl_scrape` is matched against both the remote name and the namespaced tool name, so "allow this read-only scrape" actually means what it says.
+
+The other direction is `machina harnesses`: register Machina's MCP server with supported external assistants. It exposes status, session creation, and a bounded text chat task, not a remote copy of every UI feature.
+
+### Jobs that survive restarts
+
+| Job type | Use |
+|---|---|
+| Interval prompt | Check a project every N seconds |
+| Cron prompt | Run on a five-field UTC schedule |
+| Heartbeat | Nudge an agent to continue its goal |
+| Script job | Run an operator-approved script on a schedule |
+
+Jobs are stored in PostgreSQL and scheduled by the running backend. They use the normal agent and permission paths. Script jobs require an operator-owned `.script-policy.json` outside the agent workspace, listing allowed entry files and dependencies; hashes are checked again before execution. Adding a path to a prompt is not authorization.
+
+A job that needs approval parks in `paused_approval`, is excluded from due claims, and resumes only through an explicit `jobs.resume`. This is what makes unattended automation honest: it cannot silently self-approve.
+
+### Workspace and language intelligence
+
+The terminal UI includes a file editor, tabs, a project explorer, Quick Open, and a problems panel. Workspace file access uses a server-created workspace identity and resolved paths; symlinks and `..` are resolved before containment checks. Language servers are optional separate programs (`pyright-langserver`, `typescript-language-server`) that provide completion, hover, definitions, references, and diagnostics. A missing server is reported as missing; ordinary editing still works.
+
+<details>
+<summary>Terminal UI essentials</summary>
+
+| Action | Command or shortcut |
+|---|---|
+| Send a message / add a new line | `Enter` / `Shift+Enter` |
+| Find commands | `/help` |
+| Open a project | `/workspace open <path>` |
+| Find a file | `Ctrl+P` or `/quickopen` |
+| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
+| Show or hide the file explorer | `Ctrl+T` or `/explorer` |
+| Change pane focus | `F6` / `Shift+F6` |
+| Show code completion | `Ctrl+Space` or `/editor complete` |
+| Go to definition / find references | `F12` / `Shift+F12` |
+| Maximize / restore chat | `Ctrl+Right` / `Ctrl+Left` |
+| Paste an image | `Ctrl+V` |
+| Stop a response | `Esc` after dismissing any open popup |
+| See keyboard shortcuts | `F1` or `?` on empty input |
+
+Some terminals or operating systems intercept shortcuts; the slash commands are the fallbacks. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
+
+</details>
+
+## Reliability and testing
+
+### The source of truth
+
+PostgreSQL with pgvector is the durable store for sessions, context, archives, memories, documents, approvals, jobs, usage, and artifacts. Schema initialization is explicit (`machina init`); additive runtime migrations handle compatible upgrades. The gateway does not self-migrate, so a code + schema deployment must run initialization before starting workers. That is documented in [OPERATIONS.md](OPERATIONS.md) because ignoring it is a real outage.
+
+### Observability
+
+- **Audit events** for permission decisions, approvals, and privileged operations.
+- **Traces and metrics** for turn stages, provider latency, retrieval, compaction, and errors.
+- **Usage ledger** with normalized token categories and cost provenance.
+- **Diagnostics** that record failures without crashing optional work.
+- **Redaction** at the boundary: known secrets are removed from supported output paths; logs drop raw conversation and tool payloads by default.
+
+### The test strategy
+
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,464 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+
+The suite is not just feature coverage. It includes:
+
+- **Architecture ratchets** that fail if layer boundaries drift or a god file grows past its ratified ceiling.
+- **A deferred-import census** that makes startup-cost regressions visible.
+- **Performance evidence** with explicit latency gates for prompt assembly, section indexing, and plan disclosure.
+- **Failure-injection tests** for cancellation, ownership loss, stale snapshots, quota refusal, redaction, and provider errors.
+- **Real-database tests** for vector batches, approvals, resume, compaction, and jobs.
+
+### Design tradeoffs, stated honestly
+
+- **Self-hosted, not multi-tenant.** The HTTP API uses a shared API key. It is not a per-user account system.
+- **Host execution is not a sandbox.** The Docker sandbox is a specific execution backend. A workspace being open does not sandbox language servers or host commands.
+- **Summaries are lossy.** Artifacts and archives make recovery honest where enabled; they do not make compaction lossless.
+- **Memory can be wrong.** Inspection, correction, forgetting, provenance, and optional approval exist for that reason.
+- **Embeddings and reranking are optional.** Search is keyword-only by default and reports its degraded mode rather than fabricating vectors.
+- **Prompt caching is opt-in.** The project does not claim savings it has not measured.
+
+## Rebuild it conceptually
+
+You do not need Machina's full surface area to build the same idea. Here is the smallest coherent version, in the order that keeps the system honest.
+
+### Step 0: Pick the invariants
+
+Write these down before writing code:
+
+1. The model is stateless. Every request must be assembled from durable state.
+2. The transcript is an event log. The prompt is a projection of it.
+3. Nothing lossy is published before the original is stored.
+4. An approval binds to an exact canonical action, not a tool name.
+5. A turn has exactly one owner.
+6. Every optional subsystem degrades honestly and never fabricates success.
+
+### Step 1: Model the event log
+
+A minimal schema:
+
+```sql
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY,
+    title TEXT,
+    state JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE context_chunks (
+    id UUID PRIMARY KEY,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    chunk_type TEXT NOT NULL,          -- user | assistant | tool_call | tool_result | document | summary
+    payload JSONB NOT NULL,
+    token_count INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE artifacts (
+    id UUID PRIMARY KEY,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    content_revision INT NOT NULL,
+    complete BOOLEAN NOT NULL,
+    upstream_truncated BOOLEAN,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE memories (
+    id UUID PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL,
+    importance REAL NOT NULL,
+    embedding VECTOR(1536),
+    provenance JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Add indexes for `(session_id, created_at, id)` and a vector index on memory embeddings. The `VECTOR` column assumes the pgvector extension is installed.
+
+### Step 2: Build the turn loop
+
+```python
+async def run_turn(session_id, user_text):
+    lease = await claim_turn(session_id)
+    try:
+        await append_chunk(session_id, "user", user_text)
+        while True:
+            prompt = await assemble_prompt(session_id)
+            response = await provider.complete(prompt, tools=allowed_tools())
+            if response.tool_calls:
+                for call in response.tool_calls:
+                    decision = await broker.check(call)
+                    if decision.pending:
+                        await pause_for_approval(call, decision)
+                        return
+                    result = await execute(call)
+                    await append_tool_result(session_id, call, result)
+                continue
+            await append_chunk(session_id, "assistant", response.text)
+            return response.text
+    finally:
+        await release_turn(lease)
+```
+
+The important details are not in the sketch: leases, fencing, cancellation, usage accounting, and cleanup. Add them one at a time, with tests.
+
+### Step 3: Build the context assembler
+
+```python
+async def assemble_prompt(session_id):
+    system = load_system_prompt()
+    skills = select_skill_catalog_and_sections(task)
+    history = await recent_native_turns(session_id)
+    memory = await retrieve_memories(task, limit=5)
+    docs = await retrieve_documents(task, budget=6000)
+    evidence = project(memory + docs, token_budget=remaining())
+    return fit(system, skills, history, evidence, model_window())
+```
+
+Rules:
+
+- Budget every section, not just the total.
+- Deduplicate exact repeated evidence.
+- Keep tool-call groups together.
+- Disclose omitted evidence.
+- Never let a summary outrank the latest explicit user instruction.
+
+### Step 4: Add compaction
+
+Store a checkpoint with a stable shape:
+
+```json
+{
+  "objective": "Fix the failing test suite",
+  "expected_artifact": "A passing test run",
+  "constraints": ["Do not change public APIs"],
+  "read_only_scope": "src/legacy/**",
+  "findings": [{"count": 1, "finding": "The failure is in the retry path"}],
+  "unresolved_questions": ["Is the timeout budget configurable?"],
+  "next_action": "Patch the retry guard and rerun the focused tests"
+}
+```
+
+Compact only at a safe boundary. Archive originals. Replace exact IDs in one transaction. Keep a recent native tail. Persist the continuity boundary.
+
+### Step 5: Add artifacts and reducers
+
+When a tool result exceeds a threshold:
+
+1. Store it verbatim.
+2. If the store fails, use the old bounded behavior and say nothing about recovery.
+3. Otherwise, produce a deterministic view and include the artifact handle.
+4. Reauthorize every read; bind paging cursors to the revision.
+
+Start with one reducer for the format you see most (usually test output). Add formats only when you can keep the "no net saving means no change" rule.
+
+### Step 6: Add memory
+
+Start with explicit memories, not automatic extraction:
+
+- A `remember` tool that writes a scored, categorized, redacted row.
+- A `recall` tool that retrieves hybrid results.
+- A review command to inspect and forget.
+
+Only then add post-turn consolidation. Automatic extraction is where a memory system becomes noisy; the watermark, dedupe, and approval queue are what keep it trustworthy.
+
+### Step 7: Add the permission broker
+
+```python
+action = normalize(tool_call, workspace_root)
+action.digest = sha256_versioned(
+    action.mode, action.backend, action.operation, action.tool,
+    sorted(action.capabilities), action.argv, action.shell_payload,
+    action.cwd, action.targets, action.content_digest,
+    action.network, action.timeout, action.workspace_root,
+)
+decision = policy.evaluate(action)
+if decision == "pending":
+    approval = persist_pending(action)
+    raise PausedForApproval(approval.id)
+if decision == "allowed":
+    revalidate(action)
+    consume_once(action)
+    execute(action)
+```
+
+Test the failure cases, not just the happy path: changed argument, changed directory, changed workspace, replay, wrong principal, expired approval, concurrent consumption.
+
+### Step 8: Add surfaces
+
+Build the CLI first. It forces the core to be usable without a UI. Then add HTTP/SSE for integrations. Then add the terminal UI. Keep the semantics identical: the same pause shape, the same approval identity, the same exit codes, the same usage records.
+
+### Step 9: Add observability and ratchets
+
+Before the codebase grows, add:
+
+- A usage ledger with missing/unknown as first-class states.
+- Audit records for every permission decision.
+- A test that fails when a module grows past its agreed size.
+- A test that fails when an import crosses a layer boundary.
+- A performance test with a generous but real threshold.
+
+Ratchets are cheap. Retrofitting them after a codebase has drifted is not.
+
+### Minimum viable vs. Machina
+
+| Concern | Weekend prototype | Production harness |
+|---|---|---|
+| Context | Last N messages | Typed chunks, token budget, projection, compaction, continuity, artifacts |
+| Memory | One `notes` table | Extraction, scoring, dedupe, provenance, approval, hybrid retrieval, decay |
+| Permissions | Yes/no dialog | Canonical digest, durable approval, revalidation, one-time consumption |
+| Concurrency | One process, one lock | Leases, fencing, cancellation-safe cleanup |
+| Surfaces | CLI | TUI, CLI, HTTP/SSE, MCP with parity tests |
+| Reliability | Try/except | Failure injection, real-database tests, architecture and performance ratchets |
 
 ## Get started
 
@@ -33,12 +876,12 @@ Machina helps you work on code, research questions, and automate recurring tasks
 
 | Component | Required for |
 |---|---|
-| Python 3.11+ | The backend and command line |
-| PostgreSQL 16+ with pgvector | Saved conversations, memory, and application state |
-| Node.js 22.19+ and npm | The interactive terminal UI |
-| An AI provider or local model | Generating responses and using agent tools |
+| Python 3.11+ | Backend and command line |
+| PostgreSQL 16+ with pgvector | Sessions, context, memory, approvals, usage, artifacts (pgvector is the vector extension) |
+| Node.js 22.19+ and npm | Terminal UI |
+| An AI provider or local model | Responses and agent tools |
 
-The installer supports macOS, Linux, and Git Bash on Windows. It can provision a local database with Docker, or Homebrew on macOS. The terminal UI needs an interactive terminal; Node.js is optional for command-line and HTTP use.
+The installer supports macOS, Linux, and Git Bash on Windows. It can provision a local database with Docker, or Homebrew on macOS. The terminal UI needs an interactive terminal; Node.js is optional for CLI and HTTP use.
 
 ### Install and launch
 
@@ -47,32 +890,32 @@ curl -fsSL https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.
 
 machina setup     # choose a provider and configure credentials
 machina init      # initialize the configured database
-machina doctor    # check the database, provider setup, and prerequisites
+machina doctor    # check the database, provider, and prerequisites
 machina           # open the terminal UI
 ```
 
-The [installer](install.sh) creates a Python environment, installs backend and UI dependencies, prepares `.env`, attempts database initialization, and adds a `machina` launcher to your path. Open a new shell if the launcher is not found. From an existing checkout, use `bash install.sh`.
+The installer creates a Python environment, installs backend and UI dependencies, prepares `.env`, attempts database initialization, and adds a `machina` launcher to your path. Open a new shell if the launcher is not found. From an existing checkout, use `bash install.sh`. Run the installer with `--help` for the full option set.
 
-For more control, download the installer and use `--help`. The main options are:
+<details>
+<summary>Installer options</summary>
 
 | Option | What it changes |
 |---|---|
-| `--dir DIR` | Choose where Machina is installed. |
-| `--dev` | Include Python development and testing tools. |
-| `--no-ui` | Install only the backend and command line. |
-| `--interactive` | Allow setup questions even when the script is piped into Bash. |
-| `--yes` | Run without setup questions. |
-| `--with-docker-db` | Use Docker for database provisioning if initialization fails. |
-| `--no-docker-db` | Do not use Docker to provision a database. |
-| `--no-auto-db` | Leave all database provisioning to you. |
-| `--no-shell-rc` | Do not edit your shell startup files. |
-| `--skip-init` | Leave database initialization to you. |
-| `--interop auto\|all\|none` | Control registration with detected external AI assistants. |
+| `--dir DIR` | Choose where Machina is installed |
+| `--dev` | Include Python development and testing tools |
+| `--no-ui` | Install only the backend and command line |
+| `--interactive` | Allow setup questions even when the script is piped into Bash |
+| `--yes` | Run without setup questions |
+| `--with-docker-db` / `--no-docker-db` | Use or avoid Docker for database provisioning |
+| `--no-auto-db` | Leave all database provisioning to you |
+| `--no-shell-rc` | Do not edit your shell startup files |
+| `--skip-init` | Leave database initialization to you |
+| `--interop auto\|all\|none` | Control registration with detected external AI assistants |
+
+</details>
 
 <details>
 <summary>Install manually from source</summary>
-
-Create a PostgreSQL database with pgvector available, then:
 
 ```bash
 git clone https://github.com/kiazh/Machina-Harness.git machina
@@ -92,25 +935,11 @@ machina doctor
 machina
 ```
 
-The activation command above is for macOS/Linux shells. Omit the npm step for backend-only use. A Python wheel includes the backend and bundled skills; the terminal UI and its Node dependencies require a source checkout or a separately configured `MACHINA_UI_DIR`.
-
-Optional Python extras install additional dependencies. For example, `pip install -e ".[dev,embeddings-onnx,rerank]"` adds development tools, local embedding support, and reranking.
-
-| Extra | What it adds |
-|---|---|
-| `dev` | Python testing, formatting, linting, and security tools |
-| `embeddings-local` | Model2Vec for local search by meaning |
-| `embeddings-onnx` | FastEmbed/ONNX for local embedding models |
-| `rerank` | Local ONNX models that reorder search results |
-| `secrets` | AWS Secrets Manager dependencies |
-| `connectors` | Compatibility extra; MCP is already in the base installation |
-| `workflow-trial` | Dependencies for the separate workflow-trial tooling |
-
-CI and container builds install dependencies from `uv.lock`; a manual `pip install -e .` uses pip's resolver. Local skill directories can be selected with `MACHINA_SKILLS_DIR` and `MACHINA_LEARNED_SKILLS_DIR`.
+Optional extras: `pip install -e ".[dev,embeddings-onnx,rerank]"` adds development tools, local ONNX embeddings, and reranking.
 
 </details>
 
-### Try a first task
+### First task
 
 In the UI, ask something concrete:
 
@@ -118,9 +947,9 @@ In the UI, ask something concrete:
 Explain how this project is organized and where its main entry point is.
 ```
 
-Use `/help` for the searchable command menu. Open `/workspace open .` to browse the current project, `/models` to choose a model, and `/sessions` to return to earlier work.
+Use `/help` for the searchable command menu. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
 
-For a single response without opening the UI:
+For a single response without the UI:
 
 ```bash
 machina chat "Summarize the repository layout"
@@ -128,199 +957,11 @@ machina chat -c "Continue from the last session"
 machina chat -s "<session-id>" "Resume this conversation"
 ```
 
-## Features
+Headless chat exits `0` for completion, `1` for failure, `3` for an approval pause, and `130` for interruption.
 
-Jump to [the workspace](#chat-and-code-side-by-side), [saved sessions](#save-search-and-resume-conversations), [long-task context](#keep-long-tasks-within-the-models-reading-limit), [usage](#track-usage-and-set-budgets), [document search](#search-documents-and-research-the-web), [memory](#remember-useful-information-between-conversations), [skills](#reuse-task-instructions-with-skills), [personality](#shape-personality-and-learn-from-feedback), [specialists](#delegate-to-specialist-agents), [scheduled work](#schedule-recurring-work), or [integrations](#connect-tools-and-other-ai-assistants).
+## Reference
 
-### Chat and code side by side
-
-The terminal UI combines **streaming chat**—responses appear as they are generated—with a file editor, tabs, a project explorer, and a problems panel. You can keep a conversation beside the code it concerns, expand either pane, and switch focus without leaving the terminal.
-
-Quick Open finds files by a partial name. Tabs can be temporary previews or pinned files you want to keep open. Modified, conflicting, and read-only files have visible text labels. Layout, open-file locations, and cursor positions are saved per project; this layout state does not store document contents.
-
-When a file changes on disk after you opened it, saving offers a choice: reload, explicitly overwrite, or keep editing. Closing a modified tab or quitting with unsaved files also gives you a chance to save or cancel. Binary and oversized files open in a read-only view rather than an unsuitable text editor.
-
-**Language intelligence** comes from optional language servers: separate programs that understand a programming language. Machina supports `pyright-langserver` for Python and `typescript-language-server` for JavaScript/TypeScript. They can provide completion, hover explanations, definitions, references, symbols, and diagnostics. A missing server is reported as missing; ordinary editing still works. Only install and enable servers you trust, since they run with your operating-system privileges.
-
-Paste or drop supported images into chat, attach selected code, or ask the agent to inspect files with its tools. Opening a file in the editor does not automatically send its contents to the model. The explicit attachment flow shows the file, range, version, and whether the text includes unsaved edits. Agent file reads remain subject to tool permissions.
-
-| Action | Command or shortcut |
-|---|---|
-| Send a message / add a new line | `Enter` / `Shift+Enter` |
-| Find commands | `/help` |
-| Open a project | `/workspace open <path>` |
-| Find a file | `Ctrl+P` or `/quickopen` |
-| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
-| Show or hide the file explorer | `Ctrl+T` or `/explorer` |
-| Change pane focus | `F6` / `Shift+F6` |
-| Show code completion | `Ctrl+Space` or `/editor complete` |
-| Go to definition / find references | `F12` / `Shift+F12` |
-| Preview a symbol rename, when supported | `F2` |
-| Maximize chat from the editor | `Ctrl+Right` |
-| Restore the split from the editor or maximized chat | `Ctrl+Left` or `/workspace split` |
-| Paste an image | `Ctrl+V` |
-| Stop a response | `Esc` after dismissing any open popup |
-| See keyboard shortcuts | `F1` or `?` on empty input |
-| Change appearance / editor preferences | `/theme` / `/settings` |
-
-Some terminals or operating systems intercept shortcuts. The slash commands provide fallbacks. In split mode, the chat input keeps its normal `Ctrl+Left/Right` word movement; `Ctrl+W` closes tabs only outside the chat input.
-
-The UI includes theme previews, a transparent-background option, syntax highlighting, soft wrap, and tab-width preferences. An optional **now-playing bar** shows local music or media information. On macOS, detection can use system media interfaces, installed helper tools, Spotify/Music, or supported browser tabs; some methods need Automation permission. Use `/music off` to hide it. Detection is local and does not send media metadata to the model.
-
-See the [workspace guide](docs/design/WORKSPACE.md), [UI design](docs/design/TUI_DESIGN.md), and [theme reference](docs/design/THEME_COLORS.md). Machina's terminal command tool is separate from the editor; there is no embedded terminal pane.
-
-### Save, search, and resume conversations
-
-A **session** is a saved conversation and its working state. PostgreSQL stores the messages and context needed to return to it after a restart. The command line, UI, and HTTP API use the same saved state when configured for the same database.
-
-You can name a session, give it a goal, search older conversations, resume one, export it as Markdown, or **fork** it to explore another direction in a new session. Delegated work gets its own child sessions, so specialist conversations do not have to take over the main thread.
-
-| Task | UI command |
-|---|---|
-| Start fresh / return to earlier work | `/new` / `/sessions` or `/resume` |
-| Find a conversation / recall earlier content | `/search` / `/recall` |
-| Name the conversation / set its goal | `/rename` / `/goal` |
-| Explore a separate branch | `/fork` |
-| Save a readable copy / delete a session | `/export` / `/delete` |
-
-The CLI also supports `machina sessions`, `sessions-search`, `export`, `fork`, and `delete`. Run a command with `--help` for its arguments. `machina chat -c` continues the last session, while `-s <session-id>` selects one explicitly.
-
-### Keep long tasks within the model's reading limit
-
-A model can read only a limited amount of text per request. That limit is its **context window**, measured in **tokens**: small units of text that do not correspond exactly to words. Long conversations and large command outputs can fill that window quickly.
-
-Machina combines several approaches instead of resending every detail forever:
-
-| Mechanism | What it does |
-|---|---|
-| Context compression | Summarizes older material so recent work has room. |
-| Automatic compaction | Checks for compaction after turns, reducing the need to do it manually. |
-| Saved artifacts | Retains large tool results so omitted detail can be retrieved later. |
-| Format-aware reduction | Produces smaller views of test output, logs, JSON, CSV, diffs, and code. |
-| Request projection | Chooses the working view sent to the model while preserving required instructions and related tool messages. |
-| Retrieval selection | Removes duplicate retrieved excerpts and fits evidence into a separate reading budget. |
-
-For example, a long test log can be stored in full while the model receives failure details and a recovery handle. It can then ask for a specific part of the original instead of running the tests again merely to recover omitted text.
-
-**Recovery has explicit limits.** A smaller, recoverable view is published only after the original result has been stored. If storage fails, a quota is reached, or the result exceeds the storage limit, Machina falls back to its ordinary bounded output without claiming the missing text is recoverable. A source that was already truncated upstream remains marked as such. A summary is not a guarantee that every detail is still in the current prompt.
-
-Saved artifacts support paged reads, literal search, and metadata inspection through `artifact_read`, `artifact_search`, and `artifact_describe`. Reads are authorized again each time. Related parent/child sessions can recover evidence within their delegation tree; unrelated sessions cannot. Paging cursors identify the source version, and expired evidence is reported as unavailable. Defaults are 30 days of retention, 500 artifacts per session, and 2,000,000 characters per artifact; quotas refuse new stores rather than evicting existing evidence to make room.
-
-The request planner keeps pinned instructions intact and preserves related tool-call groups together. It can substitute a verified smaller view for an older observation, but only when its stored source is available and complete. Retrieval selection similarly removes exact duplicates without treating conflicting passages as duplicates, and tells the model when lower-ranked excerpts were omitted.
-
-Use `/context` to inspect working context and `/compress` for manual compaction. [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) explains the mechanisms and failure behavior. [Projection evidence](docs/verification/DETERMINISTIC_SKILLS_B3_EVIDENCE.md) records a real DeepSeek run; it does not establish correct replay of every provider's protected or signed message format.
-
-### Track usage and set budgets
-
-`/usage` and `machina usage` show recorded model usage. Machina normalizes provider reports so ordinary input, cached input, cache writes, and output can be accounted for consistently. It also records which session and agent made a call and whether the call was for the main task, a summary, memory processing, or skill learning.
-
-Missing usage is not treated as zero. Costs are estimates from known price records or configured overrides; an unknown model price remains unknown. Retries and supporting model calls can consume tokens even if the final answer fails. Session and agent limits can cap token consumption or request counts; `0` means unlimited. These are application budgets, not a replacement for a provider-side spending limit.
-
-**Prompt caching** is a separate, optional feature. Where a provider supports it, stable instructions and repeated request prefixes may be reused by that provider. Machina's explicit prompt-cache integration is off by default and only adds cache markers for supported provider/model paths. It does not cache answers to arbitrary questions, and no fixed cost or speed improvement is promised.
-
-Automatic model switching based on task difficulty, semantic answer caching, cache warmers, and learned token-pruning models are not enabled features. The current efficiency work focuses on measuring usage and reducing repeated text while keeping omitted evidence recoverable where possible.
-
-### Search documents and research the web
-
-Machina can index documents and retrieve relevant passages while answering a question. This is often called **retrieval-augmented generation (RAG)**: give the model selected source material alongside the question instead of expecting it to know your documents already.
-
-The document tools split material into searchable pieces and keep it associated with the session. `index_document` adds material and `search_documents` finds it. Web tools provide search, page extraction, bounded multi-page crawls, and research workflows. A crawl can add the collected pages to the session's document search.
-
-Search is **keyword-only by default**. Optional search components add other ways to find and order results:
-
-| Search component | Plain-language meaning | Available backends |
-|---|---|---|
-| Embeddings | Turn text into numerical representations so similar meanings can match even with different words. | Local Model2Vec, local ONNX/FastEmbed, an OpenAI-compatible embedding API, or automatic selection |
-| Hybrid search | Combine keyword matches with meaning-based matches. | Configurable keyword and embedding weights |
-| Reranking | Take retrieved candidates and evaluate which best match the question. | Local ONNX, Cohere, an HTTP reranking service, or automatic selection |
-
-Local embeddings need `embeddings-local` or `embeddings-onnx`; local reranking needs `rerank`. Remote backends require their endpoint or credentials and send the relevant text to that service. Selecting a local chat model alone does not configure local embeddings or reranking.
-
-The default hybrid weights are `1.0` for keywords and `0.25` for embedding results, applied only when embeddings are enabled. Memory retrieval uses relevance ranking, with recency and importance as tie-breakers. Additional search components are optional because they add cost and latency and do not improve every dataset; see the [retrieval-quality review](docs/verification/RAG_QUALITY_REVIEW.md).
-
-### Remember useful information between conversations
-
-**Memory** is distinct from both the current conversation and document search. It stores useful facts, preferences, and lessons for later retrieval. For example, a conversation may establish a lasting project convention that should be available when a later task needs it.
-
-Conversation consolidation can extract candidate memories, score their importance, and check for duplicates before saving. You can inspect, search, and forget entries through `/memory` or the CLI. User profiles and agent lessons have separate roles; persona-aware retrieval uses the active persona to help select relevant memories.
-
-**Memory approval is off by default.** With `memory_approval_enabled` enabled, writes go to a pending queue where you can approve or reject them. Without it, accepted writes are saved directly. CLI controls include `memory-pending`, `memory-approve`, `memory-reject`, and their bulk variants.
-
-Memory text is passed through secret redaction before storage; if that redaction cannot be completed, a marker replaces the content. This is a safeguard, not a reason to put credentials into conversations. Memories can also be incomplete or wrong: use the inspection and forgetting controls to correct them.
-
-### Reuse task instructions with skills
-
-A **skill** is an instruction package, usually a `SKILL.md` file, that explains how to approach a type of task. A code-review skill might describe what to inspect and how to present findings. Skills provide guidance; they are different from executable tools, model training, or permission grants.
-
-Machina includes first-party skills and a curated [ECC collection](docs/ECC_SKILLS.md). `/skills` lets you browse, search, inspect, learn, review proposals, revert changes, and manage the catalog. Each skill's source and revision are tracked so the system can distinguish bundled, installed, and learned content.
-
-Routing uses catalog metadata—task types, languages, tools, exclusions, and relevant sections—to rank candidates with repeatable rules. Once the task description is formed, this matching does not require another model call. **Stage-aware loading** means a planning stage can receive planning instructions and their prerequisites without loading every later implementation or review section at once. This makes large skill collections easier to use within a limited context window.
-
-Metadata is validated separately from the instruction body. Invalid values, circular section dependencies, excessive sizes, and fields that pretend to grant authority are rejected or ignored according to the metadata format. Bundled ECC routing additions are stored in a separate, revision-bound file; if it no longer matches the bundle, Machina reports the mismatch and uses baseline metadata instead.
-
-Newly installed or learned skills without the newer metadata can receive a one-time model-generated metadata block. The instruction body is preserved. If generation or validation fails, the skill keeps its original form rather than blocking installation. Later loads reuse persisted metadata instead of generating it again. Browsing, searching, and previewing catalog routes do not themselves run the skill or install anything.
-
-**Learning new skills after turns is opt-in** (`learning_review_enabled: false`). When enabled, its automatic-publishing policy defaults to on, with a cap of five auto-applied skills per agent in a rolling 24-hour period. Set `learning_review_auto_apply: false` or the daily cap to `0` to stage proposals for review. Published learned skills have revisions and a revert path.
-
-The registry also performs a best-effort scan for suspicious instructions. A scan cannot make an untrusted skill safe; skill instructions never bypass tool permissions. See the [skill registry](machina/skills/registry.py), [routing implementation](machina/skills/runtime.py), and [enrichment rules](machina/skills/enrichment/README.md).
-
-### Shape personality and learn from feedback
-
-`/persona` sets the communication style you want, such as “explain clearly, use concrete examples, and keep a warm tone.” This human style override applies across the installation; it does not change the agent's tool permissions or replace its core role.
-
-**Personality growth** stores bounded preferences and lessons owned by an agent. These notes can affect later conversations, including after a restart or provider change. Growth is enabled by default. Use `/growth` to view progress, teach a note, give feedback, forget a note, or restore an earlier revision:
-
-```text
-/growth teach style verbosity Explain decisions with one concrete example
-/growth teach lesson testing Run focused tests before reporting success
-/growth feedback good
-/growth show
-/growth rollback
-```
-
-The related **RSI** feature—runtime self-improvement—uses recorded outcomes and feedback to adjust bounded strategy guidance and memory-retrieval policy. Revisions and trial history make those adjustments inspectable and reversible. This updates saved guidance and policy, not the underlying AI model's weights, and does not grant extra authority.
-
-**SoulSpec packages** let you import or export a structured identity: persona, voice, workflows, and related resources. Export excludes learned notes unless you explicitly include them. Importing an identity preserves the selected agent's ownership and execution settings; the documented restore option is needed to restore an included learned-note snapshot. These packages do not move all chat history or execute bundled scripts.
-
-Read [personality, growth, and identity](docs/PERSONALITY_GROWTH.md) for ownership, disabling learning, package commands, and rollback behavior. This is shared agent persistence within an installation, not isolated user accounts.
-
-### Delegate to specialist agents
-
-An **agent** combines a role or identity with a model/provider choice and an allowed set of tools. Machina provides general-purpose, research, and coding agents, a bundled [ECC specialist collection](docs/ECC_AGENTS.md), and support for custom definitions.
-
-A **subagent** is an agent working on a delegated part of a larger task. For example, a main coding agent can ask a research specialist to inspect an unfamiliar dependency. The specialist gets a child session, returns its result, and remains subject to its own tool restrictions and the permission system.
-
-Delegation can run sequentially when one result is needed by the next step, or in parallel for independent work. The main session can inspect delegated results without combining every child message into its own conversation. `/agents` browses definitions and related sessions; `/delegate` starts an assignment. Delegated work can still pause for approval or fail; creating a subagent does not guarantee a better answer or bypass a budget.
-
-### Schedule recurring work
-
-`/jobs` manages work that should run again while the backend is active:
-
-| Job type | Example use |
-|---|---|
-| Interval prompt | Check a project every set number of seconds. |
-| Cron prompt | Run a task on a five-field UTC schedule. |
-| Heartbeat | Nudge an agent to continue its current goal. |
-| Script job | Run a specific operator-approved script on a schedule. |
-
-Jobs are saved so their configuration survives restarts, but scheduling needs a running backend. They use the normal agent and permission paths. Script jobs have a separate operator policy specifying allowed entry files and dependencies; adding a path to a prompt is not enough to authorize a script.
-
-### Connect tools and other AI assistants
-
-**MCP (Model Context Protocol)** is a standard way for AI applications to connect to tools. Machina supports it in two directions:
-
-- **Bring tools into Machina.** Add a local program or HTTP MCP server through `/mcp`, review its connection details, and choose which tools the agent can use. Configuration and inspection do not by themselves launch it. Connecting starts the selected program or contacts the endpoint after the required review.
-- **Use Machina from another assistant.** `machina harnesses` can register Machina's MCP server with supported OpenCode, Codex, and Hermes installations. That server exposes status, session creation, and a bounded text chat task. It is a focused integration surface, not a remote copy of every UI feature. Machina can also delegate a bounded prompt to a supported external assistant.
-
-For incoming tools, the agent first browses the available catalog, reads a selected tool's description, then requests a specific call. This avoids putting every remote tool description into every model request. Remote tool calls still use ordinary approvals; server-provided descriptions and results do not grant authority.
-
-Supported HTTP servers can use browser-based OAuth sign-in. Machina implements the authorization-code flow with PKCE, which binds the login exchange to the client that started it. A usable desktop credential store or a configured `MACHINA_OAUTH_MASTER_KEY` is needed to protect stored OAuth credentials. Local stdio servers must already be installed; Machina does not download them automatically.
-
-See [MCP setup](docs/MCP.md), [MCP OAuth](docs/MCP_OAUTH.md), and `machina harnesses --help` for connection fields, secret references, trust settings, and supported external-assistant commands.
-
-### Command reference
-
-You can discover commands through `/help` without memorizing them. The main groups are:
+### Commands
 
 | Group | UI commands |
 |---|---|
@@ -333,68 +974,11 @@ You can discover commands through `/help` without memorizing them. The main grou
 | Models and setup | `/auth`, `/keys`, `/models`, `/default-model`, `/provider`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals`, `/interop`, `/harnesses` |
 | Information | `/status`, `/usage`, `/output`, `/mcp`, `/music`, `/help`, `/exit` |
 
-Aliases include `/settings` → `/config`, `/model` → `/default-model`, `/providers` → `/provider`, and `/compact` → `/compress`.
+Aliases: `/settings` → `/config`, `/model` → `/default-model`, `/providers` → `/provider`, `/compact` → `/compress`.
 
-For scripting, `machina --help` lists the CLI. In addition to chat and session commands, it includes memory approval/search, skill management, providers/authentication, growth, usage, configuration, and external-assistant integration. `machina`, `machina repl`, and `machina chat -i` open the same terminal UI. Headless `machina chat` exits with `0` for completion, `1` for failure, `3` for an approval pause, and `130` for interruption.
+The CLI mirrors these capabilities: `machina sessions`, `sessions-search`, `export`, `fork`, `delete`, `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `skills`, `providers`, `auth`, `growth`, `usage`, `config`, `config-set`, `doctor`, `serve`, and `harnesses`. Run any command with `--help`.
 
-## How it works
-
-Machina runs the agent locally and connects it to your selected model. The model can request tools; Machina checks permissions, executes permitted actions, and returns their results so the conversation can continue.
-
-```mermaid
-flowchart TB
-    UI["Terminal UI"] -->|"JSON-RPC over stdio"| GW["Gateway"]
-    CLI["Command line"] --> CORE["Agent and shared services<br/>context, memory, skills, delegation, jobs"]
-    API["HTTP API"] -->|"REST and streamed replies"| CORE
-    API -->|"/rpc feature methods"| GW
-    HOST["Other AI assistants"] -->|"MCP"| MCP["Machina MCP server"]
-    MCP -->|"Headless CLI and shared services"| CORE
-    GW --> CORE
-    CORE <-->|"Requests and responses"| MODEL["Cloud provider or local model"]
-    CORE <-->|"Saved application state"| DB["PostgreSQL + pgvector"]
-    CORE --> PERM["Permission checks and approvals"]
-    PERM --> TOOLS["Files, commands, web, and MCP tools"]
-    TOOLS -->|"Results"| CORE
-```
-
-The UI uses the gateway. The CLI and HTTP chat routes call shared services directly; HTTP also exposes gateway feature methods through `/rpc`. The MCP server uses shared services and headless CLI chat. These are different entry points into the same application.
-
-A typical conversation turn follows this sequence:
-
-1. Machina loads the session, its agent definition, and the configured authority.
-2. It assembles instructions, selected skills, recent conversation, and relevant memory or document excerpts.
-3. It fits that working context to the selected model's input limit and sends the request.
-4. If the model requests a tool, Machina checks the action. It runs permitted actions or pauses for a human decision.
-5. Tool results are saved and added to the conversation, using smaller recoverable views when appropriate. The model can continue from those results.
-6. When the turn finishes, Machina records usage and performs enabled context, memory, and growth maintenance. Optional skill-learning reviews run only when enabled.
-
-The **gateway** is the authenticated message interface used by the terminal UI. **JSON-RPC** describes a named operation and its arguments; **stdio** means those messages travel through the local child process's input and output streams. The HTTP API instead uses normal HTTP requests and **server-sent events (SSE)** to stream progress. Sharing core services does not mean every surface takes the same transport path.
-
-**Your data:** conversations, memories, documents, approvals, and usage records live in your database. Configuration and credentials also use local files or configured secret stores. When you choose a cloud model, the request's selected context is sent to that provider; web tools and external connectors contact their respective services. Self-hosting the application does not make those services local.
-
-## Providers and models
-
-Choose a provider in `machina setup`, or use `/provider` and `/models` in the UI. The default configuration selects OpenRouter's `openrouter/free` model and needs an OpenRouter key. Model availability, account access, pricing, and tool support depend on the provider.
-
-The table lists provider IDs used in commands, credential names, and the defaults bundled with this source version. These model IDs are application defaults, not a list of the newest models or a guarantee of account access.
-
-| Provider ID | Credential or connection | Bundled default / selection |
-|---|---|---|
-| `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022` |
-| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
-| `xai` | `XAI_API_KEY` | `grok-4` |
-| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
-| `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
-| `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` |
-| `google` | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
-| `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
-| `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
-| `chatgpt` | `machina auth login` | Choose from the account's model catalog. |
-| `copilot` | `machina auth copilot login` | Choose a model available to your account. |
-| `ollama` | A running Ollama service | `llama3.1`; the model must be available locally. |
-| `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID. |
+### Providers and model selection
 
 Override the provider and model for one command:
 
@@ -402,186 +986,91 @@ Override the provider and model for one command:
 machina chat -p deepseek -m deepseek-chat "Explain this project"
 ```
 
-Or select them interactively:
-
 | Command | Purpose |
 |---|---|
-| `/provider` | Show or change the provider. |
-| `/provider list` | List built-in and user-added connections. |
-| `/provider add` | Save a named OpenAI-compatible endpoint. |
-| `/models` | Choose a model from provider-grouped catalogs and fallback entries. |
-| `/models catalog` | Inspect the selected provider's catalog. |
-| `/default-model` | Save a default model choice; `/model` is an alias. |
-| `/effort` | Adjust reasoning effort where supported. |
-| `/auth` / `/keys` | Manage account sign-in or provider keys. |
+| `/provider` / `/provider list` | Show or change the provider; list connections |
+| `/provider add` | Save a named OpenAI-compatible endpoint |
+| `/models` / `/models catalog` | Choose a model; inspect the selected catalog |
+| `/default-model` | Save a default choice |
+| `/effort` | Adjust reasoning effort where supported |
+| `/auth` / `/keys` | Account sign-in or provider keys |
 
-Named endpoints store a base URL, optional key, and a discovered model catalog. Keys use the secret boundary rather than being written into the provider catalog file. Keyless compatible servers are supported. Catalog discovery can fail or return no models; an explicit model ID may be needed.
+New sessions resolve explicit choices first, then agent-definition defaults, then global defaults. Existing session pins stay in force until changed. Provider and model are resolved together so switching one does not silently carry over an incompatible model.
 
-New sessions resolve explicit choices first, then applicable agent-definition defaults, then global defaults. Existing saved session pins remain in force until changed. Provider and model are resolved together so switching a provider does not silently carry over a model that belonged to another one.
+### Permissions and approvals
 
-Reasoning effort is a provider-specific setting for how much reasoning work a model should attempt. Common tiers include `low`, `medium`, and `high`; some ChatGPT catalog models expose additional tiers. The available options depend on the route, and the UI validates supported choices. A higher tier is not a promise of better results.
+Use `/mode` to inspect or change the session mode and `/approvals` to review pending requests. `/approvals revoke` revokes session grants and returns the session to `ask`.
 
-The [provider registry](machina/core/provider/specs.py) and [factory](machina/core/provider/factory.py) define these connections. Machina does not include a model inference server: Ollama and other compatible servers run separately.
+```bash
+machina mode                  # show the current execution mode
+machina mode workspace        # set it for future sessions
+machina mode --revoke         # revoke grants and return to ask
+```
 
-## Permissions and security
+Use `/approvals` in the terminal UI to review pending requests. Headless and HTTP callers receive a structured pause: resolve the decision through the approval API, then resume explicitly. Resolving a decision and executing it are separate operations.
 
-Machina can change files and execute commands, so choose a mode that fits the task:
-
-| Mode | Behavior |
-|---|---|
-| `ask` (default) | Routine project actions can proceed; risky or unclassified actions require review. |
-| `workspace` | Project work can proceed; actions crossing the configured boundaries require review. |
-| `sandbox` | Terminal commands run through the configured Docker sandbox. |
-| `full` | An explicit session grant allows host operations without further approval, including destructive actions. |
-
-`ask` does **not** ask before every file write or command. Tools are checked against their declared effects and the specific requested action. Approvals bind to that action; changing it can require a new decision.
-
-Use `/mode` to inspect or change the session mode and `/approvals` to review pending requests. `/approvals revoke` revokes session grants and returns the session to `ask`. Headless chat pauses when approval is needed; it returns exit code `3` so automation can handle the decision rather than wait indefinitely.
-
-Keep credentials in `.env`, environment variables, protected mounted files, or supported Vault/AWS secret backends. Non-secret settings belong in `~/.machina/config.yaml`. Known credentials are redacted from supported output paths, but you should still avoid placing secrets in prompts or shared documents.
-
-### What an approval covers
-
-The permission broker is the shared decision point for agent tool actions. Tools declare effects such as reading files, writing files, executing a process, contacting a network service, changing memory, or delegating work. The broker checks both those effects and the specific action.
-
-An approval identifies more than a tool name. It binds the operation, targets, command or arguments, working directory, execution backend, timeout, network declarations, relevant content, and workspace identity. Approval and execution are separate recorded steps; a one-time approval is consumed for the action it authorized. Agent principals cannot approve their own requests.
-
-For example, approving a command in one project does not authorize a changed command in another directory. A changed or stale request may need a fresh approval. The UI shows approval cards; headless and HTTP callers receive a pause they can resolve and resume explicitly.
-
-### Shell commands and scripts
-
-Routine command classification handles literal commands joined by `;`, newlines, `&&`, `||`, or pipes. More complex shell features—expansion, redirection, background jobs, compound syntax, or unknown commands—require review rather than being assumed routine. Even a redirection such as `2>/dev/null` changes the classification. Quoted operators remain ordinary argument text.
-
-Script jobs require an operator-owned `.script-policy.json` outside the agent workspace. The policy lists entry scripts and dependencies; their hashes are checked again before execution. `MACHINA_SCRIPTS_DIR` selects the script directory. The Compose setup mounts `./scripts` read-only into the container.
-
-### Files, credentials, and isolation
-
-Workspace file access uses a server-created workspace identity and resolved paths. Symlinks and `..` are resolved before checking containment; a similar-looking path prefix is not enough. Language-server messages, repository comments, skills, and remote tool output are data, not permission to expand authority.
-
-Managed `.env` updates validate names and values, reject newline injection, replace files atomically, and use owner-only permissions on POSIX systems. Environment variables and mounted files can also supply secrets, with supported Vault/AWS backends for managed deployments. Credential rotation affects newly resolved credentials; already-running requests may finish with credentials they previously acquired.
-
-The HTTP API uses a shared API key. This is a shared installation model, not separate accounts with per-user data isolation. Docker terminal execution is a specific sandbox backend; the normal host process and language servers are not sandboxed merely because a workspace is open.
-
-Read [SECURITY.md](SECURITY.md), the [workspace trust model](docs/design/WORKSPACE_SECURITY.md), and [OPERATIONS.md](OPERATIONS.md) for detailed boundaries and deployment controls.
-
-## Configuration
+### Configuration
 
 Use `machina config` to inspect settings and `machina config-set <key> <value> --persist` to save a non-secret setting. `/config` and `/settings` provide interactive controls.
 
-### Where settings come from
+Precedence: explicit overrides > environment variables > saved configuration > defaults. Secrets resolve separately through explicit overrides, environment variables, mounted `<ENV_NAME>_FILE` files, and configured secret backends. YAML credential fields are ignored.
 
-For ordinary settings, explicit overrides take precedence over environment variables, which override saved configuration and defaults. Model/provider resolution also considers saved session pins and agent-definition defaults as described above. Most environment settings use `MACHINA_<KEY>`, such as `MACHINA_EXECUTION_MODE`; documented legacy names include `DATABASE_URL` and provider key variables.
-
-Secrets resolve separately through explicit overrides, environment variables, mounted `<ENV_NAME>_FILE` files, and configured secret backends. YAML credential fields are ignored. An invalid explicitly selected secret file reports an error rather than silently choosing another credential. `.env` fills absent environment values; it does not override values already supplied by the process environment.
-
-Examples:
-
-```bash
-machina config
-machina config-set memory_approval_enabled true --persist
-machina config-set learning_review_auto_apply_per_day 0 --persist
-```
-
-The tables below describe the defaults in this source version. Empty string means “no explicit choice”; it is shown as `""`.
-
-### Models, execution, and budgets
+<details>
+<summary>Key defaults</summary>
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `provider` / `model` | `openrouter` / `openrouter/free` | Global fallback AI connection |
-| `temperature` | `0.7` | Provider sampling setting; supported range is 0–2. |
-| `max_tokens` | `4096` | Response token ceiling, subject to provider limits. |
-| `reasoning_effort` | `""` | Use the provider default unless a supported effort is selected. |
+| `temperature` / `max_tokens` | `0.7` / `4096` | Sampling and response ceiling |
 | `execution_mode` | `ask` | Default authority preset for new sessions |
 | `turn_timeout` / `approval_timeout` | `300` / `300` | Turn and approval-wait limits, in seconds |
-| `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables it. |
-| `usage_session_token_limit` / `usage_agent_token_limit` | `0` / `0` | Lifetime token budgets; `0` is unlimited. |
-| `usage_session_request_limit` / `usage_agent_request_limit` | `0` / `0` | Lifetime request budgets; `0` is unlimited. |
-| `pricing_table_json` | `""` | Optional per-provider or per-model price overrides for estimates |
-
-### Context and saved tool results
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `compression_enabled` | `true` | Allow older context to be compressed. |
-| `compression_threshold` / `compression_target_ratio` | `0.8` / `0.5` | Trigger and target proportions for compression |
-| `compression_preserve_recent` | `3` | Recent context chunks preserved by compression |
-| `auto_compaction_enabled` | `true` | Check for automatic compaction after turns. |
-| `eviction_max_tokens` | `0` | Optional eviction ceiling; `0` disables the ceiling. |
-| `artifacts_enabled` | `true` | Save large tool results for authorized recovery. |
-| `artifact_retention_days` | `30` | Retention period; `0` disables expiry. |
-| `artifact_max_per_session` | `500` | Artifact quota; `0` removes the quota. |
-| `artifact_max_chars` | `2000000` | Largest individual result retained as an artifact |
-| `reducers_enabled` | `true` | Create format-aware smaller views of large results. |
-| `request_projection_enabled` | `true` | Send the budgeted working view to the model. |
-| `retrieval_selection_enabled` | `true` | Deduplicate and select retrieved evidence. |
-| `retrieval_token_budget` | `6000` | Retrieved-evidence reading budget; `0` disables this budget. |
-| `output_policy` | `legacy` | Use `concise` to request answer-first responses while respecting requested detail. |
-| `prompt_cache_enabled` | `false` | Opt into supported provider prompt-cache markers. |
-
-### Memory, search, and learning
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `memory_enabled` | `true` | Enable long-term memory integration. |
-| `memory_approval_enabled` | `false` | Hold memory writes for approval when enabled. |
-| `memory_consolidation_enabled` | `true` | Extract candidate memories from conversations. |
-| `persona_memory_enabled` | `true` | Use persona-aware memory retrieval. |
-| `rag_enabled` | `true` | Enable document-search integration. |
+| `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables |
+| `compression_enabled` | `true` | Allow older context to be compressed |
+| `compression_threshold` / `compression_target_ratio` | `0.8` / `0.5` | Trigger and target proportions |
+| `compression_preserve_recent` | `3` | Recent chunks preserved by compression |
+| `auto_compaction_enabled` | `true` | Check for compaction after turns |
+| `artifacts_enabled` | `true` | Save large tool results for recovery |
+| `artifact_retention_days` | `30` | Retention; `0` disables expiry |
+| `artifact_max_per_session` | `500` | Artifact quota; `0` removes it |
+| `artifact_max_chars` | `2000000` | Largest retained artifact |
+| `request_projection_enabled` | `true` | Send the budgeted working view |
+| `retrieval_token_budget` | `6000` | Retrieved-evidence reading budget |
+| `memory_enabled` | `true` | Long-term memory integration |
+| `memory_approval_enabled` | `false` | Hold memory writes for approval |
+| `memory_consolidation_enabled` | `true` | Extract candidates from conversations |
 | `embedding_backend` | `off` | `off`, `local`, `onnx`, `openai`, or `auto` |
 | `reranker_backend` | `none` | `none`, `local`, `cohere`, `http`, or `auto` |
-| `rrf_keyword_weight` / `rrf_dense_weight` | `1.0` / `0.25` | Keyword and embedding ranking weights when hybrid search is active |
-| `personality_growth_enabled` / `rsi_enabled` | `true` / `true` | Learned notes and bounded strategy improvement |
-| `learning_review_enabled` | `false` | Opt into post-turn reviews that can propose new skills. |
-| `learning_review_auto_apply` | `true` | Publish eligible proposals automatically when learning reviews are enabled. |
-| `learning_review_auto_apply_per_day` | `5` | Per-agent rolling 24-hour publishing cap; `0` stages proposals for review. |
-| `skills_disclosure_planner` | `true` | Load skill sections appropriate to the current task stage. |
+| `learning_review_enabled` | `false` | Opt into post-turn skill proposals |
+| `prompt_cache_enabled` | `false` | Opt into provider cache markers |
+| `output_policy` | `legacy` | `concise` requests answer-first responses |
 
-### Interface preferences
+</details>
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `theme` | `codex` | Terminal color palette |
-| `transparent_background` | `false` | Use the terminal's own background when enabled. |
-| `nowplaying_enabled` | `true` | Show the optional media bar. |
-| `ui_preferences` | `""` | Saved editor preferences, managed through the UI |
-| `workspace_ui_state` | `""` | Saved per-project layout and file/cursor locations; excludes document text. |
-
-### Environment reference
-
-See [.env.example](.env.example) for the documented variables and [config.py](machina/core/config.py) for all settings and validation rules. Common groups include:
+Common environment groups:
 
 | Purpose | Variables |
 |---|---|
-| Database | `DATABASE_URL` or `MACHINA_DATABASE_URL`; separate `MACHINA_TEST_DATABASE_URL` for tests |
+| Database | `DATABASE_URL` or `MACHINA_DATABASE_URL`; `MACHINA_TEST_DATABASE_URL` for tests |
 | Default model | `MACHINA_PROVIDER`, `MACHINA_MODEL` |
 | HTTP authentication | `MACHINA_API_KEY` |
 | Workspace and scripts | `MACHINA_WORKSPACE_ROOT`, `MACHINA_SCRIPTS_DIR` |
 | Embeddings | `MACHINA_EMBEDDING_BACKEND`, `MACHINA_EMBEDDING_MODEL`, `MACHINA_EMBEDDING_BASE_URL` |
 | Reranking | `MACHINA_RERANKER_BACKEND`, `MACHINA_RERANKER_HTTP_URL`, `COHERE_API_KEY` |
-| Search weighting | `MACHINA_RRF_KEYWORD_WEIGHT`, `MACHINA_RRF_DENSE_WEIGHT` |
 | Token/request budgets | `MACHINA_USAGE_SESSION_TOKEN_LIMIT`, `MACHINA_USAGE_SESSION_REQUEST_LIMIT`, `MACHINA_USAGE_AGENT_TOKEN_LIMIT`, `MACHINA_USAGE_AGENT_REQUEST_LIMIT` |
-| Learning | `MACHINA_LEARNING_REVIEW_ENABLED`, `MACHINA_LEARNING_REVIEW_AUTO_APPLY`, `MACHINA_LEARNING_REVIEW_AUTO_APPLY_PER_DAY` |
 | Skill directories | `MACHINA_SKILLS_DIR`, `MACHINA_LEARNED_SKILLS_DIR` |
 | Web services | `SEARXNG_URL`; optional Firecrawl stack settings in config |
-| MCP OAuth storage | `MACHINA_OAUTH_MASTER_KEY`: base64-encoded 32-byte encryption key |
+| MCP OAuth storage | `MACHINA_OAUTH_MASTER_KEY` (base64-encoded 32-byte key) |
 
-Optional `firecrawl_autostart`, `firecrawl_stop_on_exit`, and `firecrawl_home` settings control the UI's opt-in Firecrawl/SearXNG stack lifecycle. They do not start an external stack by default. [OPERATIONS.md](OPERATIONS.md) covers deployment precedence, secret rotation, and environment variables forwarded by Compose.
+See [.env.example](.env.example) and [`core/config.py`](machina/core/config.py) for the full set.
 
-## HTTP API and Docker
-
-### Run the API locally
-
-With the backend installed and database initialized, set a strong API key in your environment or `.env`, then start the server:
+### HTTP API
 
 ```bash
 export MACHINA_API_KEY="$(openssl rand -hex 32)"
 machina serve --host 127.0.0.1 --port 8000
 ```
 
-The API includes sessions, streamed chat, memory, documents, jobs, usage, agents, and approvals. Authenticate requests with `Authorization: Bearer <MACHINA_API_KEY>`. `/health` and `/ready` are public; `/metrics` requires authentication.
-
-A minimal integration first creates a session, then sends a prompt to that session:
+Authenticate with `Authorization: Bearer <MACHINA_API_KEY>`. `/health` and `/ready` are public; `/metrics` requires authentication.
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/sessions \
@@ -589,38 +1078,19 @@ curl -sS http://127.0.0.1:8000/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"title":"API example"}'
 
-# Replace <session-id> with the returned session ID.
 curl -N "http://127.0.0.1:8000/api/v1/sessions/<session-id>/prompt" \
   -H "Authorization: Bearer $MACHINA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"text":"Explain this project","protocolVersion":2}'
 ```
 
-The prompt response uses SSE: progress and result events arrive as the task runs. If it pauses for approval, resolve the pending request through `POST /api/v1/approvals/{id}/resolve`, then use the corresponding `/resume` endpoint with the required session, turn, and reviewed arguments. Resolving a decision and executing it are separate operations.
+The prompt endpoint streams SSE progress and result events. If it pauses for approval, resolve the pending request through `POST /api/v1/approvals/{id}/resolve`, then use the corresponding `/resume` endpoint with the session, turn, and reviewed arguments.
 
-Gateway feature methods are also available through `POST /rpc`; `prompt.submit`, `prompt.cancel`, and `shutdown` are not dispatched through that HTTP bridge. Turns use the session prompt endpoints.
+Gateway feature methods are also available through `POST /rpc`; `prompt.submit`, `prompt.cancel`, and `shutdown` are not dispatched through that bridge. Turns use the session prompt endpoints. The gateway uses JSON-RPC 2.0 over stdio for the terminal UI and authenticates with `MACHINA_GATEWAY_TOKEN`.
 
-<details>
-<summary>Gateway method families for client developers</summary>
+See [the gateway protocol](communications/ui-gateway-protocol.md), [event definitions](machina/protocol/events.json), and [HTTP routes](machina/api/routes/).
 
-| Family | Example methods |
-|---|---|
-| Sessions | `session.create`, `session.list`, `session.resume`, `session.rename`, `session.setGoal`, `session.setModel`, `session.export`, `session.fork` |
-| Turns and configuration | `initialize`, `prompt.submit`, `prompt.cancel`, `usage.get`, `config.get`, `config.set`, `shutdown` |
-| Permissions | `mode.get`, `mode.set`, `mode.revoke`, `approvals.list`, `approvals.resolve` |
-| Memory and growth | `memory.*`, `profile.*`, `growth.*` |
-| Skills | `skills.list`, `skills.show`, `skills.search`, `skills.section`, `skills.preview_route` |
-| Workspace | `workspace.open`, `workspace.read`, `workspace.save`, document, Quick Open, and language-server methods |
-| Connections | `mcp.*`, `models.list`, `models.setEffort`, `providers.list`, `providers.add`, `providers.remove` |
-| Automation and integrations | `jobs.*`, `agents.*`, `secrets.*`, `interop.*`, `nowplaying.get`, `nowplaying.command` |
-
-The local gateway uses JSON-RPC 2.0 and authenticates with `MACHINA_GATEWAY_TOKEN`; the UI launcher creates a token for each run. A standalone `python -m machina.gateway` creates and reports a token to stderr when one is not supplied. Gateway events use notifications; HTTP chat uses SSE. Version 2 turn events identify their session and turn so clients can associate updates with the correct conversation.
-
-See [the gateway protocol](communications/ui-gateway-protocol.md), [canonical event definitions](machina/protocol/events.json), and [HTTP routes](machina/api/routes/) for exact request and response shapes.
-
-</details>
-
-### Run with Docker Compose
+### Docker Compose
 
 From a source checkout, prepare `.env` from [.env.example](.env.example), configure your provider, and set the required API key. For MCP OAuth in a headless container, also provide the encryption key:
 
@@ -630,11 +1100,7 @@ export MACHINA_OAUTH_MASTER_KEY="$(python3 -c 'import base64,secrets; print(base
 docker compose up -d --build
 ```
 
-Persist these keys in your protected deployment configuration for subsequent starts. Compose launches PostgreSQL and the HTTP backend on `127.0.0.1:8000`; it does not launch the terminal UI. Database and application-home volumes preserve state. Code changes require rebuilding the image.
-
-The app container runs with a read-only root filesystem, dropped capabilities, a writable application-home volume, and temporary storage. This HTTP container and the terminal tool sandbox are separate deployment components. Configure the sandbox backend separately if you want terminal tools to execute there.
-
-The tool sandbox is a separate image:
+Compose launches PostgreSQL and the HTTP backend on `127.0.0.1:8000`; it does not launch the terminal UI. The app container runs with a read-only root filesystem, dropped capabilities, a writable application-home volume, and temporary storage. The tool sandbox is a separate image:
 
 ```bash
 docker build -f Dockerfile.sandbox -t machina-tool-sandbox:latest .
@@ -642,9 +1108,9 @@ docker build -f Dockerfile.sandbox -t machina-tool-sandbox:latest .
 
 Use [OPERATIONS.md](OPERATIONS.md) for deployment configuration, migrations, backups, restore checks, monitoring, and upgrades.
 
-## Development
+### Development
 
-The Python backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). The terminal UI tests live here in [ui/test/](ui/test/).
+The Python backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). The terminal UI tests live in [`ui/test/`](ui/test/).
 
 ```bash
 # From a Machina-DevTools checkout, point its runner at this source tree:
@@ -656,26 +1122,16 @@ python -m ruff format --check machina/ tools/
 npm --prefix ui run check
 ```
 
-Database-backed tests require a separate test database configured with `MACHINA_TEST_DATABASE_URL`. Test paths are relative to the DevTools checkout. Its runner isolates `HOME` and `MACHINA_HOME`; do not point test configuration at an application database.
+Database-backed tests require a separate test database configured with `MACHINA_TEST_DATABASE_URL`. The DevTools runner isolates `HOME` and `MACHINA_HOME`; do not point test configuration at an application database.
 
-Additional release checks include Bandit security scanning, `uv lock --check`, wheel/source-distribution builds with Hatchling, and `tools/check_release_artifacts.py`. Build tooling comes from the lockfile's build dependency group. A normal runtime installation does not imply every developer tool is installed.
-
-[CI](.github/workflows/ci.yml) has three main jobs:
-
-| Job | What it checks |
-|---|---|
-| `lint-and-test` | Locked Python dependencies, style/formatting, security scanning, release artifacts and isolated imports, then a pinned DevTools backend suite against this source checkout and a test PostgreSQL service. |
-| `ui` | TypeScript checks, Node tests, lint, dependency audit, and tests using a real Python gateway with a test database. |
-| `docker` | Application and tool-sandbox image builds plus targeted CLI, import, and sandbox smoke checks. |
-
-DevTools also contains architecture checks that detect unwanted dependencies between layers. A CI workflow definition describes intended checks; current release evidence and environment-gated limitations remain in [the release review](docs/verification/RELEASE_READINESS.md).
+CI covers locked dependencies, style and formatting, security scanning, release artifacts, the backend suite against a test PostgreSQL service, UI typecheck/tests/lint/audit, and Docker image builds.
 
 ### Source map
 
 ```text
 machina/
   cli/              Commands, setup, and the terminal UI launcher
-  core/             Agent loop, context, compression, artifacts, usage, providers, jobs
+  core/             Agent loop, context, continuity, compression, artifacts, providers, jobs
   api/              HTTP application and resource routes
   gateway/          Local JSON-RPC server and feature handlers
   protocol/         Shared event definitions and TypeScript generation
@@ -699,39 +1155,34 @@ tools/              Release checks and repository maintenance tools
 scripts/            Operator script mount point and setup guidance
 ```
 
-[pyproject.toml](pyproject.toml) defines packaging and Python extras; `uv.lock` records the dependency resolution. [FEATURE_LEDGER.md](FEATURE_LEDGER.md) maps implementation surfaces, and [CHANGELOG.md](CHANGELOG.md) records release changes.
+[pyproject.toml](pyproject.toml) defines packaging and extras; `uv.lock` records the dependency resolution. [FEATURE_LEDGER.md](FEATURE_LEDGER.md) maps implementation surfaces, and [CHANGELOG.md](CHANGELOG.md) records release changes.
 
-## Documentation
+### Documentation
 
 | Guide | What you will find |
 |---|---|
-| [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, and shortcuts |
-| [UI design](docs/design/TUI_DESIGN.md) / [themes](docs/design/THEME_COLORS.md) | Interface behavior, appearance, and color roles |
-| [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, saved tool output, recovery, and usage accounting |
-| [Optimization and caching](docs/optimization.md) | Gated semantic cache, prompt-cache warming, compression, and shadow rollouts |
-| [Personality and growth](docs/PERSONALITY_GROWTH.md) | Preferences, feedback, rollback, and SoulSpec identities |
-| [Bundled skills](docs/ECC_SKILLS.md) / [specialist agents](docs/ECC_AGENTS.md) | Included ECC collections and how they are mapped |
+| [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, artifacts, reducers, projection, recovery, accounting |
+| [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, shortcuts |
+| [UI design](docs/design/TUI_DESIGN.md) / [themes](docs/design/THEME_COLORS.md) | Interface behavior, appearance, color roles |
+| [Personality and growth](docs/PERSONALITY_GROWTH.md) | Preferences, feedback, rollback, SoulSpec identities |
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
-| [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, and client integration |
-| [Security](SECURITY.md) | Permissions, secrets, and trust boundaries |
-| [Operations](OPERATIONS.md) | Deployment, backups, migrations, and recovery |
+| [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
+| [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
+| [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
 | [Release evidence](docs/verification/RELEASE_READINESS.md) | Verification scope and open operational gates |
-| [Token-efficiency evidence](docs/verification/TOKEN_EFFICIENCY_2026-10-16.md) | Recorded checks for context, recovery, and accounting |
-| [Request-projection evidence](docs/verification/DETERMINISTIC_SKILLS_B3_EVIDENCE.md) | Implementation verification and provider replay limits |
-| [Native media-bar evidence](docs/verification/NOWPLAYING_NATIVE_VERIFICATION.md) | What was checked on macOS and which permissions were involved |
 | [Changelog](CHANGELOG.md) | Release changes |
 
-## Troubleshooting
+### Troubleshooting
 
 | Problem | Start here |
 |---|---|
-| Database connection or initialization fails | Check `DATABASE_URL`, confirm PostgreSQL and pgvector are available, then run `machina init` and `machina doctor`. |
-| Terminal UI will not start | Check Node.js 22.19+, an interactive terminal, and installed UI dependencies. For a source install, run `npm ci --ignore-scripts --prefix ui`. |
-| A model will not respond | Check `/provider`, `/models`, and `/keys`; confirm the chosen account has access and available quota. |
-| Code completion is missing | Check `/lsp status`. Language servers must be installed separately; macOS may intercept `Ctrl+Space`, so try `/editor complete`. |
-| Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras for search by meaning. |
-| A headless task pauses for approval | Resolve the pending request, then resume through the approval API. See the [protocol](communications/ui-gateway-protocol.md) and [security guide](SECURITY.md). |
-| The music bar is empty or prompts for permission | Check platform support and macOS Automation permissions, or hide it with `/music off`. |
+| Database connection or initialization fails | Check `DATABASE_URL`, confirm PostgreSQL and pgvector, run `machina init` and `machina doctor` |
+| Terminal UI will not start | Check Node.js 22.19+, an interactive terminal, and `npm ci --ignore-scripts --prefix ui` |
+| A model will not respond | Check `/provider`, `/models`, and `/keys`; confirm account access and quota |
+| Code completion is missing | Check `/lsp status`; language servers must be installed separately; on macOS, try `/editor complete` if `Ctrl+Space` is intercepted |
+| Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras |
+| A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
+| The music bar is empty or prompts for permission | Check platform support and macOS Automation permissions, or hide it with `/music off` |
 
 ## License and credits
 
