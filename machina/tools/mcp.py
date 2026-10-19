@@ -71,7 +71,8 @@ def _management():
                 "type": "string",
                 "description": (
                     "'untrusted' (default: exact approval unless a live session full grant authorizes the call) or "
-                    "'trusted_read' (only remote names in tool_allowlist skip approval)."
+                    "'trusted_read' (only allowlisted tools — the remote name or "
+                    "its exact namespaced form — skip approval)."
                 ),
             },
             "tool_allowlist": {

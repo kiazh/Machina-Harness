@@ -412,6 +412,13 @@ def chat(
             )
             turn_scope_token = None
             try:
+                # R04c: headless turns have no interactive approver, but the
+                # pause record still carries this turn as its origin so
+                # poll-based recovery (resolve + HTTP resume) can validate and
+                # attribute the continuation.
+                from machina.permissions.broker import set_approval_handler
+
+                set_approval_handler(None, principal="headless", turn_id=turn_id)
                 # Same shared factory as gateway/REST/jobs (definition, shared
                 # memory/RAG, authority). Headless: no approver → broker returns
                 # structured needs_approval instead of hanging.
@@ -481,6 +488,10 @@ def chat(
             finally:
                 if turn_scope_token is not None:
                     end_turn_scope(turn_scope_token)
+                try:
+                    set_approval_handler(None)
+                except Exception as _boundary_error:
+                    record_failure("cli.chat.clear_approver", _boundary_error)
                 renew_task.cancel()
                 try:
                     await asyncio.gather(renew_task, return_exceptions=True)

@@ -81,7 +81,7 @@ async def resolve_approval(request_id: str, req: ResolveApprovalRequest) -> dict
             "type": "approval.resolved",
             "requestId": request_id,
             "sessionId": rec.get("session_id"),
-            "turnId": rec.get("turn_id"),
+            "turnId": rec.get("turn_id") or "",
             "status": verdict,
         },
         "continuation": f"/api/v1/approvals/{request_id}/resume" if verdict == "approved" else None,
@@ -99,7 +99,10 @@ async def resume_approval(request_id: str, req: ResumeApprovalRequest) -> Stream
     record = await store.get_approval(request_id)
     if record is None:
         raise HTTPException(404, "approval not found")
-    if record.get("session_id") != str(req.sessionId) or record.get("turn_id") != req.turnId:
+    if (
+        record.get("session_id") != str(req.sessionId)
+        or (record.get("turn_id") or "") != req.turnId
+    ):
         raise HTTPException(403, "approval origin does not match")
     if record.get("status") != "approved" or record.get("consumed"):
         raise HTTPException(409, {"type": "approval.unavailable", "status": record.get("status")})

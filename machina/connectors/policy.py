@@ -526,12 +526,15 @@ def classify_tool(
     """Return 'trusted_read' or 'needs_approval'.
 
     Only explicit host configuration upgrades: trust == trusted_read AND
-    the remote name is on the connector's allowlist. Annotations,
-    descriptions, and titles are display-only — a read-only annotation on
-    an unknown tool, or a mutation hint on an allowlisted one, changes
-    nothing.
+    the remote name — or its exact namespaced form as shown in listings —
+    is on the connector's allowlist. Annotations, descriptions, and titles
+    are display-only — a read-only annotation on an unknown tool, or a
+    mutation hint on an allowlisted one, changes nothing.
     """
-    if config.trust == Trust.TRUSTED_READ.value and tool.remote_name in config.tool_allowlist:
+    allowlist = config.tool_allowlist
+    if config.trust == Trust.TRUSTED_READ.value and (
+        tool.remote_name in allowlist or tool.name in allowlist
+    ):
         return "trusted_read"
     return "needs_approval"
 

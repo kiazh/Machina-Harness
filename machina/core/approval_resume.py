@@ -28,7 +28,7 @@ async def resumed_request(record: dict, arguments: dict[str, Any]):
         tool=tool,
         agent_id=record["agent_id"],
         session_id=record["session_id"],
-        turn_id=record["turn_id"],
+        turn_id=record.get("turn_id") or "",
     )
 
 
