@@ -927,79 +927,104 @@ class RAGPipeline:
         self,
         session_id: uuid.UUID,
         agent_id: str = "harness",
+        *,
+        batch_size: int = 200,
     ) -> list[uuid.UUID]:
         """Index all existing context chunks for a session that don't have embeddings.
 
-        Useful for bootstrapping RAG on existing sessions.
+        Useful for bootstrapping RAG on existing sessions. Work happens in
+        bounded keyset batches so a long legacy session is never loaded whole
+        into memory and the embedder never receives an unbounded batch. The
+        keyset cursor advances past every read row, so rows that stay
+        keyword-only (NULL embedding when the embedder is unavailable) are not
+        re-read within the same call.
         """
-        rows = await db.fetch(
-            """
-            SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, created_at, accessed_at
-            FROM context_chunks
-            WHERE session_id = $1 AND embedding IS NULL
-            """,
-            session_id,
-        )
-
-        if not rows:
-            return []
-
-        chunks_to_embed = []
-        for row in rows:
-            payload = msgpack.unpackb(row["payload_msgpack"], raw=False)
-            text = payload.get("text", payload.get("content", str(payload)))
-            # Fail-closed redaction (W8): legacy rows are re-scrubbed before
-            # they are embedded or indexed again; raw text is never stored.
-            chunks_to_embed.append((row, _redact_or_failed(text), payload))
-
-        # Embed in batch (keyword-only rows keep NULL embeddings when the
-        # embedder is unavailable — AH-AUDIT-032; search_text still indexed).
-        texts = [text for _, text, _ in chunks_to_embed]
-        if self._embedder is None:
-            embeddings = [None] * len(texts)
-        else:
-            try:
-                embeddings = await self._embedder.embed_batch(texts)
-            except Exception as e:
-                logger.warning("batch embedding failed, keyword-only backfill: %s", e)
-                embeddings = [None] * len(texts)
-
-        embed_model_name = (
-            getattr(self._embedder, "model_name", getattr(self._embedder, "_model", "unknown"))
-            if self._embedder is not None
-            else "keyword-only"
-        )
-        # Persist each vector and its identity in the same row update.
-        updated = []
-        for (row, text, payload), embedding in zip(chunks_to_embed, embeddings, strict=True):
-            payload["metadata"] = {
-                **(payload.get("metadata") or {}),
-                "embedding_model": str(embed_model_name) if embedding else "keyword-only",
-                "embedding_dims": len(embedding) if embedding else 0,
-            }
-            # Fail-closed: legacy payload text is re-scrubbed too, so a raw
-            # secret cannot survive in the stored payload (W8).
-            if "text" in payload:
-                payload["text"] = text
-            if "content" in payload:
-                payload["content"] = text
-            updated.append(
-                (
-                    embedding_to_str(embedding) if embedding else None,
-                    text,
-                    payload_to_msgpack(payload),
-                    row["id"],
-                )
+        batch = max(1, int(batch_size))
+        indexed: list[uuid.UUID] = []
+        cursor_created = None
+        cursor_id = None
+        while True:
+            rows = await db.fetch(
+                """
+                SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, created_at, accessed_at
+                FROM context_chunks
+                WHERE session_id = $1 AND embedding IS NULL
+                  AND ($2::timestamptz IS NULL OR (created_at, id) > ($2::timestamptz, $3::uuid))
+                ORDER BY created_at ASC, id ASC
+                LIMIT $4
+                """,
+                session_id,
+                cursor_created,
+                cursor_id,
+                batch,
             )
+            if not rows:
+                break
+            cursor_created = rows[-1]["created_at"]
+            cursor_id = rows[-1]["id"]
 
-        await db.executemany(
-            """
-            UPDATE context_chunks
-            SET embedding = $1, search_text = $2, payload_msgpack = $3
-            WHERE id = $4
-            """,
-            updated,
-        )
+            chunks_to_embed = []
+            for row in rows:
+                payload = msgpack.unpackb(row["payload_msgpack"], raw=False)
+                text = payload.get("text", payload.get("content", str(payload)))
+                # Fail-closed redaction (W8): legacy rows are re-scrubbed before
+                # they are embedded or indexed again; raw text is never stored.
+                chunks_to_embed.append((row, _redact_or_failed(text), payload))
+
+            # Embed in batch (keyword-only rows keep NULL embeddings when the
+            # embedder is unavailable — AH-AUDIT-032; search_text still indexed).
+            texts = [text for _, text, _ in chunks_to_embed]
+            if self._embedder is None:
+                embeddings = [None] * len(texts)
+            else:
+                try:
+                    embeddings = await self._embedder.embed_batch(texts)
+                except Exception as e:
+                    logger.warning("batch embedding failed, keyword-only backfill: %s", e)
+                    embeddings = [None] * len(texts)
+
+            embed_model_name = (
+                getattr(self._embedder, "model_name", getattr(self._embedder, "_model", "unknown"))
+                if self._embedder is not None
+                else "keyword-only"
+            )
+            # Persist each vector and its identity in the same row update.
+            updated = []
+            for (row, text, payload), embedding in zip(chunks_to_embed, embeddings, strict=True):
+                payload["metadata"] = {
+                    **(payload.get("metadata") or {}),
+                    "embedding_model": str(embed_model_name) if embedding else "keyword-only",
+                    "embedding_dims": len(embedding) if embedding else 0,
+                }
+                # Fail-closed: legacy payload text is re-scrubbed too, so a raw
+                # secret cannot survive in the stored payload (W8).
+                if "text" in payload:
+                    payload["text"] = text
+                if "content" in payload:
+                    payload["content"] = text
+                updated.append(
+                    (
+                        embedding_to_str(embedding) if embedding else None,
+                        text,
+                        payload_to_msgpack(payload),
+                        row["id"],
+                    )
+                )
+
+            await db.executemany(
+                """
+                UPDATE context_chunks
+                SET embedding = $1, search_text = $2, payload_msgpack = $3
+                WHERE id = $4
+                """,
+                updated,
+            )
+            indexed.extend(row["id"] for row, _, _ in chunks_to_embed)
+            if len(rows) < batch:
+                break
+
+        if not indexed:
+            return []
 
         # Indexed content changed — drop cached search results for this session.
         self._invalidate_search_cache(session_id)
@@ -1007,10 +1032,10 @@ class RAGPipeline:
         audit_log(
             "rag_index_context_complete",
             session_id=str(session_id),
-            chunks_embedded=len(updated),
+            chunks_embedded=len(indexed),
         )
 
-        return [row["id"] for row, _, _ in chunks_to_embed]
+        return indexed
 
     def _invalidate_search_cache(self, session_id: uuid.UUID) -> None:
         """Remove cached search results for *session_id* (after re-indexing)."""

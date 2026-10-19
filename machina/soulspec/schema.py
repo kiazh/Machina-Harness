@@ -484,22 +484,40 @@ class SoulSpec:
                 for key in ("name", "description", "system_prompt", "requested_style")
             ):
                 raise ValueError("persona fields must be strings")
+            raw_values = p.get("values", [])
+            raw_traits = p.get("traits", [])
+            if (
+                not isinstance(raw_values, list)
+                or any(
+                    not isinstance(v, dict) or not isinstance(v.get("name"), str)
+                    for v in raw_values
+                )
+                or not isinstance(raw_traits, list)
+                or any(
+                    not isinstance(t, dict) or not isinstance(t.get("name"), str)
+                    for t in raw_traits
+                )
+            ):
+                raise ValueError("persona values/traits must be objects with a name")
+            voice_data = p.get("voice")
+            if voice_data is not None and not isinstance(voice_data, dict):
+                raise ValueError("persona voice must be an object")
             voice = None
-            if p.get("voice"):
+            if voice_data:
                 voice = cls.Voice(
-                    tone=p["voice"].get("tone"),
-                    style=p["voice"].get("style"),
+                    tone=voice_data.get("tone"),
+                    style=voice_data.get("style"),
                 )
             persona = cls.Persona(
                 name=p.get("name", ""),
                 description=p.get("description", ""),
                 values=[
                     cls.PersonaValue(name=v["name"], weight=v.get("weight", 0.5))
-                    for v in p.get("values", [])
+                    for v in raw_values
                 ],
                 traits=[
                     cls.PersonaTrait(name=t["name"], strength=t.get("strength", 0.5))
-                    for t in p.get("traits", [])
+                    for t in raw_traits
                 ],
                 voice=voice,
                 system_prompt=p.get("system_prompt", ""),
@@ -514,6 +532,11 @@ class SoulSpec:
             persona.requested_style = validate_value("persona_description", persona.requested_style)
             persona.learned_notes = validate_notes(persona.learned_notes)
 
+        raw_workflow = data.get("workflow", [])
+        if not isinstance(raw_workflow, list) or any(
+            not isinstance(w, dict) or not isinstance(w.get("name"), str) for w in raw_workflow
+        ):
+            raise ValueError("workflow entries must be objects with a name")
         workflow = [
             cls.Workflow(
                 name=w["name"],
@@ -521,9 +544,14 @@ class SoulSpec:
                 steps=w.get("steps", []),
                 tools=w.get("tools", []),
             )
-            for w in data.get("workflow", [])
+            for w in raw_workflow
         ]
 
+        raw_skills = data.get("skills", [])
+        if not isinstance(raw_skills, list) or any(
+            not isinstance(s, dict) or not isinstance(s.get("name"), str) for s in raw_skills
+        ):
+            raise ValueError("skills entries must be objects with a name")
         skills = [
             cls.Skill(
                 name=s["name"],
@@ -533,12 +561,14 @@ class SoulSpec:
                 if isinstance(s.get("progressive_disclosure"), dict)
                 else s.get("progressive_disclosure_level", 2),
             )
-            for s in data.get("skills", [])
+            for s in raw_skills
         ]
 
         config = None
         if data.get("config"):
             c = data["config"]
+            if not isinstance(c, dict):
+                raise ValueError("config must be an object")
             permissions = None
             if c.get("permissions"):
                 policy = c["permissions"]

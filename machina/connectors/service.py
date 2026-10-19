@@ -89,7 +89,9 @@ class ConnectorService:
         await self._refresh_auth_cache()
 
     async def _refresh_locked(self) -> None:
-        generation, configs = self.store.load()
+        # load() stats, reads (up to 1 MiB) and validates synchronously; run it
+        # in a worker so every MCP tool dispatch does not park the loop on it.
+        generation, configs = await asyncio.to_thread(self.store.load)
         if generation < self._store_generation:
             raise ConfigError("connector inventory generation moved backwards")
         if generation == self._store_generation:

@@ -105,6 +105,7 @@ class MemoryStore:
         importance: float = 0.5,
         embedding: list[float] | None = None,
         embedding_space: str | None = None,
+        embedding_space_known: bool = True,
         explicitly_important: bool = False,
         base_strength: float = 1.0,
         connection: Any | None = None,
@@ -135,6 +136,12 @@ class MemoryStore:
         shared embedder's current space). Dense reads only compare rows from
         the same space; rows written before this column existed stay usable
         through the documented ``embedding_space IS NULL`` fallback.
+
+        ``embedding_space_known=False`` writes the vector with an unknown
+        space (NULL) instead of stamping the current one. Approval completions
+        of pre-H08 pending rows use it: those vectors may come from a
+        different model, and mislabeling them makes incomparable vectors look
+        comparable.
         """
         if not bypass_approval:
             gate = _approval_gate()
@@ -193,15 +200,21 @@ class MemoryStore:
         space_id = None
         if embedding is not None:
             embedding_str = embedding_to_str(embedding)
-            space_id = embedding_space if embedding_space is not None else embedding_space_id()
-            if space_id is not None:
-                space_executor = connection if connection is not None else db
-                if not await self._ensure_embedding_space(
-                    space_executor, durable=connection is None
-                ):
-                    # Legacy database where the additive DDL cannot run: keep
-                    # the pre-H08 write shape rather than fail the write.
-                    space_id = None
+            if not embedding_space_known:
+                # Legacy pending vector: its space is genuinely unknown, so
+                # keep NULL (the read-side compatibility path) instead of
+                # claiming it belongs to today's embedder.
+                space_id = None
+            else:
+                space_id = embedding_space if embedding_space is not None else embedding_space_id()
+                if space_id is not None:
+                    space_executor = connection if connection is not None else db
+                    if not await self._ensure_embedding_space(
+                        space_executor, durable=connection is None
+                    ):
+                        # Legacy database where the additive DDL cannot run: keep
+                        # the pre-H08 write shape rather than fail the write.
+                        space_id = None
 
         async def insert(executor: Any) -> Any:
             if provenance is not None and not callable(getattr(executor, "execute", None)):

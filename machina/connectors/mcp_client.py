@@ -900,39 +900,51 @@ class MCPConnection:
 
     def _normalize(self, remote_name: str, result: Any, mcp_types: Any) -> CallOutcome:
         texts: list[str] = []
+        # Untrusted server payload: bound what we materialize before the
+        # regex redaction and JSON re-serialization run over it. Anything past
+        # this cap cannot survive the result_limit truncation below, so a
+        # giant (or hostile) response must not be joined/scanned in full.
+        cap = max(self.config.result_limit * 2, 65_536)
+        collected = 0
         structured: Any = getattr(result, "structuredContent", None)
         if structured is None:
             structured = getattr(result, "structured_content", None)
         for block in getattr(result, "content", []) or []:
+            piece: str
             if isinstance(block, mcp_types.TextContent):
-                texts.append(block.text or "")
+                piece = block.text or ""
             elif isinstance(block, mcp_types.ImageContent):
-                texts.append(f"[image omitted: {getattr(block, 'mime_type', '?')}]")
+                piece = f"[image omitted: {getattr(block, 'mime_type', '?')}]"
             elif isinstance(block, mcp_types.AudioContent):
-                texts.append(f"[audio omitted: {getattr(block, 'mime_type', '?')}]")
+                piece = f"[audio omitted: {getattr(block, 'mime_type', '?')}]"
             elif isinstance(block, mcp_types.EmbeddedResource):
-                texts.append("[embedded resource omitted: fetch explicitly, never auto-fetched]")
+                piece = "[embedded resource omitted: fetch explicitly, never auto-fetched]"
             elif isinstance(block, mcp_types.ResourceLink):
-                texts.append(f"[resource link omitted: {getattr(block, 'uri', '?')}]")
+                piece = f"[resource link omitted: {getattr(block, 'uri', '?')}]"
             else:
-                texts.append(f"[unsupported content omitted: {type(block).__name__}]")
+                piece = f"[unsupported content omitted: {type(block).__name__}]"
+            room = cap - collected
+            if room <= 0:
+                break
+            if len(piece) > room:
+                piece = piece[:room]
+            texts.append(piece)
+            collected += len(piece)
         text = self._redact("\n".join(texts))
+        structured_text: bytes | None = None
         if structured is not None:
             structured = json.loads(self._redact(json.dumps(structured, ensure_ascii=False)))
+            structured_text = json.dumps(structured, ensure_ascii=False).encode("utf-8")
         truncated = False
         encoded = text.encode("utf-8", "replace")
-        structured_bytes = (
-            len(json.dumps(structured, ensure_ascii=False).encode("utf-8"))
-            if structured is not None
-            else 0
-        )
+        structured_bytes = len(structured_text) if structured_text is not None else 0
         if len(encoded) + structured_bytes > self.config.result_limit:
             # The marker shares the byte budget. When the text portion leaves
             # room, serialize structuredContent into that room instead of
             # dropping the tool's only output (combined #41 / original #54).
             marker = b"\n...[truncated]..."[: self.config.result_limit]
             if structured is not None:
-                structured_text = json.dumps(structured, ensure_ascii=False).encode("utf-8")
+                structured_text = structured_text or b""
                 room = self.config.result_limit - len(encoded) - len(marker)
                 if room > 0:
                     prefix = text + ("\n" if text else "")

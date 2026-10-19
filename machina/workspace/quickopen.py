@@ -238,6 +238,7 @@ class QuickOpenIndex:
         rel: str,
         visited: set[tuple[int, int]],
         pending: list[str],
+        symlinked_dirs: set[str],
     ) -> None:
         """Follow a symlink only when its target stays inside the root."""
         try:
@@ -250,7 +251,9 @@ class QuickOpenIndex:
             self.skipped_symlinks += 1
             return
         try:
-            st = os.stat(raw.path)  # the inside-root target (kind + cycle guard)
+            # Stat the validated target string, not the link again: the link
+            # may have been swapped between the two calls.
+            st = os.stat(target)
         except OSError:
             self.skipped_symlinks += 1
             return
@@ -260,6 +263,10 @@ class QuickOpenIndex:
                 return
             visited.add(identity)
             pending.append(rel)
+            # The containment check above only binds the target we just
+            # resolved; the walk re-opens ``rel`` later. Re-validate at the
+            # point of use (scan()) so a swapped link cannot redirect it.
+            symlinked_dirs.add(rel)
         elif stat.S_ISREG(st.st_mode):
             self._add(rel)
 
@@ -278,10 +285,22 @@ class QuickOpenIndex:
         if root_identity is not None:
             visited.add(root_identity)
         pending: list[str] = [""]
+        symlinked_dirs: set[str] = set()
+        root_text = str(self.root)
         examined = 0
         stop = False
         while pending and not stop:
             rel_dir = pending.pop()
+            if rel_dir and rel_dir in symlinked_dirs:
+                # Re-validate a symlinked directory at the point of use: the
+                # link may have been swapped after _scan_symlink validated it.
+                try:
+                    resolved = os.path.realpath(self.root / rel_dir)
+                except OSError:
+                    resolved = ""
+                if resolved != root_text and not resolved.startswith(root_text + os.sep):
+                    self.skipped_symlinks += 1
+                    continue
             try:
                 iterator = os.scandir(self.root if not rel_dir else self.root / rel_dir)
             except OSError:
@@ -306,7 +325,7 @@ class QuickOpenIndex:
                             continue
                         rel = f"{rel_dir}/{name}" if rel_dir else name
                         if raw.is_symlink():
-                            self._scan_symlink(raw, rel, visited, pending)
+                            self._scan_symlink(raw, rel, visited, pending, symlinked_dirs)
                         elif raw.is_dir(follow_symlinks=False):
                             self._queue_directory(raw, rel, visited, pending)
                         elif raw.is_file(follow_symlinks=False):

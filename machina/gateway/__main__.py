@@ -40,9 +40,25 @@ import json
 import logging
 import secrets
 import threading
+from queue import Full, Queue
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Bounded hand-off between the event loop and the protocol writer thread.
+# A UI that stops draining the pipe must never freeze the loop (control
+# requests such as prompt.cancel have to stay dispatchable) and must never
+# grow this process's memory without limit. 4096 frames is far above any
+# healthy UI's backlog; reaching it means the channel is effectively dead.
+_WRITE_QUEUE_MAX = 4096
+_write_queue: Queue[str | None] = Queue(maxsize=_WRITE_QUEUE_MAX)
+_write_thread: threading.Thread | None = None
+_write_failures = 0
+
+# Inbound protocol lines are bounded too: a flooding client applies
+# back-pressure to its own reader thread instead of growing the queue
+# without limit.
+_READ_QUEUE_MAX = 1024
 
 # Control requests preempt the serial request chain (H21). Each exists to
 # cancel, resolve, revoke, or stop in-flight work, so queueing one behind a
@@ -53,14 +69,89 @@ _CONTROL_METHODS = frozenset({"prompt.cancel", "approvals.resolve", "mode.revoke
 # before their handlers are cancelled and joined.
 REQUEST_DRAIN_TIMEOUT_SECONDS = 10.0
 REQUEST_CANCEL_GRACE_SECONDS = 0.35
+WRITER_FLUSH_TIMEOUT_SECONDS = 5.0
+
+
+def _writer_loop() -> None:
+    """Write protocol frames off the event loop, in order.
+
+    ``write``/``flush`` on a pipe the UI stopped draining blocks until the
+    pipe buffer frees; running that on the loop thread would make cancel and
+    shutdown requests undispatchable. A single thread preserves frame order.
+    """
+    while True:
+        line = _write_queue.get()
+        if line is None:
+            return
+        try:
+            _protocol_out.write(line)
+            _protocol_out.flush()
+        except (OSError, ValueError) as exc:
+            global _write_failures
+            _write_failures += 1
+            # The UI went away or the fd is non-blocking. Keep the loop alive
+            # (stdin EOF still drives shutdown) but never lose the evidence.
+            if _write_failures == 1 or _write_failures % 100 == 0:
+                logger.error("gateway protocol write failed (%d so far): %s", _write_failures, exc)
+
+
+def _start_writer() -> None:
+    global _write_thread
+    if _write_thread is not None and _write_thread.is_alive():
+        return
+    _write_thread = threading.Thread(
+        target=_writer_loop, name="machina-gateway-stdout", daemon=True
+    )
+    _write_thread.start()
+
+
+def _stop_writer() -> None:
+    """Flush queued frames, then stop the writer thread (bounded)."""
+    thread = _write_thread
+    if thread is None or not thread.is_alive():
+        return
+    try:
+        _write_queue.put(None, timeout=WRITER_FLUSH_TIMEOUT_SECONDS)
+    except Full:
+        logger.error(
+            "gateway protocol writer backlog exceeded; %d frame(s) discarded", _write_queue.qsize()
+        )
+        return
+    thread.join(WRITER_FLUSH_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        logger.error(
+            "gateway protocol writer did not drain within %.0fs", WRITER_FLUSH_TIMEOUT_SECONDS
+        )
 
 
 def _write(frame: dict[str, Any]) -> None:
+    """Hand one frame to the writer thread; never blocks the event loop."""
+    line = json.dumps(frame, ensure_ascii=False, default=str) + "\n"
+    _start_writer()
     try:
-        _protocol_out.write(json.dumps(frame, ensure_ascii=False, default=str) + "\n")
-        _protocol_out.flush()
-    except (OSError, ValueError):
-        pass  # the UI went away; the stdin reader sees EOF and we shut down
+        _write_queue.put_nowait(line)
+    except Full:
+        # Back-pressure is exhausted: the UI is not draining. Dropping the
+        # frame keeps the loop responsive so the user can still cancel or
+        # shut the gateway down; log it rather than losing it silently.
+        logger.error(
+            "gateway protocol write queue is full (%d frames); dropping a frame", _WRITE_QUEUE_MAX
+        )
+
+
+def _put_inbound(
+    queue: asyncio.Queue[str | None], loop: asyncio.AbstractEventLoop, item: str | None
+) -> bool:
+    """Block the reader thread while the bounded queue is full; False if closed."""
+    try:
+        future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+    except RuntimeError:
+        return False
+    try:
+        future.result()
+    except Exception:  # loop closed/cancelled while the reader was parked
+        return False
+    return True
 
 
 def _start_stdin_reader(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[str | None]) -> None:
@@ -70,10 +161,10 @@ def _start_stdin_reader(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[st
         try:
             for raw in iter(_protocol_in.readline, b""):
                 line = raw.decode("utf-8", errors="replace").strip()
-                if line:
-                    loop.call_soon_threadsafe(queue.put_nowait, line)
+                if line and not _put_inbound(queue, loop, line):
+                    return
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            _put_inbound(queue, loop, None)
 
     threading.Thread(target=pump, name="machina-gateway-stdin", daemon=True).start()
 
@@ -182,12 +273,15 @@ async def _serve() -> None:
             file=sys.stderr,
             flush=True,
         )
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_READ_QUEUE_MAX)
     _start_stdin_reader(asyncio.get_running_loop(), queue)
     try:
         await _dispatch_requests(gateway, queue)
     finally:
         await gateway.close()
+        # Last frames (shutdown ack, close notifications) still sit in the
+        # writer queue; drain them before the process exits.
+        _stop_writer()
 
 
 def main() -> None:

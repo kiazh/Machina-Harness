@@ -207,6 +207,7 @@ class RuntimeServices:
             cancellation: asyncio.CancelledError | None = None
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
+
             async def _stage(label: str, operation: Callable[[float], Awaitable[Any]]) -> None:
                 """Run one shutdown stage under the cancellation-aware budget.
 

@@ -1085,6 +1085,10 @@ class BaseReActAgent:
                                 "operation": _ap.get("operation", ""),
                                 "target": _ap.get("target", ""),
                                 "status": _ap.get("status", "pending"),
+                                # Epoch creation time: lets the trace layer
+                                # measure the real human wait at re-pause and
+                                # at approval resume.
+                                "created_at": _ap.get("created_at"),
                             }
                             item["elapsed_ms"] = (time.monotonic() - start) * 1000
                             return
@@ -1504,7 +1508,7 @@ class BaseReActAgent:
         self, planned, session_id, pending_chunks, tool_calls_made
     ) -> None:
         for item in planned:
-            if item["name"] is None or item.get("_denied"):
+            if item["name"] is None:
                 continue
             if item.get("_recorded") and (
                 not item.get("_approval_id") or item.get("_approval_done")
@@ -1513,7 +1517,11 @@ class BaseReActAgent:
             try:
                 if item.get("_cancelled"):
                     await self._retire_tool_approval(item, "cancelled")
-                elif "elapsed_ms" in item:
+                elif item.get("_denied") or "elapsed_ms" in item:
+                    # Denied items were announced to the client in Phase B but
+                    # only recorded by Phase D's shared tail; a batch cancelled
+                    # before Phase D reached them must still land their chunk
+                    # and tool_calls_made entry.
                     await self._record_tool_action(
                         item, session_id, pending_chunks, tool_calls_made
                     )
@@ -2018,9 +2026,7 @@ class ReActAgent(BaseReActAgent):
                     total_tokens += sum(entry.get("delegated_tokens", 0) for entry in batch)
                     pauses = collect_pauses(batch)
                     if pauses:
-                        return pause_response(
-                            tool_calls_made, total_tokens, iteration + 1, pauses
-                        )
+                        return pause_response(tool_calls_made, total_tokens, iteration + 1, pauses)
                     # S3.1(d) stagnation hook: shared batch tail (turn_flow owns the
                     # guarded wiring access; stagnation-only, never a cap).
                     _s3_progress_history, _s3_text = await stagnation_step(
@@ -2195,9 +2201,7 @@ class ReActAgent(BaseReActAgent):
                         self._schedule_memory_consolidation(session_id)
                         yield StreamEvent(
                             type="done",
-                            response=failed_response(
-                                tool_calls_made, total_tokens, iteration + 1
-                            ),
+                            response=failed_response(tool_calls_made, total_tokens, iteration + 1),
                         )
                         return
 

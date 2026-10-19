@@ -82,6 +82,25 @@ SECRET_KEYS = frozenset(
     }
 )
 
+#: Values shipped in ``.env.example``. A copied placeholder is not a credential:
+#: reporting it as configured makes every provider call fail with 401.
+PLACEHOLDER_SECRETS = frozenset(
+    {
+        "sk-or-...",
+        "sk-...",
+        "sk-ant-...",
+        "gsk_",
+        "replace-with-a-long-random-key",
+        "replace-with-a-separate-long-random-key",
+    }
+)
+
+
+def is_configured_secret(value: Any) -> bool:
+    """True when *value* is real credential material, not empty/placeholder."""
+    text = str(value or "").strip()
+    return bool(text) and text not in PLACEHOLDER_SECRETS
+
 
 # Load the nearest .env before the config singleton below is built. Uses the
 # shared resolver contract (AH-028): $MACHINA_ENV_FILE override, else nearest

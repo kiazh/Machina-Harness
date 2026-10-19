@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from machina.core.compression import CompressionConfig, CompressionResult, ContextCompressor
-from machina.core.config import config
+from machina.core.config import config, is_configured_secret
 from machina.core.context import context_manager
 from machina.core.metrics import metrics
 from machina.core.models import Session
@@ -753,6 +753,15 @@ def _safe_config_bool(cfg, key: str) -> bool:
         return False
 
 
+def _safe_config_configured(cfg, key: str) -> bool:
+    """Like bool(get), but a copied placeholder does not count as configured."""
+    try:
+        return is_configured_secret(cfg.get(key))
+    except Exception as _boundary_error:
+        record_failure("services.status_summary", _boundary_error)
+        return False
+
+
 async def status_summary() -> dict[str, Any]:
     """Database, counts, mode, and real capability health.
 
@@ -857,7 +866,7 @@ async def status_summary() -> dict[str, Any]:
         ),
         "tools": registry.list_tools(),
         # Total config failure must never crash the endpoint: report unknown.
-        "openrouterKeySet": _safe_config_bool(config, "openrouter_api_key"),
+        "openrouterKeySet": _safe_config_configured(config, "openrouter_api_key"),
         "model": _safe_config_value(config, "model"),
         "provider": _safe_config_value(config, "provider"),
     }

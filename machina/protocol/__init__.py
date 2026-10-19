@@ -30,7 +30,9 @@ def _build_event_plans() -> dict[str, tuple[frozenset[str], tuple[tuple[str, str
     for name, declared in SCHEMA["events"].items():
         fields = {**_BASE_FIELDS, **declared}
         allowed = frozenset(key.removesuffix("?") for key in fields)
-        checks = tuple((raw.removesuffix("?"), kind, not raw.endswith("?")) for raw, kind in fields.items())
+        checks = tuple(
+            (raw.removesuffix("?"), kind, not raw.endswith("?")) for raw, kind in fields.items()
+        )
         plans[name] = (allowed, checks)
     return plans
 

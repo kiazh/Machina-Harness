@@ -22,6 +22,7 @@ import re
 import tempfile
 import threading
 import unicodedata
+from collections.abc import Iterable
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1158,10 +1159,24 @@ class SkillRegistry(SkillSource):
 
     def record_use(self, name: str) -> None:
         """Record that a skill was used (triggered and content injected)."""
-        skill = self._skills.get(_skill_key(name))
-        if skill:
-            skill.usage_count += 1
-            skill.last_activity_at = datetime.now(UTC)
+        self.record_use_many((name,))
+
+    def record_use_many(self, names: Iterable[str]) -> None:
+        """Record several uses with a single telemetry write.
+
+        Disclosure can inject several skills in one turn. Persisting each use
+        separately re-reads, re-merges, fsyncs, and atomically replaces the
+        whole telemetry file once per skill; batch instead.
+        """
+        now = datetime.now(UTC)
+        changed = False
+        for name in names:
+            skill = self._skills.get(_skill_key(name))
+            if skill:
+                skill.usage_count += 1
+                skill.last_activity_at = now
+                changed = True
+        if changed:
             self._save_telemetry()
 
     def record_view(self, name: str) -> None:

@@ -58,6 +58,7 @@ import hashlib
 import json
 import logging
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from typing import Any
@@ -247,7 +248,15 @@ def trace_tool_call(item: Any) -> Iterator[_ToolTrace]:
 
 
 def record_approval_pause(approval: Any) -> None:
-    """Observe-only approval span for one needs-approval pause; never raises."""
+    """Observe-only approval span for one needs-approval pause; never raises.
+
+    The span body is only the pause emission, so its duration is ~0 by
+    construction. ``waited_ms`` is set from the approval record's
+    ``created_at`` when present: ~0 for a fresh pause, the already-elapsed
+    wait when an existing request is re-reported (duplicate pause), and the
+    real wait is recorded separately at resume time
+    (``traces.record_approval_resume``).
+    """
     try:
         from machina.observability.traces import approval_span
 
@@ -260,6 +269,13 @@ def record_approval_pause(approval: Any) -> None:
                     target=str(approval.get("target", "")),
                     outcome="paused",
                 )
+                created_at = approval.get("created_at")
+                if (
+                    isinstance(created_at, (int, float))
+                    and not isinstance(created_at, bool)
+                    and created_at > 0
+                ):
+                    span.set(waited_ms=max(0.0, (time.time() - float(created_at)) * 1000.0))
     except Exception:
         pass
 

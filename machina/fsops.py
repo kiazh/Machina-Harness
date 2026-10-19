@@ -49,9 +49,7 @@ def close_quietly(fd: int) -> None:
         pass
 
 
-def fsync_dir_best_effort(
-    directory: Path, *, opener: Callable[..., int] = os.open
-) -> None:
+def fsync_dir_best_effort(directory: Path, *, opener: Callable[..., int] = os.open) -> None:
     """Persist a rename on POSIX; unavailable directory fsync is not fatal.
 
     ``opener`` lets a caller keep its own module-level open seam (tests pin

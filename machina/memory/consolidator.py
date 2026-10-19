@@ -378,25 +378,7 @@ class MemoryConsolidator:
         # share an enforced space. No-key operation is preserved (embedding
         # stays None, keyword retrieval unaffected); embedding failures never
         # drop the memory.
-        try:
-            from machina.memory.embeddings import embed_query as _embed_query
-            from machina.memory.redaction import redact_secrets as _redact_mem
-
-            for candidate in eligible:
-                if candidate.embedding:
-                    continue
-                try:
-                    redacted = _redact_mem(candidate.content or "").text
-                    if not redacted.strip():
-                        continue
-                    candidate.embedding = await _embed_query(redacted[:2000])
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("consolidator.candidate_embedding", _boundary_error)
-                    candidate.embedding = None
-        except Exception as _boundary_error:
-            # Optional fallback preserves the primary outcome; report no payload.
-            record_failure("consolidator.consolidate_session", _boundary_error)
+        await self._embed_candidates(eligible, failure_op="consolidator.consolidate_session")
 
         # Step 4: Deduplicate against existing memories (batch)
         new_memories: list[MemoryEntry] = []
@@ -413,6 +395,9 @@ class MemoryConsolidator:
         # Normalize each stored memory once: the map answers both the
         # duplicate check and the access-bump target lookup.
         existing_by_content = {_normalize(m.content): m for m in existing_memories}
+        # One set shared by both dedup paths below: a duplicate that arrives
+        # once with an embedding and once without must not be written twice.
+        seen_norms: set[str] = set(existing_by_content)
 
         # Batch check for duplicates using SQL vector similarity
         # instead of O(n*m) nested loop cosine similarity.
@@ -421,7 +406,6 @@ class MemoryConsolidator:
             # the HNSW index for O(log n) similarity search per candidate,
             # avoiding the O(n*m) nested loop over all existing memories.
             # Intra-batch seen tracking prevents duplicates within this batch.
-            seen_norms: set[str] = set(existing_by_content)
             seen_embeddings: list[list[float]] = []
             for candidate in candidates_with_embedding:
                 is_duplicate = False
@@ -469,13 +453,12 @@ class MemoryConsolidator:
         # Candidates whose embedding is still missing (no provider, embedding
         # failure, or empty content) stay on normalized-content dedup against
         # stored memories and within this batch.
-        seen = set(existing_by_content)
         for candidate in candidates_without_embedding:
             key = _normalize(candidate.content)
             if not key:
                 logger.warning("Skipping empty normalized memory content")
                 continue
-            if key in seen:
+            if key in seen_norms:
                 match = existing_by_content.get(key)
                 if match is not None and getattr(match, "id", None) is not None:
                     try:
@@ -484,7 +467,7 @@ class MemoryConsolidator:
                         # Optional fallback preserves the primary outcome; report no payload.
                         record_failure("consolidator.consolidate_session", _boundary_error)
                 continue
-            seen.add(key)
+            seen_norms.add(key)
             new_memories.append(candidate)
 
         # Step 5: Write new memories
@@ -541,6 +524,55 @@ class MemoryConsolidator:
             return ConsolidationResult("partial", written, None, len(chunks))
         return ConsolidationResult("complete", written, _checkpoint_for(chunks), len(chunks))
 
+    async def _embed_candidates(self, eligible: list[MemoryEntry], *, failure_op: str) -> None:
+        """Redaction-before-embedding ingestion (AH-AUDIT-038), one batch.
+
+        Extraction returns embedding=None, so candidates must be embedded
+        BEFORE dedup or the vector comparison only sees prompt-injected
+        entries. Redacted content is embedded through the shared embedder, so
+        candidate and query embeddings share an enforced space. No-key
+        operation is preserved (embedding stays None); embedding failures
+        never drop the memory. Imports stay call-local so the embeddings and
+        redaction modules remain patchable at their own seams.
+        """
+        try:
+            from machina.memory.embeddings import embed_texts as _embed_texts
+            from machina.memory.redaction import redact_secrets as _redact_mem
+
+            pending: list[MemoryEntry] = []
+            texts: list[str] = []
+            for candidate in eligible:
+                if candidate.embedding:
+                    continue
+                try:
+                    redacted = _redact_mem(candidate.content or "").text
+                    if not redacted.strip():
+                        continue
+                    pending.append(candidate)
+                    texts.append(redacted[:2000])
+                except Exception as _boundary_error:
+                    # Optional fallback preserves the primary outcome; report no payload.
+                    record_failure("consolidator.candidate_embedding", _boundary_error)
+                    candidate.embedding = None
+            if texts:
+                # One batch call: per-candidate embedding made extraction wait
+                # on up to 100 sequential provider round-trips.
+                try:
+                    vectors = await _embed_texts(texts)
+                except Exception as _boundary_error:
+                    # Same boundary the per-candidate path reported: the
+                    # failure is observed and candidates stay keyword-only.
+                    record_failure("consolidator.candidate_embedding", _boundary_error)
+                    vectors = None
+                if vectors is not None:
+                    for candidate, vector in zip(pending, vectors, strict=False):
+                        # Same defense as embed_query: an all-zero vector has
+                        # no cosine direction.
+                        candidate.embedding = vector if vector and any(vector) else None
+        except Exception as _boundary_error:
+            # Optional fallback preserves the primary outcome; report no payload.
+            record_failure(failure_op, _boundary_error)
+
     async def consolidate_from_text(
         self,
         text: str,
@@ -570,6 +602,10 @@ class MemoryConsolidator:
         eligible = [c for c in candidates if c.importance >= 0.2]
         if not eligible:
             return []
+        # Candidate embeddings (one batch). Extraction never sets embeddings,
+        # so the vector branch below used to be dead code and paraphrased text
+        # injections duplicated stored memories.
+        await self._embed_candidates(eligible, failure_op="consolidator.consolidate_from_text")
         existing_memories = await self.store.search(
             agent_id=agent_id, limit=1000, include_embedding=False
         )

@@ -367,11 +367,16 @@ def _empty_result(
     stale: bool = False,
     revision: str | None = None,
 ) -> ReadSectionResult:
+    # ``preamble + sum(section.text)`` double-counts nested subsections: a
+    # parent's text already includes its children. The document total is the
+    # last parsed section's end (or the preamble when the file has no
+    # headings).
+    total = index.sections[-1].end if index.sections else len(index.preamble)
     return ReadSectionResult(
         skill_id=skill_id,
         content_revision=index.revision if revision is None else revision,
         section_id=section_id,
-        total=len(index.preamble) + sum(len(section.text) for section in index.sections),
+        total=total,
         stale=stale,
         diagnostics=diagnostics,
     )

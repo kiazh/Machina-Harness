@@ -147,6 +147,24 @@ def _mutation_session_lock(session_id: uuid.UUID) -> asyncio.Lock:
         return lock
 
 
+def _retire_lock(session_id: uuid.UUID, lock: asyncio.Lock) -> None:
+    """Drop an idle per-session mutex so the lock maps stay bounded.
+
+    Only unlocked locks are retired: ``asyncio.Lock.release`` hands ownership
+    to a queued waiter while keeping ``locked()`` true, so an unlocked lock
+    provably has no waiters. Every fetch-then-acquire sequence in this module
+    is synchronous between ``_session_lock()`` and ``lock.acquire()``, so no
+    task can hold a reference to a retired lock without holding it.
+    """
+    if lock.locked():
+        return
+    key = str(session_id)
+    with _guard:
+        for table in (_locks, _mutation_locks):
+            if table.get(key) is lock:
+                table.pop(key, None)
+
+
 def _live_claim_where() -> str:
     return "(claim_owner IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= now())"
 
@@ -450,6 +468,7 @@ async def _acquire_claim(
                     lock.release()
                 except RuntimeError:
                     _note_lock_contention(f"{contention}_claim_busy")
+                _retire_lock(session_id, lock)
                 log_event(
                     "turns.claim",
                     level="debug",
@@ -474,6 +493,7 @@ async def _acquire_claim(
                         lock.release()
                     except RuntimeError:
                         _note_lock_contention(f"{contention}_stale_conflict")
+                    _retire_lock(session_id, lock)
                     log_event(
                         "turns.claim",
                         level="debug",
@@ -498,6 +518,7 @@ async def _acquire_claim(
                 lock.release()
             except RuntimeError:
                 _note_lock_contention(f"{contention}_local_busy")
+            _retire_lock(session_id, lock)
             log_event(
                 "turns.claim",
                 level="debug",
@@ -536,6 +557,7 @@ async def _acquire_claim(
                 lock.release()
             except RuntimeError:
                 _note_lock_contention(f"{contention}_cancelled")
+            _retire_lock(session_id, lock)
             _local_release(session_id, owner)
         raise
     except Exception:
@@ -543,6 +565,7 @@ async def _acquire_claim(
             lock.release()
         except RuntimeError:
             _note_lock_contention(f"{contention}_error_cleanup")
+        _retire_lock(session_id, lock)
         _local_release(session_id, owner)
         raise
 
@@ -602,6 +625,7 @@ async def end_turn(session_id: uuid.UUID, token: str | None) -> bool:
                         lock.release()
                     except RuntimeError:
                         _note_lock_contention("end_turn_release")
+            _retire_lock(session_id, lock)
         log_event(
             "turns.release",
             level="debug",
@@ -620,6 +644,7 @@ async def end_turn(session_id: uuid.UUID, token: str | None) -> bool:
                 lock.release()
             except RuntimeError:
                 _note_lock_contention("end_turn_local_release")
+        _retire_lock(session_id, lock)
         log_event(
             "turns.release",
             level="debug",
@@ -717,6 +742,7 @@ async def end_mutation(session_id: uuid.UUID, token: str | None) -> bool:
                     lock.release()
                 except RuntimeError:
                     _note_lock_contention("end_mutation_release")
+            _retire_lock(session_id, lock)
         log_event(
             "turns.release",
             level="debug",
@@ -734,6 +760,7 @@ async def end_mutation(session_id: uuid.UUID, token: str | None) -> bool:
                 lock.release()
             except RuntimeError:
                 _note_lock_contention("end_mutation_local_release")
+        _retire_lock(session_id, lock)
         log_event(
             "turns.release",
             level="debug",
@@ -867,6 +894,11 @@ class TurnOwnership:
             task.cancel()
         try:
             await asyncio.gather(task, return_exceptions=True)
-        except (asyncio.CancelledError, Exception) as _boundary_error:
+        except asyncio.CancelledError:
+            # The caller was cancelled while joining: the renewal already
+            # stopped, so there is nothing to report and the cancellation
+            # must propagate.
+            raise
+        except Exception as _boundary_error:
             # Optional fallback preserves the primary outcome; report no payload.
             record_failure("turns.stop_renewal", _boundary_error)

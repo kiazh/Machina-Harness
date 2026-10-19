@@ -39,17 +39,34 @@ _INDEXES: dict[bool, tuple[tuple, SkillIndex]] = {}
 #: cached across a reload, because reload re-parses every metadata object.
 _REVISION_CACHES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
+#: Serialized metadata digests, memoized per live metadata object. A warm
+#: search otherwise re-serializes every skill's metadata on every call just to
+#: validate the revision cache. The weakref callback removes the entry when
+#: the object dies, so a recycled id can never return a stale digest.
+_METADATA_DIGESTS: dict[int, tuple[weakref.ref, str]] = {}
+
 
 def _metadata_digest(metadata: object | None) -> str | None:
     if metadata is None:
         return None
+    key = id(metadata)
+    cached = _METADATA_DIGESTS.get(key)
+    if cached is not None and cached[0]() is metadata:
+        return cached[1]
     to_dict = getattr(metadata, "to_dict", None)
     if callable(to_dict):
         try:
-            return json.dumps(to_dict(), sort_keys=True, default=str)
+            digest = json.dumps(to_dict(), sort_keys=True, default=str)
         except Exception:  # digest must never break search; fall back to repr
-            return repr(metadata)
-    return repr(metadata)
+            digest = repr(metadata)
+    else:
+        digest = repr(metadata)
+    try:
+        ref = weakref.ref(metadata, lambda _ref, key=key: _METADATA_DIGESTS.pop(key, None))
+    except TypeError:  # not weak-referenceable: recompute next time
+        return digest
+    _METADATA_DIGESTS[key] = (ref, digest)
+    return digest
 
 
 # Alias normalization (stopwords, synonyms, C++/C#/.NET folding) lives in
@@ -458,6 +475,7 @@ def _legacy_disclosure(
         return ""
     result = header
     per_skill = max(0, (budget - get_token_count(header) - 120) // len(matches))
+    used: list[str] = []
     for skill in matches:
         content = skills.get_skill_content(skill.name)
         if not content:
@@ -483,7 +501,7 @@ def _legacy_disclosure(
         if get_token_count(result + block) > budget:
             break
         result += block
-        skills.record_use(skill.name)
+        used.append(skill.name)
         events_module.record_instruction_section_disclosed(
             skill_id=skill.name,
             section_id="body",
@@ -491,6 +509,8 @@ def _legacy_disclosure(
         )
         if activated is not None:
             activated.append(skill.name)
+    if used:
+        skills.record_use_many(used)
     return result
 
 
@@ -602,8 +622,9 @@ def _planned_disclosure(
         if get_token_count(result + "\n" + line) > budget:
             break
         result += "\n" + line
-    for skill_id in revealed:
-        skills.record_use(skill_id)
+    used = list(revealed)
+    if used:
+        skills.record_use_many(used)
         if activated is not None:
-            activated.append(skill_id)
+            activated.extend(used)
     return result

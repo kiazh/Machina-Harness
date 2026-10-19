@@ -73,10 +73,8 @@ def _keyring_backend_usable(keyring_mod) -> bool:
         # Escape hatch only: the documented flag permits this one backend
         # class and must not widen the allowlist below to unknown backends.
         return os.environ.get("MACHINA_OAUTH_ALLOW_PLAINTEXT_KEYRING") == "1"
-    return (
-        any(token in lowered for token in _ALLOWED_BACKENDS)
-        or ("keyring" in lowered
-        and (os.name == "posix" or os.name == "nt"))
+    return any(token in lowered for token in _ALLOWED_BACKENDS) or (
+        "keyring" in lowered and (os.name == "posix" or os.name == "nt")
     )
 
 

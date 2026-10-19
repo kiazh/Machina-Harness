@@ -49,6 +49,7 @@ __all__ = [
     "llm_span",
     "note_finish",
     "note_reserve",
+    "record_approval_resume",
     "remove_sink",
     "render_diagnostics",
     "reset_for_tests",
@@ -138,7 +139,6 @@ class TurnTrace:
     ledger: list[dict[str, Any]] = field(default_factory=list)
     ledger_dropped: int = 0
     ended: bool = False
-    _stack_depth: int = 0
 
     @property
     def root(self) -> Span | None:
@@ -363,7 +363,6 @@ def start_turn(
             agent_id=str(agent_id or ""),
             task_class=str(task_class or ""),
             parent_turn_id=str(prev) if prev is not None else "",
-            _stack_depth=len(_span_stack.get()),
         )
         root = Span(
             id=_new_id(),
@@ -611,6 +610,39 @@ def approval_span(request_id: str) -> Iterator[Span | None]:
     """Child run for one human-approval wait (waited_ms auto-filled on exit)."""
     with _child_span(APPROVAL, str(request_id), {"request_id": str(request_id)}) as span:
         yield span  # type: ignore[misc]
+
+
+def record_approval_resume(approval: Any) -> None:
+    """Observe-only: record the measured human wait when an approved action resumes.
+
+    The pause span is emitted while the turn pauses, so its duration is ~0 by
+    construction; the real wait (request creation → decision) only becomes
+    measurable when the broker later claims the approval and lets the action
+    run. Never raises.
+    """
+    try:
+        if not isinstance(approval, dict):
+            return
+        created = approval.get("created_at")
+        if not isinstance(created, (int, float)) or isinstance(created, bool):
+            return
+        resolved = approval.get("resolved_at")
+        end = (
+            float(resolved)
+            if isinstance(resolved, (int, float)) and not isinstance(resolved, bool)
+            else time.time()
+        )
+        waited_ms = max(0.0, (end - float(created)) * 1000.0)
+        with approval_span(str(approval.get("request_id", ""))) as span:
+            if span is not None:
+                span.set(
+                    operation=str(approval.get("operation", "")),
+                    target=str(approval.get("target", "")),
+                    outcome="resumed",
+                    waited_ms=waited_ms,
+                )
+    except Exception:
+        return
 
 
 # ─── usage attribution ──────────────────────────────────────────────────────

@@ -1090,9 +1090,7 @@ async def list_files(path: str = ".", pattern: str = "*") -> str:
                 if stat.S_ISLNK(entry_status.st_mode):
                     continue
                 if stat.S_ISREG(entry_status.st_mode):
-                    lines.append(
-                        f"{f.relative_to(dir_path)} ({entry_status.st_size} bytes)"
-                    )
+                    lines.append(f"{f.relative_to(dir_path)} ({entry_status.st_size} bytes)")
                 elif stat.S_ISDIR(entry_status.st_mode):
                     lines.append(f"{f.relative_to(dir_path)}/ (dir)")
             lines.append("(Listing limited to 200 matches and 4096 inspected entries.)")

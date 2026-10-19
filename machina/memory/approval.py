@@ -330,6 +330,9 @@ class MemoryApprovalGate:
                     if row.get("embedding") is not None
                     else None,
                     embedding_space=row.get("embedding_space"),
+                    # A pre-H08 pending row has a vector from an unknown
+                    # space; never stamp it with the current embedder.
+                    embedding_space_known=row.get("embedding_space") is not None,
                     explicitly_important=row["explicitly_important"],
                     base_strength=row["base_strength"],
                     connection=conn,
@@ -501,6 +504,8 @@ class MemoryApprovalGate:
                 if row.get("embedding") is not None
                 else None,
                 embedding_space=row.get("embedding_space"),
+                # Pre-H08 pending vectors keep an unknown space (see approve()).
+                embedding_space_known=row.get("embedding_space") is not None,
                 explicitly_important=row["explicitly_important"],
                 base_strength=row["base_strength"],
                 connection=conn,

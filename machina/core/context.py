@@ -940,6 +940,7 @@ class ContextManager:
         # user turn that anchored the retained tail. A boundary removed by an
         # older compressor cannot make history disappear; fall back to the
         # durable transcript and let this turn establish a fresh anchor.
+        dangling = boundary_id is not None and boundary_index is None
         active = all_active
         if boundary_id is not None and boundary_index is not None:
             active = all_active[boundary_index:]
@@ -956,10 +957,17 @@ class ContextManager:
             return ContinuityWindow(
                 messages=[{"role": row["role"], "content": row["content"]} for row in active],
                 summary=summary,
-                boundary_id=boundary_id,
+                # A dangling anchor is retired instead of re-emitted, matching
+                # the fresh-anchor fallback below.
+                boundary_id=None if dangling else boundary_id,
                 compacted=False,
             )
-        new_boundary = retained[0]["id"] if compacted and evicted else boundary_id
+        # A boundary that no longer exists in the transcript must not be
+        # re-persisted: without this, the next turn repeats the full scan
+        # (boundary_time stays None) and re-anchors the same dead id.
+        new_boundary = (
+            retained[0]["id"] if (compacted and evicted) or (dangling and retained) else boundary_id
+        )
         new_summary = summary
         if evicted:
             new_summary = self._fold_continuity_summary(summary, evicted)
@@ -1251,6 +1259,7 @@ class ContextManager:
                     # HELD-55: the originals are the authority for the ordinal;
                     # the compressor's in-memory chunks may have dropped it.
                     ordinal_by_id = {r["id"]: r.get("event_seq") for r in orig_rows}
+                    archive_rows: list[tuple[Any, ...]] = []
                     for r in orig_rows:
                         raw_payload = r["payload_msgpack"]
                         try:
@@ -1264,25 +1273,34 @@ class ContextManager:
                         except Exception as exc:
                             record_failure("context.archive.embedding", exc)
                             emb_str = None
-                        await conn.execute(
-                            """
-                            INSERT INTO context_archive
-                                (session_id, chunk_id, payload_msgpack, embedding,
-                                 archive_reason, agent_id, chunk_type, token_count,
-                                 original_created_at, search_text)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                            """,
-                            session_id,
-                            r["id"],
-                            raw_payload,
-                            emb_str,
-                            archive_reason,
-                            r["agent_id"],
-                            r["chunk_type"],
-                            r["token_count"],
-                            r["created_at"],
-                            search_text,
+                        archive_rows.append(
+                            (
+                                session_id,
+                                r["id"],
+                                raw_payload,
+                                emb_str,
+                                archive_reason,
+                                r["agent_id"],
+                                r["chunk_type"],
+                                r["token_count"],
+                                r["created_at"],
+                                search_text,
+                            )
                         )
+                    # One round trip for the whole batch: the row locks, the
+                    # mutation claim and the serial runner slot are all held
+                    # while this runs, so N sequential INSERTs (hundreds for a
+                    # large compaction) braked every queued turn behind them.
+                    await conn.executemany(
+                        """
+                        INSERT INTO context_archive
+                            (session_id, chunk_id, payload_msgpack, embedding,
+                             archive_reason, agent_id, chunk_type, token_count,
+                             original_created_at, search_text)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        """,
+                        archive_rows,
+                    )
                     await conn.execute(
                         "DELETE FROM context_chunks WHERE session_id = $1 AND id = ANY($2::uuid[])",
                         session_id,

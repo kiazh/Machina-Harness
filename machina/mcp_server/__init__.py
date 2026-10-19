@@ -131,15 +131,15 @@ _SESSION_LINE_RE = re.compile(
 _PENDING_REQUEST_RE = re.compile(
     r"^\s*request\s+(?P<request_id>[A-Za-z0-9_-]+)(?:\s+\((?P<detail>[^)]*)\))?\s*$"
 )
-# CLI chatter around the reply (see machina/cli/__init__.py chat path).
-_NOISE_LINE_PREFIXES = (
-    "New session:",
-    "Resuming session:",
-    "Continuing session:",
-    "Session ID:",
-    "Model:",
-    "Mode:",
-    "Iterations:",
+# CLI chatter around the reply (see machina/cli/__init__.py chat path). Each
+# shape is anchored to the exact CLI format: a reply line that merely starts
+# with "Model:" or "Mode:" is content, not chatter, and must survive.
+_NOISE_LINE_RES = (
+    re.compile(rf"^(?:New|Resuming|Continuing) session:\s*{SESSION_ID_PATTERN.pattern}\s*$"),
+    re.compile(rf"^Session ID:\s*{SESSION_ID_PATTERN.pattern}\s*$"),
+    re.compile(r"^Model:\s*.+\([^()]+\)\s*$"),
+    re.compile(r"^Mode:\s*(?:ask|workspace|sandbox|full)\s*\(backend:[^)]*\)\s*$"),
+    re.compile(r"^Iterations:\s*\d+\s*\|\s*Tool calls:.*$"),
 )
 
 # AH-AUDIT-010: children inherit only the platform variables they need to
@@ -449,7 +449,9 @@ def _parse_session_id(output: str) -> str | None:
 
 def _extract_reply(output: str) -> str:
     kept = [
-        line for line in output.splitlines() if not line.strip().startswith(_NOISE_LINE_PREFIXES)
+        line
+        for line in output.splitlines()
+        if not any(pattern.match(line.strip()) for pattern in _NOISE_LINE_RES)
     ]
     return "\n".join(kept).strip()
 

@@ -168,16 +168,19 @@ async def _generate_installed_metadata(gw: Gateway, skill: Any) -> dict[str, Any
 async def skills_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """List all skills."""
     gw.require_db()
-    return {"skills": [_skill(s) for s in sorted(_registry().list_skills(), key=lambda s: s.name)]}
+    # Catalogue load stats (and on change re-parses) the whole skills tree;
+    # every browse handler used to pay that on the event loop.
+    registry = await asyncio.to_thread(_registry)
+    return {"skills": [_skill(s) for s in sorted(registry.list_skills(), key=lambda s: s.name)]}
 
 
 async def skills_show(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """Show a skill by name."""
     gw.require_db()
-    skill = _registry().get(_str(params, "name", max_len=200))
+    registry = await asyncio.to_thread(_registry)
+    skill = registry.get(_str(params, "name", max_len=200))
     if skill is None:
         raise RpcError(NOT_FOUND, f"skill {params.get('name')!r} not found")
-    registry = _registry()
     registry.record_view(skill.name)
     result = _skill(skill, content=True)
     result["content"] = registry.get_skill_content(skill.name)
@@ -219,10 +222,11 @@ async def skills_learn(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 async def skills_delete(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     gw.require_db()
     name = _str(params, "name", max_len=200)
-    skill = _registry().get(name)
+    registry = await asyncio.to_thread(_registry)
+    skill = registry.get(name)
     if skill and skill.source_type == "builtin-ecc":
         raise RpcError(INVALID_PARAMS, "ECC skills are bundled defaults and cannot be deleted")
-    if not _registry().delete_skill(name):
+    if not registry.delete_skill(name):
         raise RpcError(NOT_FOUND, f"skill {name!r} not found")
     return {"deleted": True}
 
@@ -231,7 +235,7 @@ async def skills_curator(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     gw.require_db()
     from machina.skills.registry import SkillCurator
 
-    curator = SkillCurator(_registry())
+    curator = SkillCurator(await asyncio.to_thread(_registry))
     report = curator.get_health_report()
     report["unused"] = [s.name for s in curator.get_unused_skills()]
     report["stale"] = [s.name for s in curator.get_stale_skills(_int(params, "days", 30, 1, 3650))]
@@ -492,7 +496,7 @@ async def skills_search(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     limit = _int(params, "limit", SKILLS_SEARCH_DEFAULT_LIMIT, 1, SKILLS_SEARCH_MAX_LIMIT)
     cursor = _str(params, "cursor", required=False, max_len=SKILLS_SEARCH_MAX_CURSOR) or None
     filters = _search_filters(params.get("filters"))
-    registry = _registry()
+    registry = await asyncio.to_thread(_registry)
     selected = _filtered_skills(registry.list_skills(), filters)
     browse = bool(filters["include_excluded"] or filters["enabled"] is False)
 
@@ -634,7 +638,7 @@ async def skills_preview_route(gw: Gateway, params: dict[str, Any]) -> dict[str,
 
     payload = preview_task_descriptor(request, task_state=context or None)
     task_revision = int(payload["descriptor"]["task_state_revision"])
-    registry = _registry()
+    registry = await asyncio.to_thread(_registry)
     workflow = plan_workflow(
         request, skills=registry, task_state=context or None, task_revision=task_revision
     )
@@ -771,7 +775,7 @@ async def skills_section(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """
     gw.require_db()
     skill_id = _str(params, "skillId", max_len=200)
-    registry = _registry()
+    registry = await asyncio.to_thread(_registry)
     skill = registry.get(skill_id)
     if skill is None:
         raise RpcError(NOT_FOUND, f"skill {skill_id!r} not found")

@@ -845,9 +845,7 @@ class ContextCompressor:
                     f"constraints: {'; '.join(cp['constraints']) or '(none)'}",
                     f"read-only scope: {cp['read_only_scope'] or '(none)'}",
                 ]
-                lines.extend(
-                    f"finding ({f['count']}): {f['finding']}" for f in cp["findings"]
-                )
+                lines.extend(f"finding ({f['count']}): {f['finding']}" for f in cp["findings"])
                 if cp["unresolved_questions"]:
                     lines.append("open: " + "; ".join(cp["unresolved_questions"]))
                 lines.append(f"next: {cp['next_action']}")

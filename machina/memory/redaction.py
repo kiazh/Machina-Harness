@@ -510,9 +510,7 @@ def redact_secrets(text: str) -> RedactionResult:
     return _default_redactor.redact(text)
 
 
-def redacted_excerpt(
-    text: str, limit: int = 1200, *, margin: int = 16_384
-) -> str:
+def redacted_excerpt(text: str, limit: int = 1200, *, margin: int = 16_384) -> str:
     """Bounded display excerpt with fail-safe redaction.
 
     Display paths used to redact the whole (up to 60k) fetched page for a

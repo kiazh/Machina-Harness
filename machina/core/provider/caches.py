@@ -12,11 +12,10 @@ from cachetools import TTLCache
 
 from machina.core.models import LLMResponse, ToolDefinition
 
-# In-memory LLM response cache: deduplicates retrying POSTs with identical
-# payloads. Keys include provider, effective request, and caller identity when
-# supplied; entries are TTL/size-bounded. Identity-free callers (main agent
-# path; N4) can share one cached body within the TTL — the second reservation
-# re-attributes cached usage (conservative over-count).
+# In-memory LLM response cache: deduplicates retrying POSTs with identical payloads. Keys include
+# provider, effective request, and caller identity when supplied; entries are TTL/size-bounded.
+# Identity-free callers (main agent path; N4) can share one cached body within the TTL — the second
+# reservation re-attributes cached usage (conservative over-count).
 _RESPONSE_CACHE_TTL = 60  # seconds
 _RESPONSE_CACHE_MAXSIZE = 256
 _RESPONSE_CACHE: TTLCache = TTLCache(maxsize=_RESPONSE_CACHE_MAXSIZE, ttl=_RESPONSE_CACHE_TTL)
@@ -57,7 +56,8 @@ def _cache_key(
             "request": request,
             "identity": identity,
         },
-        sort_keys=True, default=str,
+        sort_keys=True,
+        default=str,
     ).encode()
     return hashlib.sha256(raw).hexdigest()
 

@@ -71,7 +71,9 @@ class _CallbackServer:
 
     The authorization code and state travel only in the browser's request
     line, so the handler never logs requests. Only a callback with the
-    expected state can settle the flow; invalid requests leave it pending.
+    expected state can settle the flow; invalid requests leave it pending
+    (a state mismatch is remembered so the timeout can report it instead of
+    claiming no callback arrived).
     """
 
     def __init__(self, redirect_uri: str, state: str) -> None:
@@ -85,6 +87,7 @@ class _CallbackServer:
         self.done = Event()
         self.code: str | None = None
         self.error: str | None = None
+        self.rejected_state = False
         self._state = str(state)
         self._http: HTTPServer | None = None
         self._thread: Thread | None = None
@@ -138,6 +141,9 @@ class _CallbackServer:
         query = parse_qs(parsed.query)
         state = (query.get("state") or [""])[0]
         if not hmac.compare_digest(state.encode("utf-8"), self._state.encode("utf-8")):
+            # Never settle on an unauthenticated callback (F11/F24): a local
+            # prefetcher or stale tab must not be able to abort the flow.
+            self.rejected_state = True
             self._respond(request, 400, "Sign-in state did not match.")
             return
         error = (query.get("error") or [""])[0]
@@ -274,19 +280,20 @@ def login(
         server.stop()
 
     if not settled:
-        output.error(
-            f"Sign-in timed out after {timeout:g}s without a browser callback.",
-            "Run `machina auth login` again.",
-        )
-        raise typer.Exit(EXIT_FAILED)
-    if server.error:
-        if server.error == "state_mismatch":
+        if server.rejected_state:
             output.error(
-                "Sign-in state did not match; the callback was rejected.",
-                "Run `machina auth login` again.",
+                f"Sign-in timed out after {timeout:g}s: a callback arrived but its sign-in "
+                "state did not match, and no matching callback followed.",
+                "Run `machina auth login` again and use the URL printed this time.",
             )
         else:
-            output.error(f"Sign-in was not completed ({server.error}).")
+            output.error(
+                f"Sign-in timed out after {timeout:g}s without a browser callback.",
+                "Run `machina auth login` again.",
+            )
+        raise typer.Exit(EXIT_FAILED)
+    if server.error:
+        output.error(f"Sign-in was not completed ({server.error}).")
         raise typer.Exit(EXIT_FAILED)
     assert server.code  # a settled flow without error always carries a code
     try:

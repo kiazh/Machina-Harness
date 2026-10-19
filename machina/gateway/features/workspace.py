@@ -343,7 +343,7 @@ async def workspace_open(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     trust = _bool(params, "trust")
     service = _service(gw)
     try:
-        identity = service.open(root, trust)
+        identity = await asyncio.to_thread(service.open, root, trust)
     except WorkspaceError as exc:
         raise RpcError(INVALID_PARAMS, exc.message) from exc
     await _attach_lsp_manager(gw, service, identity)
@@ -365,7 +365,9 @@ async def workspace_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     limit = _int(params, "limit", DEFAULT_LIST_LIMIT, 1, 200)
     include_hidden = _bool(params, "includeHidden")
     try:
-        page = service.list(path, cursor=cursor, limit=limit, include_hidden=include_hidden)
+        page = await asyncio.to_thread(
+            service.list, path, cursor=cursor, limit=limit, include_hidden=include_hidden
+        )
     except WorkspaceError as exc:
         return _refusal(exc)
     return page.as_dict()
@@ -375,7 +377,9 @@ async def workspace_read(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     service = _require(gw, params)
     uri = _raw_str(params, "uri", max_len=MAX_URI_CHARS)
     try:
-        result = service.read(uri)
+        # A cold/network volume can stall a read for seconds (up to
+        # MAX_READ_BYTES); never on the gateway loop.
+        result = await asyncio.to_thread(service.read, uri)
     except WorkspaceError as exc:
         return _refusal(exc)
     return result.as_dict()

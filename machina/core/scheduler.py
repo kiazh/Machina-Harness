@@ -603,13 +603,23 @@ class JobRunner:
             maintenance.cancel()
             try:
                 await maintenance
-            except (asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                if not maintenance.cancelled():
+                    # stop() itself was cancelled: the shutdown cancellation
+                    # propagates instead of being logged as a job failure.
+                    raise
+                # The expected outcome of this stop(): no failure to report.
+            except Exception as _boundary_error:
                 record_failure("scheduler.optimization_maintenance_stop", _boundary_error)
         if self._task is not None:
             self._task.cancel()
             try:
                 await self._task
-            except (asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                if not self._task.cancelled():
+                    raise
+                # The expected outcome of this stop(): no failure to report.
+            except Exception as _boundary_error:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("scheduler.stop", _boundary_error)
             self._task = None
@@ -764,12 +774,18 @@ class JobRunner:
             # AH-AUDIT-020: the ownership-wait task is owned here — cancel
             # and join it on EVERY exit (success/failure/timeout/ownership
             # loss/runner cancellation). Task GC is not lifecycle management.
+            cancelled_while_joining = False
             try:
                 if loss_wait is not None and not loss_wait.done():
                     loss_wait.cancel()
                 if loss_wait is not None:
                     await asyncio.gather(loss_wait, return_exceptions=True)
-            except (asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                # The runner itself was cancelled while joining the watcher:
+                # nothing failed, and the run bookkeeping below must still
+                # settle before the cancellation propagates.
+                cancelled_while_joining = True
+            except Exception as _boundary_error:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("scheduler.run_due_once", _boundary_error)
             if exec_task is not None and not exec_task.done():
@@ -778,6 +794,8 @@ class JobRunner:
                 if exec_task is not None and not exec_task.cancelled():
                     exec_task.exception()
                 await self._finish_run(job, lease_task, claim_token, error, paused_for)
+            if cancelled_while_joining:
+                raise asyncio.CancelledError
         return True
 
     def _quarantine_run(
@@ -1139,6 +1157,7 @@ class JobRunner:
                         # Optional fallback preserves the primary outcome; report no payload.
                         record_failure("scheduler._execute", _boundary_error)
         finally:
+            cancelled_while_joining = False
             if previous_owner is not None:
                 try:
                     await self._restore_session_owner(job, previous_owner)
@@ -1152,7 +1171,11 @@ class JobRunner:
                 claim_renewal.cancel()
                 try:
                     await asyncio.gather(claim_renewal, return_exceptions=True)
-                except (asyncio.CancelledError, Exception) as _boundary_error:
+                except asyncio.CancelledError:
+                    # Cancelled while joining: no failure to report, and the
+                    # job-turn release below must still settle first.
+                    cancelled_while_joining = True
+                except Exception as _boundary_error:
                     # Optional fallback preserves the primary outcome; report no payload.
                     record_failure("scheduler._execute", _boundary_error)
             try:
@@ -1160,6 +1183,8 @@ class JobRunner:
             except Exception as _boundary_error:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("scheduler._execute", _boundary_error)
+            if cancelled_while_joining:
+                raise asyncio.CancelledError
 
     async def _build_agent(
         self,

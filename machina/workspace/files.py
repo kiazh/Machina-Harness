@@ -660,7 +660,12 @@ class WorkspaceFiles:
 
         base = expected_revision or None
         async with write_coordinator.hold(resolved):
-            disk_revision = self._disk_revision(resolved, display=normalized)
+            # Both steps are blocking: hashing the whole on-disk file and the
+            # temp-file write + fsync. A cold or huge file must never stall
+            # the gateway loop (every session shares it).
+            disk_revision = await asyncio.to_thread(
+                self._disk_revision, resolved, display=normalized
+            )
             if base != disk_revision:
                 if disk_revision is None:
                     reason = CONFLICT_MISSING_ON_DISK
@@ -676,7 +681,7 @@ class WorkspaceFiles:
                         reason=reason,
                     ),
                 )
-            self._write_target(resolved, data, display=normalized)
+            await asyncio.to_thread(self._write_target, resolved, data, display=normalized)
             revision = revision_from_bytes(data)
             revision_registry.record(resolved, revision)
             return SaveResult(ok=True, revision=revision, saved_ui_version=ui_version)
@@ -825,7 +830,10 @@ class WorkspaceFiles:
     def _check_writable_target(st_before: Any, *, display: str) -> int:
         """Refuse symlink/irregular/read-only/hard-linked targets fail-closed."""
         if st_before is None:
-            return 0o644  # new file; umask does not apply to openat here
+            # New file: owner-only, consistent with the agent file writer
+            # (machina/tools/file.py). openat applies the mode exactly, so a
+            # permissive environment umask is never silently widened.
+            return 0o600
         if stat.S_ISLNK(st_before.st_mode):
             raise WorkspaceError("denied", f"target is a symlink: {display}")
         if not stat.S_ISREG(st_before.st_mode):

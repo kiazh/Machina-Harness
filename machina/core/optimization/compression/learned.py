@@ -10,6 +10,8 @@ load, timeout, anchor, or similarity failure reverts to the original text.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import functools
 import importlib.util
 import json
 import threading
@@ -51,6 +53,16 @@ _DEFAULT_MIN_RATIO = 0.4
 _DEFAULT_MIN_SIMILARITY = 0.88
 _COMPRESSOR_CACHE: dict[str, Compressor] = {}
 _COMPRESSOR_LOCK = threading.Lock()
+
+#: Dedicated single-worker pool for the (CPU-heavy, model-loading) LLMLingua
+#: call. A ``compress()`` that outlives the caller's timeout keeps its thread
+#: running — threads cannot be cancelled. On the shared default executor those
+#: abandoned calls pile up and starve latency-sensitive ``asyncio.to_thread``
+#: users (file tools, the RAG embedder). One worker bounds the abandonment to
+#: a single thread, and the compressor's own lock serializes access anyway.
+_COMPRESSOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="machina-compress"
+)
 
 
 class Compressor(Protocol):
@@ -124,6 +136,13 @@ class LlMLinguaCompressor:
                 return None
             return None
 
+    async def compress_async(self, text: str, *, ratio: float) -> str | None:
+        """``compress`` on the dedicated worker pool (see the executor note)."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _COMPRESSOR_EXECUTOR, functools.partial(self.compress, text, ratio=ratio)
+        )
+
 
 def build_compressor(backend: str | None = None) -> Compressor:
     selected = (backend or str(config.get("optimization_compression_backend") or "")).lower()
@@ -190,7 +209,14 @@ async def compress_messages(
     changed = False
     for span in spans:
         try:
-            compressed = await asyncio.to_thread(compressor.compress, span.text, ratio=target_ratio)
+            if isinstance(compressor, LlMLinguaCompressor):
+                # Dedicated worker: a timeout-abandoned call cannot occupy the
+                # default executor that the rest of the app shares.
+                compressed = await compressor.compress_async(span.text, ratio=target_ratio)
+            else:
+                compressed = await asyncio.to_thread(
+                    compressor.compress, span.text, ratio=target_ratio
+                )
         except Exception:
             continue
         if not isinstance(compressed, str) or not compressed.strip():

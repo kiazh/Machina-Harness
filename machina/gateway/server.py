@@ -424,28 +424,48 @@ class Gateway:
             raise
         except Exception as _boundary_error:
             record_failure("server.close", _boundary_error)
+        # An in-flight ChatGPT login owns a loopback listener and a background
+        # task; cancel and join it here instead of leaving it for process
+        # shutdown to kill without observing the socket teardown.
+        try:
+            from machina.gateway.features.auth_chatgpt import retire_login_flows
+
+            await retire_login_flows(timeout=timeout)
+        except asyncio.CancelledError:
+            raise
+        except Exception as _boundary_error:
+            record_failure("server.close", _boundary_error)
         if self._owns_db:
             try:
                 await self.runtime.shutdown_connectors(timeout=timeout)
-            except (asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                # Shutdown cancellation of close() itself must propagate.
+                raise
+            except Exception as _boundary_error:
                 record_failure("server.close", _boundary_error)
         if self._db_ready and self._owns_db:
             # Agent background work (consolidation/learning reviews) must
             # finish before the pool closes; bounded, never raises.
             try:
                 await drain_background_tasks()
-            except (TimeoutError, asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                raise
+            except (TimeoutError, Exception) as _boundary_error:
                 record_failure("server.close", _boundary_error)
             from machina.observability.audit import audit_persistence
 
             try:
                 await asyncio.wait_for(audit_persistence.stop(), timeout=5)
-            except (TimeoutError, asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                raise
+            except (TimeoutError, Exception) as _boundary_error:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("server.close", _boundary_error)
             try:
                 await asyncio.wait_for(db.close(), timeout=5)
-            except (TimeoutError, asyncio.CancelledError, Exception) as _boundary_error:
+            except asyncio.CancelledError:
+                raise
+            except (TimeoutError, Exception) as _boundary_error:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("server.close", _boundary_error)
         self._db_ready = False

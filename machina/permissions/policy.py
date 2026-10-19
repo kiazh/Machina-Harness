@@ -140,9 +140,7 @@ def credential_store_paths() -> frozenset[Path]:
     return frozenset(stores)
 
 
-def _is_credential_store(
-    value: str, root: Path, stores: frozenset[Path] | None = None
-) -> bool:
+def _is_credential_store(value: str, root: Path, stores: frozenset[Path] | None = None) -> bool:
     """Exact resolved store identity (plus its atomic temp/backup siblings).
 
     The store file IS the secret: when a workspace contains the store, its
@@ -802,21 +800,16 @@ def _sensitive_capabilities(req: ActionRequest) -> list[str]:
                 found.append("credential_access")
             if reach.external:
                 found.append("opaque_execution_review")
-    if (
-        first
-        in {
-            "sudo",
-            "su",
-            "runas",
-            "chown",
-            "passwd",
-            "iptables",
-            "set-mppreference",
-            "set-executionpolicy",
-        }
-        or (first == "chmod"
-        and "777" in argv)
-    ):
+    if first in {
+        "sudo",
+        "su",
+        "runas",
+        "chown",
+        "passwd",
+        "iptables",
+        "set-mppreference",
+        "set-executionpolicy",
+    } or (first == "chmod" and "777" in argv):
         found.append("privilege_escalation")
     if first in {
         "rm",
@@ -1079,10 +1072,8 @@ def decide(req: ActionRequest, grants: list[dict] | None = None) -> Decision:
             return Decision("allowed", "full-mode session grant covers target", req)
         if cap in (req.operation, "workspace"):
             return Decision("allowed", "scope grant covers target", req)
-    if (
-        req.operation in ("file.write", "process.exec")
-        or (req.targets
-        and not all(_inside_workspace(t, req_root) for t in req.targets))
+    if req.operation in ("file.write", "process.exec") or (
+        req.targets and not all(_inside_workspace(t, req_root) for t in req.targets)
     ):
         return Decision("pending", "write/exec or out-of-scope access requires approval", req)
     return Decision("pending", "action requires approval", req)

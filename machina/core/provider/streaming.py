@@ -154,9 +154,7 @@ async def begin_stream_usage(
     ``store`` is the provider module's ``usage_store`` binding rather than a
     captured import, so the existing monkeypatch seam keeps working.
     """
-    audit_log(
-        "llm_stream_start", provider=provider_name, model=model, message_count=len(messages)
-    )
+    audit_log("llm_stream_start", provider=provider_name, model=model, message_count=len(messages))
     reservation_id = None
     if session_id is not None and agent_id is not None:
         reservation_id = await store.reserve(
@@ -247,7 +245,10 @@ async def complete_stream(
     )
     if debug_label is not None and logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "%s stream complete model=%s tool_calls=%d", debug_label, resolved_model, len(tool_calls)
+            "%s stream complete model=%s tool_calls=%d",
+            debug_label,
+            resolved_model,
+            len(tool_calls),
         )
     return LLMResponse(
         content=content,

@@ -122,6 +122,12 @@ _LOCKS_GUARD = threading.Lock()
 _LOCKS: dict[str, threading.Lock] = {}
 #: Paths that already reported an open failure (warn once, not per event).
 _REPORTED_FAILURES: set[str] = set()
+#: Records dropped because the bounded sink lock was busy. Incremented per
+#: drop; warned on the first drop and then every ``_DROP_WARN_EVERY`` so a
+#: burst stays visible without flooding the log. ``instrumentation.events``
+#: counts attempts, so this is the other half of the accounting.
+_DROPPED_WRITES = 0
+_DROP_WARN_EVERY = 100
 
 try:  # pragma: no cover - platform dependent
     import fcntl as _fcntl
@@ -302,15 +308,18 @@ def _serialize(record: dict[str, object]) -> str:
     return json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")) + "\n"
 
 
-def _write_line(path: Path, line: str) -> None:
+def _write_line(path: Path, line: str) -> bool:
     """Append one line to *path* under thread + file locks (best effort).
 
     Lock acquisition is bounded: instrumentation must never stall the caller
-    behind another writer. A skipped record is preferable to a blocked turn.
+    behind another writer. A skipped record is preferable to a blocked turn;
+    the skip is counted and rate-limit warned via :func:`_note_dropped_write`.
+    Returns False when the record was dropped.
     """
     lock = _lock_for(path)
     if not lock.acquire(timeout=0.05):
-        return
+        _note_dropped_write(path)
+        return False
     try:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -345,6 +354,23 @@ def _write_line(path: Path, line: str) -> None:
             os.close(fd)
     finally:
         lock.release()
+    return True
+
+
+def _note_dropped_write(path: Path) -> None:
+    """Count a dropped sink record and warn rate-limited (never raises)."""
+    global _DROPPED_WRITES
+    _DROPPED_WRITES += 1
+    if _DROPPED_WRITES != 1 and _DROPPED_WRITES % _DROP_WARN_EVERY != 0:
+        return
+    try:
+        logger.warning(
+            "instrumentation record dropped (%d dropped so far; sink lock busy): %s",
+            _DROPPED_WRITES,
+            path,
+        )
+    except Exception:
+        pass
 
 
 def _report_sink_failure(path: Path, error: BaseException) -> None:
@@ -386,7 +412,13 @@ def _emit(event: str, level: str, fields: dict[str, Any]) -> None:
     path = None
     try:
         path = _resolve_log_path()
-        _write_line(path, _serialize(record))
+        if not _write_line(path, _serialize(record)):
+            try:
+                from machina.core.metrics import metrics
+
+                metrics.increment_counter("instrumentation.dropped")
+            except Exception:
+                pass
     except Exception as error:
         if path is not None:
             _report_sink_failure(path, error)

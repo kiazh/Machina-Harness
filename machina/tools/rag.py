@@ -371,30 +371,36 @@ async def close_active_rag_pipeline() -> None:
             "path": {"type": "string", "description": "Path to the file to index"},
             "session_id": {
                 "type": "string",
-                "description": "Session ID to associate the document with",
+                "description": "Session ID to associate the document with; omit (or pass 'current') for the active session",
             },
             "metadata": {"type": "object", "description": "Optional metadata to attach to chunks"},
         },
-        "required": ["path", "session_id"],
+        "required": ["path"],
     },
 )
 async def index_document(
     path: str,
-    session_id: str,
+    session_id: str = "",
     metadata: dict[str, Any] | None = None,
 ) -> str:
     """Index a document into the RAG pipeline.
 
     The document is loaded, chunked, embedded, and stored for semantic search.
+    ``session_id`` defaults to the caller's active session; ``current`` and
+    ``active`` are accepted aliases. The model cannot see its own session id,
+    so requiring it here made the tool unusable from a live turn.
     """
-    try:
-        sid = uuid.UUID(session_id)
-    except ValueError:
-        raise ValidationError(f"Invalid session_id '{session_id}'") from None
-
     agent_id, owned_session = await active_agent_scope()
-    if sid != owned_session:
-        raise ToolError("document session does not belong to the active agent session")
+    target = str(session_id or "").strip()
+    if target and target.lower() not in ("current", "active"):
+        try:
+            sid = uuid.UUID(target)
+        except ValueError:
+            raise ValidationError(f"Invalid session_id '{session_id}'") from None
+        if sid != owned_session:
+            raise ToolError("document session does not belong to the active agent session")
+    else:
+        sid = owned_session
 
     # R4-026: resolve the target through the same canonical execution-context
     # workspace the broker approved against, so the indexed file is the
@@ -417,7 +423,7 @@ async def index_document(
         )
         audit_log(
             "rag_tool_index_document",
-            session_id=session_id,
+            session_id=str(sid),
             path=path,
             chunks_indexed=len(chunks),
         )
@@ -426,7 +432,7 @@ async def index_document(
         logger.exception("Failed to index document: %s", path)
         audit_log(
             "rag_tool_index_document_error",
-            session_id=session_id,
+            session_id=str(sid),
             path=path,
             error=str(e),
         )

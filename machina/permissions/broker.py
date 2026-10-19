@@ -121,6 +121,16 @@ def _log_approval_wait(req: ActionRequest, approval: object) -> None:
         pass
 
 
+def _record_resume_wait(approval: object) -> None:
+    """Observe-only: hand the measured human wait to the trace layer."""
+    try:
+        from machina.observability.traces import record_approval_resume
+
+        record_approval_resume(approval)
+    except Exception:
+        pass
+
+
 class PermissionBroker:
     @instrumented("permissions", "guard")
     async def guard(self, req: ActionRequest) -> ActionRequest:
@@ -255,6 +265,7 @@ class PermissionBroker:
                 req.approval_id = approved["request_id"]
                 _stamp_execution(req)
                 audit_permission_verdict("allowed", req, reason="approved action resumed")
+                _record_resume_wait(approved)
                 return req
             current = await _store.get_approval(approved["request_id"])
             raise NeedsApproval(current or approved)
@@ -296,6 +307,7 @@ class PermissionBroker:
                     req.approval_id = req.request_id
                     _stamp_execution(req)
                     audit_permission_verdict("allowed", req, reason="approval resumed")
+                    _record_resume_wait(current)
                     return req
                 current = await _store.get_approval(req.request_id)
                 raise NeedsApproval(current or {"request_id": req.request_id}) from None

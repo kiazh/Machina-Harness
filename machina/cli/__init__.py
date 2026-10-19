@@ -32,7 +32,7 @@ from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
 from machina.cli.providers import app as providers_app
 from machina.core.background_tasks import drain_background_tasks
-from machina.core.config import SECRET_KEYS, config, validate_value
+from machina.core.config import SECRET_KEYS, config, is_configured_secret, validate_value
 from machina.core.context import context_manager
 from machina.core.execution_context import begin_turn_scope, end_turn_scope
 from machina.core.provider.specs import provider_names
@@ -586,7 +586,7 @@ def status():
             for t in tools:
                 console.print(f"    [dim]•[/dim] {t}")
 
-            if config.get("openrouter_api_key"):
+            if is_configured_secret(config.get("openrouter_api_key")):
                 output.status_line("OpenRouter API key", "set", "success")
             else:
                 output.status_line("OpenRouter API key", "not set", "warning")
@@ -1404,15 +1404,7 @@ def doctor():
     def _key_configured(value: object) -> bool:
         # Placeholders copied from .env.example must not count as configured —
         # otherwise doctor reports ✓ and every provider call fails with 401.
-        text = str(value or "").strip()
-        return bool(text) and text not in {
-            "sk-or-...",
-            "sk-...",
-            "sk-ant-...",
-            "gsk_",
-            "replace-with-a-long-random-key",
-            "replace-with-a-separate-long-random-key",
-        }
+        return is_configured_secret(value)
 
     check(
         "OPENROUTER_API_KEY",

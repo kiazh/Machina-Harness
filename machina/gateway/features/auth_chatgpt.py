@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import importlib
+import logging
 import socket
 import webbrowser
 from contextlib import suppress
@@ -36,6 +37,8 @@ from urllib.parse import parse_qs, urlparse
 from machina.gateway.errors import OPERATION_FAILED, RpcError
 from machina.gateway.features._common import _bool
 from machina.security import chatgpt_auth
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -95,6 +98,30 @@ async def _retire_invalidated_flows() -> None:
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def retire_login_flows(timeout: float = 5.0) -> None:
+    """Cancel and bounded-join every in-flight login flow (Gateway.close()).
+
+    Without this the loopback listener task kept its socket and stayed alive
+    past close(); process shutdown then had to cancel it without observing
+    the listener teardown.
+    """
+    global _PENDING
+    pending, _PENDING = _PENDING, None
+    tasks = [pending.task] if pending is not None else []
+    tasks.extend(task for task in _INVALIDATED if not task.done())
+    _INVALIDATED.clear()
+    tasks = [task for task in tasks if not task.done()]
+    for task in tasks:
+        task.cancel()
+    if not tasks:
+        return
+    _done, still_pending = await asyncio.wait(tasks, timeout=timeout)
+    if still_pending:
+        logger.warning(
+            "%d chatgpt login flow(s) resisted cancellation on close", len(still_pending)
+        )
 
 
 def _clear_catalog_state() -> None:
