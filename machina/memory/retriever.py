@@ -495,11 +495,14 @@ class MemoryRetriever:
         )
 
         # Score is the normalized keyword match fraction, recomputed in Python
-        # so mocked stores and DB rows rank identically.
+        # so mocked stores and DB rows rank identically. Lowercase the query
+        # terms once, not once per row per term.
+        lowered_keywords = [kw.lower() for kw in keywords]
         results: list[tuple[MemoryEntry, float]] = []
         for row in rows:
             entry = self.store._row_to_entry(row)
-            match_count = sum(1 for kw in keywords if kw.lower() in entry.content.lower())
+            content_lower = entry.content.lower()
+            match_count = sum(1 for kw in lowered_keywords if kw in content_lower)
             score = match_count / len(keywords) if keywords else 0.0
             results.append((entry, score))
 

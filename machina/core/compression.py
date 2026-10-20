@@ -470,12 +470,13 @@ class ContextCompressor:
                 if cid:
                     id_to_indices.setdefault(cid, []).append(i)
         for cid, idxs in id_to_indices.items():
-            # Pair indices sharing one call ID (usually exactly 2).
-            for a in idxs:
-                for b in idxs:
-                    if a != b and a not in pairs and b not in pairs:
-                        pairs[a] = b
-                        pairs[b] = a
+            # Pair indices sharing one call ID in order (usually exactly 2).
+            # A linear pass preserves the previous matching while avoiding a
+            # quadratic scan when a provider repeats one call ID many times.
+            available = [index for index in idxs if index not in pairs]
+            for first, second in zip(available[0::2], available[1::2]):
+                pairs[first] = second
+                pairs[second] = first
 
         # Build a map of tool_name -> list of indices
         tool_call_indices: dict[str, list[int]] = {}

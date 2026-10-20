@@ -33,6 +33,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 __all__ = [
@@ -247,17 +248,6 @@ _PREFERENCE_MAX = 1.2
 #: Catalog-dependent by construction; see the robustness notes in the tests.
 _DISTINGUISHING_RATIO = 0.5
 
-COMPONENT_ORDER = (
-    "exact_name",
-    "trigger",
-    "lexical",
-    "phrase",
-    "name_overlap",
-    "task_family",
-    "capability",
-    "stack",
-    "preference",
-)
 _COMPONENT_LABELS = {
     "exact_name": "exact name",
     "trigger": "trigger",
@@ -351,14 +341,12 @@ class _Retrieved:
 # ─── normalization ───────────────────────────────────────────────────────────
 
 
-def normalize_tokens(text: str) -> list[str]:
-    """Canonical tokens: aliases folded, synonyms expanded, stopwords dropped.
+#: Inputs longer than this are tokenized without caching. Skill metadata is
+#: short; a long user query must not pin a large string in the process cache.
+_MAX_CACHED_TOKEN_INPUT = 512
 
-    Meaning-sensitive punctuation for C++, C#, F#, and .NET is preserved as
-    stable tokens; everything else is tokenized on ``[a-z0-9]+``. No
-    fuzzy correction happens here (see :func:`build_query_descriptor` for the
-    opt-in, bounded tolerance).
-    """
+
+def _normalize_tokens_uncached(text: str) -> tuple[str, ...]:
     folded = text.casefold()
     for source, replacement in ALIAS_REPLACEMENTS:
         folded = folded.replace(source, replacement)
@@ -366,7 +354,30 @@ def normalize_tokens(text: str) -> list[str]:
     result: list[str] = []
     for word in words:
         result.extend(SYNONYM_EXPANSIONS.get(word, word).split())
-    return [word for word in result if word not in STOPWORDS and len(word) > 1]
+    return tuple(word for word in result if word not in STOPWORDS and len(word) > 1)
+
+
+@lru_cache(maxsize=4096)
+def _normalize_tokens_cached(text: str) -> tuple[str, ...]:
+    return _normalize_tokens_uncached(text)
+
+
+def normalize_tokens(text: str) -> list[str]:
+    """Canonical tokens: aliases folded, synonyms expanded, stopwords dropped.
+
+    Meaning-sensitive punctuation for C++, C#, F#, and .NET is preserved as
+    stable tokens; everything else is tokenized on ``[a-z0-9]+``. No
+    fuzzy correction happens here (see :func:`build_query_descriptor` for the
+    opt-in, bounded tolerance). Ranking reuses static skill metadata across
+    queries, so the pure tokenization step is cached; callers still receive a
+    fresh list and cannot mutate the cache.
+    """
+    tokens = (
+        _normalize_tokens_cached(text)
+        if len(text) <= _MAX_CACHED_TOKEN_INPUT
+        else _normalize_tokens_uncached(text)
+    )
+    return list(tokens)
 
 
 def build_query_descriptor(

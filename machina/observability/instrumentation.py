@@ -46,7 +46,9 @@ from machina.memory.redaction import redact_secrets
 
 __all__ = ["instrument", "instrumented", "log_event", "warm"]
 
-logger = logging.getLogger("machina.instrumentation")
+#: Logger name used for the parallel Python ``logging`` record.
+LOGGER_NAME = "machina.instrumentation"
+logger = logging.getLogger(LOGGER_NAME)
 # A library logger must not fall through to logging.lastResort (which writes
 # bare warning messages to stderr when the host configured no handlers).
 logger.addHandler(logging.NullHandler())
@@ -61,8 +63,6 @@ MAX_CONTAINER_ITEMS = 50
 MAX_CONTAINER_DEPTH = 4
 #: Rotation threshold for the dedicated JSONL sink (keep one previous file).
 MAX_LOG_BYTES = 10 * 1024 * 1024
-#: Logger name used for the parallel Python ``logging`` record.
-LOGGER_NAME = "machina.instrumentation"
 #: Metrics counter (the collector has no label dimension; one bounded family).
 METRICS_COUNTER = "instrumentation.events"
 

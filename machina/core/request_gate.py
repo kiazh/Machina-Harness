@@ -4,12 +4,12 @@ One function — :func:`evaluate_request` — is called by ``run()`` and
 ``run_stream()`` after in-place stale-history condensation and before every
 provider request, so the two loops cannot drift (C10):
 
-- **Default (flag off): shadow.** The request is projected and a bounded,
+- **Flag off: shadow.** The request is projected and a bounded,
   redacted report is logged under the stable logger name
   ``agent.request_projection.shadow`` (counts, refusal code, estimate, basis,
   hashes — never message bodies). Outgoing messages are byte-identical to the
   pre-B2 behavior; the legacy hard capacity guard is unchanged.
-- **``request_projection_enabled`` (default False): wired.** A safe plan is
+- **``request_projection_enabled`` (default True): wired.** A safe plan is
   sent — pins first, then the canonical unit order — and a structured refusal
   turns into the same capacity-failure shape the legacy guard emits
   (audit event + ``outcome="failed"`` + the refusal message and safe options)

@@ -428,7 +428,14 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
                 _kill_tree(proc, holder.get("pgid"))
             if container_name:
                 await asyncio.to_thread(_stop_container, container_name)
-            worker.join(timeout=10)
+            # A cancelled terminal worker may still be retiring a killed
+            # process tree. Wait off the event loop: a stuck child must not
+            # freeze every gateway session for up to the join timeout.
+            try:
+                await asyncio.to_thread(worker.join, 10)
+            except Exception as error:
+                # Executor shutdown must not mask the original cancellation.
+                logger.warning("terminal worker join failed: %s", error)
             raise
         worker.join(timeout=10)
         if "error" in outcome:
