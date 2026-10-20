@@ -1,6 +1,6 @@
-"""Machina MCP server shim — phase 1 interop surface (stdio transport).
+"""Machina MCP server shim — interop and subagent surface (stdio transport).
 
-Exposes exactly three tools to MCP hosts (OpenCode, Codex, Claude Desktop):
+Exposes tools to MCP hosts (OpenCode, Codex, Claude Desktop):
 
 ``machina_status()``
     Read-only status text from the same in-process data path as
@@ -8,12 +8,24 @@ Exposes exactly three tools to MCP hosts (OpenCode, Codex, Claude Desktop):
 
 ``machina_chat(prompt, session_id=None, mode=None)``
     One headless ``machina chat`` turn in a bounded child process. Text only
-    (attachments/images are unsupported in phase 1). A turn that pauses for
-    approval (CLI exit 3) returns a structured ``paused_for_approval`` result
-    instead of hanging.
+    (attachments/images are unsupported). A turn that pauses for approval
+    (CLI exit 3) returns a structured ``paused_for_approval`` result.
 
 ``machina_session_create(title=None)``
     Create an empty session row through ``session_manager`` and return its id.
+
+``machina_agents()``
+    List the agent definitions an external orchestrator can delegate to.
+
+``machina_delegate(agent, task, parent_session_id=None, ...)``
+    Run one child agent in a fresh durable Machina session and return its
+    result. This is the single-spawn primitive an external orchestrator uses
+    when OpenCode/Codex should treat Machina as its subagent provider.
+
+``machina_delegate_many(tasks, parent_session_id=None, max_concurrency=0)``
+    Run up to 20 child agents in one call, in bounded waves. Concurrency is
+    capped by ``max_delegate_concurrency`` (default 4), matching the
+    Codex-style slot model rather than spawning an unbounded fan-out.
 
 Process discipline shares the repo's terminal-tool leaf mechanics
 (``machina/core/child_process.py``, AH-AUDIT-010/023): children run with a
@@ -58,7 +70,10 @@ logger = logging.getLogger("machina.mcp_server")
 __all__ = [
     "ProcessResult",
     "build_server",
+    "machina_agents",
     "machina_chat",
+    "machina_delegate",
+    "machina_delegate_many",
     "machina_session_create",
     "machina_status",
     "main",
@@ -79,6 +94,12 @@ MAX_OUTPUT_CHARS = 64_000
 MAX_STDERR_CHARS = 8_000
 DEFAULT_CHAT_TIMEOUT_SECONDS = 300.0
 VALID_MODES = ("ask", "workspace", "sandbox", "full")
+MAX_DELEGATE_TASKS = 20
+MAX_AGENT_NAME_CHARS = 100
+MAX_EXPECTED_CHARS = 1_000
+MAX_ARTIFACT_PATH_CHARS = 500
+MAX_DELEGATE_REPLY_CHARS = 8_000
+MAX_BATCH_DELEGATE_REPLY_CHARS = 4_000
 
 # R5-A (finding 1): tool-supplied modes are capped by a server-side ceiling so
 # an MCP caller can never select broader host authority than the operator
@@ -682,35 +703,300 @@ async def machina_session_create(title: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Orchestrated subagents (OpenCode/Codex → Machina)
+# ---------------------------------------------------------------------------
+
+
+def _parent_session_id(value: str | None) -> uuid.UUID | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("parent_session_id must be a UUID string or null")
+    try:
+        return uuid.UUID(value.strip())
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"parent_session_id is not a valid UUID: {value!r}") from exc
+
+
+def _delegate_args_error(
+    agent: object,
+    task: object,
+    expected_output: object = None,
+    expected_artifact_path: object = None,
+) -> str | None:
+    if not isinstance(agent, str) or not agent.strip():
+        return "agent must be a non-empty string"
+    if len(agent) > MAX_AGENT_NAME_CHARS:
+        return f"agent name exceeds {MAX_AGENT_NAME_CHARS} characters"
+    if not isinstance(task, str) or not task.strip():
+        return "task must be a non-empty string"
+    if len(task) > MAX_PROMPT_CHARS:
+        return f"task exceeds {MAX_PROMPT_CHARS} characters"
+    if expected_output is not None and (
+        not isinstance(expected_output, str) or len(expected_output) > MAX_EXPECTED_CHARS
+    ):
+        return f"expected_output must be a string of at most {MAX_EXPECTED_CHARS} characters"
+    if expected_artifact_path is not None and (
+        not isinstance(expected_artifact_path, str)
+        or len(expected_artifact_path) > MAX_ARTIFACT_PATH_CHARS
+    ):
+        return (
+            "expected_artifact_path must be a string of at most "
+            f"{MAX_ARTIFACT_PATH_CHARS} characters"
+        )
+    return None
+
+
+def _delegation_payload(
+    result: Any, *, reply_limit: int = MAX_DELEGATE_REPLY_CHARS
+) -> dict[str, Any]:
+    """Bounded JSON-safe result for one child agent."""
+    status = str(getattr(result, "status", "error") or "error")
+    response = str(getattr(result, "response", "") or "")
+    if status in ("error", "failed"):
+        try:
+            from machina.memory.redaction import redact_diagnostic
+
+            response = redact_diagnostic(response)
+        except Exception:
+            response = "[redaction unavailable]"
+    approvals: list[dict[str, str]] = []
+    try:
+        from machina.protocol import approval_summary
+
+        for card in getattr(result, "needs_approval", None) or []:
+            if isinstance(card, dict):
+                approvals.append(approval_summary(card))
+    except Exception:
+        approvals = []
+    session_id = getattr(result, "session_id", None)
+    return {
+        "agent": str(getattr(result, "agent", "") or ""),
+        "status": status,
+        "session_id": str(session_id) if session_id else None,
+        "response": _bounded(response, reply_limit),
+        "tokens": int(getattr(result, "tokens", 0) or 0),
+        "iterations": int(getattr(result, "iterations", 0) or 0),
+        "needs_approval": approvals,
+    }
+
+
+def _delegation_error_payload(error: BaseException, *, agent: str | None = None) -> dict[str, Any]:
+    """Bounded, redacted result for a failed child (never a raw traceback)."""
+    detail = f"{type(error).__name__}: {error}"
+    try:
+        from machina.memory.redaction import redact_diagnostic
+
+        detail = redact_diagnostic(detail)
+    except Exception:
+        detail = "[redaction unavailable]"
+    return {
+        "agent": agent or "",
+        "status": "error",
+        "session_id": None,
+        "response": _bounded(detail, MAX_ERROR_CHARS),
+        "tokens": 0,
+        "iterations": 0,
+        "needs_approval": [],
+    }
+
+
+async def machina_agents() -> str:
+    """List the agents an external orchestrator can delegate to."""
+    try:
+        from machina.core.agent_def import agent_registry
+
+        async with _db_section():
+            definitions = await agent_registry.list()
+    except Exception as exc:
+        return _json_text({"status": "error", "error": _bounded(str(exc), MAX_ERROR_CHARS)})
+    agents = [
+        {
+            "name": definition.name,
+            "description": _bounded(definition.description or "", 240),
+            "source": _bounded(getattr(definition, "source", "") or "", 40),
+        }
+        for definition in definitions
+    ]
+    agents.sort(key=lambda item: item["name"])
+    return _json_text({"agents": agents})
+
+
+async def machina_delegate(
+    agent: str,
+    task: str,
+    parent_session_id: str | None = None,
+    expected_output: str | None = None,
+    expected_artifact_path: str | None = None,
+) -> str:
+    """Run one child agent in a fresh durable Machina session.
+
+    The child inherits the MCP server's execution-mode ceiling and cannot
+    approve its own actions. A child that needs approval returns
+    ``status: waiting_approval`` with the pending request ids; a human must
+    resolve it in Machina before the task can continue.
+    """
+    error = _delegate_args_error(agent, task, expected_output, expected_artifact_path)
+    if error:
+        return _json_text({"status": "invalid_request", "error": error})
+    try:
+        parent = _parent_session_id(parent_session_id)
+        from machina.core.orchestrator import AgentNotFoundError, orchestrator
+
+        async with _db_section() as db:
+            try:
+                await db.initialize_runtime_schema()
+            except Exception:
+                # Same best-effort migration contract as session creation and
+                # the CLI chat entry: an upgraded install gains delegation
+                # tables before the child is built, without hiding the real
+                # delegation result.
+                pass
+            result = await orchestrator.delegate(
+                agent.strip(),
+                task,
+                from_agent="mcp-host",
+                parent_session_id=parent,
+                authority={"max_mode": _mcp_mode_ceiling()},
+                expected_output=expected_output,
+                expected_artifact_path=expected_artifact_path,
+            )
+    except AgentNotFoundError as exc:
+        return _json_text({"status": "invalid_request", "error": str(exc)})
+    except Exception as exc:
+        return _json_text(_delegation_error_payload(exc, agent=agent))
+    return _json_text(_delegation_payload(result))
+
+
+async def machina_delegate_many(
+    tasks: list[dict[str, str]],
+    parent_session_id: str | None = None,
+    max_concurrency: int = 0,
+) -> str:
+    """Run up to 20 child agents in bounded concurrent waves.
+
+    Each task is ``{"agent": "...", "task": "..."}``. ``max_concurrency``
+    defaults to ``max_delegate_concurrency`` (4) and is clamped to 1..20.
+    Results preserve input order; individual failures are returned in place.
+    """
+    if not isinstance(tasks, list) or not tasks:
+        return _json_text({"status": "invalid_request", "error": "tasks must be a non-empty list"})
+    if len(tasks) > MAX_DELEGATE_TASKS:
+        return _json_text(
+            {
+                "status": "invalid_request",
+                "error": f"tasks must contain at most {MAX_DELEGATE_TASKS} delegations",
+            }
+        )
+    steps: list[tuple[str, str]] = []
+    for index, item in enumerate(tasks):
+        if not isinstance(item, dict):
+            return _json_text(
+                {"status": "invalid_request", "error": f"tasks[{index}] must be an object"}
+            )
+        agent, task = item.get("agent"), item.get("task")
+        error = _delegate_args_error(agent, task)
+        if error:
+            return _json_text({"status": "invalid_request", "error": f"tasks[{index}]: {error}"})
+        steps.append((agent.strip(), task))
+
+    try:
+        parent = _parent_session_id(parent_session_id)
+        try:
+            limit = int(max_concurrency or 0)
+        except (TypeError, ValueError):
+            return _json_text(
+                {"status": "invalid_request", "error": "max_concurrency must be an integer"}
+            )
+        if limit <= 0:
+            try:
+                from machina.core.config import config
+
+                limit = int(config.get("max_delegate_concurrency") or 4)
+            except Exception:
+                limit = 4
+        limit = max(1, min(limit, MAX_DELEGATE_TASKS, len(steps)))
+        from machina.core.orchestrator import orchestrator
+
+        async with _db_section() as db:
+            try:
+                await db.initialize_runtime_schema()
+            except Exception:
+                # Best effort, matching the single-child path; delegation rows
+                # and agent_messages remain the durable source of truth.
+                pass
+            results = await orchestrator.run_parallel(
+                steps,
+                parent_session_id=parent,
+                max_concurrency=limit,
+            )
+    except Exception as exc:
+        return _json_text(_delegation_error_payload(exc))
+
+    payloads: list[dict[str, Any]] = []
+    for (agent, _task), result in zip(steps, results, strict=False):
+        if isinstance(result, BaseException):
+            payloads.append(_delegation_error_payload(result, agent=agent))
+        else:
+            payloads.append(_delegation_payload(result, reply_limit=MAX_BATCH_DELEGATE_REPLY_CHARS))
+    failures = sum(1 for item in payloads if item["status"] in ("error", "failed"))
+    approvals = sum(1 for item in payloads if item["status"] == "waiting_approval")
+    if failures == len(payloads):
+        status = "failed"
+    elif failures:
+        status = "partial"
+    elif approvals:
+        status = "waiting_approval"
+    else:
+        status = "completed"
+    return _json_text(
+        {
+            "status": status,
+            "requested": len(steps),
+            "concurrency": limit,
+            "results": payloads,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Server assembly (stdio)
 # ---------------------------------------------------------------------------
 
 
 def build_server() -> MCPServer:
-    """Assemble the stdio server with exactly the three phase-1 tools."""
+    """Assemble the stdio server: status, chat, sessions, and subagents."""
     server = MCPServer(
         name="machina",
         title="Machina",
         description=(
-            "Machina agent framework shim (phase 1): read-only status, one-shot chat turns, "
-            "session creation."
+            "Machina agent framework shim: status, chat turns, session creation, agent "
+            "listing, and durable child-agent delegation."
         ),
         instructions=(
             "Machina is a self-hosted agent framework backed by PostgreSQL. Use "
             "machina_status for a read-only health/count summary. Use machina_chat to run "
             "one headless turn and receive {status, session_id, reply} JSON; it is text-only "
-            "(attachments/images are unsupported in phase 1), and a turn that pauses for "
-            "approval returns status paused_for_approval instead of hanging. Use "
-            "machina_session_create only when an empty session is needed before chatting."
+            "(attachments/images are unsupported), and a turn that pauses for approval "
+            "returns status paused_for_approval instead of hanging. Use "
+            "machina_session_create only when an empty session is needed before chatting. "
+            "For orchestration, call machina_agents to discover roles, then machina_delegate "
+            "for one child or machina_delegate_many for up to 20 children in bounded waves "
+            "(max_concurrency defaults to max_delegate_concurrency). Delegated children "
+            "inherit the server execution-mode ceiling and cannot approve their own actions; "
+            "a waiting_approval result must be resolved by a human in Machina."
         ),
         version=__version__,
     )
     server.add_tool(machina_status, annotations=ToolAnnotations(read_only_hint=True))
+    server.add_tool(machina_agents, annotations=ToolAnnotations(read_only_hint=True))
     server.add_tool(machina_chat)
     server.add_tool(machina_session_create)
+    server.add_tool(machina_delegate)
+    server.add_tool(machina_delegate_many)
     return server
 
 
 def main() -> None:
-    """Entry point: serve the three tools over stdio."""
+    """Entry point: serve the MCP tools over stdio."""
     build_server().run(transport="stdio")

@@ -590,24 +590,44 @@ class Orchestrator:
         *,
         parent_session_id: uuid.UUID | None = None,
         _hop_count: int = 0,
+        max_concurrency: int | None = None,
     ) -> list[DelegationResult | Exception]:
-        """Run (agent, task) delegations concurrently.
+        """Run (agent, task) delegations concurrently in bounded waves.
 
         Children inherit ``_hop_count + 1`` so circular delegation is still
         bounded. Individual failures are returned as exceptions in place
         (return_exceptions=True) so callers never lose results.
+
+        ``max_concurrency`` bounds the number of child agents active at once
+        (Codex-style concurrency slots). It defaults to
+        ``max_delegate_concurrency``; the remaining tasks queue in order.
         """
-        raw = await asyncio.gather(
-            *(
-                self.delegate(
+        if not tasks:
+            return []
+        if max_concurrency is None:
+            try:
+                max_concurrency = int(config.get("max_delegate_concurrency") or 4)
+            except Exception:
+                max_concurrency = 4
+        try:
+            limit = int(max_concurrency)
+        except (TypeError, ValueError):
+            limit = 4
+        limit = max(1, min(limit, len(tasks)))
+        semaphore = asyncio.Semaphore(limit)
+
+        async def run_one(agent_name: str, task: str) -> DelegationResult:
+            async with semaphore:
+                return await self.delegate(
                     agent_name,
                     task,
                     from_agent="orchestrator",
                     parent_session_id=parent_session_id,
                     _hop_count=_hop_count + 1,
                 )
-                for agent_name, task in tasks
-            ),
+
+        raw = await asyncio.gather(
+            *(run_one(agent_name, task) for agent_name, task in tasks),
             return_exceptions=True,
         )
         return list(raw)

@@ -26,13 +26,34 @@ Calls have a total deadline including concurrency wait. Waiting without dispatch
 
 ## Machina as an MCP server
 
-Machina also acts as an MCP server: `python -m machina.mcp_server` serves the phase-1 shim over stdio to hosts such as OpenCode, Codex and Claude Desktop. Register it with a Python that has Machina installed (a checkout virtualenv is easiest):
+Machina also acts as an MCP server: `python -m machina.mcp_server` serves the interop and subagent shim over stdio to hosts such as OpenCode, Codex and Claude Desktop. Register it with a Python that has Machina installed (a checkout virtualenv is easiest):
 
 ```bash
 opencode mcp add machina -- /path/to/machina/.venv/bin/python -m machina.mcp_server
 ```
 
-Project-scope registration writes the host's own config file (`opencode.json` for OpenCode), which this repository gitignores because the interpreter path is host-specific; other hosts use their equivalent stdio configuration. The shim exposes exactly three tools: `machina_status` (read-only, same data path as `machina status`), `machina_chat` (one headless `machina chat` turn) and `machina_session_create`. Phase 1 is text-only — attachments/images are refused — and a turn that pauses for approval (CLI exit 3) returns `{"status": "paused_for_approval", ...}` with the pending request ids instead of hanging; the caller resolves the request in Machina and resumes the session. Children run in the host's launch directory with a minimal environment allowlist, their own process group and a bounded kill-tree deadline; stdout is the reply and stderr is diagnostics-only, so child secret material never enters a tool result.
+Project-scope registration writes the host's own config file (`opencode.json` for OpenCode), which this repository gitignores because the interpreter path is host-specific; other hosts use their equivalent stdio configuration. The shim exposes:
+
+- `machina_status` — read-only health/count summary.
+- `machina_chat` — one headless `machina chat` turn.
+- `machina_session_create` — create an empty session.
+- `machina_agents` — list the agent roles an external orchestrator can call.
+- `machina_delegate` — run one child agent in a fresh durable Machina session.
+- `machina_delegate_many` — run up to 20 child agents in bounded waves.
+
+Chat is text-only; a turn that pauses for approval (CLI exit 3) returns `{"status": "paused_for_approval", ...}` with pending request ids instead of hanging; the caller resolves the request in Machina and resumes the session. Chat subprocesses run in the host's launch directory with a minimal environment allowlist, their own process group and a bounded kill-tree deadline; stdout is the reply and stderr is diagnostics-only, so child secret material never enters a tool result. Delegated children instead run in-process under Machina's configured workspace, provider, accounting and permission ceiling.
+
+### OpenCode/Codex as orchestrator, Machina as subagent provider
+
+This is the scalable interop direction: the external harness keeps its own planner/UI/session model, and calls Machina when it wants a durable specialist child with Machina permissions, context, and accounting.
+
+1. Register the shim once: `machina harnesses enable opencode` (or `codex`).
+2. From the external orchestrator, call `machina_agents` to discover roles.
+3. Call `machina_delegate` for one child, or `machina_delegate_many` with up to 20 `{agent, task}` entries for a batch.
+4. `max_concurrency` defaults to `max_delegate_concurrency` (4), so 20 tasks run in orderly waves rather than 20 simultaneous provider calls. The external orchestrator can choose a lower value or up to 20.
+5. A child that needs approval returns `waiting_approval` with request ids; a human resolves it in Machina. Children inherit the MCP server's execution-mode ceiling and cannot approve their own actions.
+
+The reverse direction (Machina as planner over OpenCode child sessions) is not exposed through MCP because OpenCode's subagent surface is its internal Task/session API and ACP/HTTP server, not an MCP server. `machina harnesses run opencode "<prompt>"` remains the one-shot bridge; a true reverse control plane would need an OpenCode server/ACP adapter rather than pretending the MCP registration is symmetric.
 
 The `j9` gate journey proves the OpenCode → shim → Machina-session roundtrip end to end and SKIPs unless `opencode` is installed and the project has a registered `machina` server; the recorded round trip, database token check and unit + stdio-handshake coverage are in the [interop proof](verification/proofs/interop_2026-10-14/README.md).
 

@@ -79,7 +79,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,469 passed, 2 skipped (DevTools suite, real PostgreSQL) |
+| Backend tests | 6,478 passed, 2 skipped (DevTools suite, real PostgreSQL) |
 | Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
@@ -722,7 +722,7 @@ MCP tools are not injected wholesale into every request. The agent:
 
 This keeps remote schemas out of prompts until they are relevant. Remote tool calls still go through ordinary approvals. Server-provided descriptions and results are data, never authority. A namespaced allowlist entry such as `firecrawl__firecrawl_scrape` is matched against both the remote name and the namespaced tool name, so "allow this read-only scrape" actually means what it says.
 
-The other direction is `machina harnesses`: register Machina's MCP server with supported external assistants. It exposes status, session creation, and a bounded text chat task, not a remote copy of every UI feature.
+The other direction is `machina harnesses`: register Machina's MCP server with supported external assistants. It exposes status, session creation, a bounded text chat task, agent listing, and single/bounded-batch child delegation. That lets OpenCode or Codex act as the orchestrator while Machina runs durable specialist subagents; it is not a remote copy of every UI feature.
 
 ### Jobs that survive restarts
 
@@ -784,7 +784,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,469 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,478 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 
@@ -1126,6 +1126,7 @@ Precedence: explicit overrides > environment variables > saved configuration > d
 |---|---|---|
 | `provider` / `model` | `openrouter` / `openrouter/free` | Global fallback AI connection |
 | `temperature` / `max_tokens` | `0.7` / `4096` | Sampling and response ceiling |
+| `max_delegate_concurrency` | `4` | Child agents active at once in a parallel batch |
 | `execution_mode` | `ask` | Default authority preset for new sessions |
 | `turn_timeout` / `approval_timeout` | `300` / `300` | Turn and approval-wait limits, in seconds |
 | `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables |

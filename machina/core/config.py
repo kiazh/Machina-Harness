@@ -159,6 +159,10 @@ DEFAULTS: dict[str, Any] = {
     "agent_id": "harness",
     "temperature": 0.7,
     "max_tokens": 4096,
+    # Maximum child agents running concurrently in one parallel delegation
+    # batch. The model-facing prompt still advises three per block; this is
+    # the engine-side wave size (Codex V2 defaults to four including root).
+    "max_delegate_concurrency": 4,
     # Reasoning depth for providers that support it: "" (provider default),
     # "low"/"medium"/"high" wire-wide, and "xhigh"/"max" for the ChatGPT
     # catalog tiers (per-model validated by the chatgpt provider). Sent as
@@ -536,6 +540,7 @@ def _check_int_bounds(key: str, val: int) -> None:
         "approval_timeout": (1, 3600),
         "context_budget": (100, None),
         "max_tokens": (1, MAX_TOKENS),
+        "max_delegate_concurrency": (1, 64),
         # 0 disables throttling (AsyncTokenBucket.acquire short-circuits);
         # documented in rate_limit.py and pinned by test_f5_zero_rate.
         "rate_limit_calls_per_minute": (0, None),
@@ -606,6 +611,7 @@ class Config:
     agent_id: str = "harness"
     temperature: float = 0.7
     max_tokens: int = 4096
+    max_delegate_concurrency: int = 4
     reasoning_effort: str = ""
     rate_limit_calls_per_minute: int = 10
     usage_session_token_limit: int = 0
