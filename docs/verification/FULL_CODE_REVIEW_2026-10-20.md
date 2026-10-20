@@ -1,6 +1,6 @@
 # Full-code debugging and debloating review — incomplete
 
-Status: **partial audit; do not treat this as a complete review or an all-clear.** Parallel reviewers hit an account usage limit before finishing their assigned reads. Current checked-out commit is `8f2085480577285900a9d1e45c7a382189bc47b9`. An independent verification pass reproduced every listed P1/P2 finding, fixed the confirmed defects, and reran the complete backend and UI suites; the coverage ledger remains partial.
+Status: **partial audit; do not treat this as a complete review or an all-clear.** Parallel reviewers hit an account usage limit before finishing their assigned reads. Review baseline: `8f2085480577285900a9d1e45c7a382189bc47b9`; verification fixes: `610ff50` plus DevTools `e9da800`. An independent verification pass reproduced every listed P1/P2 finding, fixed the confirmed defects, and reran the complete backend and UI suites; the coverage ledger remains partial.
 
 ## Coverage
 
