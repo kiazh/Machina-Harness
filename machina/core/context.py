@@ -1017,8 +1017,15 @@ class ContextManager:
             retained.append(row)
             total += row["tokens"]
         retained.reverse()
-        while retained and retained[0]["role"] != "user":
-            retained.pop(0)
+        # Drop a partial leading turn with one slice. Repeated ``pop(0)`` is
+        # quadratic when an unbounded transcript starts with assistant/tool
+        # rows and the continuity window is large.
+        first_user = next(
+            (index for index, row in enumerate(retained) if row["role"] == "user"),
+            len(retained),
+        )
+        if first_user:
+            retained = retained[first_user:]
         if not retained:
             return [], messages
         split = len(messages) - len(retained)

@@ -638,14 +638,24 @@ class ContextCompressor:
         # Select groups that fit within target budget. Budgets count the FINAL
         # serialized representation (5.7): effective tokens fall back to the
         # real tokenizer when stored counts are 0/underestimated, and per-field
-        # minima keep tool protocol structure intact.
+        # minima keep tool protocol structure intact. Memoize the fallback:
+        # the same chunk is measured once for the total and again for its
+        # group, while payload strings can exceed the tokenizer's small cache.
+        effective_cache: dict[int, int] = {}
+
         def _effective(c: ContextChunk) -> int:
             if c.token_count and c.token_count > 0:
                 return c.token_count
+            key = id(c)
+            cached = effective_cache.get(key)
+            if cached is not None:
+                return cached
             try:
-                return max(1, get_token_count(str(c.payload)))
+                value = max(1, get_token_count(str(c.payload)))
             except Exception:
-                return 1
+                value = 1
+            effective_cache[key] = value
+            return value
 
         target_tokens = int(sum(_effective(c) for c in chunks) * self.config.target_ratio)
         selected: list[ContextChunk] = []

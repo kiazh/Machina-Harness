@@ -372,9 +372,9 @@ def build_task_descriptor(
         )
 
     # --- constraints (sticky; explicit release only) --------------------------
-    constraints, released = _merge_constraints(state, text)
+    constraints, released, query_constraints = _merge_constraints(state, text)
     for constraint in constraints:
-        source = "query" if constraint in detect_constraints(text) else "task_state"
+        source = "query" if constraint in query_constraints else "task_state"
         evidence.append(FactEvidence("constraints", constraint, source, "active constraint"))
     for constraint in sorted(released):
         evidence.append(
@@ -605,17 +605,23 @@ def _state_capabilities(state: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _merge_constraints(
     state: Mapping[str, Any] | None, text: str
-) -> tuple[tuple[str, ...], frozenset[str]]:
-    """Sticky constraints: prior and stated constraints minus explicit releases."""
+) -> tuple[tuple[str, ...], frozenset[str], tuple[str, ...]]:
+    """Sticky constraints: prior and stated constraints minus explicit releases.
+
+    The stated set is returned so the evidence loop can distinguish query
+    constraints from inherited ones without rescanning the same text once per
+    constraint.
+    """
     released = released_constraints(text)
+    stated = detect_constraints(text)
     merged: list[str] = []
     if state:
         prior = state.get("constraints")
         if isinstance(prior, (list, tuple, set, frozenset)):
             merged.extend(str(value) for value in prior if isinstance(value, str) and value)
-    merged.extend(detect_constraints(text))
+    merged.extend(stated)
     ordered = [token for token in dict.fromkeys(merged) if token not in released]
-    return tuple(ordered), released
+    return tuple(ordered), released, stated
 
 
 def _task_families(
