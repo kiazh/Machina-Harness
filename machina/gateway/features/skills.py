@@ -166,12 +166,14 @@ async def _generate_installed_metadata(gw: Gateway, skill: Any) -> dict[str, Any
 
 
 async def skills_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
-    """List all skills."""
+    """List skills, optionally filtered for the empty-query browse surface."""
     gw.require_db()
     # Catalogue load stats (and on change re-parses) the whole skills tree;
     # every browse handler used to pay that on the event loop.
     registry = await asyncio.to_thread(_registry)
-    return {"skills": [_skill(s) for s in sorted(registry.list_skills(), key=lambda s: s.name)]}
+    filters = _search_filters(params.get("filters"))
+    selected = _filtered_skills(registry.list_skills(), filters)
+    return {"skills": [_skill(s) for s in sorted(selected, key=lambda s: s.name)]}
 
 
 async def skills_show(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:

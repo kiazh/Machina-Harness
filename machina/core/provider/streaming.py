@@ -148,15 +148,17 @@ async def begin_stream_usage(
     max_tokens: int,
     session_id: uuid.UUID | None,
     agent_id: str | None,
+    usage_reserved: bool = False,
 ) -> ReservationSettlement:
     """Audit a stream start and reserve its usage when attributable.
 
     ``store`` is the provider module's ``usage_store`` binding rather than a
-    captured import, so the existing monkeypatch seam keeps working.
+    captured import, so the existing monkeypatch seam keeps working. A caller
+    that already owns the reservation passes ``usage_reserved=True``.
     """
     audit_log("llm_stream_start", provider=provider_name, model=model, message_count=len(messages))
     reservation_id = None
-    if session_id is not None and agent_id is not None:
+    if not usage_reserved and session_id is not None and agent_id is not None:
         reservation_id = await store.reserve(
             session_id, agent_id, provider_name, model, messages, tools or [], max_tokens
         )

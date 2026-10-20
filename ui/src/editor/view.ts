@@ -313,7 +313,7 @@ export class EditorView implements Component, Focusable {
 	private dragging = false;
 	private lastWidth = 0;
 	private readonly lineCache = new Map<string, { version: number; starts: number[] }>();
-	private readonly wrapCache = new Map<string, { version: number; contentCells: number; rows: VisualRow[] }>();
+	private readonly wrapCache = new Map<string, { version: number; contentCells: number; tabWidth: number; rows: VisualRow[] }>();
 	private lastFrame: FrameCache | null = null;
 	private inlineCompletion: { documentId: string; version: number; offset: number; text: string } | undefined;
 
@@ -399,6 +399,10 @@ export class EditorView implements Component, Focusable {
 		const next = Number.isFinite(width) ? Math.min(16, Math.max(1, Math.floor(width))) : EDITOR_TAB_WIDTH;
 		if (next === this.tabWidth) return;
 		this.tabWidth = next;
+		// Cached visual rows include tab expansion; keep their key honest and
+		// invalidate the previous frame so a preference change is immediate.
+		this.wrapCache.clear();
+		this.lastFrame = null;
 		this.requestRenderCallback();
 	}
 
@@ -863,7 +867,12 @@ export class EditorView implements Component, Focusable {
 
 	private wrapRows(record: DocumentRecord, starts: number[], contentCells: number): VisualRow[] {
 		const cached = this.wrapCache.get(record.id);
-		if (cached && cached.version === record.version && cached.contentCells === contentCells) {
+		if (
+			cached
+			&& cached.version === record.version
+			&& cached.contentCells === contentCells
+			&& cached.tabWidth === this.tabWidth
+		) {
 			return cached.rows;
 		}
 		const per = Math.max(1, contentCells);
@@ -875,7 +884,12 @@ export class EditorView implements Component, Focusable {
 				rows.push({ line, fromCell: chunk * per, toCell: Math.min(width, (chunk + 1) * per) });
 			}
 		}
-		this.wrapCache.set(record.id, { version: record.version, contentCells, rows });
+		this.wrapCache.set(record.id, {
+			version: record.version,
+			contentCells,
+			tabWidth: this.tabWidth,
+			rows,
+		});
 		return rows;
 	}
 
@@ -1248,6 +1262,11 @@ export class EditorView implements Component, Focusable {
 		const startOffset = Math.min(state.selectionAnchorOffset, state.cursorOffset);
 		const endOffset = Math.max(state.selectionAnchorOffset, state.cursorOffset);
 		return startOffset === endOffset ? undefined : { startOffset, endOffset };
+	}
+
+	/** True when the active editor owns a non-empty selection. */
+	hasSelection(): boolean {
+		return this.selectionRange(this.activeDocumentId) !== undefined;
 	}
 
 	private copySelection(documentId: string): boolean {

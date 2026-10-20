@@ -240,6 +240,7 @@ def _tools_payload(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
 class ChatGPTProvider(LLMProvider, RateLimitBinding):
     """Codex protocol over the ChatGPT subscription backend."""
 
+    owns_usage_reservation = True
     BASE_URL = "https://chatgpt.com/backend-api/codex"
     RESPONSES_PATH = "/responses"
     ORIGINATOR = "machina"
@@ -476,6 +477,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a Codex Responses completion as Machina StreamEvents.
 
@@ -498,6 +500,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
             max_tokens=max_tokens,
             session_id=session_id,
             agent_id=agent_id,
+            usage_reserved=usage_reserved,
         )
 
         content_parts: list[str] = []
@@ -614,6 +617,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         """Non-streaming call: drain the stream and return the terminal response."""
         response: LLMResponse | None = None
@@ -627,6 +631,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
                 reasoning_effort=reasoning_effort,
                 session_id=session_id,
                 agent_id=agent_id,
+                usage_reserved=usage_reserved,
             )
         ) as events:
             async for event in events:

@@ -306,6 +306,10 @@ class UsageStore:
             "agent_id": agent_id,
             **kwargs,
         }
+        if getattr(provider, "owns_usage_reservation", False):
+            # This wrapper owns the single outer reservation; self-accounting
+            # providers must only settle it, never create a second row.
+            call_kwargs["usage_reserved"] = session_id is not None
         if max_tokens != 4096:
             call_kwargs["max_tokens"] = max_tokens
         try:

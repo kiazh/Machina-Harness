@@ -150,6 +150,28 @@ test("R5-D1a bare /mode passes the active session ID on mode.get", async () => {
 
 // ─── D1b ────────────────────────────────────────────────────────────────────
 
+test("R5-D1c a delayed mode response cannot overwrite a newer session's footer", async () => {
+	let resolveA: (value: { mode: string; sessionId: string }) => void = () => {};
+	const host = Object.create(App.prototype) as {
+		current: SessionInfo | undefined;
+		client: { request: () => Promise<unknown> };
+		footer: { mode?: string };
+		tui: { requestRender(): void };
+		request<T>(method: string, params: Record<string, unknown>): Promise<T>;
+	};
+	host.current = MAIN;
+	host.client = { request: () => new Promise((resolve) => { resolveA = resolve as typeof resolveA; }) };
+	host.footer = { mode: "ask" };
+	host.tui = { requestRender() {} };
+
+	const pending = host.request("mode.get", { sessionId: MAIN.id });
+	host.current = CHILD;
+	resolveA({ mode: "full", sessionId: MAIN.id });
+	await pending;
+
+	assert.equal(host.footer.mode, "ask", "the stale MAIN response must not change CHILD's footer");
+});
+
 test("R5-D1b switching sessions refreshes the footer to the new session's authority", async (t) => {
 	const { app, client } = await boot();
 	t.after(() => app.exit());

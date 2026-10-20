@@ -65,6 +65,7 @@ _FREE_FALLBACK_MODELS = (
 class OpenRouterProvider(LLMProvider, RateLimitBinding):
     """OpenRouter API — OpenAI-compatible, multi-model."""
 
+    owns_usage_reservation = True
     BASE_URL = "https://openrouter.ai/api/v1"
 
     async def context_window(self, model: str | None = None) -> int:
@@ -104,6 +105,7 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         # Input validation
         _validate_messages(messages)
@@ -147,7 +149,7 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
 
         # Reserve usage if session_id and agent_id are provided
         reservation_id = None
-        if session_id is not None and agent_id is not None:
+        if not usage_reserved and session_id is not None and agent_id is not None:
             reservation_id = await usage_store.reserve(
                 session_id,
                 agent_id,

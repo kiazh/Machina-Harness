@@ -591,6 +591,7 @@ class Orchestrator:
         parent_session_id: uuid.UUID | None = None,
         _hop_count: int = 0,
         max_concurrency: int | None = None,
+        authority: dict | None = None,
     ) -> list[DelegationResult | Exception]:
         """Run (agent, task) delegations concurrently in bounded waves.
 
@@ -601,6 +602,8 @@ class Orchestrator:
         ``max_concurrency`` bounds the number of child agents active at once
         (Codex-style concurrency slots). It defaults to
         ``max_delegate_concurrency``; the remaining tasks queue in order.
+        ``authority`` applies the same explicit child-authority cap to every
+        wave (MCP orchestration uses it to hold the server's mode ceiling).
         """
         if not tasks:
             return []
@@ -624,6 +627,7 @@ class Orchestrator:
                     from_agent="orchestrator",
                     parent_session_id=parent_session_id,
                     _hop_count=_hop_count + 1,
+                    authority=authority,
                 )
 
         raw = await asyncio.gather(

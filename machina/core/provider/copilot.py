@@ -121,6 +121,7 @@ class _ToolCallAccumulator:
 class CopilotProvider(LLMProvider, RateLimitBinding):
     """OpenAI-compatible Copilot API over the user's Copilot subscription."""
 
+    owns_usage_reservation = True
     DEFAULT_MODEL = "gpt-6.1-sol"  # live Copilot catalog, 2026-10-15
 
     def __init__(
@@ -207,6 +208,7 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a Copilot chat completion as Machina StreamEvents."""
         del reasoning_effort  # the Copilot API exposes no effort knob
@@ -228,6 +230,7 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
             max_tokens=max_tokens,
             session_id=session_id,
             agent_id=agent_id,
+            usage_reserved=usage_reserved,
         )
 
         accumulator = _ToolCallAccumulator()
@@ -314,6 +317,7 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         """Non-streaming call: drain the stream and return the terminal response."""
         response: LLMResponse | None = None
@@ -327,6 +331,7 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
                 reasoning_effort=reasoning_effort,
                 session_id=session_id,
                 agent_id=agent_id,
+                usage_reserved=usage_reserved,
             )
         ) as events:
             async for event in events:

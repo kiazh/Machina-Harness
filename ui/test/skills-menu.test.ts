@@ -789,8 +789,20 @@ class ScriptedSkillsClient {
 			case "skills.search":
 				if (this.searchError) throw this.searchError;
 				return this.searchResponse(params) as T;
-			case "skills.list":
-				return { skills: this.candidates.map((row) => ({ name: row.name, description: `Description of ${row.name}`, triggers: row.matchedPhrases, version: "1.0.0", sourceType: row.sourceType, usageCount: 0, enabled: row.enabled })) } as T;
+			case "skills.list": {
+				const filters = (params.filters ?? {}) as {
+					enabled?: boolean | null;
+					source?: string[];
+				};
+				let rows = this.candidates;
+				if (filters.enabled === true) rows = rows.filter((row) => row.enabled);
+				if (filters.enabled === false) rows = rows.filter((row) => !row.enabled);
+				if (Array.isArray(filters.source) && filters.source.length > 0) {
+					const sources = new Set(filters.source);
+					rows = rows.filter((row) => sources.has(row.sourceType));
+				}
+				return { skills: rows.map((row) => ({ name: row.name, description: `Description of ${row.name}`, triggers: row.matchedPhrases, version: "1.0.0", sourceType: row.sourceType, usageCount: 0, enabled: row.enabled })) } as T;
+			}
 			case "skills.show":
 				return { skill: this.showSkill } as T;
 			case "skills.preview_route":
@@ -1082,4 +1094,52 @@ test("SM-09 bare /skills lists every skill immediately (catalog browse, no typin
 		(entry) => entry.method === "skills.search" && String(entry.params.query ?? "") === "",
 	);
 	assert.equal(emptySearches.length, 0, "empty-query browse goes through skills.list, never an empty skills.search");
+});
+
+test("SM-10 blank-query catalog browse honors enabled and source filters", async (t) => {
+	const { app, tui, client, type } = await boot();
+	t.after(() => app.exit());
+	client.candidates = [
+		candidate({ skillId: "enabled-local", name: "enabled-local", enabled: true, sourceType: "local" }),
+		candidate({ skillId: "disabled-local", name: "disabled-local", enabled: false, sourceType: "local" }),
+		candidate({ skillId: "enabled-learned", name: "enabled-learned", enabled: true, sourceType: "learned" }),
+	];
+	type("/skills");
+	type("\r");
+	await settle();
+	tui.renderNow(true);
+	const menu = skillsMenuOf(app);
+	assert.ok(menu, "catalog menu is mounted");
+	const filters = menu as unknown as {
+		openFilterSlot(slot: string): void;
+		applyFilterSlot(value: string): void;
+	};
+
+	filters.openFilterSlot("state");
+	filters.applyFilterSlot("disabled");
+	await delay(160);
+	tui.renderNow(true);
+	assert.equal(menu.getView().filters.enabled, false);
+	assert.deepEqual(
+		menu.getView().candidates.map((row) => row.name),
+		["disabled-local"],
+		"blank-query browsing must not ignore the disabled filter",
+	);
+
+	filters.openFilterSlot("state");
+	filters.applyFilterSlot("__any__");
+	filters.openFilterSlot("source");
+	filters.applyFilterSlot("learned");
+	await delay(160);
+	assert.deepEqual(
+		menu.getView().candidates.map((row) => row.name),
+		["enabled-learned"],
+		"blank-query browsing must pass the source filter",
+	);
+	const catalogCalls = client.requests.filter((entry) => entry.method === "skills.list");
+	assert.equal(
+		(catalogCalls.at(-1)?.params.filters as { source?: string[] } | undefined)?.source?.[0],
+		"learned",
+		"the catalog request carries the active filters",
+	);
 });

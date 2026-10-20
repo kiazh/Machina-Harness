@@ -58,6 +58,15 @@ test("disabled renders nothing; nothing playing shows one honest line", () => {
 	assert.deepEqual(bar({}, 3).render(0), []);
 });
 
+test("metadata terminal controls never reach the rendered bar", () => {
+	const attack = "track\x1b]52;c;SEVMTE8=\x07";
+	const instance = bar({ title: attack, artist: attack, source: attack, error: attack });
+	const raw = instance.render(90).join("\n");
+	assert.equal(raw.includes("\x1b]52;"), false, "OSC clipboard/title controls are stripped");
+	assert.equal(raw.includes("\x07"), false, "BEL payload terminators are stripped");
+	assert.match(stripTerminalSequences(raw), /track/, "ordinary text still renders");
+});
+
 test("three-row layout: title / artist · source / transport with progress", () => {
 	const lines = plainLines(bar(), 90);
 	assert.equal(lines.length, 3);

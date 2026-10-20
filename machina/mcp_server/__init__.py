@@ -929,6 +929,7 @@ async def machina_delegate_many(
                 steps,
                 parent_session_id=parent,
                 max_concurrency=limit,
+                authority={"max_mode": _mcp_mode_ceiling()},
             )
     except Exception as exc:
         return _json_text(_delegation_error_payload(exc))

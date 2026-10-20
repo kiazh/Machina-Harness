@@ -4,6 +4,7 @@
 // guesses the resulting state — it re-reads it.
 
 import type { NowPlayingBar, NowPlayingState } from "../components/NowPlayingBar.ts";
+import { sanitizeLabelText } from "../design/text.ts";
 
 /** Data-poll cadence: metadata changes are seconds-scale; frames interpolate. */
 export const NOWPLAYING_POLL_MS = 2000;
@@ -14,6 +15,12 @@ export interface NowPlayingControllerOptions {
 	onChange?: () => void;
 }
 
+function displayValue(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const safe = sanitizeLabelText(value).trim();
+	return safe || null;
+}
+
 function normalize(payload: unknown): NowPlayingState {
 	const raw = (payload ?? {}) as Partial<NowPlayingState>;
 	const state: NowPlayingState["state"] =
@@ -21,13 +28,13 @@ function normalize(payload: unknown): NowPlayingState {
 	return {
 		available: raw.available === true,
 		state,
-		title: typeof raw.title === "string" && raw.title.trim() ? raw.title : null,
-		artist: typeof raw.artist === "string" && raw.artist.trim() ? raw.artist : null,
-		album: typeof raw.album === "string" && raw.album.trim() ? raw.album : null,
-		source: typeof raw.source === "string" && raw.source.trim() ? raw.source : null,
+		title: displayValue(raw.title),
+		artist: displayValue(raw.artist),
+		album: displayValue(raw.album),
+		source: displayValue(raw.source),
 		elapsed: typeof raw.elapsed === "number" && raw.elapsed >= 0 ? raw.elapsed : null,
 		duration: typeof raw.duration === "number" && raw.duration > 0 ? raw.duration : null,
-		error: typeof raw.error === "string" && raw.error.trim() ? raw.error : null,
+		error: displayValue(raw.error),
 		fetchedAtMs: Date.now(),
 	};
 }

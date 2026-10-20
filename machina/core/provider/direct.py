@@ -50,6 +50,8 @@ from machina.core.usage import usage_store
 class DirectProvider(LLMProvider, RateLimitBinding):
     """OpenAI-compatible chat API for a single vendor (see PROVIDER_SPECS)."""
 
+    owns_usage_reservation = True
+
     def __init__(
         self,
         spec: ProviderSpec,
@@ -103,6 +105,7 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         _validate_messages(messages)
         _validate_params(temperature, max_tokens)
@@ -132,7 +135,7 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         )
 
         reservation_id = None
-        if session_id is not None and agent_id is not None:
+        if not usage_reserved and session_id is not None and agent_id is not None:
             reservation_id = await usage_store.reserve(
                 session_id, agent_id, self.spec.name, model, messages, tools or [], max_tokens
             )

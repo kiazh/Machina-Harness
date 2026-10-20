@@ -38,6 +38,8 @@ from machina.core.usage import usage_store
 class OllamaProvider(LLMProvider, RateLimitBinding):
     """Local Ollama provider — free, self-hosted."""
 
+    owns_usage_reservation = True
+
     def __init__(
         self,
         model: str = "llama3.1",
@@ -77,6 +79,7 @@ class OllamaProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         # Input validation
         _validate_messages(messages)
@@ -121,7 +124,7 @@ class OllamaProvider(LLMProvider, RateLimitBinding):
 
         # Reserve usage if session_id and agent_id are provided
         reservation_id = None
-        if session_id is not None and agent_id is not None:
+        if not usage_reserved and session_id is not None and agent_id is not None:
             reservation_id = await usage_store.reserve(
                 session_id,
                 agent_id,

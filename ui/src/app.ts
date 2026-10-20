@@ -663,6 +663,18 @@ export class App implements FeatureHost {
 	async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 		const result = await this.client.request<T>(method, params, App.requestTimeoutMs(method, params));
 		if (["mode.get", "mode.set", "mode.revoke"].includes(method)) {
+			const responseSession = (result as { sessionId?: unknown; session_id?: unknown }).sessionId
+				?? (result as { sessionId?: unknown; session_id?: unknown }).session_id;
+			const requestedSession = params.sessionId ?? params.session_id;
+			const sessionId = typeof responseSession === "string"
+				? responseSession
+				: typeof requestedSession === "string"
+					? requestedSession
+					: undefined;
+			// A delayed response for a previous session must never rewrite the
+			// footer after a session switch. Updates without a session scope
+			// (the global mode query) keep their established behavior.
+			if (sessionId !== undefined && this.current?.id !== sessionId) return result;
 			const mode = (result as { mode?: string }).mode;
 			if (typeof mode === "string") this.footer.mode = mode;
 			this.tui.requestRender();
@@ -1734,6 +1746,11 @@ export class App implements FeatureHost {
 		}
 
 		if (matchesKey(data, Key.ctrl("c"))) {
+			// A focused editor owns Ctrl+C while it has selected text; the
+			// global exit/cancel/clear route must not preempt a copy.
+			if (this.activeRegion === "editor" && this.integration?.view.hasSelection()) {
+				return undefined;
+			}
 			if (this.running) this.cancel();
             else if (this.editor.getText() || this.pendingImageLoads) { this.editor.setText(""); this.clearImages(); }
 			else void this.exit();
@@ -3211,7 +3228,7 @@ export class App implements FeatureHost {
 			const menu = new SkillsMenu(
 				{
 					search: (params) => this.skillsSearch(params),
-					catalog: () => this.skillsCatalog(),
+					catalog: (filters) => this.skillsCatalog(filters),
 					details: (skillId) => this.skillsDetails(skillId),
 					preview: (request) => this.skillsPreview(request),
 					section: (params) => this.skillsSection(params),
@@ -3294,10 +3311,16 @@ export class App implements FeatureHost {
 	 * shown honestly (applicability `excluded`, reason `disabled`) — browsing
 	 * intentionally surfaces them; the automatic selector never does.
 	 */
-	private async skillsCatalog(): Promise<SkillsSearchResult> {
+	private async skillsCatalog(filters: SkillsFilters = {
+		task_family: "",
+		capability: "",
+		source: [],
+		enabled: null,
+		include_excluded: true,
+	}): Promise<SkillsSearchResult> {
 		const { skills } = await this.request<{
 			skills: Array<{ name: string; description: string; sourceType?: string; enabled?: boolean }>;
-		}>("skills.list", {});
+		}>("skills.list", { filters: { ...filters, source: [...filters.source] } });
 		const candidates: SkillsCandidate[] = (Array.isArray(skills) ? skills : []).map((skill) => {
 			const enabled = skill.enabled !== false;
 			return {
@@ -3317,16 +3340,9 @@ export class App implements FeatureHost {
 				enabled,
 			};
 		});
-		const filters: SkillsFilters = {
-			task_family: "",
-			capability: "",
-			source: [],
-			enabled: null,
-			include_excluded: true,
-		};
 		return {
 			query: "",
-			filters,
+			filters: { ...filters, source: [...filters.source] },
 			limit: candidates.length,
 			browse: true,
 			candidates,

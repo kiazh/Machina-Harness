@@ -43,6 +43,17 @@ test("initialize reads config, fetches once, and shows the bar", async () => {
 	assert.deepEqual(calls.map((call) => call.method), ["nowplaying.get"]);
 });
 
+test("normalize strips terminal controls from media metadata", async () => {
+	const attack = "title\x1b]52;c;SEVMTE8=\x07";
+	const { controller, bar } = makeController({
+		"nowplaying.get": { ...PLAYING, title: attack, artist: attack, source: attack },
+	});
+	await controller.initialize({ nowplaying_enabled: true });
+	assert.equal(bar.state?.title, "title");
+	assert.equal(bar.state?.artist, "title");
+	assert.equal(bar.state?.source, "title");
+});
+
 test("disabled config skips the fetch and hides the bar", async () => {
 	const { controller, bar, calls } = makeController({});
 	await controller.initialize({ nowplaying_enabled: false });

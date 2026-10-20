@@ -283,7 +283,7 @@ export interface SkillsMenuProviders {
 	 * lists every skill instead of showing the "type to search" idle state;
 	 * typing switches to ranked `skills.search`.
 	 */
-	catalog?: () => Promise<SkillsSearchResult>;
+	catalog?: (filters?: SkillsFilters) => Promise<SkillsSearchResult>;
 }
 
 export interface SkillsMenuOptions {
@@ -1072,10 +1072,31 @@ export class SkillsMenu implements Component {
 			// (`skills.list`); any typed query uses ranked `skills.search`.
 			const result =
 				query.trim() === "" && this.providers.catalog
-					? await this.providers.catalog()
+					? await this.providers.catalog(filters)
 					: await this.providers.search({ query, filters, limit: this.limit });
 			if (seq !== this.requestSeq) return;
-			this.apply(result, { append: false });
+			// Defense in depth for hosts that bind an older catalog provider:
+			// enabled/source are visible on every candidate and must still be
+			// honored in the empty-query branch. Family/capability filtering
+			// remains the backend catalog handler's responsibility.
+			const filtered =
+				query.trim() === "" && this.providers.catalog
+					? {
+							...result,
+							candidates: result.candidates.filter((candidate) => {
+								if (filters.enabled === true && !candidate.enabled) return false;
+								if (filters.enabled === false && candidate.enabled) return false;
+								if (filters.source.length > 0) {
+									const source = candidate.sourceType.toLowerCase();
+									if (!filters.source.some((value) => value.toLowerCase() === source)) {
+										return false;
+									}
+								}
+								return true;
+							}),
+						}
+					: result;
+			this.apply(filtered, { append: false });
 		} catch (error) {
 			if (seq !== this.requestSeq) return;
 			this.status = "error";

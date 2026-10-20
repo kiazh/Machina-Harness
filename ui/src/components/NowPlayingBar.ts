@@ -18,6 +18,7 @@
 // play/pause to the detected source (when that source accepts commands).
 
 import { type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { sanitizeLabelText } from "../design/text.ts";
 import { theme } from "../design/theme.ts";
 
 /** Equalizer frames for the "audio is playing" animation. */
@@ -127,7 +128,7 @@ export class NowPlayingBar implements PinnedBarBudget {
 			// as the same empty state as "nothing is playing".
 			return nowPlayingProblem(state) === "permission" ? "Automation permission needed" : "Nothing playing";
 		}
-		return state.title;
+		return sanitizeLabelText(state.title);
 	}
 
 	private titleLine(width: number): string {
@@ -146,11 +147,11 @@ export class NowPlayingBar implements PinnedBarBudget {
 	private metaLine(width: number): string {
 		const state = this.state;
 		if (!state) return truncateToWidth(theme.dim("♪ Nothing playing"), width);
-		if (state.error) return truncateToWidth(theme.warning(state.error), width);
+		if (state.error) return truncateToWidth(theme.warning(sanitizeLabelText(state.error)), width);
 		if (!state.title) return truncateToWidth(theme.dim("♪ Nothing playing"), width);
-		const parts = [state.artist, state.source].filter(
-			(part): part is string => Boolean(part && part.trim()),
-		);
+		const parts = [state.artist, state.source]
+			.filter((part): part is string => Boolean(part && part.trim()))
+			.map((part) => sanitizeLabelText(part));
 		return truncateToWidth(theme.dim(parts.join(" · ")), width);
 	}
 
@@ -189,16 +190,18 @@ export class NowPlayingBar implements PinnedBarBudget {
 		if (!state?.title) {
 			const message =
 				nowPlayingProblem(state) === "permission"
-					? theme.warning(`♪ Automation permission needed — ${state?.error ?? "check System Settings"}`)
+					? theme.warning(
+							`♪ Automation permission needed — ${sanitizeLabelText(state?.error ?? "check System Settings")}`,
+						)
 					: state?.error
-						? theme.warning(state.error)
+						? theme.warning(sanitizeLabelText(state.error))
 						: theme.dim("♪ Nothing playing");
 			return truncateToWidth(message, width);
 		}
-		const artist = state.artist ? ` — ${state.artist}` : "";
+		const artist = state.artist ? ` — ${sanitizeLabelText(state.artist)}` : "";
 		const clock = state.duration !== null ? ` · ${formatClock(this.elapsedNow())}` : "";
 		return truncateToWidth(
-			`${this.glyph()} ${theme.bold(`${state.title}${artist}`)}${theme.dim(clock)}`,
+			`${this.glyph()} ${theme.bold(`${sanitizeLabelText(state.title)}${artist}`)}${theme.dim(clock)}`,
 			width,
 		);
 	}

@@ -669,6 +669,27 @@ test("Ctrl+Right maximizes chat from the editor; hiding reconciles focus and Ctr
 	await app.exit();
 });
 
+test("Ctrl+C with an editor selection falls through to the view instead of exiting", async () => {
+	const { app } = makeApp();
+	await app.start();
+	await waitForWorkspace(app);
+	await internals(app).openWorkspacePath("a.ts");
+	const state = internals(app);
+	assert.equal(state.activeRegion, "editor");
+	const view = state.integration?.view as unknown as
+		| { handleInput(data: string): boolean; hasSelection(): boolean }
+		| undefined;
+	assert.ok(view, "workspace view is mounted");
+	// Select the first grapheme; the editor's own ctrl+c copy path is the
+	// behavior under test, not the global exit/cancel/clear route.
+	assert.equal(view.handleInput("\x1b[1;2C"), true, "shift+right selects text");
+	assert.equal(view.hasSelection(), true);
+	const dispatch = (data: string) =>
+		(app as unknown as { onKey(data: string): { consume: boolean } | undefined }).onKey(data);
+	assert.equal(dispatch("\x03"), undefined, "focused editor with a selection owns Ctrl+C");
+	await app.exit();
+});
+
 test("Ctrl+V with the editor focused falls through to the view; the composer keeps the global path", async () => {
 	const { app, tui } = makeApp();
 	await app.start();

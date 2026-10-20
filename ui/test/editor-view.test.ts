@@ -244,6 +244,19 @@ test("bracketed paste inserts verbatim as one transaction (tabs and CRLF kept)",
 	assert.equal(lf.store.getDocument(lf.doc.id)?.lineEnding, "mixed");
 });
 
+test("changing tab width invalidates cached wrap geometry", () => {
+	const { store, doc } = freshStore("\tX");
+	const harness = makeView(store, doc.id, { softWrap: true, tabWidth: 4 });
+	harness.view.setViewportRows(4);
+	harness.view.render(7);
+	harness.view.setTabWidth(8);
+	const afterChange = plain(harness.view.render(7)).join("\n");
+	harness.view.invalidate();
+	const fresh = plain(harness.view.render(7)).join("\n");
+	assert.equal(afterChange, fresh, "the preference change must not leave stale wrapped rows");
+	assert.match(afterChange, /X/, "the cell after the tab remains visible");
+});
+
 test("ctrl+v reads the injected clipboard and inserts as one transaction", async () => {
 	const { store, doc } = freshStore("x");
 	store.setSelection(doc.id, { cursorOffset: 1 });

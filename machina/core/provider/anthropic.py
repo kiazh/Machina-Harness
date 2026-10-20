@@ -51,6 +51,7 @@ from machina.core.usage import usage_store
 class AnthropicProvider(LLMProvider, RateLimitBinding):
     """Anthropic Messages API — https://api.anthropic.com/v1/messages."""
 
+    owns_usage_reservation = True
     BASE_URL = "https://api.anthropic.com"
     API_VERSION = "2023-06-01"
     DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
@@ -261,6 +262,7 @@ class AnthropicProvider(LLMProvider, RateLimitBinding):
         reasoning_effort: str | None = None,
         session_id: uuid.UUID | None = None,
         agent_id: str | None = None,
+        usage_reserved: bool = False,
     ) -> LLMResponse:
         _validate_messages(messages)
         _validate_params(temperature, max_tokens)
@@ -288,7 +290,7 @@ class AnthropicProvider(LLMProvider, RateLimitBinding):
         )
 
         reservation_id = None
-        if session_id is not None and agent_id is not None:
+        if not usage_reserved and session_id is not None and agent_id is not None:
             reservation_id = await usage_store.reserve(
                 session_id,
                 agent_id,
