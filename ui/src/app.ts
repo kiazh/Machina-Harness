@@ -156,7 +156,7 @@ interface WorkspaceIntegration {
 }
 
 /** Layout-intent + terminal identity for shell re-sync (cheap change key). */
-function workspaceShellKey(input: LayoutInput, columns: number, rows: number): string {
+function workspaceShellKey(input: LayoutInput, columns: number, rows: number, chromeRows: number): string {
 	return [
 		input.requestedMode,
 		input.splitRatio,
@@ -165,6 +165,7 @@ function workspaceShellKey(input: LayoutInput, columns: number, rows: number): s
 		input.chatSide ?? "left",
 		columns,
 		rows,
+		chromeRows,
 	].join("|");
 }
 
@@ -443,6 +444,8 @@ export class App implements FeatureHost {
 	private completionSession: CompletionSession | undefined;
 	/** Debounce automatic requests without blocking local edits. */
 	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Deferred chrome-height reconciliation for the composer popup. */
+	private workspaceChromeTimer: ReturnType<typeof setTimeout> | undefined;
 	private quickOpenPane: QuickOpenPane | undefined;
 	private quickOpenHandle: OverlayHandle | undefined;
 	/** `/skills` Menu dialog (A5, spec §12.3): the mounted component (dedup + tests). */
@@ -503,7 +506,10 @@ export class App implements FeatureHost {
 		// draft edit re-derives whether a caret is actually on screen (an empty
 		// composer shows only the placeholder, so it must not burn renders).
 		this.composer.editor.cursorBlockVisible = () => this.cursorBlinkOn();
-		this.composer.editor.onChange = () => this.syncCursorBlink();
+		this.composer.editor.onChange = () => {
+			this.syncCursorBlink();
+			this.scheduleWorkspaceChromeSync();
+		};
         this.composer.editor.onPaste = (text) => this.acceptImageDrop(text);
         this.composer.editor.onSubmitBlocked = () => {
             if (!this.pendingImageLoads) return false;
@@ -1670,6 +1676,11 @@ export class App implements FeatureHost {
 		// Layout changes normally reconcile already; this closes the window where
 		// the TUI still targets a pane removed by a resize/visibility toggle.
 		this.reconcileFocus();
+		// The composer's autocomplete popup can change the chrome height while
+		// this key is being handled by the focused Editor. Recheck after the
+		// input dispatch so the panes (including Problems) get the remaining
+		// rows instead of being clipped by the grown composer.
+		this.scheduleWorkspaceChromeSync();
 		if (this.dialogs.length || this.approvalDialogs.size) return undefined; // focused dialogs own their keys
 
 		// ── integrated workspace (plan §8 focus priority) ────────────────────
@@ -2279,7 +2290,6 @@ export class App implements FeatureHost {
 		const input = integration.controller.getLayoutInput();
 		const columns = Math.max(0, this.tui.terminal.columns);
 		const rows = Math.max(0, this.tui.terminal.rows);
-		this.lastWorkspaceShellKey = workspaceShellKey(input, columns, rows);
 		this.shell.setWorkspaceState(input);
 		// Breadcrumb root (finding 2): pushed here so open/switch/close all
 		// converge on the same single call site.
@@ -2294,6 +2304,7 @@ export class App implements FeatureHost {
 		// the panes row; chromeRows sums their heights and gaps from the same
 		// budgets the root VStack uses.
 		const chrome = this.shell.chromeRows();
+		this.lastWorkspaceShellKey = workspaceShellKey(input, columns, rows, chrome);
 		if (layout.editor) integration.pane.layout(Math.max(1, layout.editor.rows - chrome));
 		if (layout.explorer) {
 			// The docked tree owns its own windowing inside a bounded panel:
@@ -2320,12 +2331,32 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
+	/**
+	 * Reconcile pane row allocation after the composer settles. The slash
+	 * autocomplete grows the composer during the key dispatch; scheduling this
+	 * as a task (not a microtask) lets the focused Editor finish its render
+	 * state before the shell measures the chrome.
+	 */
+	private scheduleWorkspaceChromeSync(): void {
+		if (!this.integration || !this.workspaceLayoutActive || this.exiting) return;
+		if (this.workspaceChromeTimer !== undefined) return;
+		this.workspaceChromeTimer = setTimeout(() => {
+			this.workspaceChromeTimer = undefined;
+			if (!this.exiting) this.syncWorkspaceShellIfChanged();
+		}, 0);
+	}
+
 	/** Cheap re-sync: only when the intent or terminal dimensions changed. */
 	private syncWorkspaceShellIfChanged(): void {
 		const integration = this.integration;
 		if (!integration || !this.workspaceLayoutActive) return;
 		const input = integration.controller.getLayoutInput();
-		const key = workspaceShellKey(input, Math.max(0, this.tui.terminal.columns), Math.max(0, this.tui.terminal.rows));
+		const key = workspaceShellKey(
+			input,
+			Math.max(0, this.tui.terminal.columns),
+			Math.max(0, this.tui.terminal.rows),
+			this.shell.chromeRows(),
+		);
 		if (key === this.lastWorkspaceShellKey) return;
 		this.syncWorkspaceShell();
 	}

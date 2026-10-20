@@ -134,7 +134,7 @@ The independent verification pass reproduced every P1/P2 finding above and appli
 Verification evidence:
 
 - Full backend suite against a fresh dedicated database (`machina_fullreview_final`): **6,495 passed, 2 skipped**, exit code zero, in 437.75 seconds.
-- Full UI check against the dedicated UI database (`machina_sweep_ui_20261020`): **1,164 passed, zero skipped**, typecheck and ESLint clean.
+- Full UI check against the dedicated UI database (`machina_sweep_ui_20261020`): **1,165 passed, zero skipped**, typecheck and ESLint clean.
 - `repro_double_reservation.py`: **1 POST, 1 reservation, 1 finish** after the fix.
 - `repro_ui.mjs`: wrap layout stays valid, Ctrl+C is not consumed with a selection, stale mode response leaves `ask`, OSC-52 does not survive, and blank-query disabled filtering shows only the disabled candidate.
 - Focused regressions: usage/skills/provider **57 passed**; MCP/multi-agent/cache checks passed; UI repro tests **163 passed** before the final full UI run.

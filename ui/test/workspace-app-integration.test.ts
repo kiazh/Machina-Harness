@@ -1839,3 +1839,54 @@ test("a short docked explorer stays content-sized while its budget stays capped"
 		await app.exit();
 	}
 });
+
+
+test("opening the slash menu keeps the Problems section visible", async () => {
+	const { app, tui, term, client } = await bootFramed(160, 48);
+	try {
+		await internals(app).openWorkspacePath("src/a.ts");
+		client.emitWorkspace({
+			type: "workspace.diagnostics",
+			workspaceId: "ws1",
+			epoch: 1,
+			serverGeneration: 1,
+			uri: "file:///ws/src/a.ts",
+			version: null,
+			source: "typescript",
+			diagnostics: [
+				{
+					range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+					severity: 1,
+					message: "boom",
+				},
+			],
+		} as WorkspaceEvent);
+		await settle();
+		await runCommand({ name: "problems", args: "" }, app);
+		await settle();
+		internals(app).setFocusForRegion("chat-composer");
+
+		term.onInput!("/");
+		await delay(20);
+		tui.renderNow(true);
+		const afterFirstOpen = tui.getScreenLines().map(stripTerminalSequences);
+		assert.equal(internals(app).problemsOpen, true);
+		assert.ok(
+			afterFirstOpen.some((line) => line.includes("boom")),
+			"the Problems section must remain composed above the opened slash menu",
+		);
+
+		term.onInput!("");
+		await delay(20);
+		tui.renderNow(true);
+		term.onInput!("/");
+		await delay(20);
+		tui.renderNow(true);
+		assert.ok(
+			tui.getScreenLines().some((line) => stripTerminalSequences(line).includes("boom")),
+			"reopening the slash menu must not clip the Problems section",
+		);
+	} finally {
+		await app.exit();
+	}
+});
