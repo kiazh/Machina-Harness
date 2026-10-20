@@ -5,8 +5,36 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterable
 
-_PARSED = tuple  # (loc: int, imports: list[str], is_entry: bool)
+MAX_BYTES_PER_FILE = 2_000_000
+
+
+def _entry_is_valid(entry: object) -> bool:
+    """Whether a persisted entry has the shape this cache can trust."""
+    if not isinstance(entry, dict):
+        return False
+    sha256 = entry.get("sha256")
+    mtime = entry.get("mtime")
+    size = entry.get("size")
+    loc = entry.get("loc")
+    imports = entry.get("imports")
+    is_entry = entry.get("entry")
+    return (
+        isinstance(sha256, str)
+        and bool(sha256)
+        and isinstance(mtime, (int, float))
+        and not isinstance(mtime, bool)
+        and isinstance(size, int)
+        and not isinstance(size, bool)
+        and size >= 0
+        and isinstance(loc, int)
+        and not isinstance(loc, bool)
+        and loc >= 0
+        and isinstance(imports, list)
+        and all(isinstance(name, str) for name in imports)
+        and isinstance(is_entry, bool)
+    )
 
 
 class ContentHashCache:
@@ -27,23 +55,34 @@ class ContentHashCache:
         if path and os.path.exists(path):
             try:
                 with open(path, encoding="utf-8") as fh:
-                    self._entries = json.load(fh)
+                    loaded = json.load(fh)
             except (OSError, ValueError):
-                self._entries = {}
+                loaded = {}
+            if isinstance(loaded, dict):
+                self._entries = {
+                    key: value
+                    for key, value in loaded.items()
+                    if isinstance(key, str) and _entry_is_valid(value)
+                }
 
     def lookup(self, abs_path: str) -> tuple | None:
         ent = self._entries.get(abs_path)
-        if not ent:
+        if not _entry_is_valid(ent):
             return None
         expected = ent.get("sha256")
         if not expected:
             return None
         try:
             st = os.stat(abs_path)
+            if st.st_size > MAX_BYTES_PER_FILE:
+                return None
             if ent.get("mtime") != st.st_mtime or ent.get("size") != st.st_size:
                 return None  # stat changed -> caller re-reads + store() re-hashes
             with open(abs_path, "rb") as fh:
-                digest = hashlib.sha256(fh.read()).hexdigest()
+                current = fh.read(MAX_BYTES_PER_FILE + 1)
+            if len(current) > MAX_BYTES_PER_FILE or len(current) != st.st_size:
+                return None
+            digest = hashlib.sha256(current).hexdigest()
         except OSError:
             return None
         if digest != expected:
@@ -62,9 +101,13 @@ class ContentHashCache:
         loc, imports, entry = parsed
         try:
             st = os.stat(abs_path)
+            if st.st_size > MAX_BYTES_PER_FILE:
+                return False
             with open(abs_path, "rb") as fh:
-                current = fh.read()
+                current = fh.read(MAX_BYTES_PER_FILE + 1)
         except OSError:
+            return False
+        if len(current) > MAX_BYTES_PER_FILE:
             return False
         digest = hashlib.sha256(current).hexdigest()
         if source is not None and hashlib.sha256(source).hexdigest() != digest:
@@ -82,6 +125,30 @@ class ContentHashCache:
             "entry": bool(entry),
         }
         return True
+
+    def prune(self, root: str, live_paths: Iterable[str]) -> int:
+        """Drop entries under *root* that the completed scan did not observe.
+
+        A cache can be shared across roots; entries outside *root* are left
+        untouched. Callers must only invoke this after a complete scan, since
+        a partial scan cannot distinguish a deleted path from an unread one.
+        """
+        root_abs = os.path.abspath(root)
+        live = {os.path.abspath(path) for path in live_paths}
+        stale: list[str] = []
+        for path in self._entries:
+            if not isinstance(path, str) or not os.path.isabs(path):
+                continue
+            candidate = os.path.abspath(path)
+            try:
+                within_root = os.path.commonpath((candidate, root_abs)) == root_abs
+            except ValueError:
+                continue
+            if within_root and candidate not in live:
+                stale.append(path)
+        for path in stale:
+            del self._entries[path]
+        return len(stale)
 
     def save(self) -> None:
         if not self.path:

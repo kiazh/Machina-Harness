@@ -1545,9 +1545,15 @@ class LspManager:
     async def stop_all(self) -> None:
         """Stop every owned connection; the manager is closed afterwards."""
         self._closed = True
-        for task in list(self._restart_tasks.values()):
+        restart_tasks = list(self._restart_tasks.values())
+        for task in restart_tasks:
             task.cancel()
         try:
+            # Await cancelled restart tasks before stopping connections. A
+            # restart may be inside connection.start(); retiring only the
+            # connections leaves a pending task to die with the test loop.
+            if restart_tasks:
+                await asyncio.gather(*restart_tasks, return_exceptions=True)
             await asyncio.gather(
                 *(connection.stop() for connection in self._connections.values()),
                 return_exceptions=True,
@@ -1557,7 +1563,8 @@ class LspManager:
             # every process group synchronously before unwinding.
             self.force_kill_all()
             raise
-        self._restart_tasks.clear()
+        finally:
+            self._restart_tasks.clear()
 
     def force_kill_all(self) -> None:
         """Best-effort synchronous kill of every owned connection.

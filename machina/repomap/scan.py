@@ -6,7 +6,7 @@ import ast
 import os
 from dataclasses import dataclass, field
 
-from machina.repomap.cache import ContentHashCache
+from machina.repomap.cache import MAX_BYTES_PER_FILE, ContentHashCache
 
 DEFAULT_EXCLUDE_DIRS = frozenset(
     {
@@ -22,7 +22,6 @@ DEFAULT_EXCLUDE_DIRS = frozenset(
     }
 )
 DEFAULT_EXCLUDE_SUFFIXES = (".pyc", ".pyo")
-MAX_BYTES_PER_FILE = 2_000_000  # bound: skip giant blobs, still count them
 
 
 @dataclass
@@ -86,7 +85,9 @@ def build_repomap(root: str, cache: ContentHashCache | None = None) -> RepoMap:
         cache = ContentHashCache()
     assert isinstance(cache, ContentHashCache)
     m = RepoMap(root=os.path.abspath(root))
-    for dirpath, dirnames, filenames in os.walk(m.root):
+    complete = os.path.isdir(m.root)
+    walk_errors: list[OSError] = []
+    for dirpath, dirnames, filenames in os.walk(m.root, onerror=walk_errors.append):
         dirnames[:] = sorted(d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS)
         for name in sorted(filenames):
             if name.endswith(DEFAULT_EXCLUDE_SUFFIXES):
@@ -96,6 +97,7 @@ def build_repomap(root: str, cache: ContentHashCache | None = None) -> RepoMap:
             try:
                 size = os.path.getsize(abs_path)
             except OSError:
+                complete = False
                 continue
             m.files.append(rel)
             if size > MAX_BYTES_PER_FILE:
@@ -109,8 +111,12 @@ def build_repomap(root: str, cache: ContentHashCache | None = None) -> RepoMap:
             else:
                 try:
                     with open(abs_path, "rb") as fh:
-                        raw = fh.read()
+                        raw = fh.read(MAX_BYTES_PER_FILE + 1)
                 except OSError:
+                    complete = False
+                    continue
+                if len(raw) > MAX_BYTES_PER_FILE:
+                    m.skipped_large.append(rel)
                     continue
                 source = raw.decode("utf-8", errors="replace")
                 m.files_scanned += 1
@@ -127,7 +133,11 @@ def build_repomap(root: str, cache: ContentHashCache | None = None) -> RepoMap:
                 m.test_files.append(rel)
             if imports:
                 m.import_edges[_local_module(rel)] = sorted(set(imports))
+    if walk_errors:
+        complete = False
     m.files.sort()
     m.entry_points.sort()
     m.test_files.sort()
+    if complete:
+        cache.prune(m.root, (os.path.join(m.root, rel) for rel in m.files))
     return m

@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -528,8 +529,11 @@ def _read_project_metadata(
 def _stack_from_package_json(path: Path) -> dict[str, tuple[str, ...]]:
     """Extract stack tokens from one manifest file; never runs its scripts."""
     try:
-        payload = path.read_text(encoding="utf-8", errors="replace")[:_MANIFEST_MAX_BYTES]
-        data = json.loads(payload)
+        with path.open("rb") as manifest:
+            payload = manifest.read(_MANIFEST_MAX_BYTES + 1)
+        if len(payload) > _MANIFEST_MAX_BYTES:
+            return {}
+        data = json.loads(payload.decode("utf-8", errors="replace"))
     except Exception:
         return {}
     if not isinstance(data, Mapping):
@@ -539,7 +543,7 @@ def _stack_from_package_json(path: Path) -> dict[str, tuple[str, ...]]:
         declared = data.get(section)
         if not isinstance(declared, Mapping):
             continue
-        for name in list(declared)[:_MANIFEST_MAX_DEPENDENCIES]:
+        for name in islice(declared, _MANIFEST_MAX_DEPENDENCIES):
             tokens.update(_words(str(name)))
     return _categorize(sorted(tokens & _TECHNOLOGIES))
 
@@ -550,7 +554,7 @@ def _recent_snippets(
     """Bounded recent-context texts, mirroring the workflow planner's window."""
     user_snippets: list[str] = []
     other_snippets: list[str] = []
-    for chunk in list(recent or [])[:3]:
+    for chunk in islice(recent or (), 3):
         if not isinstance(chunk, Mapping):
             continue
         kind = chunk.get("chunk_type", chunk.get("type"))
