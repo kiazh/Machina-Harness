@@ -469,7 +469,7 @@ class ContextCompressor:
                 cid = _call_id(chunk.payload)
                 if cid:
                     id_to_indices.setdefault(cid, []).append(i)
-        for cid, idxs in id_to_indices.items():
+        for idxs in id_to_indices.values():
             # Pair indices sharing one call ID in order (usually exactly 2).
             # A linear pass preserves the previous matching while avoiding a
             # quadratic scan when a provider repeats one call ID many times.
@@ -742,7 +742,7 @@ class ContextCompressor:
             if get_token_count(value) > per_field:
                 payload[key] = _truncate_str(value, per_field)
                 truncated = True
-        for key, value in payload.items():
+        for value in payload.values():
             if isinstance(value, dict):
                 for k2, v2 in list(value.items()):
                     if isinstance(v2, str) and get_token_count(v2) > per_field:

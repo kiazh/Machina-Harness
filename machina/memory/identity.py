@@ -645,7 +645,7 @@ class IdentityGate:
 
         # For each mentioned fact, check if sentiment aligns with confidence
         consistency_scores = []
-        for fact, confidence in mentioned_facts:
+        for _fact, confidence in mentioned_facts:
             if has_positive and not has_negative:
                 # Positive sentiment — should align with high confidence
                 consistency_scores.append(confidence)

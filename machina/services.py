@@ -206,14 +206,14 @@ async def compress_session_with_status(
     # and cleanup happen inside this owning try/finally.
     llm_provider = None
     try:
-        # AH-008: fetch ALL chunks (paginated), not just the newest 1000, and
-        # replace only the captured input IDs so concurrent inserts survive.
-        # AH-AUDIT-034: conversational compaction scope excludes indexed
-        # documents — document rows keep their IDs/text/embeddings/source
-        # metadata intact through explicit and automatic compression.
+        # AH-008: fetch ALL conversational chunks (paginated), not just the
+        # newest 1000, and replace only the captured input IDs so concurrent
+        # inserts survive. AH-AUDIT-034: indexed documents are excluded at the
+        # SQL read — their IDs/text/embeddings/source metadata stay intact
+        # through explicit and automatic compression.
         # Eviction likewise never selects documents (context.py); dedicated
         # document lifecycle operations own the document index.
-        all_chunks = await context_manager.get_all_chunks(session.id)
+        all_chunks = await context_manager.get_all_chunks(session.id, include_documents=False)
         chunks = [c for c in all_chunks if c.chunk_type != "document"]
         if not chunks:
             return CompressOutcome(status="no_op")
@@ -515,15 +515,12 @@ async def _compressible_context_tokens(session_id) -> int:
     (combined #35 / original #51).
     """
     try:
-        chunks = await context_manager.get_all_chunks(session_id)
+        # One indexed aggregate, not a full chunk fetch: this runs after every
+        # turn boundary and must not scale with session payload size.
+        return int(await context_manager.get_compressible_token_usage(session_id))
     except Exception as _boundary_error:
         record_failure("services.compressible_context", _boundary_error)
         return 0
-    return sum(
-        int(getattr(chunk, "token_count", 0) or 0)
-        for chunk in (chunks or [])
-        if getattr(chunk, "chunk_type", "") != "document"
-    )
 
 
 async def maybe_auto_compact(session_id) -> dict | None:
@@ -586,8 +583,10 @@ async def maybe_auto_compact(session_id) -> dict | None:
         # nearly this size.
         state = session.state or {}
         last = state.get("last_auto_compact_tokens")
-        total_now = await context_manager.get_token_usage(session_id)
-        if isinstance(last, int) and total_now <= last + max(100, int(budget * 0.05)):
+        # Compare the same document-excluded scope the trigger just measured;
+        # document growth must not look like conversational progress, and the
+        # aggregate does not need to be fetched twice.
+        if isinstance(last, int) and compressible <= last + max(100, int(budget * 0.05)):
             _record_compaction_status("skipped", reason="no_progress")
             return None
         # compress_session verifies this same token before replacing (shared

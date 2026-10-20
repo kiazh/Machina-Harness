@@ -79,7 +79,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,466 passed, 2 skipped (DevTools suite, real PostgreSQL) |
+| Backend tests | 6,469 passed, 2 skipped (DevTools suite, real PostgreSQL) |
 | Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
@@ -784,7 +784,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,466 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,469 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 

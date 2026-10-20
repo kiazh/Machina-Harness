@@ -870,7 +870,7 @@ class BaseReActAgent:
         # S3.3 END tool-trace hook
         # ── Phase A: parse and validate the whole batch ─────────────────────
         planned: list[dict[str, Any]] = []
-        for idx, tc in enumerate(response.tool_calls):
+        for tc in response.tool_calls:
             function_data = tc.get("function", {})
             tool_name = function_data.get("name")
             call_id = _ensure_tool_call_id(tc)

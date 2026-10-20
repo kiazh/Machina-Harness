@@ -109,6 +109,7 @@ class MetricsCollector:
     """Thread-safe metrics collector for latency, throughput, errors, and token usage."""
 
     _MAX_LATENCY_SAMPLES = 10_000  # Cap per-operation latency list size
+    _MAX_SERIES = 1024  # Cap distinct operation labels per metric family
 
     def __init__(self) -> None:
         # Reentrant: get_all_metrics() holds the lock while calling
@@ -126,9 +127,16 @@ class MetricsCollector:
         # had no production reader and grew with every session.
         self._token_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+    def _series_key(self, mapping: dict[str, Any], operation: str) -> str:
+        """Bound distinct labels so a hostile model/tool catalog cannot grow maps forever."""
+        if operation not in mapping and len(mapping) >= self._MAX_SERIES:
+            return "other"
+        return operation
+
     def record_latency(self, operation: str, duration_ms: float) -> None:
         """Record a latency measurement in milliseconds."""
         with self._lock:
+            operation = self._series_key(self._latencies, operation)
             latencies = self._latencies[operation]
             latencies.append(duration_ms)
             self._latency_totals[operation]["count"] += 1
@@ -141,11 +149,13 @@ class MetricsCollector:
     def increment_counter(self, operation: str, value: int = 1) -> None:
         """Increment a throughput counter."""
         with self._lock:
+            operation = self._series_key(self._counters, operation)
             self._counters[operation] += value
 
     def record_error(self, operation: str) -> None:
         """Record an error for an operation."""
         with self._lock:
+            operation = self._series_key(self._errors, operation)
             self._errors[operation] += 1
 
     def record_tokens(self, session_id: str, prompt_tokens: int, completion_tokens: int) -> None:

@@ -402,6 +402,8 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
         stop = threading.Event()
         holder: dict = {}
         outcome: dict = {}
+        loop = asyncio.get_running_loop()
+        finished = asyncio.Event()
 
         def _target() -> None:
             try:
@@ -415,12 +417,18 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
                 )
             except BaseException as e:  # marshalled to caller
                 outcome["error"] = e
+            finally:
+                try:
+                    loop.call_soon_threadsafe(finished.set)
+                except RuntimeError:
+                    # The loop closed during shutdown; no waiter remains.
+                    pass
 
         worker = threading.Thread(target=_target, daemon=True)
         worker.start()
         try:
-            while worker.is_alive():
-                await asyncio.sleep(0.05)
+            # Event-driven: a fast command must not pay a 50 ms poll tick.
+            await finished.wait()
         except asyncio.CancelledError:
             stop.set()
             proc = holder.get("process")
@@ -437,7 +445,7 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
                 # Executor shutdown must not mask the original cancellation.
                 logger.warning("terminal worker join failed: %s", error)
             raise
-        worker.join(timeout=10)
+        await asyncio.to_thread(worker.join, 10)
         if "error" in outcome:
             raise outcome["error"]
         if "result" not in outcome:

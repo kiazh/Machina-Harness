@@ -643,7 +643,7 @@ def plan_disclosure(
                 )
             cost = sum(unit[3] for unit in units)
             if cost > remaining:
-                for declared, parsed, _text, _estimate in units:
+                for declared, _parsed, _text, _estimate in units:
                     unresolved.append(
                         UnresolvedPrerequisite(
                             skill_id=step.skill_id,

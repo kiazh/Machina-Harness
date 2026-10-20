@@ -667,8 +667,14 @@ class ContextManager:
         before_id: uuid.UUID | None = None,
         before_seq: int | None = None,
         chunk_type: str | None = None,
+        exclude_chunk_type: str | None = None,
     ) -> list[ContextChunk]:
         """Keyset page: rows strictly older than the ``(time, event_seq, id)`` cursor.
+
+        ``chunk_type`` selects one type; ``exclude_chunk_type`` excludes one
+        type (used to keep indexed documents out of conversational
+        compaction without loading their payloads and embeddings). The two are
+        mutually exclusive.
 
         Cursor-based pagination is stable under concurrent inserts/deletes:
         new rows sort before the cursor and never duplicate into later pages;
@@ -680,6 +686,8 @@ class ContextManager:
         keeps the legacy 2-key predicate (no reinterpretation of a stored
         cursor), and the caller advances the ordinal from the last row.
         """
+        if chunk_type and exclude_chunk_type:
+            raise ValueError("chunk_type and exclude_chunk_type are mutually exclusive")
         if chunk_type:
             rows = await db.fetch(
                 """
@@ -707,11 +715,15 @@ class ContextManager:
                 before_seq,
             )
         else:
+            # Keep the default query plan free of a no-op predicate; documents
+            # are excluded only when the caller asks for it.
+            exclude_clause = " AND chunk_type <> $6" if exclude_chunk_type else ""
+            exclude_params: tuple[Any, ...] = (exclude_chunk_type,) if exclude_chunk_type else ()
             rows = await db.fetch(
-                """
+                f"""
                 SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, embedding, created_at, accessed_at, document_source, event_seq
                 FROM context_chunks
-                WHERE session_id = $1
+                WHERE session_id = $1{exclude_clause}
                   AND ($3::uuid IS NULL OR (
                         CASE WHEN $5::bigint IS NULL
                           THEN (COALESCE(created_at, '0001-01-01 00:00:00+00'::timestamptz), id)
@@ -724,12 +736,13 @@ class ContextManager:
                 ORDER BY COALESCE(created_at, '0001-01-01 00:00:00+00'::timestamptz) DESC,
                          COALESCE(event_seq, -9223372036854775808) DESC, id DESC
                 LIMIT $4
-                """,
+                """,  # nosec B608 # fixed clause; values are bound
                 session_id,
                 before_time,
                 before_id,
                 limit,
                 before_seq,
+                *exclude_params,
             )
         return [self._row_to_chunk(r) for r in rows]
 
@@ -828,8 +841,14 @@ class ContextManager:
         )
         return [self._row_to_chunk(row) for row in rows]
 
-    async def get_all_chunks(self, session_id: uuid.UUID) -> list[ContextChunk]:
+    async def get_all_chunks(
+        self, session_id: uuid.UUID, *, include_documents: bool = True
+    ) -> list[ContextChunk]:
         """Fetch every active chunk for *session_id* (newest first).
+
+        ``include_documents=False`` excludes indexed document rows at the SQL
+        boundary; conversational compaction never touches them, and loading
+        their payloads/embeddings just to filter them in Python is wasteful.
 
         Keyset snapshot (5.7): pages by the (created_at, event_seq, id) cursor
         (HELD-55; a same-created_at batch pages in event order rather than
@@ -850,6 +869,8 @@ class ContextManager:
                 "before_time": before_time,
                 "before_id": before_id,
             }
+            if not include_documents:
+                cursor_kwargs["exclude_chunk_type"] = "document"
             if before_seq is not None:
                 cursor_kwargs["before_seq"] = before_seq
             page = await self.get_chunks_before(session_id, **cursor_kwargs)
@@ -1383,6 +1404,19 @@ class ContextManager:
         """Get total token count for a session."""
         return await db.fetchval(
             "SELECT COALESCE(SUM(token_count), 0) FROM context_chunks WHERE session_id = $1",
+            session_id,
+        )
+
+    async def get_compressible_token_usage(self, session_id: uuid.UUID) -> int:
+        """Stored tokens eligible for conversational compaction.
+
+        Indexed documents have a separate lifecycle and are never selected by
+        conversational eviction/compaction, so this aggregate must use the
+        same ``chunk_type <> 'document'`` scope as eviction.
+        """
+        return await db.fetchval(
+            "SELECT COALESCE(SUM(token_count), 0) FROM context_chunks "
+            "WHERE session_id = $1 AND chunk_type <> 'document'",
             session_id,
         )
 

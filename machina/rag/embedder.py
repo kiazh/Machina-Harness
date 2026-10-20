@@ -891,6 +891,9 @@ def build_embedder(settings: EmbeddingSettings | None = None) -> Embedder | None
 _shared_embedder: Embedder | None = None
 _shared_embedder_identity: tuple | None = None
 _shared_embedder_lock = threading.Lock()
+# Strong references for rotated-out close tasks: a bare create_task result can
+# be garbage-collected before it runs, leaking the old embedder's clients.
+_closing_embedders: set[asyncio.Task[None]] = set()
 
 
 def _embedder_identity(settings: EmbeddingSettings) -> tuple[str, str, str, str]:
@@ -919,7 +922,9 @@ def _schedule_close(embedder: Embedder) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_close_quietly(embedder))
+    task = loop.create_task(_close_quietly(embedder))
+    _closing_embedders.add(task)
+    task.add_done_callback(_closing_embedders.discard)
 
 
 def get_shared_embedder() -> Embedder | None:

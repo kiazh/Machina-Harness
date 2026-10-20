@@ -203,7 +203,7 @@ def _parse_index(content: str, revision: str) -> SectionIndex:
     parsed: list[ParsedSection] = []
     for position, (line_number, level, heading, start) in enumerate(headings):
         end = len(content)
-        for line_after, level_after, _heading_after, start_after in headings[position + 1 :]:
+        for _line_after, level_after, _heading_after, start_after in headings[position + 1 :]:
             if level_after <= level:
                 end = start_after
                 break
