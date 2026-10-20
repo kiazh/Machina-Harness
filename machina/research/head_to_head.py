@@ -603,11 +603,37 @@ def grade(run_dir: Path, venv_python: Path, test_path: str, timeout: float = 120
 # ---------------------------------------------------------------------------
 
 
-def run_one(harness: str, args: argparse.Namespace, task_dir: Path, venv_python: Path) -> dict:
+def _run_dir_for(harness: str, args: argparse.Namespace, task_dir: Path) -> Path:
     runs_dir = (
         Path(args.runs_dir).expanduser().resolve() if args.runs_dir else (task_dir.parent / "runs")
     )
-    run_dir = runs_dir / task_dir.name / harness
+    return runs_dir / task_dir.name / harness
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    """True when either resolved path equals or contains the other."""
+    first = first.resolve()
+    second = second.resolve()
+    return first == second or first in second.parents or second in first.parents
+
+
+def _ensure_run_dir_outside_task(task_dir: Path, run_dir: Path) -> None:
+    """Refuse a computed destination that overlaps the pristine fixture.
+
+    This check must happen before ``rmtree(run_dir)``: a task named
+    ``machina`` under ``<base>/machina`` with ``--runs-dir <base>`` and
+    ``--harness machina`` computes the pathname of the task itself. Deleting
+    that destination would destroy the only pristine copy.
+    """
+    if _paths_overlap(task_dir, run_dir):
+        raise ValueError(
+            f"computed run directory overlaps --task-dir: {run_dir}; choose a different --runs-dir"
+        )
+
+
+def run_one(harness: str, args: argparse.Namespace, task_dir: Path, venv_python: Path) -> dict:
+    run_dir = _run_dir_for(harness, args, task_dir)
+    _ensure_run_dir_outside_task(task_dir, run_dir)
     # Fail closed before anything is copied: an escaping fixture link would
     # alias the pristine original (or any outside path) into the run copy.
     assert_no_escaping_symlinks(task_dir, label="task fixture")
@@ -820,6 +846,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--runs-dir must not be inside --task-dir")
 
     harnesses = ["opencode", "machina"] if args.harness == "both" else [args.harness]
+    for harness in harnesses:
+        if _paths_overlap(task_dir, _run_dir_for(harness, args, task_dir)):
+            parser.error(
+                "computed run directory overlaps --task-dir; choose a different --runs-dir"
+            )
     if "opencode" in harnesses and shutil.which("opencode") is None:
         parser.error("opencode executable not found on PATH")
 
