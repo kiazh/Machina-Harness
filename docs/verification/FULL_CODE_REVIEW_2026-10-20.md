@@ -148,3 +148,16 @@ The earlier 6,477/1,158 figures and the 71-failure sandbox run belong to the pre
 2. Check already-reviewed hashes against the current checkout and inspect changed code before carrying findings forward.
 3. Reproduce the remaining candidate leads (Anthropic cache-prefix fields, gateway queue growth, workspace-save lock ownership, MCP serialization copies, archive/continuity/semantic-cache eviction, preview-document eviction) before applying fixes.
 4. Keep the full backend and UI suites green as the remaining coverage is completed. The current ledger still does not support an all-clear claim.
+
+## Boundary pass — 2026-10-20
+
+A boundary-first verification pass inspected the remaining API, gateway, connector, security, workspace, permission, and tool runtime surfaces with:
+
+- an auth-route inventory (all mutating/data routes require `require_api_key`; `/health` and `/ready` are deliberately public and return only generic health state);
+- dangerous-pattern scans for shell execution, `eval`/`exec`, unsafe YAML/pickle loading, string-built SQL, unbounded file reads, and secret logging;
+- targeted inspection of gateway dispatch back-pressure/drain behavior, permission command classification, the HTTP RPC bridge, OAuth/MCP launch boundaries, workspace path handling, and terminal/file process ownership;
+- the full backend and UI suites already recorded above.
+
+No additional confirmed P1/P2 defect was found in this boundary pass. The scan hits that looked alarming were reviewed and classified as intentional: fixed SQL fragments with bound parameters, loopback/plaintext policy checks, broker-mediated `shell=True`, private stream remapping in the gateway entry point, and exception containment in best-effort shutdown paths.
+
+This is a boundary static/security pass, not a line-by-line completion of every remaining file. The coverage ledger therefore remains **277 documented full reads / 347 remaining-or-undocumented paths**; it should not be marked complete from this pass alone.
