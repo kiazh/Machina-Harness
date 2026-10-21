@@ -52,6 +52,7 @@ COPY --chown=appuser:appuser skills ./skills
 COPY --chown=appuser:appuser pyproject.toml README.md ./
 
 # Switch to non-root user
+ENV HOME=/home/appuser
 USER appuser
 
 # Catch missing runtime dependencies during the image build.

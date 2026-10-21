@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import stat
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +67,9 @@ def _previous_package_files(root: Path) -> set[str]:
     removed.
     """
     try:
-        manifest = json.loads((root / "soul.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            _read_package_file(root / "soul.json", label="soul.json").decode("utf-8")
+        )
     except (OSError, ValueError):
         return set()
     files = manifest.get("files") if isinstance(manifest, dict) else None
@@ -75,21 +79,37 @@ def _previous_package_files(root: Path) -> set[str]:
 
 
 def _read_package_file(path: Path, *, label: str) -> bytes:
-    """Read one package file under the size cap with UTF-8 validation."""
+    """Read one regular package file under the size cap with UTF-8 validation.
+
+    O_NOFOLLOW/O_NONBLOCK plus an fstat check prevent FIFOs and device files
+    from blocking an import/export indefinitely.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        size = path.stat().st_size
+        fd = os.open(path, flags)
     except OSError as error:
         raise ValueError(f"package file unreadable: {label}") from error
-    # Pre-stat before reading: a symlink (or a growing file) must not be
-    # pulled into memory first only to be rejected afterwards.
-    if size > _PACKAGE_FILE_MAX_BYTES:
-        raise ValueError(
-            f"package file exceeds size limit ({_PACKAGE_FILE_MAX_BYTES} bytes): {label}"
-        )
     try:
-        data = path.read_bytes()
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"package file is not a regular file: {label}")
+        if info.st_size > _PACKAGE_FILE_MAX_BYTES:
+            raise ValueError(
+                f"package file exceeds size limit ({_PACKAGE_FILE_MAX_BYTES} bytes): {label}"
+            )
+        chunks: list[bytes] = []
+        remaining = _PACKAGE_FILE_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
     except OSError as error:
         raise ValueError(f"package file unreadable: {label}") from error
+    finally:
+        os.close(fd)
     if len(data) > _PACKAGE_FILE_MAX_BYTES:
         raise ValueError(
             f"package file exceeds size limit ({_PACKAGE_FILE_MAX_BYTES} bytes): {label}"

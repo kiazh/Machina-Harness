@@ -336,26 +336,6 @@ def chat(
                     record_failure("cli.chat.grant_full_default", grant_error)
                     logger.warning("full-mode grant activation failed: %s", grant_error)
 
-            if (
-                normalized_mode is not None
-                and getattr(session, "execution_mode", None) != normalized_mode
-            ):
-                # A resumed row carries its own durable mode; an explicit
-                # --mode must win for this invocation (combined #39).
-                await db.execute(
-                    "UPDATE sessions SET execution_mode = $2 WHERE id = $1",
-                    session.id,
-                    normalized_mode,
-                )
-                session.execution_mode = normalized_mode
-
-            ceiling = os.environ.get("MACHINA_MCP_MODE_CEILING")
-            if ceiling is not None:
-                ranks = {"ask": 0, "workspace": 1, "sandbox": 2, "full": 3}
-                if ranks.get(session.execution_mode, 4) > ranks.get(ceiling, 0):
-                    output.error("mode_ceiling_exceeded")
-                    raise typer.Exit(1)
-
             # R04: headless chat is a first-class transport — claim the shared
             # session turn before building or streaming anything, so a live
             # gateway/REST/job/CLI owner rejects this prompt instead of
@@ -372,6 +352,42 @@ def chat(
                     "Wait for it to finish (or stop it in the UI), then retry.",
                 )
                 raise typer.Exit(EXIT_FAILED)
+
+            # The mode change is part of the turn mutation, not a side channel:
+            # apply it only after the ownership claim and release that claim if
+            # the durable activation or ceiling check fails. Use the shared
+            # activation path so full grants, revocations, cache invalidation,
+            # and env shadows stay consistent with gateway/REST.
+            try:
+                if (
+                    normalized_mode is not None
+                    and getattr(session, "execution_mode", None) != normalized_mode
+                ):
+                    if db.connected:
+                        from machina.core.session_mode import activate_durable_mode
+
+                        await activate_durable_mode(
+                            str(session.id), session.agent_id, normalized_mode
+                        )
+                    else:
+                        from machina.core.session_mode import set_session_mode
+
+                        set_session_mode(str(session.id), normalized_mode)
+                    session.execution_mode = normalized_mode
+
+                ceiling = os.environ.get("MACHINA_MCP_MODE_CEILING")
+                if ceiling is not None:
+                    ranks = {"ask": 0, "workspace": 1, "sandbox": 2, "full": 3}
+                    if ranks.get(session.execution_mode, 4) > ranks.get(ceiling, 0):
+                        output.error("mode_ceiling_exceeded")
+                        raise typer.Exit(1)
+            except BaseException:
+                try:
+                    await end_turn(session.id, turn_token)
+                except Exception as release_error:
+                    record_failure("cli.chat.release_turn_after_mode_failure", release_error)
+                raise
+
             # P0-18: forensic start record BEFORE the agent executes. Emitted
             # after the claim is held (a busy rejection is not a started run)
             # and before build/stream, so a crash mid-turn still leaves

@@ -46,7 +46,7 @@ class CreateMemoryRequest(BaseModel):
     category: str = "fact"
     importance: float = Field(default=0.5, ge=0, le=1)
     sessionId: uuid.UUID | None = None
-    agent: str = "harness"
+    agent: str = Field(default="harness", max_length=128)
 
 
 class CreatePersonaMemoryRequest(BaseModel):

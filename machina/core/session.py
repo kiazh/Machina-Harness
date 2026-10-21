@@ -429,6 +429,27 @@ class SessionManager:
                     session_id,
                     new_session.id,
                 )
+                # The fork must retain evicted/compacted history too: archive
+                # rows are the transcript source after context eviction, and
+                # dropping them silently loses pre-compaction messages.
+                await conn.execute(
+                    """
+                    INSERT INTO context_archive (
+                        session_id, chunk_id, payload_msgpack, embedding,
+                        archived_at, archive_reason, resurrection_count,
+                        last_resurrected, agent_id, chunk_type, token_count,
+                        original_created_at, search_text
+                    )
+                    SELECT $2, chunk_id, payload_msgpack, embedding,
+                           archived_at, archive_reason, resurrection_count,
+                           last_resurrected, agent_id, chunk_type, token_count,
+                           original_created_at, search_text
+                    FROM context_archive
+                    WHERE session_id = $1
+                    """,
+                    session_id,
+                    new_session.id,
+                )
                 # Existing installations may not have applied the image-cache
                 # migration yet. Ordinary context must still be forkable.
                 if await conn.fetchval("SELECT to_regclass('session_image_context')") is not None:

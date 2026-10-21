@@ -520,7 +520,7 @@ function runCommand(cmd, options = {}) {
   // double quotes, so block $ and ` anywhere in cmd. Other operators
   // (;|&) are literal inside quotes, so only check unquoted portions.
   const unquoted = cmd.replace(/"[^"]*"/g, '').replace(/'[^']*'/g, '');
-  if (/[;|&\n]/.test(unquoted) || /[`$]/.test(cmd)) {
+  if (/[;|&\r\n]/.test(unquoted) || /[`$\\<>]/.test(cmd)) {
     return { success: false, output: 'runCommand blocked: shell metacharacters not allowed' };
   }
 

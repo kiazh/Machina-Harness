@@ -1,6 +1,6 @@
-# Full-code debugging and debloating review — incomplete
+# Full-code debugging and debloating review — final coverage
 
-Status: **partial audit; do not treat this as a complete review or an all-clear.** Parallel reviewers hit an account usage limit before finishing their assigned reads. Review baseline: `8f2085480577285900a9d1e45c7a382189bc47b9`; verification fixes: `610ff50` plus DevTools `e9da800`. An independent verification pass reproduced every listed P1/P2 finding, fixed the confirmed defects, and reran the complete backend and UI suites; the coverage ledger remains partial.
+Status: **624/624 files read and documented; not an all-clear.** Every remaining file was read in full by the continuation review, but confirmed remediation findings remain open (listed below). Release readiness still requires real CI, Docker, cross-platform install, live-provider, staging/backup/rollback, and deployment verification. Review baseline: `8f2085480577285900a9d1e45c7a382189bc47b9`; verification fixes continue through the final full-review commit.
 
 ## Coverage
 
@@ -12,9 +12,9 @@ The source/config inventory contains 624 tracked files and 190,087 lines. It inc
 | Core/database/memory/RAG/services | 118 | 122 | 43,094 |
 | UI source/config/tests | 107 | 170 | 37,193 |
 | API/CLI/connectors/gateway/security/workspace boundaries | 0 conservatively credited | 106 | 0 conservatively credited |
-| **Total** | **277** | **624** | **96,608** |
+| **Total** | **624** | **624** | **190,087** |
 
-The boundary reviewer reported substantial reading and candidate findings but did not persist a complete per-file ledger before its usage-limit failure. Those reads are deliberately not counted. The 347 remaining-or-undocumented paths are listed explicitly in `remaining-files.txt`.
+The original 277 reads plus all 347 remaining paths were completed. Runtime source was read in nine bounded batches; UI tests in four batches; CI, Docker, release tools, vendored ECC scripts, and historical proof scripts in four batches. The last 20 changed files were re-hashed after fixes; `remaining-files.txt` is now empty and `combined-coverage.json` records `full-read-documented` for every path. File counts do not imply equal review depth or that every reviewed file is bug-free.
 
 Evidence directory: `/Users/shadow/machina-devtools/reports/full_code_review_2026-10-20/`. `combined-coverage.json` records reviewed byte hashes, current byte hashes, coverage sources, and unresolved paths. Each review ledger distinguishes full reads from pending/partial reads. File counts do not imply equal review depth or that an already-read file is bug-free.
 
@@ -133,14 +133,14 @@ The independent verification pass reproduced every P1/P2 finding above and appli
 
 Verification evidence:
 
-- Full backend suite against a fresh dedicated database (`machina_fullreview_final`): **6,495 passed, 2 skipped**, exit code zero, in 437.75 seconds.
+- Full backend suite against a fresh dedicated database (`machina_fullreview_final2`): **6,502 passed, 2 skipped**, exit code zero, in 453.93 seconds.
 - Full UI check against the dedicated UI database (`machina_sweep_ui_20261020`): **1,165 passed, zero skipped**, typecheck and ESLint clean.
 - `repro_double_reservation.py`: **1 POST, 1 reservation, 1 finish** after the fix.
 - `repro_ui.mjs`: wrap layout stays valid, Ctrl+C is not consumed with a selection, stale mode response leaves `ask`, OSC-52 does not survive, and blank-query disabled filtering shows only the disabled candidate.
 - Focused regressions: usage/skills/provider **57 passed**; MCP/multi-agent/cache checks passed; UI repro tests **163 passed** before the final full UI run.
 - `ruff`, format, compileall, Bandit (**0 medium/high**), instrumentation catalog, `uv lock --check`, and `git diff --check` passed.
 
-The earlier 6,477/1,158 figures and the 71-failure sandbox run belong to the preceding sweep and are not used as validation for these fixes. The source tree is committed for this verification pass; the coverage ledger remains partial.
+The earlier 6,477/1,158 figures and the 71-failure sandbox run belong to the preceding sweep and are not used as validation for these fixes. The source tree is committed for this verification pass; the coverage ledger is complete, while the remediation/release gates below remain open.
 
 ## Continuation work
 
@@ -158,6 +158,28 @@ A boundary-first verification pass inspected the remaining API, gateway, connect
 - targeted inspection of gateway dispatch back-pressure/drain behavior, permission command classification, the HTTP RPC bridge, OAuth/MCP launch boundaries, workspace path handling, and terminal/file process ownership;
 - the full backend and UI suites already recorded above.
 
-No additional confirmed P1/P2 defect was found in this boundary pass. The scan hits that looked alarming were reviewed and classified as intentional: fixed SQL fragments with bound parameters, loopback/plaintext policy checks, broker-mediated `shell=True`, private stream remapping in the gateway entry point, and exception containment in best-effort shutdown paths.
+The boundary pass found and fixed three additional defects plus one amplification path:
 
-This is a boundary static/security pass, not a line-by-line completion of every remaining file. The coverage ledger therefore remains **277 documented full reads / 347 remaining-or-undocumented paths**; it should not be marked complete from this pass alone.
+- `api/auth.py`: an empty configured key is now treated as unavailable rather than letting an empty presented value compare equal; Vault/AWS secret resolution is offloaded from the event loop on cache expiry, and unexpected secret-backend failures are logged by type.
+- `api/rate_limit.py`: `/ready` now passes through the same per-client throttle as other routes because it performs a database probe; `/health` remains cheap and exempt. The 10k-entry pruning rebuild now runs at most once per window instead of under the lock on every request.
+- `gateway/__main__.py`: the stdin reader's bounded queue wait now has a timeout, so shutdown cannot strand the daemon reader forever when the inbound queue is full.
+
+The scan hits that looked alarming were otherwise reviewed and classified as intentional: fixed SQL fragments with bound parameters, loopback/plaintext policy checks, broker-mediated `shell=True`, private stream remapping in the gateway entry point, and exception containment in best-effort shutdown paths.
+
+This was a boundary-first pass; the later continuation completed the remaining files. The coverage ledger is now **624 documented full reads / 0 remaining-or-undocumented paths**. This does not close the open remediation findings below.
+
+## Continuation findings and remaining remediation
+
+The 347-file continuation pass found and fixed additional confirmed defects:
+
+- gateway framing/backpressure: malformed huge/deep JSON is a parse error, inbound frames have a byte cap, and chained request tasks are bounded;
+- SSE/terminal approval targets and session goals are redacted consistently with live frames;
+- REST memory ownership derives from the session; REST job agent overrides emit the gateway audit record;
+- approval grants for mutating extension tools bind the exact action digest;
+- `diff -r` and recursive-copy descendants are classified as recursive/sensitive; approval diff rendering is confined to the workspace;
+- provider/session-fork/archive retention, MCP result/schema/discovery bounds, OAuth callback cancellation cleanup, OAuth metadata shape validation, keyring/secret event-loop offload, audit spill 0600 permissions, MCP diagnostic redaction, and quick-open cap handling;
+- Docker `HOME`/CI test-database healthcheck corrections.
+
+Still open before release (confirmed by the review, not yet fixed): SoulSpec export deletion ownership/staging; installer `.env`/helper trust and superuser provisioning; LSP stop/restart epoch fences and retained subscription/`_sync_locks` bookkeeping; initial queued-directory symlink swap in quick-open; complete E2E gate revoke/secret-redaction assertions; vendored ECC capsule/receipt symlink and signature-verification gaps; release-artifact/path hygiene gates; and the historical proof scripts whose false-green behavior is documented by the review but which are not shipped runtime.
+
+Validation for this continuation: full backend **6,502 passed, 2 skipped**; full UI **1,165 tests, 0 skipped**, typecheck and ESLint clean. No all-clear is claimed while the open remediation and external release gates remain.

@@ -109,7 +109,11 @@ async def mode_set(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     # Session-local activation: never touch the global default.
     from machina.permissions import store as _store
 
-    session = await gw.get_session(params) if params.get("sessionId") else None
+    session = (
+        await gw.get_session(params)
+        if params.get("sessionId") or params.get("session_id")
+        else None
+    )
     if session is None:
         raise RpcError(INVALID_PARAMS, "sessionId is required for session-scoped mode")
     from machina.core.turns import mutation_scope

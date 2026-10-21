@@ -255,6 +255,10 @@ class DocumentMirrorStore:
                 "unsupported-encoding", "text contains code points that are not valid UTF-8"
             ) from error
         existing = self._mirrors.get(uri)
+        if existing is None and len(self._mirrors) >= 1000:
+            raise WorkspaceError(
+                "too-large", "too many open document mirrors; close documents and retry"
+            )
         if existing is not None and version <= existing.version:
             return DocumentOpenResult(
                 accepted_version=existing.version,

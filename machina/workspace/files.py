@@ -681,7 +681,21 @@ class WorkspaceFiles:
                         reason=reason,
                     ),
                 )
-            await asyncio.to_thread(self._write_target, resolved, data, display=normalized)
+            write_job = asyncio.create_task(
+                asyncio.to_thread(self._write_target, resolved, data, display=normalized)
+            )
+            try:
+                await asyncio.shield(write_job)
+            except asyncio.CancelledError:
+                # The executor cannot be cancelled; releasing the per-path
+                # lock while it is still committing lets a later save race an
+                # older write. Hold the lock until the commit settles, then
+                # propagate the cancellation.
+                try:
+                    await asyncio.shield(write_job)
+                except BaseException:
+                    pass
+                raise
             revision = revision_from_bytes(data)
             revision_registry.record(resolved, revision)
             return SaveResult(ok=True, revision=revision, saved_ui_version=ui_version)
@@ -709,6 +723,11 @@ class WorkspaceFiles:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
                 raise WorkspaceError("not-regular", f"target is not a regular file: {display}")
+            if st.st_size > MAX_SAVE_BYTES:
+                raise WorkspaceError(
+                    "too-large",
+                    f"existing file is {st.st_size} bytes; the save limit is {MAX_SAVE_BYTES}",
+                )
             self._verify_containment(resolved, display=display)
             digest = hashlib.sha256()
             size = 0

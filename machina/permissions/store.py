@@ -25,6 +25,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 TERMINAL = ("completed", "failed", "cancelled")
+# The in-memory approval map is a live mirror, not an audit log. Bound it so a
+# long-lived gateway cannot retain every proposal/display text forever; active
+# records are never evicted.
+_MAX_APPROVAL_MIRROR = 2048
 
 
 class _MemoryStore:
@@ -499,6 +503,15 @@ async def create_approval(req: Any, principal: str) -> dict:
         "content_preview": _redact_public_text(getattr(req, "content_preview", "") or ""),
     }
     async with _mem.lock:
+        if len(_mem.approvals) >= _MAX_APPROVAL_MIRROR:
+            terminal = [
+                (request_id, item)
+                for request_id, item in _mem.approvals.items()
+                if item.get("status") in TERMINAL
+            ]
+            terminal.sort(key=lambda pair: float(pair[1].get("created_at") or 0))
+            for request_id, _item in terminal[: len(_mem.approvals) - _MAX_APPROVAL_MIRROR + 1]:
+                _mem.approvals.pop(request_id, None)
         _mem.approvals[req.request_id] = rec
     db = await _db()
     if db is not None:

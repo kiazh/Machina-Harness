@@ -681,7 +681,8 @@ class WorkspaceService:
         """
         manager = self._lsp_manager
         if (
-            manager is None
+            not self.trusted
+            or manager is None
             or language is None
             or not callable(getattr(manager, "ensure_started", None))
         ):

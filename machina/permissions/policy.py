@@ -255,7 +255,9 @@ def sensitive_path(
 # family matcher sees through them, so an editor or rsync copy of a secret
 # gates exactly like the original.
 _BACKUP_DECORATION_RE = re.compile(
-    r"(?:~+\d*|[._-](?:bak|backup|old|orig|save|swp|swo|tmp|temp)\d*|[._-]\d+)+$",
+    # One decoration at a time; _backup_stripped loops. Removing the outer
+    # + avoids exponential backtracking on long '~'-only components.
+    r"(?:~+\d*|[._-](?:bak|backup|old|orig|save|swp|swo|tmp|temp)\d*|[._-]\d+)$",
     re.IGNORECASE,
 )
 
@@ -464,9 +466,23 @@ def _recursive_traversal(argv: list[str], cwd: str) -> bool:
         return False
     name = executable_name(argv[0])
     args = argv[1:]
+    if name == "diff":
+        # `diff -r` (and its unambiguous GNU abbreviation) reads every
+        # descendant, including credentials, exactly like grep -r.
+        for arg in args:
+            if arg in {"--recursive", "-r", "-R"} or arg.startswith("--recurs"):
+                return True
+            if (
+                arg.startswith("-")
+                and not arg.startswith("--")
+                and any(ch in arg[1:] for ch in ("r", "R"))
+            ):
+                return True
+        return False
     if name == "grep":
         for index, arg in enumerate(args):
-            if arg in {"--recursive", "--dereference-recursive"}:
+            # GNU getopt accepts unambiguous long-option prefixes.
+            if arg in {"--recursive", "--dereference-recursive"} or arg.startswith("--recurs"):
                 return True
             # R01: -d/--directories=recurse walks descendants exactly like
             # -R but used to slip past the compact-flag check below.
@@ -622,10 +638,16 @@ def _recursive_copy_reach(
                 # the R4-062 fail-closed doctrine if that ever changes.
                 is_link = entry.is_symlink()
                 is_dir = entry.is_dir()
-            except OSError:
+                resolved_entry = entry.resolve()
+            except (OSError, RuntimeError):
                 # A failed stat hides whether this entry would be
                 # dereferenced or descended into: fail closed.
                 return _CopyReach(protected=True, external=external, sensitive=sensitive)
+            # A recursive copy materializes every regular descendant at
+            # dest/.env or dest/credentials, not only the entries reached
+            # through symlinks. Classify each actual path, not just links.
+            if sensitive_path(str(resolved_entry), workspace):
+                sensitive = True
             reached_via_link = follow_symlinks and (via_link or is_link)
             if reached_via_link:
                 try:
@@ -685,7 +707,7 @@ def _recursive_copy_sources(argv: list[str], cwd: str) -> list[tuple[Path, bool]
         elif arg == "--no-dereference":
             if is_cp:
                 follow = False
-        elif arg in {"--recursive", "--archive"}:
+        elif arg in {"--recursive", "--archive"} or arg.startswith("--recurs"):
             recursive = True
             if arg == "--archive":
                 follow = False
@@ -1057,7 +1079,12 @@ def decide(req: ActionRequest, grants: list[dict] | None = None) -> Decision:
             continue
         if not _scope_allows(g, req):
             continue
-        if req.operation in ("file.write", "process.exec", "network.fetch"):
+        if req.operation in ("file.write", "process.exec", "network.fetch") or (
+            "mutating-tool" in req.capabilities
+        ):
+            # Extension tools (e.g. repo_stage/repo_activate) carry their
+            # arguments only in the digest. A session grant for one call must
+            # not authorize a different URL/digest.
             if g.get("digest") != req.digest:
                 continue
             return Decision("allowed", "matching scoped grant", req)
@@ -1186,7 +1213,11 @@ def build_request(
     preview_len = 0
     if content:
         preview_len = len(content)
-    if content and (operation == "file.write" or operation.startswith("tool.")):
+    if content and (
+        operation == "file.write"
+        or operation.startswith("tool.")
+        or operation in {"delegate", "memory"}
+    ):
         try:
             from machina.memory.redaction import redact_secrets as _redact
 

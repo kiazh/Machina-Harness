@@ -673,6 +673,8 @@ class OAuthNetworkClient:
             break
         if server_meta is None:
             raise OAuthNetworkError("authorization server metadata not found")
+        if not isinstance(server_meta, dict):
+            raise OAuthNetworkError("authorization server metadata is malformed")
         advertised_issuer = str(server_meta.get("issuer", ""))
         if advertised_issuer != selected:
             raise OAuthNetworkError(
@@ -878,7 +880,7 @@ class OAuthNetworkClient:
                     "basic auth requires a secret reference",
                     reason="oauth_client_configuration_required",
                 )
-            extra_secret = _get_secret(secret_ref) or ""
+            extra_secret = await asyncio.to_thread(_get_secret, secret_ref) or ""
             if not extra_secret:
                 raise OAuthNetworkError("client secret unavailable", reason="oauth_exchange_failed")
             auth = (client.client_id, extra_secret)
@@ -910,7 +912,7 @@ class OAuthNetworkClient:
         if record.token_endpoint_auth_method == "client_secret_basic":
             from machina.security.secrets import get_secret as _get_secret
 
-            secret = _get_secret(record.client_secret_ref) or ""
+            secret = await asyncio.to_thread(_get_secret, record.client_secret_ref) or ""
             if not secret:
                 raise OAuthNetworkError("client secret unavailable", reason="oauth_refresh_failed")
             auth = (record.client_id, secret)
@@ -953,7 +955,7 @@ class OAuthNetworkClient:
         if record.token_endpoint_auth_method == "client_secret_basic":
             from machina.security.secrets import get_secret as _get_secret
 
-            secret = _get_secret(record.client_secret_ref) or ""
+            secret = await asyncio.to_thread(_get_secret, record.client_secret_ref) or ""
             auth = (record.client_id, secret) if secret else None
         try:
             await self._post_form(

@@ -962,12 +962,14 @@ async def write_file(path: str, content: str) -> str:
                     os.close(fd)
                 except OSError:
                     pass
+                fd = None
                 _atomic_write_file(file_path, content, mode=mode)
             except BaseException:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
                 if not existed_before:
                     _remove_rejected_empty_leaf(
                         lambda: os.lstat(file_path), lambda: os.unlink(file_path)

@@ -88,6 +88,8 @@ services:
       MACHINA_USAGE_AGENT_TOKEN_LIMIT: ${MACHINA_USAGE_AGENT_TOKEN_LIMIT:-0}
       MACHINA_USAGE_AGENT_REQUEST_LIMIT: ${MACHINA_USAGE_AGENT_REQUEST_LIMIT:-0}
       MACHINA_HOME: /home/appuser/.machina
+      # Keep Path.home()-based stores on the writable volume, not read-only /root.
+      HOME: /home/appuser
       MACHINA_SCRIPTS_DIR: /app/scripts
       PYTHONDONTWRITEBYTECODE: "1"
     read_only: true

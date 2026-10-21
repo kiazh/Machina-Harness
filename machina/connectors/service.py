@@ -275,7 +275,10 @@ class ConnectorService:
 
         config = self._config(connector_id)
         refuse_sandbox_stdio(config, mode)
-        secrets = {name: get_secret(name) or "" for name in config.secret_refs}
+        # Vault/AWS resolution is synchronous HTTP; keep it off the loop.
+        secrets = await asyncio.to_thread(
+            lambda: {name: get_secret(name) or "" for name in config.secret_refs}
+        )
         await self.manager.connect(connector_id, secrets, launch_config=launch_config)
         connection = self._live_connection(connector_id)
         try:

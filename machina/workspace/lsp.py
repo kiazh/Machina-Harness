@@ -366,7 +366,7 @@ class LspFraming:
     def _decode_body(self, body: bytes) -> dict[str, Any]:
         try:
             value = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
             raise LspProtocolError(f"invalid message body: {exc}") from None
         if not isinstance(value, dict):
             raise LspProtocolError("message body must be a JSON object")

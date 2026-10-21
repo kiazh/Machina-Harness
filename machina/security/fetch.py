@@ -32,6 +32,17 @@ class FetchError(Exception):
     """Validation or transport failure (never returns partial unsafe data)."""
 
 
+def _safe_error_url(url: str) -> str:
+    """Display form of a URL with userinfo/credential query values removed."""
+    try:
+        from machina.core.provider.audit import redact_url_credentials
+
+        return redact_url_credentials(url)
+    except Exception:
+        # Diagnostics must fail closed rather than echo the raw URL.
+        return "[redacted URL]"
+
+
 def _bounded_resolve(hostname: str, timeout: float = 5.0) -> list[str]:
     import concurrent.futures
 
@@ -230,7 +241,7 @@ def pinned_fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = CONNE
         except (ValueError, UnicodeError):
             raise FetchError("invalid URL encoding or authority") from None
         if parsed.scheme not in ("http", "https"):
-            raise FetchError(f"unsupported scheme in {current!r}")
+            raise FetchError(f"unsupported scheme in {_safe_error_url(current)!r}")
         if not hostname or hostname.lower() in ("localhost", "localhost.localdomain"):
             raise FetchError(f"rejected host {hostname!r}")
         try:
@@ -238,7 +249,7 @@ def pinned_fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = CONNE
         except ValueError:
             # Final-review fix: `:99999` / non-numeric ports raised a bare
             # ValueError past every FetchError handler.
-            raise FetchError(f"invalid port in {current!r}") from None
+            raise FetchError(f"invalid port in {_safe_error_url(current)!r}") from None
         port = parsed_port or (443 if parsed.scheme == "https" else 80)
         authority = _host_authority(hostname, parsed.scheme, parsed_port)
         ips = _bounded_resolve(hostname, timeout=min(5.0, _remaining()))
@@ -292,7 +303,7 @@ def pinned_fetch(url: str, *, max_bytes: int = MAX_BYTES, timeout: float = CONNE
             current = urljoin(current, location)
             continue
         if status != 200:
-            raise FetchError(f"HTTP {status} for {current}")
+            raise FetchError(f"HTTP {status} for {_safe_error_url(current)}")
         try:
             return body.decode("utf-8")
         except UnicodeDecodeError:

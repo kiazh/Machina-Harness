@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -132,10 +134,15 @@ class AuditPersistence:
             }
             line = json.dumps(record, default=str) + "\n"
             path = _spill_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with suppress(OSError):
+                os.chmod(path.parent, 0o700)
             self._rotate_spill_if_needed(path)
-            with open(path, "a", encoding="utf-8") as handle:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
                 handle.write(line)
+            with suppress(OSError):
+                os.chmod(path, 0o600)
             metrics.increment_counter("audit.spill.written")
         except Exception as error:
             # The drop behavior stays metrics/log-only; spilling must never

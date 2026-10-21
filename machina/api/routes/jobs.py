@@ -51,6 +51,17 @@ async def create_job(session_id: str, req: CreateJobRequest) -> dict[str, Any]:
     if kind not in ("heartbeat", "interval", "cron"):
         raise HTTPException(400, "kind must be 'heartbeat', 'interval', or 'cron'")
     prompt = req.prompt or ("" if req.noAgent else DEFAULT_HEARTBEAT_PROMPT)
+    agent_name = req.agent or session.agent_id
+    if agent_name != session.agent_id:
+        # REST must retain the gateway's override audit trail.
+        from machina.core.provider import audit_log
+
+        audit_log(
+            "job_agent_override",
+            session_id=str(session.id),
+            session_agent=session.agent_id,
+            requested_agent=agent_name,
+        )
     try:
         job = await job_store.create(
             name=req.name or f"{kind} job",
@@ -58,7 +69,7 @@ async def create_job(session_id: str, req: CreateJobRequest) -> dict[str, Any]:
             session_id=sid,
             prompt=prompt,
             interval_seconds=req.intervalSeconds,
-            agent_name=req.agent or session.agent_id,
+            agent_name=agent_name,
             cron_expression=req.cronExpression,
             model=req.model,
             provider=req.provider,

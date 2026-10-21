@@ -216,13 +216,15 @@ def _bounded(text: str, limit: int) -> str:
 
 def _redacted_tail(text: str, limit: int) -> str:
     """Bounded tail of diagnostic text with secret-looking strings redacted."""
-    tail = text[-limit:] if len(text) > limit else text
     try:
         from machina.memory.redaction import redact_secrets
 
-        tail = redact_secrets(tail).text
+        # Redact the complete text BEFORE truncating. Cutting first can split
+        # a credential so the detector no longer recognizes it.
+        redacted = redact_secrets(text).text
     except Exception:
-        pass
+        return "[redaction unavailable]"
+    tail = redacted[-limit:] if len(redacted) > limit else redacted
     return tail.strip()
 
 
@@ -674,7 +676,7 @@ async def machina_chat(prompt: str, session_id: str | None = None, mode: str | N
         {
             "status": "failed",
             "session_id": parsed_session,
-            "reply": reply,
+            "reply": _redacted_tail(reply, MAX_REPLY_CHARS),
             "exit_code": result.returncode,
             "error": _bounded(diagnostic, MAX_ERROR_CHARS),
         }
@@ -690,6 +692,10 @@ async def machina_session_create(title: str | None = None) -> str:
     """Create an empty Machina session row and return its id as JSON text."""
     if title is not None and not isinstance(title, str):
         return _json_text({"status": "invalid_request", "error": "title must be a string or null"})
+    if title is not None and len(title) > 200:
+        return _json_text(
+            {"status": "invalid_request", "error": "title must be at most 200 characters"}
+        )
     try:
         session_id, resolved_title = await _create_session_row(title)
     except Exception as exc:
@@ -809,7 +815,15 @@ async def machina_agents() -> str:
         async with _db_section():
             definitions = await agent_registry.list()
     except Exception as exc:
-        return _json_text({"status": "error", "error": _bounded(str(exc), MAX_ERROR_CHARS)})
+        return _json_text(
+            {
+                "status": "error",
+                "error": _bounded(
+                    _redacted_tail(f"{type(exc).__name__}: {exc}", MAX_ERROR_CHARS),
+                    MAX_ERROR_CHARS,
+                ),
+            }
+        )
     agents = [
         {
             "name": definition.name,

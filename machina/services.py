@@ -674,14 +674,21 @@ def learn_skill(
     triggers: list[str] | None = None,
 ):
     """Create a skill from a file path, an http(s) URL, or an existing skill name."""
-    from machina.skills.registry import skill_registry
+    from machina.skills.registry import SkillParser, skill_registry
 
     skill_registry.load_all()
     path = Path(source).expanduser()
 
     if path.is_file():
         try:
-            content = path.resolve().read_text(encoding="utf-8")
+            resolved = path.resolve()
+            # Bound the read itself: a symlink or enormous file must not be
+            # materialized only to be rejected by the parser's size check.
+            if resolved.stat().st_size > SkillParser.MAX_CONTENT_SIZE:
+                raise ServiceError(
+                    f"Skill file exceeds maximum size of {SkillParser.MAX_CONTENT_SIZE} bytes"
+                )
+            content = resolved.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raise ServiceError(f"Cannot learn from binary or non-UTF-8 file: {path.name}") from None
         except OSError as e:

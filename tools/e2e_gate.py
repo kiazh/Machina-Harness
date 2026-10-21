@@ -240,8 +240,21 @@ def database_name_from_url(url: str) -> str | None:
 
 
 def is_test_database(name: str | None) -> bool:
-    """Fail-closed test-database predicate: the name must contain 'test'."""
-    return bool(name) and "test" in name.casefold()
+    """Fail-closed test-database predicate: a real test token, not a substring.
+
+    ``latest``/``contest``/``attestation`` must not count merely because they
+    contain the letters "test".
+    """
+    if not name:
+        return False
+    folded = name.casefold()
+    return (
+        folded == "test"
+        or folded.startswith(("test_", "test-"))
+        or folded.endswith(("_test", "-test"))
+        or "_test_" in folded
+        or "-test-" in folded
+    )
 
 
 def summarize_db_url(url: str) -> str:
@@ -2866,6 +2879,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     selected = [part.strip() for part in args.journeys.split(",") if part.strip()]
+    if not selected:
+        log("no journeys selected; refusing to emit a false-green gate")
+        return 2
     unknown = [part for part in selected if part not in JOURNEY_IDS]
     if unknown:
         log(f"unknown journeys: {unknown}; valid: {list(JOURNEY_IDS)}")
@@ -2979,7 +2995,12 @@ def main(argv: list[str] | None = None) -> int:
         f"e2e-gate: {doc['summary']['passed']} PASS / {doc['summary']['failed']} FAIL / "
         f"{doc['summary']['skipped']} SKIP (proof: {doc['proof_files']['markdown']})"
     )
-    return 1 if doc["summary"]["failed"] else 0
+    if doc["summary"]["failed"]:
+        return 1
+    if doc["summary"]["passed"] == 0:
+        log("every selected journey was skipped; refusing to emit a false-green gate")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

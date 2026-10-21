@@ -319,7 +319,8 @@ function getRunCommand(script, options = {}) {
 
 // Allowed characters in arguments: alphanumeric, whitespace, dashes, dots, slashes,
 // equals, colons, commas, quotes, @. Rejects shell metacharacters like ; | & ` $ ( ) { } < > !
-const SAFE_ARGS_REGEX = /^[@a-zA-Z0-9\s_./:=,'"*+-]+$/;
+// Literal space/tab only: \s also admits CR/LF, which can split a command.
+const SAFE_ARGS_REGEX = /^[@a-zA-Z0-9 \t_./:=,'"*+-]+$/;
 
 /**
  * Get the command to execute a package binary

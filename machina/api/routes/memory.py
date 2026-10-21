@@ -27,11 +27,20 @@ async def create_memory(req: CreateMemoryRequest) -> dict[str, Any]:
 
     if req.category not in {"preference", "decision", "fact", "event", "transient"}:
         raise HTTPException(400, "invalid memory category")
-    if req.sessionId is not None and await session_manager.get(req.sessionId) is None:
-        raise HTTPException(404, "session not found")
+    agent_id = req.agent
+    if req.sessionId is not None:
+        session = await session_manager.get(req.sessionId)
+        if session is None:
+            raise HTTPException(404, "session not found")
+        # Memory ownership follows the session, exactly as the gateway path
+        # does. An explicit non-default agent may not relabel a session's
+        # memory (which would inject rows into another agent's retrieval).
+        if req.agent not in ("harness", session.agent_id):
+            raise HTTPException(403, "agent does not own this session")
+        agent_id = session.agent_id
     result = await memory_store.add(
         session_id=req.sessionId,
-        agent_id=req.agent,
+        agent_id=agent_id,
         content=req.content,
         category=req.category,
         importance=req.importance,

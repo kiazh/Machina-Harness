@@ -28,7 +28,9 @@ from machina.connectors.http_transport import run_dns_check
 from machina.connectors.models import (
     MAX_CATALOG_TOOLS,
     MAX_DESCRIPTION_CHARS,
+    MAX_SCHEMA_BYTES,
     MAX_STDERR_BYTES,
+    MAX_TOOL_NAME_CHARS,
     AuthRequired,
     CallOutcome,
     ConfigError,
@@ -43,6 +45,30 @@ from machina.connectors.policy import validate_arguments
 from machina.observability.instrumentation import instrument, instrumented, log_event
 
 logger = logging.getLogger(__name__)
+
+
+def _bounded_json(value: Any, limit: int) -> str | None:
+    """Serialize *value* without materializing an unbounded string.
+
+    Returns None as soon as the UTF-8 encoding exceeds *limit*. The caller
+    rejects oversized schemas/content rather than retaining them in memory.
+    """
+    encoder = json.JSONEncoder(ensure_ascii=False, default=str)
+    chunks: list[str] = []
+    size = 0
+    try:
+        for chunk in encoder.iterencode(value):
+            # Count code points without copying a potentially huge string
+            # chunk; the final UTF-8 check accounts for multi-byte content.
+            size += len(chunk)
+            if size > limit:
+                return None
+            chunks.append(chunk)
+        result = "".join(chunks)
+        return result if len(result.encode("utf-8")) <= limit else None
+    except (TypeError, ValueError, RecursionError):
+        return None
+
 
 _METADATA_HOSTS = {"169.254.169.254", "100.100.100.100", "fd00:ec2::254"}
 
@@ -792,24 +818,27 @@ class MCPConnection:
                     timeout=remaining,
                 )
                 for entry in page.tools or []:
+                    name = str(getattr(entry, "name", "") or "")
+                    if not name or len(name) > MAX_TOOL_NAME_CHARS:
+                        raise ConnectionFailed("tool name exceeds the supported bound")
                     schema = getattr(entry, "input_schema", None) or {}
-                    schema_json = json.dumps(schema, default=str, ensure_ascii=False)
-                    if (
-                        self._redact(entry.name) != entry.name
-                        or self._redact(schema_json) != schema_json
-                    ):
+                    schema_json = _bounded_json(schema, MAX_SCHEMA_BYTES)
+                    if schema_json is None:
+                        raise ConnectionFailed("tool schema exceeds the supported bound")
+                    if self._redact(name) != name or self._redact(schema_json) != schema_json:
                         # Rewriting schema values could weaken argument validation
                         # or change an approved dispatch contract. Refuse discovery.
                         raise ConnectionFailed("tool catalog contains credential material")
+                    description = self._redact(
+                        str(getattr(entry, "description", "") or "")[:MAX_DESCRIPTION_CHARS]
+                    )
                     tools.append(
                         DiscoveredTool(
                             connector_id=self.config.id,
                             name="",
-                            remote_name=entry.name,
-                            description=self._redact(entry.description or "")[
-                                :MAX_DESCRIPTION_CHARS
-                            ],
-                            schema=json.loads(json.dumps(schema, default=str)),
+                            remote_name=name,
+                            description=description,
+                            schema=json.loads(schema_json),
                         )
                     )
                     if len(tools) >= MAX_CATALOG_TOOLS:
@@ -933,8 +962,22 @@ class MCPConnection:
         text = self._redact("\n".join(texts))
         structured_text: bytes | None = None
         if structured is not None:
-            structured = json.loads(self._redact(json.dumps(structured, ensure_ascii=False)))
-            structured_text = json.dumps(structured, ensure_ascii=False).encode("utf-8")
+            structured_json = _bounded_json(structured, cap)
+            if structured_json is None:
+                # Never materialize several unbounded copies of an untrusted
+                # structured payload just to discover it exceeds the cap.
+                structured = None
+                marker = "\n[structured content omitted: too large]"
+                text = (text + marker)[:cap]
+            else:
+                structured_json = self._redact(structured_json)
+                structured_text = structured_json.encode("utf-8")
+                try:
+                    structured = json.loads(structured_json)
+                except ValueError:
+                    # Redaction must not corrupt JSON; if it did, keep the
+                    # bounded textual form rather than failing the call.
+                    structured = structured_json
         truncated = False
         encoded = text.encode("utf-8", "replace")
         structured_bytes = len(structured_text) if structured_text is not None else 0

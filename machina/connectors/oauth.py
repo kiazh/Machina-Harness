@@ -240,24 +240,33 @@ class OAuthCoordinator:
             digest = self._digest_of(snapshot, config_revision=config.revision)
             preview_id = secrets.token_hex(8)
             expires_at = self._now() + timedelta(seconds=OAUTH_PREVIEW_TTL_SECONDS)
-            async with self._lock:
-                await self._sweep_previews_locked()
-                # FM3-RF6-F2 cap: evict the oldest preview (closing its
-                # listener) instead of growing unboundedly.
-                while len(self._previews) >= OAUTH_MAX_PREVIEWS:
-                    oldest = next(iter(self._previews), None)
-                    if oldest is None:
-                        break
-                    await self._close_preview_locked(oldest)
-                self._previews[preview_id] = {
-                    "connector_id": connector_id,
-                    "owner": owner,
-                    "snapshot": snapshot,
-                    "digest": digest,
-                    "callback": callback,
-                    "expires_at": expires_at,
-                    "local_access": bool(config.local_access),
-                }
+            try:
+                async with self._lock:
+                    await self._sweep_previews_locked()
+                    # FM3-RF6-F2 cap: evict the oldest preview (closing its
+                    # listener) instead of growing unboundedly.
+                    while len(self._previews) >= OAUTH_MAX_PREVIEWS:
+                        oldest = next(iter(self._previews), None)
+                        if oldest is None:
+                            break
+                        await self._close_preview_locked(oldest)
+                    self._previews[preview_id] = {
+                        "connector_id": connector_id,
+                        "owner": owner,
+                        "snapshot": snapshot,
+                        "digest": digest,
+                        "callback": callback,
+                        "expires_at": expires_at,
+                        "local_access": bool(config.local_access),
+                    }
+            except BaseException:
+                # Reservation already bound the loopback socket. Cancellation
+                # while waiting for the preview lock must not orphan it.
+                try:
+                    await callback.aclose()
+                except BaseException:
+                    pass
+                raise
             result: dict[str, Any] = {
                 "previewId": preview_id,
                 "digest": digest,
@@ -382,8 +391,17 @@ class OAuthCoordinator:
             # be linearized with credential publication.
             "publication_fence": PublicationFence(),
         }
-        async with self._lock:
-            self._operations[operation_id] = operation
+        try:
+            async with self._lock:
+                self._operations[operation_id] = operation
+        except BaseException:
+            # The preview was already removed; until the operation is
+            # registered this callback has no owner and must be closed.
+            try:
+                await callback.aclose()
+            except BaseException:
+                pass
+            raise
         task = asyncio.create_task(self._run_operation(operation_id))
         operation["task"] = task
         return {"operation": self._operation_view(operation)}

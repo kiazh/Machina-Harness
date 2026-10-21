@@ -239,8 +239,12 @@ class QuickOpenIndex:
         visited: set[tuple[int, int]],
         pending: list[str],
         symlinked_dirs: set[str],
-    ) -> None:
-        """Follow a symlink only when its target stays inside the root."""
+    ) -> bool | None:
+        """Follow a symlink only when its target stays inside the root.
+
+        Returns False when adding a symlinked regular file hit the file cap,
+        so the caller can stop the walk just like the regular-file branch.
+        """
         try:
             target = os.path.realpath(raw.path)
         except OSError:
@@ -268,7 +272,8 @@ class QuickOpenIndex:
             # point of use (scan()) so a swapped link cannot redirect it.
             symlinked_dirs.add(rel)
         elif stat.S_ISREG(st.st_mode):
-            self._add(rel)
+            return self._add(rel)
+        return None
 
     async def scan(self) -> None:
         """Walk the root; yields to the event loop after every bounded slice.
@@ -325,7 +330,12 @@ class QuickOpenIndex:
                             continue
                         rel = f"{rel_dir}/{name}" if rel_dir else name
                         if raw.is_symlink():
-                            self._scan_symlink(raw, rel, visited, pending, symlinked_dirs)
+                            if (
+                                self._scan_symlink(raw, rel, visited, pending, symlinked_dirs)
+                                is False
+                            ):
+                                stop = True
+                                break
                         elif raw.is_dir(follow_symlinks=False):
                             self._queue_directory(raw, rel, visited, pending)
                         elif raw.is_file(follow_symlinks=False):

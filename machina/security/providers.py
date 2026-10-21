@@ -73,6 +73,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+MAX_MODELS_RESPONSE_BYTES = 1_000_000
 
 #: Explicit operator opt-in that permits non-loopback plaintext http
 #: endpoints (bearer keys then travel in cleartext).
@@ -245,7 +246,13 @@ def load_store() -> dict[str, Any]:
         return _empty_store()
     if not isinstance(raw, dict) or not isinstance(raw.get("providers"), dict):
         return _empty_store()
-    return {"version": int(raw.get("version") or 1), "providers": raw["providers"]}
+    try:
+        version = int(raw.get("version") or 1)
+    except (TypeError, ValueError):
+        # A corrupt version field must not make every provider operation
+        # raise despite load_store's never-raises contract.
+        version = 1
+    return {"version": version, "providers": raw["providers"]}
 
 
 def _save_store(store: dict[str, Any]) -> Path:
@@ -488,20 +495,52 @@ def fetch_models(
     owned = client is None
     http = client or httpx.Client(timeout=httpx.Timeout(timeout, connect=min(5.0, timeout)))
     try:
-        response = http.get(url, headers=headers)
-    except Exception as exc:
-        raise ProviderStoreError(f"could not reach {base_url} ({type(exc).__name__})") from exc
+        if owned:
+            # Production path: enforce the byte cap while streaming, before
+            # response.json() can materialize an attacker-sized body.
+            body = bytearray()
+            try:
+                with http.stream("GET", url, headers=headers) as response:
+                    status = response.status_code
+                    if status == 200:
+                        for chunk in response.iter_bytes():
+                            if len(body) + len(chunk) > MAX_MODELS_RESPONSE_BYTES:
+                                raise ProviderStoreError(
+                                    "model list response exceeded the byte limit"
+                                )
+                            body.extend(chunk)
+            except ProviderStoreError:
+                raise
+            except Exception as exc:
+                raise ProviderStoreError(
+                    f"could not reach {base_url} ({type(exc).__name__})"
+                ) from exc
+            if status != 200:
+                raise ProviderStoreError(
+                    f"model list request returned HTTP {status} from {base_url}"
+                )
+            try:
+                payload = json.loads(bytes(body))
+            except ValueError as exc:
+                raise ProviderStoreError("model list response was not JSON") from exc
+        else:
+            try:
+                response = http.get(url, headers=headers)
+            except Exception as exc:
+                raise ProviderStoreError(
+                    f"could not reach {base_url} ({type(exc).__name__})"
+                ) from exc
+            if response.status_code != 200:
+                raise ProviderStoreError(
+                    f"model list request returned HTTP {response.status_code} from {base_url}"
+                )
+            try:
+                payload = response.json()
+            except Exception as exc:
+                raise ProviderStoreError("model list response was not JSON") from exc
     finally:
         if owned:
             http.close()
-    if response.status_code != 200:
-        raise ProviderStoreError(
-            f"model list request returned HTTP {response.status_code} from {base_url}"
-        )
-    try:
-        payload = response.json()
-    except Exception as exc:
-        raise ProviderStoreError("model list response was not JSON") from exc
     rows: Any = None
     if isinstance(payload, dict):
         rows = payload.get("data")

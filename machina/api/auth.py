@@ -7,6 +7,7 @@ The key is read from the ``MACHINA_API_KEY`` environment variable (via
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 
@@ -22,8 +23,11 @@ API_KEY_ENV = "MACHINA_API_KEY"
 def configured_key() -> str | None:
     try:
         return get_secret(API_KEY_ENV)
-    except Exception:
-        return None  # Fail closed if a secret provider is unavailable.
+    except Exception as exc:
+        # Fail closed, but leave a non-secret diagnostic for operators:
+        # a backend outage must not look identical to a missing setting.
+        logger.warning("API key backend unavailable (%s)", type(exc).__name__)
+        return None
 
 
 def _extract(authorization: str | None, x_api_key: str | None) -> str | None:
@@ -39,8 +43,12 @@ async def require_api_key(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> None:
     """FastAPI dependency: accept the request only with the right key."""
-    expected = configured_key()
-    if expected is None:
+    # Vault/AWS backends use synchronous HTTP; keep that potentially
+    # blocking work off the event loop on cache expiry.
+    expected = await asyncio.to_thread(configured_key)
+    # An empty configured value is not a key. Treating it as configured would
+    # let an empty presented value compare equal and bypass auth.
+    if not expected:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             f"API key not configured; set {API_KEY_ENV}",
@@ -53,7 +61,7 @@ async def require_api_key(
             if presented is not None
             else False
         )
-    except (TypeError, UnicodeError, Exception):
+    except (TypeError, UnicodeError):
         ok = False
     if not ok:
         raise HTTPException(

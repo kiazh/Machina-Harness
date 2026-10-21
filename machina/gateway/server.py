@@ -310,7 +310,10 @@ class Gateway:
         """Parse and answer one inbound JSON-RPC frame."""
         try:
             message = json.loads(line)
-        except json.JSONDecodeError as e:
+        except (ValueError, RecursionError) as e:
+            # JSONDecodeError is only one ValueError subclass; huge integer
+            # literals and deeply nested frames must be parse errors too, not
+            # exceptions that unwind the gateway loop.
             logger.warning("Parse error: %s", e)
             self._send_error(None, PARSE_ERROR, f"parse error: {e}")
             return

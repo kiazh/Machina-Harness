@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from machina import services
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 async def config_get(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """Get current configuration."""
     gw.require_db()
-    snapshot = _config_snapshot()
+    snapshot = await asyncio.to_thread(_config_snapshot)
     snapshot["model"], snapshot["provider"] = gw.model, gw.provider
     return {"config": snapshot, "secrets": sorted(SECRET_KEYS)}
 

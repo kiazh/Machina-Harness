@@ -111,7 +111,7 @@ def _serialize_event(
         if pauses:
             from machina.protocol import approval_summary
 
-            data["needsApproval"] = [approval_summary(p) for p in pauses]
+            data["needsApproval"] = _redact_value([approval_summary(p) for p in pauses])
     elif event.type == "needs_approval":
         # Typed pause (AH-AUDIT-030): actionable, never a generic error.
         data["requestId"] = event.content

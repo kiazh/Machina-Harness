@@ -401,7 +401,13 @@ async def _stream_session(
                         "toolCalls": terminal_payload["toolCalls"],
                     }
                     if "needsApproval" in terminal_payload:
-                        terminal_data["needsApproval"] = terminal_payload["needsApproval"]
+                        # The terminal summary is a transport artifact too:
+                        # approval targets can contain URLs, commands, or
+                        # paths with credentials and must use the same
+                        # redaction as live needs_approval frames.
+                        terminal_data["needsApproval"] = _redact_value(
+                            terminal_payload["needsApproval"]
+                        )
                 else:
                     logger.warning("Unknown turn event kind: %s", turn_event.kind)
         except TimeoutError:

@@ -370,7 +370,8 @@ def _redact_output(text: str) -> str:
 
         return redact_secrets(text).text
     except Exception:
-        return text
+        # A diagnostic is never worth leaking a credential: fail closed.
+        return "[redaction unavailable]"
 
 
 def _run(
@@ -516,7 +517,7 @@ def _probe_list(spec: PlatformSpec, binary: str | None) -> _ListProbe:
     if result.timed_out:
         return _ListProbe(False, False, "", "list command timed out")
     if result.returncode != 0:
-        detail = _bounded(_strip_ansi(result.stderr or result.output).strip(), MAX_DETAIL_CHARS)
+        detail = _bounded(_redact_output(result.stderr or result.output), MAX_DETAIL_CHARS)
         return _ListProbe(False, False, "", f"list command failed ({detail or 'no output'})")
     try:
         rows = _parse_listing(spec, result.output)
@@ -534,7 +535,7 @@ def _probe_version(spec: PlatformSpec, binary: str) -> str | None:
     )
     if result.timed_out or result.returncode != 0:
         return None
-    for line in _strip_ansi(result.output).splitlines():
+    for line in _redact_output(result.output).splitlines():
         line = line.strip()
         if line:
             return line[:MAX_VERSION_CHARS]

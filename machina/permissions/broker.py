@@ -564,9 +564,16 @@ def _file_write_diff(req: ActionRequest) -> dict:
 
         current = ""
         try:
-            p = Path(req.targets[0])
-            if p.is_file() and p.stat().st_size <= 200_000:
-                current = p.read_text(encoding="utf-8", errors="replace")[:4000]
+            p = Path(req.targets[0]).expanduser()
+            root = Path(req.cwd or ".").resolve()
+            resolved = (p if p.is_absolute() else root / p).resolve()
+            # The approval card must not read a file the requested write is
+            # not authorized to touch. In particular /etc/shadow and
+            # /proc/self/environ are outside the workspace root even though
+            # they are syntactically valid targets.
+            if resolved == root or root in resolved.parents:
+                if resolved.is_file() and resolved.stat().st_size <= 200_000:
+                    current = resolved.read_text(encoding="utf-8", errors="replace")[:4000]
         except Exception:
             current = ""
         # RF3-F2: redact BEFORE diffing — the unified diff is display-only

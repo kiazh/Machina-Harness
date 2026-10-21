@@ -86,9 +86,20 @@ def action_for_tool(name: str, args: dict) -> dict:
             "network": [str(args.get("url", args.get("query", "")))],
         }
     if name in ("delegate",):
-        return {"operation": "delegate", "targets": [str(args.get("agent", ""))]}
+        return {
+            "operation": "delegate",
+            "targets": [str(args.get("agent", ""))],
+            # The task text is the execution payload: bind it so one reviewed
+            # delegation approval cannot be reused for a different task.
+            "content": json.dumps(args, sort_keys=True, ensure_ascii=False),
+        }
     if name in ("share_memory", "remember", "recall", "learn_personality"):
-        return {"operation": "memory", "targets": []}
+        return {
+            "operation": "memory",
+            "targets": [],
+            # Bind the memory body/arguments for the same reason.
+            "content": json.dumps(args, sort_keys=True, ensure_ascii=False),
+        }
     if name in ("skill_list", "skill_read", "skill_resource"):
         return {"operation": "skill.read", "targets": [str(args.get("skill_name", ""))]}
     if name in ("session_recall", "session_recall_window", "list_agents", "harness_status"):

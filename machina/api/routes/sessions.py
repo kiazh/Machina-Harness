@@ -186,5 +186,5 @@ async def get_context(session_id: str, limit: int = Query(50, ge=1, le=500)) -> 
         ],
         "totalTokens": await context_manager.get_token_usage(sid),
         "budget": await session_context_window(session),
-        "goal": session.goal,
+        "goal": redact_secrets(session.goal or "").text,
     }

@@ -57,8 +57,15 @@ _write_failures = 0
 
 # Inbound protocol lines are bounded too: a flooding client applies
 # back-pressure to its own reader thread instead of growing the queue
-# without limit.
-_READ_QUEUE_MAX = 1024
+# without limit. The byte cap is enforced before decoding or queueing, so a
+# single newline-free frame cannot allocate without bound.
+_READ_QUEUE_MAX = 256
+_MAX_FRAME_BYTES = 8 * 1024 * 1024
+# Request handlers are chained, but the dispatcher must not turn an arbitrarily
+# long inbound queue into an arbitrarily long task chain. The semaphore caps
+# outstanding handlers; with the queue byte/frame caps this bounds both tasks
+# and retained line strings.
+_MAX_INFLIGHT_REQUESTS = 64
 
 # Control requests preempt the serial request chain (H21). Each exists to
 # cancel, resolve, revoke, or stop in-flight work, so queueing one behind a
@@ -148,7 +155,12 @@ def _put_inbound(
     except RuntimeError:
         return False
     try:
-        future.result()
+        # A full queue plus a dispatcher that has already started shutting
+        # down must not park this daemon reader forever while its event loop
+        # is retired. Bounded back-pressure lets the reader exit.
+        future.result(timeout=REQUEST_DRAIN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return False
     except Exception:  # loop closed/cancelled while the reader was parked
         return False
     return True
@@ -159,7 +171,20 @@ def _start_stdin_reader(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[st
 
     def pump() -> None:
         try:
-            for raw in iter(_protocol_in.readline, b""):
+            while True:
+                raw = _protocol_in.readline(_MAX_FRAME_BYTES + 1)
+                if not raw:
+                    return
+                if len(raw) > _MAX_FRAME_BYTES:
+                    # Discard the remainder of this frame so its tail cannot be
+                    # mistaken for a new, shorter request. The client gets no
+                    # response; an oversized frame is not a valid request.
+                    while not raw.endswith(b"\n"):
+                        raw = _protocol_in.readline(_MAX_FRAME_BYTES + 1)
+                        if not raw:
+                            return
+                    logger.warning("gateway protocol frame exceeded the byte limit")
+                    continue
                 line = raw.decode("utf-8", errors="replace").strip()
                 if line and not _put_inbound(queue, loop, line):
                     return
@@ -173,7 +198,9 @@ def _request_method(line: str) -> str | None:
     """Best-effort method name for dispatch; malformed frames return None."""
     try:
         message = json.loads(line)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
+        # JSONDecodeError is a ValueError; huge integers and deeply nested
+        # frames raise those other ValueError/RecursionError subclasses too.
         return None
     if not isinstance(message, dict):
         return None
@@ -200,9 +227,11 @@ async def _dispatch_requests(gateway: Any, queue: asyncio.Queue[str | None]) -> 
     """
     requests: set[asyncio.Task[None]] = set()
     tail: asyncio.Task[None] | None = None
+    slots = asyncio.Semaphore(_MAX_INFLIGHT_REQUESTS)
 
     def _retire(task: asyncio.Task[None]) -> None:
         requests.discard(task)
+        slots.release()
         if task.cancelled():
             return
         error = task.exception()
@@ -232,8 +261,11 @@ async def _dispatch_requests(gateway: Any, queue: asyncio.Queue[str | None]) -> 
             # Preempt: awaited (not spawned) so shutdown is fully applied
             # before the loop decides whether to keep reading.
             await gateway.handle_line(line)
-        else:
-            start(line)
+            continue
+        # Backpressure before creating the next chained handler. This keeps
+        # the queue bound meaningful even when every handler is slow.
+        await slots.acquire()
+        start(line)
 
     pending = [task for task in requests if not task.done()]
     if pending:
