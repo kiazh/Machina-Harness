@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.0 — 2026-10-21
+
+- Model picker now uses the bundled models.dev catalog for built-in providers, with current names, context windows, efforts, and descriptions.
+- Reworked grouped picker headers and rows: provider names in section headers, display names as labels, and compact model/context/effort descriptions.
+- Grok subscription menu includes the current Grok variants and remains separate from the xAI API-key provider.
+
 ## 1.1.1 — 2026-10-21
 
 - Cleaned the model picker to one current row per family and removed legacy duplicates.

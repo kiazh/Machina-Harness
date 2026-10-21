@@ -1383,7 +1383,7 @@ test("/models groups catalogs per provider with the selected provider first", as
 	// The selected provider's section renders first, with its live rows.
 	const rows = host.pickItems[0]!;
 	assert.equal(rows[0]!.value, "__section__::chatgpt");
-	assert.match(rows[0]!.label!, /chatgpt \(current\)/);
+	assert.match(rows[0]!.label!, /ChatGPT subscription · current/);
 	assert.equal(rows[1]!.value, "chatgpt::gpt-6-luna");
 	assert.match(rows[1]!.description ?? "", /effort: low\/high/);
 	assert.match(rows[1]!.description ?? "", /ctx 272K/);

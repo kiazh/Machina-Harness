@@ -38,7 +38,7 @@ from machina.core.config import (
     persist_provider_fallback,
 )
 from machina.core.exceptions import ValidationError
-from machina.core.provider import catalog
+from machina.core.provider import catalog, models_dev
 from machina.core.provider.reasoning import supported_reasoning_efforts
 from machina.core.provider.specs import PROVIDERS
 from machina.core.session import session_manager
@@ -161,10 +161,17 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         return await _chatgpt_models(provider, refresh)
     if store.is_named_provider(provider):
         return await _named_models(provider, refresh)
-    # Built-in direct families have no discovery endpoint this surface owns;
-    # the UI falls back to its curated list for them.
+    # Built-in direct families use the bundled models.dev snapshot. This is
+    # the same source the UI fallback was hand-written from, so the picker
+    # shows current metadata without a provider-specific discovery endpoint.
     if provider in PROVIDERS:
-        return _models_payload(provider, source="none", models=[])
+        rows = models_dev.provider_models(provider)
+        return _models_payload(
+            provider,
+            source="models.dev" if rows else "none",
+            models=rows,
+            fetch_error=None if rows else "no models.dev entry for this provider",
+        )
     raise RpcError(INVALID_PARAMS, f"unknown provider: {provider}")
 
 

@@ -25,9 +25,31 @@ import { confirm, type Command, type FeatureHost } from "./types.ts";
 
 export interface ModelEntry {
 	model: string;
-	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "opencode" | "custom" | "ollama" | string;
+	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "grok" | "opencode" | "custom" | "ollama" | string;
 	description: string;
+	displayName?: string;
+	contextWindow?: number | null;
+	efforts?: string[];
 }
+
+const PROVIDER_LABELS: Record<string, string> = {
+	openai: "OpenAI",
+	anthropic: "Anthropic",
+	google: "Google",
+	deepseek: "DeepSeek",
+	xai: "xAI",
+	grok: "Grok subscription",
+	groq: "Groq",
+	mistral: "Mistral",
+	together: "Together AI",
+	openrouter: "OpenRouter",
+	opencode: "OpenCode Zen",
+	kimi: "Kimi Code",
+	chatgpt: "ChatGPT subscription",
+	copilot: "GitHub Copilot",
+	ollama: "Ollama (local)",
+	custom: "Custom endpoint",
+};
 
 // Offline fallback only: the real catalogs (OpenAI account + user-added
 // providers) are fetched at runtime; this list keeps `/models` useful when
@@ -112,7 +134,10 @@ export function catalogToEntries(result: ModelsListResult): ModelEntry[] {
 	return result.models.map((entry) => ({
 		model: entry.id,
 		provider: result.provider,
-		description: catalogDescription(entry),
+		displayName: entry.displayName,
+		contextWindow: entry.contextWindow,
+		efforts: entry.efforts,
+		description: entry.description ?? "",
 	}));
 }
 
@@ -143,10 +168,16 @@ export interface GroupedModels {
 export type ModelPickerRow = SelectItem & { section?: true };
 
 function toSelectItem(e: ModelEntry): SelectItem {
+	const label = e.displayName && e.displayName !== e.model ? e.displayName : e.model;
+	const bits = [e.model];
+	const window = formatContextWindow(e.contextWindow);
+	if (window !== "—") bits.push(`ctx ${window}`);
+	if (e.efforts?.length) bits.push(`effort: ${e.efforts.join("/")}`);
+	if (e.description) bits.push(e.description);
 	return {
 		value: `${e.provider}::${e.model}`,
-		label: `${e.model} (${e.provider})`,
-		description: e.description,
+		label,
+		description: bits.join(" · "),
 	};
 }
 
@@ -234,9 +265,10 @@ export function buildModelPickerRows(groups: ModelGroup[]): ModelPickerRow[] {
 	const rows: ModelPickerRow[] = [];
 	for (const group of groups) {
 		if (!group.entries.length) continue;
+		const label = PROVIDER_LABELS[group.provider] ?? group.provider;
 		rows.push({
 			value: `__section__::${group.provider}`,
-			label: `── ${group.provider}${group.current ? " (current)" : ""} · ${group.entries.length} model(s) ──`,
+			label: `── ${label}${group.current ? " · current" : ""} · ${group.entries.length} ──`,
 			section: true,
 		});
 		for (const entry of group.entries) rows.push(toSelectItem(entry));
