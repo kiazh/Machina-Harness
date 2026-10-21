@@ -10,7 +10,7 @@ Machina is a terminal AI workspace: chat beside your code, delegate to specialis
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** 0.2.0 development release candidate. See [release evidence and remaining deployment gates](docs/verification/RELEASE_READINESS.md) before operating a public service.
+**Release status:** **1.0.0 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.0.0 release notes](docs/verification/RELEASE_1.0.0.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 

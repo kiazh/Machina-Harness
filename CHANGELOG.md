@@ -1,6 +1,16 @@
 # Release notes
 
-## 0.2.0 — unreleased candidate
+## 1.0.0 — 2026-10-21
+
+First open-source release of Machina as a self-hosted agent harness.
+
+- Terminal UI, CLI, HTTP API, MCP, PostgreSQL context/memory, permissions, jobs, skills, and provider integrations.
+- Bounded MCP subagent delegation (`machina_agents`, `machina_delegate`, `machina_delegate_many`).
+- Full-code review hardening across gateway framing/backpressure, approval redaction, memory/job ownership, extension-tool digest binding, MCP result bounds, session fork archives, OAuth cleanup, audit permissions, SoulSpec export ownership, quick-open containment, and LSP lifecycle handling.
+- Release validation: 6,502 backend tests passed (2 skipped), 1,165 UI tests passed, Docker image/CLI smoke passed, wheel/sdist isolated-import checks passed, and GitHub Actions CI (backend, UI, Docker) passed.
+- Known limitations: self-hosted only; no hosted service, production SLA, backup/restore certification, or guarantee for every provider/account combination. Review the release notes before use.
+
+## 0.2.0 — development release (historical)
 
 - Fullscreen terminal UI with themes, framed results, exact approval controls and quieter motion.
 - Interactive persona editing, persisted runtime learning and feedback/revision restoration.
