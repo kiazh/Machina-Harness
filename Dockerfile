@@ -5,7 +5,7 @@
 # moving tag.
 
 # ─── Build stage ────────────────────────────────────────────────────────────
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS builder
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS builder
 
 WORKDIR /app
 
@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir --upgrade pip "uv==0.11.7" \
     && pip install --no-cache-dir --no-deps .
 
 # ─── Runtime stage ───────────────────────────────────────────────────────────
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS runtime
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
 
 WORKDIR /app
 
