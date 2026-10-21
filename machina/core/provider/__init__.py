@@ -29,6 +29,7 @@ from .chatgpt import ChatGPTProvider  # noqa: F401 — chatgpt-account import su
 from .copilot import CopilotProvider  # noqa: F401 — copilot-seat import surface
 from .direct import DirectProvider  # noqa: F401 — pre-split import surface
 from .factory import get_provider
+from .grok import GrokProvider  # noqa: F401 — Grok subscription import surface
 from .ollama import OllamaProvider  # noqa: F401 — pre-split import surface
 from .openrouter import OpenRouterProvider  # noqa: F401 — pre-split import surface
 from .rate_limit import AsyncTokenBucket, reload_rate_limiters

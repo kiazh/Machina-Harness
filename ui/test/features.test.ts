@@ -1445,7 +1445,10 @@ test("/models search matches provider names and model ids across groups", async 
 	const menu = new Menu("Models", rows, {});
 	// Typing a provider name narrows to that provider's models.
 	menu.handleInput("deepseek");
-	assert.deepEqual(menu.filtered().map((row) => row.value), ["deepseek::deepseek-chat"]);
+	assert.deepEqual(menu.filtered().map((row) => row.value), [
+		"deepseek::deepseek-v4-flash",
+		"deepseek::deepseek-chat",
+	]);
 	assert.ok(!menu.filtered().some((row) => row.value.startsWith("__section__")), "headers yield during search");
 	// Typing a family matches every provider's gpt rows (catalog + curated).
 	for (let i = 0; i < "deepseek".length; i++) menu.handleInput("\x7f");
@@ -1456,7 +1459,10 @@ test("/models search matches provider names and model ids across groups", async 
 	// The /models <query> path uses the same match across groups.
 	const deepseek = filterModelGroups(grouped.groups, "deepseek");
 	assert.deepEqual(deepseek.map((group) => group.provider), ["deepseek"]);
-	assert.deepEqual(deepseek[0]!.entries.map((entry) => entry.model), ["deepseek-chat"]);
+	assert.deepEqual(deepseek[0]!.entries.map((entry) => entry.model), [
+		"deepseek-v4-flash",
+		"deepseek-chat",
+	]);
 	assert.ok(filterModelGroups(grouped.groups, "gpt").some((group) => group.provider === "chatgpt"));
 });
 

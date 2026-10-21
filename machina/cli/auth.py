@@ -1,11 +1,12 @@
 """``machina auth`` — sign in to subscription providers for their LLM providers.
 
-Two providers are covered, each with ``login|status|logout``:
+Three providers are covered, each with ``login|status|logout``:
 
 * ``chatgpt`` — the Codex CLI's public OAuth client (top-level ``login`` /
   ``status`` / ``logout`` remain as aliases for this one).
 * ``copilot`` — GitHub's device flow (or a read-only ``gh auth token`` import)
   for a Copilot seat.
+* ``grok`` — xAI's device flow for SuperGrok / X Premium+ subscriptions.
 
 Every login listener binds loopback only and never logs a request line (the
 one-time code and state travel in the query string); the state check uses
@@ -37,11 +38,11 @@ from rich.markup import escape
 
 from machina.cli import output
 from machina.cli.output import console
-from machina.security import chatgpt_auth, copilot_auth
+from machina.security import chatgpt_auth, copilot_auth, grok_auth
 
 app = typer.Typer(
     name="auth",
-    help="Sign in to subscription LLM providers (chatgpt, copilot).",
+    help="Sign in to subscription LLM providers (chatgpt, copilot, grok).",
     no_args_is_help=True,
 )
 
@@ -358,6 +359,79 @@ chatgpt_app.command("login")(login)
 chatgpt_app.command("status")(status)
 chatgpt_app.command("logout")(logout)
 app.add_typer(chatgpt_app, name="chatgpt")
+
+
+# ─── grok (xAI subscription, device flow) ───────────────────────────────────
+
+
+def _print_grok_status(report: dict[str, Any]) -> None:
+    console.print("[bold]xAI Grok subscription[/bold]")
+    if not report.get("signed_in"):
+        output.status_line("Status", "not signed in", "warning")
+        console.print("  Sign in with [bold]machina auth grok login[/bold].")
+        return
+    detail = "signed in (Machina token store)"
+    if report.get("expired"):
+        detail += " — access token expired, refreshes on the next call"
+    output.status_line("Status", detail, "success")
+    output.status_line("Account", str(report.get("account_id") or "unknown"))
+    output.status_line("Expires", _expiry_text(report.get("expires_at")))
+    output.muted(f"Tokens live in {grok_auth.auth_path()}; the grok provider uses them.")
+
+
+@app.command("grok-login", hidden=True)
+def grok_login(
+    no_browser: bool = typer.Option(False, "--no-browser"),
+    timeout: float = typer.Option(300.0, "--timeout"),
+) -> None:
+    """Sign in with a SuperGrok / X Premium+ subscription (device flow)."""
+    try:
+        device = grok_auth.start_device_login()
+    except grok_auth.GrokAuthError as error:
+        output.error(str(error))
+        raise typer.Exit(EXIT_FAILED) from None
+    url = str(device.get("verification_uri_complete") or device["verification_uri"])
+    code = str(device["user_code"])
+    console.print("[bold]Open this URL and approve the Grok sign-in:[/bold]")
+    console.print(url, markup=False, highlight=False)
+    output.status_line("Code", code)
+    if not no_browser:
+        with suppress(Exception):
+            webbrowser.open(url)
+    output.muted(f"Waiting for approval (up to {timeout:g}s)...")
+    try:
+        tokens = grok_auth.poll_device_login(device, timeout=timeout)
+    except grok_auth.GrokAuthError as error:
+        output.error(str(error))
+        raise typer.Exit(EXIT_FAILED) from None
+    output.success(f"Signed in to Grok ({tokens.get('account_id') or 'xAI account'}).")
+    output.status_line("Expires", _expiry_text(tokens.get("expires_at")))
+
+
+@app.command("grok-status", hidden=True)
+def grok_status(json_output: bool = typer.Option(False, "--json")) -> None:
+    report = grok_auth.status()
+    if json_output:
+        typer.echo(json.dumps(report, sort_keys=True))
+    else:
+        _print_grok_status(report)
+    raise typer.Exit(EXIT_OK if report.get("signed_in") else EXIT_FAILED)
+
+
+@app.command("grok-logout", hidden=True)
+def grok_logout() -> None:
+    removed = grok_auth.logout()
+    if removed:
+        output.success("Signed out of Grok.")
+    else:
+        console.print("[yellow]Already signed out of Grok.[/yellow]")
+
+
+grok_app = typer.Typer(name="grok", help="Sign in to a Grok subscription.", no_args_is_help=True)
+grok_app.command("login")(grok_login)
+grok_app.command("status")(grok_status)
+grok_app.command("logout")(grok_logout)
+app.add_typer(grok_app, name="grok")
 
 
 # ─── copilot ─────────────────────────────────────────────────────────────────

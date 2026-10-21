@@ -22,9 +22,13 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     # (2026-10 catalog). Conservative where the vendor offers a beta/expansion
     # tier: the standard window is used so a turn is never refused against a
     # capacity the model may not actually serve.
+    "gemini-4": 1_048_576,
+    "gemini-3.8": 1_048_576,
     "gemini-2.5-flash": 1_048_576,
     "gemini-2.5-pro": 1_048_576,
     "gemini-2.0-flash": 1_048_576,
+    "gpt-6.1": 1_050_000,
+    "gpt-6": 1_050_000,
     "gpt-4.1": 1_047_576,
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
@@ -33,16 +37,23 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-5": 400_000,
     "o3": 200_000,
     "o4-mini": 200_000,
+    "grok-4.7": 500_000,
+    "grok-4.6": 500_000,
+    "grok-4.5": 500_000,
     "grok-4": 256_000,
     "grok-3": 131_072,
+    "claude-sonnet-5": 1_000_000,
+    "claude-opus-5": 1_000_000,
+    "claude-haiku-5": 1_000_000,
     "claude-sonnet-4": 200_000,
     "claude-opus-4": 200_000,
     "claude-haiku-4": 200_000,
     "claude-3-7-sonnet": 200_000,
     "claude-3-5-sonnet": 200_000,
     "llama-3.3-70b": 128_000,
+    "mistral-large-4": 1_048_576,
     "mistral-large": 128_000,
-    "mistral-small": 128_000,
+    "mistral-small": 262_144,
     # DeepSeek's hosted API is 64K for the chat/reasoner families; V4 reports
     # a 1M window in the OpenRouter catalog (provider-scoped lookup wins).
     "deepseek-v4": 1_048_576,
@@ -52,6 +63,7 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "deepseek-reasoner": 64_000,
     # Qwen hosted families. qwen-max is the 32K DashScope entry; the
     # 2.5/3 families are documented at 128K.
+    "qwen3.8": 131_072,
     "qwen3": 131_072,
     "qwen2.5": 131_072,
     "qwen-plus": 131_072,

@@ -132,6 +132,7 @@ RESERVED_NAMES: frozenset[str] = frozenset(
         "kimi",
         "chatgpt",
         "copilot",
+        "grok",
         "custom",
         "ollama",
     }

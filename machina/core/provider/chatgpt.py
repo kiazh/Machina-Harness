@@ -185,15 +185,17 @@ def _map_usage(usage: dict[str, Any]) -> dict[str, Any]:
     return parse_chatgpt_usage(usage)
 
 
-def _stream_error(event: dict[str, Any], model: str) -> ProviderError:
+def _stream_error(event: dict[str, Any], model: str, provider: str = "chatgpt") -> ProviderError:
     nested = event.get("error") if isinstance(event.get("error"), dict) else {}
     message = event.get("message") or nested.get("message") or "no detail"
     code = event.get("code") or nested.get("code")
     suffix = f" ({code})" if code else ""
-    return ProviderError(f"chatgpt stream error for {model}: {message}{suffix}")
+    return ProviderError(f"{provider} stream error for {model}: {message}{suffix}")
 
 
-def _terminal_failure(event: dict[str, Any], model: str) -> ProviderError:
+def _terminal_failure(
+    event: dict[str, Any], model: str, provider: str = "chatgpt"
+) -> ProviderError:
     response = event.get("response") if isinstance(event.get("response"), dict) else {}
     status = str(response.get("status") or event.get("type") or "failed").removeprefix("response.")
     error = response.get("error") if isinstance(response.get("error"), dict) else {}
@@ -203,10 +205,12 @@ def _terminal_failure(event: dict[str, Any], model: str) -> ProviderError:
         else {}
     )
     reason = error.get("message") or details.get("reason") or "no detail"
-    return ProviderError(f"chatgpt response {status} for {model}: {reason}")
+    return ProviderError(f"{provider} response {status} for {model}: {reason}")
 
 
-def _rate_limit_error(response: httpx.Response, model: str) -> RateLimitError:
+def _rate_limit_error(
+    response: httpx.Response, model: str, provider: str = "chatgpt"
+) -> RateLimitError:
     """ChatGPT plan quota exhausted (429). Credentials stay valid."""
     reset_at: float | None = None
     raw_reset = (response.headers.get("x-codex-primary-reset-at") or "").strip()
@@ -217,7 +221,7 @@ def _rate_limit_error(response: httpx.Response, model: str) -> RateLimitError:
         if raw_after.isdigit():
             reset_at = time.time() + float(raw_after)
     return RateLimitError(
-        f"ChatGPT usage limit reached (HTTP 429) for {model}; credentials are still valid. "
+        f"{provider} usage limit reached (HTTP 429) for {model}; credentials are still valid. "
         "Retry after the usage window resets.",
         reset_at=reset_at,
     )
@@ -241,6 +245,8 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
     """Codex protocol over the ChatGPT subscription backend."""
 
     owns_usage_reservation = True
+    PROVIDER_NAME = _PROVIDER_NAME
+    AUTH = chatgpt_auth
     BASE_URL = "https://chatgpt.com/backend-api/codex"
     RESPONSES_PATH = "/responses"
     ORIGINATOR = "machina"
@@ -259,7 +265,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         # entry happens when a call resolves its effective model, so a bad
         # level fails with the supported set for THAT model, not a global one.
         self._default_effort = str(reasoning_effort or "").strip().lower()
-        self._rate_limit_key = _PROVIDER_NAME
+        self._rate_limit_key = self.PROVIDER_NAME
         self._auth_path = auth_path
         self.client = httpx.AsyncClient(
             base_url=self.BASE_URL,
@@ -286,7 +292,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
             "User-Agent": f"machina/{__version__}",
             "session_id": str(uuid.uuid4()),
         }
-        account = str(tokens.get("account_id") or "") or chatgpt_auth.extract_account_id(access)
+        account = str(tokens.get("account_id") or "") or self.AUTH.extract_account_id(access)
         if account:
             headers["chatgpt-account-id"] = account
         return headers
@@ -396,6 +402,9 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
             )
         return "\n\n".join(instructions), items
 
+    def _validate_model(self, model: str) -> None:
+        validate_model_slug(model, account_id=self._account_hint())
+
     def _resolve_effort(self, model: str, explicit: str | None) -> str:
         """Catalog-validated effort: per-call > instance > config key.
 
@@ -442,28 +451,28 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         isolation between accounts (review round 6, R6-1).
         """
         try:
-            return str(chatgpt_auth.status(path=self._auth_path).get("account_id") or "")
+            return str(self.AUTH.status(path=self._auth_path).get("account_id") or "")
         except Exception:
             return ""
 
     async def _resolve_tokens(self) -> dict[str, Any]:
-        return await asyncio.to_thread(chatgpt_auth.resolve_tokens, path=self._auth_path)
+        return await asyncio.to_thread(self.AUTH.resolve_tokens, path=self._auth_path)
 
     async def _refresh_tokens(self, tokens: dict[str, Any]) -> dict[str, Any]:
         try:
-            return await asyncio.to_thread(chatgpt_auth.refresh, tokens, path=self._auth_path)
-        except chatgpt_auth.ChatGPTAuthError:
+            return await asyncio.to_thread(self.AUTH.refresh, tokens, path=self._auth_path)
+        except self.AUTH.ChatGPTAuthError:
             raise
         except Exception as exc:
-            raise chatgpt_auth.ChatGPTAuthError(
-                f"ChatGPT token refresh failed ({type(exc).__name__}); {chatgpt_auth.LOGIN_HINT}",
+            raise self.AUTH.ChatGPTAuthError(
+                f"{self.PROVIDER_NAME} token refresh failed ({type(exc).__name__}); {self.AUTH.LOGIN_HINT}",
                 code="chatgpt_refresh_failed",
             ) from exc
 
-    def _unauthorized(self, model: str) -> chatgpt_auth.ChatGPTAuthError:
-        return chatgpt_auth.ChatGPTAuthError(
-            f"ChatGPT rejected the stored credential (HTTP 401) for {model}; "
-            f"{chatgpt_auth.LOGIN_HINT}",
+    def _unauthorized(self, model: str) -> Any:
+        return self.AUTH.ChatGPTAuthError(
+            f"{self.PROVIDER_NAME} rejected the stored credential (HTTP 401) for {model}; "
+            f"{self.AUTH.LOGIN_HINT}",
             code="chatgpt_unauthorized",
         )
 
@@ -489,11 +498,11 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
         await self._rate_limiter.acquire()
 
         resolved_model = model or self.model
-        validate_model_slug(resolved_model, account_id=self._account_hint())
+        self._validate_model(resolved_model)
         payload = self._payload(messages, resolved_model, tools, reasoning_effort)
         settlement = await begin_stream_usage(
             store=usage_store,
-            provider_name=_PROVIDER_NAME,
+            provider_name=self.PROVIDER_NAME,
             model=resolved_model,
             messages=messages,
             tools=tools,
@@ -525,11 +534,11 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
                         raise self._unauthorized(resolved_model)
                     if response.status_code == 429:
                         await response.aread()
-                        raise _rate_limit_error(response, resolved_model)
+                        raise _rate_limit_error(response, resolved_model, self.PROVIDER_NAME)
                     if response.status_code != 200:
                         body = (await response.aread()).decode("utf-8", "replace")[:300]
                         raise ProviderError(
-                            f"chatgpt provider HTTP {response.status_code} for "
+                            f"{self.PROVIDER_NAME} provider HTTP {response.status_code} for "
                             f"{resolved_model}: {body}"
                         )
                     async for line in response.aiter_lines():
@@ -572,16 +581,16 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
                                 if isinstance(usage, dict):
                                     stream_usage = usage
                         elif event_type == _WIRE_EVENT_ERROR:
-                            raise _stream_error(event, resolved_model)
+                            raise _stream_error(event, resolved_model, self.PROVIDER_NAME)
                         elif event_type in _WIRE_EVENT_FATAL:
-                            raise _terminal_failure(event, resolved_model)
+                            raise _terminal_failure(event, resolved_model, self.PROVIDER_NAME)
                 break
             if not saw_terminal:
-                raise _truncated_stream_error(_PROVIDER_NAME, resolved_model)
+                raise _truncated_stream_error(self.PROVIDER_NAME, resolved_model)
         except BaseException as exc:
             await fail_stream(
                 settlement,
-                provider_name=_PROVIDER_NAME,
+                provider_name=self.PROVIDER_NAME,
                 audit_model=resolved_model,
                 resolved_model=resolved_model,
                 started=start,
@@ -591,7 +600,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
 
         response = await complete_stream(
             settlement,
-            provider_name=_PROVIDER_NAME,
+            provider_name=self.PROVIDER_NAME,
             requested_model=resolved_model,
             resolved_model=resolved_model,
             messages=messages,
@@ -603,7 +612,7 @@ class ChatGPTProvider(LLMProvider, RateLimitBinding):
             missing_usage="estimate",
             total_tokens="keep",
             audit_model=resolved_model,
-            debug_label="chatgpt",
+            debug_label=self.PROVIDER_NAME,
         )
         yield StreamEvent(type="done", response=response)
 

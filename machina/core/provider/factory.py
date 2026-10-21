@@ -11,6 +11,7 @@ from machina.core.provider.base import LLMProvider
 from machina.core.provider.chatgpt import ChatGPTProvider
 from machina.core.provider.copilot import CopilotProvider
 from machina.core.provider.direct import DirectProvider
+from machina.core.provider.grok import GrokProvider
 from machina.core.provider.ollama import OllamaProvider
 from machina.core.provider.openrouter import OpenRouterProvider
 from machina.core.provider.specs import PROVIDER_SPECS, ProviderSpec, provider_names
@@ -119,6 +120,9 @@ def get_provider(
     elif provider == "copilot":
         # GitHub Copilot seat (GitHub token); no API key.
         return CopilotProvider(model=model, reasoning_effort=reasoning_effort)
+    elif provider == "grok":
+        # xAI Grok subscription tokens from the device OAuth flow.
+        return GrokProvider(model=model, reasoning_effort=reasoning_effort)
     elif provider == "custom":
         return _custom_provider(model, reasoning_effort)
     elif provider == "ollama":

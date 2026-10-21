@@ -10,7 +10,7 @@ Machina is a terminal AI workspace: chat beside your code, delegate to specialis
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.0.0 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.0.0 release notes](docs/verification/RELEASE_1.0.0.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.1.0 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.0.0 release notes](docs/verification/RELEASE_1.0.0.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -649,18 +649,19 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | Provider ID | Credential or connection | Bundled default |
 |---|---|---|
 | `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022` |
-| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
-| `xai` | `XAI_API_KEY` | `grok-4` |
-| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
-| `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
-| `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` |
-| `google` | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
+| `openai` | `OPENAI_API_KEY` | `gpt-6.1-sol` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| `xai` | `XAI_API_KEY` | `grok-4.7` |
+| `groq` | `GROQ_API_KEY` | `qwen/qwen3.8-27b` |
+| `together` | `TOGETHER_API_KEY` | `deepseek-ai/DeepSeek-V4.1-Flash` |
+| `mistral` | `MISTRAL_API_KEY` | `mistral-large-4` |
+| `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
 | `chatgpt` | `machina auth login` | Choose from the account's model catalog |
 | `copilot` | `machina auth copilot login` | Choose a model available to your account |
+| `grok` | `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
 | `ollama` | A running Ollama service | `llama3.1`; the model must be installed |
 | `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
 
