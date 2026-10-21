@@ -49,6 +49,7 @@ import logging
 import os
 import secrets
 import urllib.parse
+import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -212,7 +213,7 @@ class WorkspaceService:
         # Subscription bookkeeping, by object identity: a connection/manager is
         # observed once for the service lifetime (handlers re-check epoch and
         # tracking before acting), so no duplicate events can be emitted.
-        self._state_subscribed: list[Any] = []
+        self._state_subscribed: weakref.WeakSet[Any] = weakref.WeakSet()
         self._ready_subscribed: list[Any] = []
         self._open_records: dict[str, _OpenRecord] = {}
         self._sync_tasks: dict[str, asyncio.Task[None]] = {}
@@ -416,10 +417,10 @@ class WorkspaceService:
         self._connections.clear()
         self._open_records.clear()
         self._diagnostics.clear()
-        # Drop retired manager/connection callbacks so repeated opens cannot
-        # retain every LSP manager ever seen for the process lifetime.
+        # Drop retired manager references. Connection subscriptions are held
+        # weakly, so reused connections keep exactly one handler without
+        # retaining every connection for the process lifetime.
         self._ready_subscribed.clear()
-        self._state_subscribed.clear()
 
     def _request_manager_stop(self, manager: Any) -> None:
         existing = self._stop_task
@@ -869,7 +870,7 @@ class WorkspaceService:
             connection=connection, language=language, epoch=self._epoch
         )
         if not any(existing is connection for existing in self._state_subscribed):
-            self._state_subscribed.append(connection)
+            self._state_subscribed.add(connection)
             subscribe_state = getattr(connection, "on_state_change", None)
             if callable(subscribe_state):
                 subscribe_state(self._handle_connection_state)
