@@ -38,6 +38,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "o3": 200_000,
     "o4-mini": 200_000,
     "grok-4.7": 500_000,
+    "grok-4.3": 1_000_000,
+    "grok-build": 256_000,
     "grok-4.6": 500_000,
     "grok-4.5": 500_000,
     "grok-4": 256_000,

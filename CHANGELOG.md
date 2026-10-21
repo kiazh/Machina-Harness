@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.1.1 — 2026-10-21
+
+- Cleaned the model picker to one current row per family and removed legacy duplicates.
+- Added Grok subscription variants: Grok 4.7 Build Fast, 4.6, 4.5, 4.3, and Grok Build 0.1.
+
 ## 1.1.0 — 2026-10-21
 
 - Updated curated model fallbacks and context windows from the models.dev catalog: GPT-6.1, Claude Sonnet/Opus/Haiku 5.x, Gemini 4, Grok 4.7, DeepSeek V4 Flash, Mistral Large 4, Qwen 3.8, and DeepSeek V4.1 Flash.

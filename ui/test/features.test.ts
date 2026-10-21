@@ -703,15 +703,15 @@ test("/default-model sets a custom id and saves it", async () => {
 test("/default-model with no args opens the menu and saves the pick", async () => {
 	const host = new FakeHost();
 	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
-	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-chat", provider: "deepseek" };
-	host.picks.push("deepseek::deepseek-chat");
+	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" };
+	host.picks.push("deepseek::deepseek-v4-flash");
 	await run("/default-model", host);
 	assert.deepEqual(
 		host.calls.map((c) => [c.method, c.params]),
 		[
 			["config.set", { key: "provider", value: "deepseek", persist: true }],
-			["config.set", { key: "model", value: "deepseek-chat", persist: true }],
-			["session.setModel", { sessionId: SESSION.id, model: "deepseek-chat", provider: "deepseek" }],
+			["config.set", { key: "model", value: "deepseek-v4-flash", persist: true }],
+			["session.setModel", { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" }],
 		],
 	);
 	assert.match(host.last().text, /saved as default/);
@@ -721,13 +721,13 @@ test("/default-model resolves a curated id directly", async () => {
 	const host = new FakeHost();
 	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
 	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-chat", provider: "deepseek" };
-	await run("/default-model deepseek-chat", host);
+	await run("/default-model deepseek-v4-flash", host);
 	assert.deepEqual(
 		host.calls.map((c) => [c.method, c.params]),
 		[
 			["config.set", { key: "provider", value: "deepseek", persist: true }],
-			["config.set", { key: "model", value: "deepseek-chat", persist: true }],
-			["session.setModel", { sessionId: SESSION.id, model: "deepseek-chat", provider: "deepseek" }],
+			["config.set", { key: "model", value: "deepseek-v4-flash", persist: true }],
+			["session.setModel", { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" }],
 		],
 	);
 });
@@ -1251,7 +1251,7 @@ test("/models never switches providers without the confirm", async () => {
 		p.provider === "deepseek"
 			? { provider: "deepseek", source: "none", models: [], fetchError: null }
 			: { provider: "chatgpt", source: "live", fetchError: null, models: [{ id: "gpt-6-luna" }] };
-	host.picks.push("deepseek::deepseek-chat", "no");
+	host.picks.push("deepseek::deepseek-v4-flash", "no");
 	await run("/models", host);
 	assert.ok(!host.calls.some((c) => c.method === "config.set" || c.method === "session.setModel"));
 	assert.match(host.last().text, /Provider unchanged/);
@@ -1269,18 +1269,18 @@ test("/models prefers the same model id under the current provider", async () =>
 	};
 	host.responses["models.list"] = (p: Record<string, unknown>) =>
 		p.provider === "chatgpt"
-			? { provider: "chatgpt", source: "live", fetchError: null, models: [{ id: "gpt-4o-mini" }] }
+			? { provider: "chatgpt", source: "live", fetchError: null, models: [{ id: "gpt-6.1-sol" }] }
 			: { provider: "openai", source: "none", models: [], fetchError: null };
 	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: p.provider, key: p.key, value: p.value });
-	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "gpt-4o-mini", provider: "openai" };
-	host.picks.push("chatgpt::gpt-4o-mini");
+	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "gpt-6.1-sol", provider: "openai" };
+	host.picks.push("chatgpt::gpt-6.1-sol");
 	await run("/models", host);
 	assert.ok(!host.pickTitles.some((title) => title.includes("Switch provider")), "same-id shadow needs no confirm");
 	assert.deepEqual(
 		host.calls.filter((c) => c.method === "config.set").map((c) => c.params),
 		[
 			{ key: "provider", value: "openai" },
-			{ key: "model", value: "gpt-4o-mini" },
+			{ key: "model", value: "gpt-6.1-sol" },
 		],
 	);
 	assert.ok(host.printed.some((p) => /also exists under openai/.test(p.text)));
@@ -1297,7 +1297,7 @@ test("/models filters by query and warns when nothing matches", async () => {
 
 test("/models curated list includes the ChatGPT account and OpenCode Zen defaults", () => {
 	const chatgpt = CURATED_MODELS.find((e) => e.provider === "chatgpt");
-	assert.equal(chatgpt?.model, "gpt-6.1-sol");
+	assert.equal(chatgpt?.model, "gpt-6-luna");
 	assert.match(chatgpt?.description ?? "", /\/auth/);
 	const opencode = CURATED_MODELS.find((e) => e.provider === "opencode");
 	assert.equal(opencode?.model, "big-pickle");
@@ -1391,7 +1391,7 @@ test("/models groups catalogs per provider with the selected provider first", as
 	// curated fallback rows both stay reachable and searchable.
 	const values = rows.map((row) => row.value);
 	assert.ok(values.includes("__section__::deepseek"));
-	assert.ok(values.includes("deepseek::deepseek-chat"));
+	assert.ok(values.includes("deepseek::deepseek-v4-flash"));
 	assert.ok(values.includes("__section__::acme"));
 	assert.ok(values.includes("acme::acme-1"));
 	assert.ok(values.indexOf("__section__::chatgpt") < values.indexOf("__section__::openrouter"));
@@ -1445,24 +1445,18 @@ test("/models search matches provider names and model ids across groups", async 
 	const menu = new Menu("Models", rows, {});
 	// Typing a provider name narrows to that provider's models.
 	menu.handleInput("deepseek");
-	assert.deepEqual(menu.filtered().map((row) => row.value), [
-		"deepseek::deepseek-v4-flash",
-		"deepseek::deepseek-chat",
-	]);
+	assert.deepEqual(menu.filtered().map((row) => row.value), ["deepseek::deepseek-v4-flash"]);
 	assert.ok(!menu.filtered().some((row) => row.value.startsWith("__section__")), "headers yield during search");
 	// Typing a family matches every provider's gpt rows (catalog + curated).
 	for (let i = 0; i < "deepseek".length; i++) menu.handleInput("\x7f");
 	menu.handleInput("gpt");
 	const gpt = menu.filtered().map((row) => row.value);
 	assert.ok(gpt.includes("chatgpt::gpt-6-luna"));
-	assert.ok(gpt.includes("openai::gpt-4o-mini"));
+	assert.ok(gpt.includes("openai::gpt-6.1-sol"));
 	// The /models <query> path uses the same match across groups.
 	const deepseek = filterModelGroups(grouped.groups, "deepseek");
 	assert.deepEqual(deepseek.map((group) => group.provider), ["deepseek"]);
-	assert.deepEqual(deepseek[0]!.entries.map((entry) => entry.model), [
-		"deepseek-v4-flash",
-		"deepseek-chat",
-	]);
+	assert.deepEqual(deepseek[0]!.entries.map((entry) => entry.model), ["deepseek-v4-flash"]);
 	assert.ok(filterModelGroups(grouped.groups, "gpt").some((group) => group.provider === "chatgpt"));
 });
 
