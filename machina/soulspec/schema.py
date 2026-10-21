@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,7 @@ _SEMVER = re.compile(
 
 # RF6-F6: every imported package file is bounded and must be UTF-8 text.
 _PACKAGE_FILE_MAX_BYTES = 256 * 1024
+_PACKAGE_OWNER_FILE = ".machina-package-owner.json"
 # R4-091: bound how many files one manifest may reference, so a manifest
 # cannot turn a package import into an unbounded number of reads.
 _PACKAGE_REFERENCE_MAX = 64
@@ -60,22 +62,41 @@ def _package_file(root: Path, relative: str) -> Path:
 
 
 def _previous_package_files(root: Path) -> set[str]:
-    """Relative paths declared by the destination's existing soul.json manifest.
+    """Files proven owned by Machina's previous export, not merely declared.
 
-    Returns an empty set when there is no readable manifest: without it,
-    ownership of destination files cannot be established, so nothing may be
-    removed.
+    A destination ``soul.json`` is attacker-controlled content. Deleting every
+    path it names would let a crafted manifest remove arbitrary files. Require
+    the private ownership marker written by the previous export, bind it to the
+    exact manifest bytes, and verify each file's hash before claiming it.
     """
     try:
-        manifest = json.loads(
-            _read_package_file(root / "soul.json", label="soul.json").decode("utf-8")
+        marker = json.loads(
+            _read_package_file(root / _PACKAGE_OWNER_FILE, label=_PACKAGE_OWNER_FILE).decode(
+                "utf-8"
+            )
         )
+        manifest = _read_package_file(root / "soul.json", label="soul.json")
     except (OSError, ValueError):
         return set()
-    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(marker, dict):
+        return set()
+    if marker.get("manifest_sha256") != hashlib.sha256(manifest).hexdigest():
+        return set()
+    files = marker.get("files")
     if not isinstance(files, dict):
         return set()
-    return {value for value in files.values() if isinstance(value, str)}
+    owned: set[str] = set()
+    for relative, expected in files.items():
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            continue
+        try:
+            path = _package_file(root, relative)
+            actual = hashlib.sha256(_read_package_file(path, label=relative)).hexdigest()
+        except (OSError, ValueError):
+            continue
+        if actual == expected:
+            owned.add(relative)
+    return owned
 
 
 def _read_package_file(path: Path, *, label: str) -> bytes:
@@ -475,8 +496,27 @@ class SoulSpec:
             destination = _package_file(root, relative)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(output_files[relative])
-        _package_file(root, "soul.json").write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        manifest_path = _package_file(root, "soul.json")
+        manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        manifest_path.write_bytes(manifest_bytes)
+        owner_files = {
+            relative: hashlib.sha256(
+                _read_package_file(_package_file(root, relative), label=relative)
+            ).hexdigest()
+            for relative in references.values()
+        }
+        owner_files["soul.json"] = hashlib.sha256(manifest_bytes).hexdigest()
+        _package_file(root, _PACKAGE_OWNER_FILE).write_text(
+            json.dumps(
+                {
+                    "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                    "files": owner_files,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
 
     @classmethod

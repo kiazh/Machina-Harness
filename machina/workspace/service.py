@@ -416,6 +416,10 @@ class WorkspaceService:
         self._connections.clear()
         self._open_records.clear()
         self._diagnostics.clear()
+        # Drop retired manager/connection callbacks so repeated opens cannot
+        # retain every LSP manager ever seen for the process lifetime.
+        self._ready_subscribed.clear()
+        self._state_subscribed.clear()
 
     def _request_manager_stop(self, manager: Any) -> None:
         existing = self._stop_task

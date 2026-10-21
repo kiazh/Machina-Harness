@@ -296,9 +296,10 @@ class QuickOpenIndex:
         stop = False
         while pending and not stop:
             rel_dir = pending.pop()
-            if rel_dir and rel_dir in symlinked_dirs:
-                # Re-validate a symlinked directory at the point of use: the
-                # link may have been swapped after _scan_symlink validated it.
+            if rel_dir:
+                # Re-validate EVERY queued directory at the point of use, not
+                # only directories reached through symlinks: a real directory
+                # can be swapped for an outside symlink after it was queued.
                 try:
                     resolved = os.path.realpath(self.root / rel_dir)
                 except OSError:
@@ -307,7 +308,7 @@ class QuickOpenIndex:
                     self.skipped_symlinks += 1
                     continue
             try:
-                iterator = os.scandir(self.root if not rel_dir else self.root / rel_dir)
+                iterator = os.scandir(resolved if rel_dir else self.root)
             except OSError:
                 self.unreadable += 1
                 self._mark(REASON_UNREADABLE)
