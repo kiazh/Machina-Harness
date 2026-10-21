@@ -8,12 +8,28 @@ Machina is a terminal AI workspace: chat beside your code, delegate to specialis
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
+## Install
+
+One command on macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.sh | bash
+```
+
+The installer sets up Python and UI dependencies, prepares `.env`, initializes
+PostgreSQL/pgvector when possible, and installs the `machina` launcher. You can
+also clone the repository and run `bash install.sh`.
+
+**Requirements:** Python 3.11+, Node.js 22.19+, and PostgreSQL with pgvector.
+See [Get started](#get-started) for manual setup, options, and Docker.
+
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
 **Release status:** **1.2.0 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.0 release notes](docs/verification/RELEASE_1.2.0.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
+- [Install](#install) — one-command setup
 - [Technical overview](#technical-overview) — the problems a harness must solve
 - [One session, end to end](#one-session-end-to-end) — the whole system in a worked example
 - [Feature tour](#feature-tour) — the headline capabilities
