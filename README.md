@@ -23,9 +23,15 @@ also clone the repository and run `bash install.sh`.
 **Requirements:** Python 3.11+, Node.js 22.19+, and PostgreSQL with pgvector.
 See [Get started](#get-started) for manual setup, options, and Docker.
 
+**Windows:** run this from **WSL2 (Ubuntu)** or **Git Bash**, not a native
+PowerShell prompt. In PowerShell, install WSL with `wsl --install`, open the
+Ubuntu shell, and run the command there. If WSL reports a missing `venv`
+module, run `sudo apt-get update && sudo apt-get install -y python3-venv`
+(use the matching `python3.XX-venv` package for your Python version) and retry.
+
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.0 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.0 release notes](docs/verification/RELEASE_1.2.0.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.1 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.1 release notes](docs/verification/RELEASE_1.2.1.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 

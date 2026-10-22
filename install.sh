@@ -136,14 +136,65 @@ is_repo_dir() { [ -f "$1/pyproject.toml" ] && [ -d "$1/machina" ] && [ -d "$1/ui
 # that case clone into a temporary directory and merge it in without ever
 # overwriting the operator's files. A normal empty/missing target keeps the
 # plain one-step clone.
+show_banner() {
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    printf '\n\033[1;36m  MACHINA\033[0m  self-hosted agent harness\n'
+    printf '  \033[2minstall · configure · run\033[0m\n\n'
+  else
+    printf '\nMACHINA — self-hosted agent harness\ninstall · configure · run\n\n'
+  fi
+}
+
+# Clone with bounded retries and a download animation. The first clone can
+# fail on a transient network/DNS error; retrying is safer than asking the
+# user to start over.
+clone_repo() {
+  local dest="$1" attempt=1 status
+  local log_file
+  log_file="$(mktemp "${TMPDIR:-/tmp}/machina-clone.XXXXXX")" || return 1
+  while [ "$attempt" -le 3 ]; do
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+      git clone --depth 1 "$REPO_URL" "$dest" >"$log_file" 2>&1 &
+      local pid=$! tick=0
+      while kill -0 "$pid" 2>/dev/null; do
+        case $((tick % 4)) in
+          0) printf '\r\033[2K\033[36m[install]\033[0m ◜ downloading Machina…' ;;
+          1) printf '\r\033[2K\033[36m[install]\033[0m ◝ downloading Machina…' ;;
+          2) printf '\r\033[2K\033[36m[install]\033[0m ◞ downloading Machina…' ;;
+          *) printf '\r\033[2K\033[36m[install]\033[0m ◟ downloading Machina…' ;;
+        esac
+        tick=$((tick + 1))
+        sleep 0.12
+      done
+      if wait "$pid"; then status=0; else status=$?; fi
+      printf '\r\033[2K'
+    else
+      git clone --depth 1 "$REPO_URL" "$dest" >"$log_file" 2>&1
+      status=$?
+    fi
+    if [ "$status" = "0" ]; then
+      rm -f "$log_file"
+      log "Repository downloaded"
+      return 0
+    fi
+    warn "git clone failed (attempt $attempt/3); retrying in ${attempt}s…"
+    rm -rf "$dest"
+    attempt=$((attempt + 1))
+    sleep "$attempt"
+  done
+  cat "$log_file" >&2
+  rm -f "$log_file"
+  return 1
+}
+
 clone_into_app_dir() {
   if [ ! -d "$APP_DIR" ] || [ -z "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
-    git clone --depth 1 "$REPO_URL" "$APP_DIR"
+    clone_repo "$APP_DIR"
     return
   fi
   local tmp entry base
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/machina-clone.XXXXXX")" || return 1
-  if ! git clone --depth 1 "$REPO_URL" "$tmp/repo"; then
+  if ! clone_repo "$tmp/repo"; then
     rm -rf "$tmp"
     return 1
   fi
@@ -163,15 +214,23 @@ clone_into_app_dir() {
 }
 
 pick_python() {
-  local c
-  for c in python3 python; do
-    if command -v "$c" >/dev/null 2>&1; then
-      if [ "$("$c" -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)' 2>/dev/null || echo 0)" = "1" ]; then
-        PYTHON_BIN="$c"
-        return 0
-      fi
+  local c fallback=""
+  # Prefer a version whose venv/ensurepip support is actually installed.
+  for c in python3.13 python3.12 python3.11 python3.14 python3 python; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    if [ "$("$c" -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)' 2>/dev/null || echo 0)" != "1" ]; then
+      continue
+    fi
+    if [ -z "$fallback" ]; then fallback="$c"; fi
+    if "$c" -c 'import ensurepip' >/dev/null 2>&1; then
+      PYTHON_BIN="$c"
+      return 0
     fi
   done
+  if [ -n "$fallback" ]; then
+    PYTHON_BIN="$fallback"
+    return 0
+  fi
   return 1
 }
 
@@ -194,7 +253,14 @@ detect_os() {
   esac
 }
 OS_FAMILY="$(detect_os)"
+if [ "$OS_FAMILY" = "linux" ] && { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; }; then
+  OS_FAMILY="wsl"
+fi
+show_banner
 log "Detected OS: $OS_FAMILY"
+if [ "$OS_FAMILY" = "windows" ]; then
+  log "Windows detected (Git Bash/MSYS). PowerShell users: run this installer from Git Bash or WSL."
+fi
 
 # --- Locate or clone the checkout -------------------------------------------
 # F-04: an explicit --dir / MACHINA_INSTALL_DIR always wins. The current
@@ -316,7 +382,36 @@ else
   # F-32: guard the venv command itself; under `set -e` an unguarded failure
   # exits before the diagnostic below (Debian/Ubuntu without python3-venv).
   if ! "$PYTHON_BIN" -m venv .venv || ! venv_healthy; then
-    die "Could not build a working .venv with $PYTHON_BIN. Try running '$PYTHON_BIN -m venv --clear .venv' manually (see error above), or install Python 3.11+ and the venv/ensurepip package for your distribution (e.g. sudo apt-get install python3-venv)."
+    rm -rf .venv
+    # Debian/Ubuntu often ships Python without ensurepip even though the
+    # ``venv`` module exists. A --without-pip venv is still usable; bootstrap
+    # pip from the official signed/bootstrap endpoint instead of failing.
+    if "$PYTHON_BIN" -m venv --without-pip .venv && venv_healthy; then
+      log "Bootstrapping pip (python3-venv/ensurepip is missing)"
+      bootstrap_pip="$(mktemp "${TMPDIR:-/tmp}/get-pip.XXXXXX.py")"
+      if command -v curl >/dev/null 2>&1 && curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$bootstrap_pip"; then
+        if ! "$(venv_python)" "$bootstrap_pip"; then
+          rm -f "$bootstrap_pip"
+          die "pip bootstrap failed. Install python3-venv with: sudo apt-get install python3-venv"
+        fi
+        rm -f "$bootstrap_pip"
+      elif command -v wget >/dev/null 2>&1 && wget -qO "$bootstrap_pip" https://bootstrap.pypa.io/get-pip.py; then
+        if ! "$(venv_python)" "$bootstrap_pip"; then
+          rm -f "$bootstrap_pip"
+          die "pip bootstrap failed. Install python3-venv with: sudo apt-get install python3-venv"
+        fi
+        rm -f "$bootstrap_pip"
+      else
+        rm -f "$bootstrap_pip"
+        die "Could not download pip bootstrap. Install python3-venv (or python3.XX-venv for this Python) and re-run."
+      fi
+    else
+      if [ "$OS_FAMILY" = "wsl" ] || [ "$OS_FAMILY" = "linux" ]; then
+        die "Could not build a working .venv. Install the venv package for $PYTHON_BIN (for example: sudo apt-get update && sudo apt-get install -y python3-venv), then re-run. On WSL, also install the matching python3.XX-venv package."
+      else
+        die "Could not build a working .venv with $PYTHON_BIN. Install Python 3.11+ with venv/ensurepip support and re-run."
+      fi
+    fi
   fi
   log "Virtualenv ready"
 fi

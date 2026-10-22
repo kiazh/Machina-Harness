@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.1 — 2026-10-22
+
+- Installer now retries transient clone failures, handles WSL/Windows explicitly, and produces a working venv when `ensurepip` is missing by bootstrapping pip.
+- Added the Machina install banner and animated download indicator.
+- README now surfaces WSL/Git Bash requirements for Windows users.
+
 ## 1.2.0 — 2026-10-21
 
 - Model picker now uses the bundled models.dev catalog for built-in providers, with current names, context windows, efforts, and descriptions.
