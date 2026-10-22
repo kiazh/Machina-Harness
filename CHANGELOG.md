@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.2 — 2026-10-22
+
+- Added a native Windows PowerShell installer (`install.ps1`) with no WSL requirement.
+- The Windows installer can install missing Git/Python/Node with winget, create the venv, bootstrap dependencies, start a pgvector Docker database, run schema initialization, and add the venv Scripts directory to the user PATH.
+- Windows users can now use `irm https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.ps1 | iex` as the primary install command.
+
 ## 1.2.1 — 2026-10-22
 
 - Installer now retries transient clone failures, handles WSL/Windows explicitly, and produces a working venv when `ensurepip` is missing by bootstrapping pip.
