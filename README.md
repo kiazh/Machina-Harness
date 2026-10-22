@@ -35,7 +35,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.2 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.2 release notes](docs/verification/RELEASE_1.2.2.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.3 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.3 release notes](docs/verification/RELEASE_1.2.3.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -1107,7 +1107,7 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 Aliases: `/settings` → `/config`, `/model` → `/default-model`, `/providers` → `/provider`, `/compact` → `/compress`.
 
-The CLI mirrors these capabilities: `machina sessions`, `sessions-search`, `export`, `fork`, `delete`, `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `skills`, `providers`, `auth`, `growth`, `usage`, `config`, `config-set`, `doctor`, `serve`, and `harnesses`. Run any command with `--help`.
+The CLI mirrors these capabilities: `machina sessions`, `sessions-search`, `export`, `fork`, `delete`, `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `skills`, `providers`, `auth`, `growth`, `usage`, `config`, `config-set`, `doctor`, `serve`, `stop`, and `harnesses`. Run any command with `--help`.
 
 ### Providers and model selection
 
@@ -1203,6 +1203,18 @@ machina serve --host 127.0.0.1 --port 8000
 ```
 
 Authenticate with `Authorization: Bearer <MACHINA_API_KEY>`. `/health` and `/ready` are public; `/metrics` requires authentication.
+
+### Shutdown
+
+```bash
+machina stop
+```
+
+This stops `machina serve` first, then the TUI/gateway, then the managed
+`machina-db` Docker container — only after every Machina client has released
+its database lease. The next `machina` or `machina serve` starts the container
+again automatically. Native/external PostgreSQL is never stopped. Set
+`MACHINA_DB_MANAGE=0` to opt out of Docker container management.
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/sessions \

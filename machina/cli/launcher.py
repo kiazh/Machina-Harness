@@ -11,6 +11,7 @@ import atexit
 import os
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -118,10 +119,52 @@ def launch_ui(
     # nothing here may raise or block the UI (machina/core/firecrawl_lifecycle.py);
     # atexit is the safety net behind the finally for non-returning exits.
     atexit.register(stop_if_enabled)
+    # The TUI is a long-lived DB client. Start the installer-owned container
+    # if needed and release it only after the UI process has fully exited. A
+    # concurrent `machina serve` keeps its own lease, so it prevents an early
+    # database stop.
+    from machina.db.lifecycle import acquire as acquire_db_lease
+    from machina.db.lifecycle import release as release_db_lease
+    from machina.db.lifecycle import set_child_pid
+
+    db_lease = acquire_db_lease("tui")
     start_if_enabled()
+    child = subprocess.Popen(args, env=env)
+    set_child_pid(db_lease, child.pid)
+    previous_handlers: dict[int, object] = {}
+
+    def _request_stop(_signum: int, _frame: object) -> None:
+        if child.poll() is None:
+            child.terminate()
+
+    for signum in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGINT", None)):
+        if signum is not None:
+            try:
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, _request_stop)
+            except (OSError, ValueError):
+                pass
     try:
-        return subprocess.call(args, env=env)
+        return child.wait()
     except KeyboardInterrupt:
+        if child.poll() is None:
+            child.terminate()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
         return 130
     finally:
+        for signum, handler in previous_handlers.items():
+            try:
+                signal.signal(signum, handler)
+            except (OSError, ValueError):
+                pass
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
         stop_if_enabled()
+        release_db_lease(db_lease)

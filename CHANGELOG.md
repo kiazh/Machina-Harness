@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.3 — 2026-10-22
+
+- Added `machina stop`, which shuts down the HTTP server first, then the TUI/gateway, and finally the installer-managed PostgreSQL container after the last client releases its lease.
+- Long-lived TUI and `machina serve` processes now register database leases; concurrent clients prevent an early database stop.
+- A normal TUI exit now stops the managed Docker database when no other Machina client is running; the next start relaunches it automatically.
+
 ## 1.2.2 — 2026-10-22
 
 - Added a native Windows PowerShell installer (`install.ps1`) with no WSL requirement.

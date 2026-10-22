@@ -58,6 +58,18 @@ const tui = new TuiAltScreen(new ThemedTerminal(), undefined, undefined, tuiClip
 const client = new GatewayClient({ python, token: gatewayToken, env: { MACHINA_GATEWAY_TOKEN: gatewayToken } });
 const app = new App(tui, client, { model: values.model, provider: values.provider, sessionId: values.session, mode: values.mode });
 
+// `machina stop` targets the UI child, not the Python launcher. Shut the UI
+// and its gateway down in order; the launcher releases the database lease
+// only after this process exits.
+let shuttingDown = false;
+const requestShutdown = () => {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	void app.exit().finally(() => process.exit(0));
+};
+process.on("SIGTERM", requestShutdown);
+process.on("SIGBREAK", requestShutdown);
+
 // Never leave the terminal in raw mode, whatever happens.
 const crash = (error: unknown) => {
 	try {

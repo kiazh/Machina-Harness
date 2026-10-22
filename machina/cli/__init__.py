@@ -1798,29 +1798,121 @@ def serve(
 
     url = f"http://{host}:{port}"
 
+    from machina.db.lifecycle import acquire as acquire_db_lease
+    from machina.db.lifecycle import release as release_db_lease
+
+    db_lease = acquire_db_lease("serve")
     try:
-        with output.spinner("Starting server..."):
-            from machina.api.app import create_app
+        try:
+            with output.spinner("Starting server..."):
+                from machina.api.app import create_app
 
-            create_app()
-    except Exception as e:
-        output.error(f"Failed to start server: {e}")
-        raise typer.Exit(1) from None
+                create_app()
+        except Exception as e:
+            output.error(f"Failed to start server: {e}")
+            raise typer.Exit(1) from None
 
-    console.print(f"[green]Starting server at {escape(url)}[/green]")
-    console.print("[dim]Press Ctrl+C to stop[/dim]")
-    console.print()
+        console.print(f"[green]Starting server at {escape(url)}[/green]")
+        console.print("[dim]Press Ctrl+C to stop[/dim]")
+        console.print()
 
-    try:
-        uvicorn.run(
-            "machina.api.app:create_app",
-            host=host,
-            port=port,
-            reload=reload,
-            factory=True,
-        )
-    except KeyboardInterrupt:
-        console.print("\n[dim]Server stopped.[/dim]")
+        try:
+            uvicorn.run(
+                "machina.api.app:create_app",
+                host=host,
+                port=port,
+                reload=reload,
+                factory=True,
+            )
+        except KeyboardInterrupt:
+            console.print("\n[dim]Server stopped.[/dim]")
+    finally:
+        release_db_lease(db_lease)
+
+
+# ─── Global shutdown ─────────────────────────────────────────────────────────
+
+
+@app.command(name="stop")
+def stop_all() -> None:
+    """Stop Machina clients in order, then stop the managed database.
+
+    Order is deliberate: HTTP server first, TUI/gateway second, PostgreSQL
+    last. A client releases its database lease during normal shutdown; the
+    container is stopped only when no live Machina client remains.
+    """
+    import signal
+    import subprocess
+    import time
+    from contextlib import suppress
+
+    from machina.db import lifecycle
+
+    me = os.getpid()
+    clients = [item for item in lifecycle.live_clients() if int(item["pid"]) != me]
+    if not clients:
+        stopped = lifecycle.stop_if_idle()
+        console.print("[yellow]No running Machina clients found.[/yellow]")
+        console.print("Database container stopped." if stopped else "Database was left running.")
+        return
+
+    def alive(pid: int) -> bool:
+        return lifecycle._alive(pid)  # shared existence probe, no process signal
+
+    def wait_gone(pids: set[int], timeout: float = 10.0) -> set[int]:
+        deadline = time.monotonic() + timeout
+        remaining = set(pids)
+        while remaining and time.monotonic() < deadline:
+            remaining = {pid for pid in remaining if alive(pid)}
+            if remaining:
+                time.sleep(0.15)
+        return remaining
+
+    def graceful(pid: int) -> None:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T"],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGTERM)
+
+    def force(pid: int) -> None:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+    # Server first, TUI/gateway second, database last.
+    for role in ("serve", "tui"):
+        pids = {
+            int(item.get("child_pid") or item["pid"]) for item in clients if item["role"] == role
+        }
+        if not pids:
+            continue
+        console.print(f"Stopping {role} client(s): {', '.join(map(str, sorted(pids)))}")
+        for pid in pids:
+            graceful(pid)
+        remaining = wait_gone(pids)
+        for pid in remaining:
+            force(pid)
+        remaining = wait_gone(remaining, timeout=3.0)
+        if remaining:
+            console.print(f"[yellow]Client(s) did not exit: {sorted(remaining)}[/yellow]")
+
+    # Give normal lease release a final chance, then stop only if idle.
+    deadline = time.monotonic() + 5.0
+    while lifecycle.live_clients() and time.monotonic() < deadline:
+        time.sleep(0.15)
+    stopped = lifecycle.stop_if_idle()
+    console.print("Database container stopped." if stopped else "Database was left running.")
 
 
 # ─── Config commands ─────────────────────────────────────────────────────────
