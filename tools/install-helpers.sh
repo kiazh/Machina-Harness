@@ -275,8 +275,36 @@ docker_db_container_password() {
 #       printed and the caller must NOT retry init or install Homebrew, which
 #       cannot repair a custom DATABASE_URL (the 60 s retry + rogue brew
 #       install INFRA-I1 flagged).
+ensure_docker_daemon() {
+  docker info >/dev/null 2>&1 && return 0
+  case "${OS_FAMILY:-}" in
+    macos)
+      [ -d "/Applications/Docker.app" ] || return 1
+      open -a Docker >/dev/null 2>&1 || return 1
+      ;;
+    linux)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl start docker >/dev/null 2>&1 || sudo -n systemctl start docker >/dev/null 2>&1 || return 1
+      else
+        return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  local i
+  for i in $(seq 1 45); do
+    docker info >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
 start_docker_db() {
   command -v docker >/dev/null 2>&1 || return 1
+  ensure_docker_daemon || {
+    warn "Docker is installed but its daemon is not running; start Docker Desktop/Engine and retry."
+    return 1
+  }
   local container_state="" container_password="" container_url env_url
   # AH-029: `docker ps` lists running containers only — a stopped
   # machina-db would be missed and `docker run --name` would fail with
@@ -312,6 +340,7 @@ start_docker_db() {
       fi
       log "machina-db $container_state; DATABASE_URL matches its credentials, reusing it"
     fi
+    docker update --restart unless-stopped machina-db >/dev/null 2>&1 || true
     if [ "$container_state" = "stopped" ]; then
       log "Starting existing stopped machina-db container"
       docker start machina-db >/dev/null || return 1
@@ -326,7 +355,7 @@ start_docker_db() {
   DB_URL="postgresql://postgres:${DB_PASS}@127.0.0.1:5432/machina"
   log "Starting local Postgres (pgvector/pgvector:pg16 on 127.0.0.1:5432)"
   # shellcheck disable=SC2086
-  docker run -d --name machina-db \
+  docker run -d --name machina-db --restart unless-stopped \
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD="$DB_PASS" -e POSTGRES_DB=machina \
     -p 127.0.0.1:5432:5432 "$PGVECTOR_IMAGE" >/dev/null || return 1
   # Point a default DATABASE_URL at the generated credentials; a custom URL

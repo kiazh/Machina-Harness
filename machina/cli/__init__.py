@@ -1456,7 +1456,13 @@ def doctor():
         finally:
             await db.close()
 
-    _run(_check_db())
+    from machina.db import lifecycle
+
+    lease = lifecycle.acquire("doctor")
+    try:
+        _run(_check_db())
+    finally:
+        lifecycle.release(lease)
 
     console.print()
     console.print("[bold]External agent harnesses[/bold]")
@@ -1477,6 +1483,13 @@ def init(
 ):
     """Initialize Machina — create the database schema."""
 
+    from machina.db import lifecycle
+
+    # `machina init` is the installer's provisioning hook. Starting (or
+    # creating) the managed container here means a fresh checkout and the
+    # curl/irm installers do not depend on a separately-started database.
+    lease = lifecycle.acquire("init") if db_url is None else None
+
     async def _init():
         if db_url:
             db.dsn = db_url
@@ -1496,7 +1509,10 @@ def init(
         output.success("Machina initialized!")
         output.muted("Run `machina` to open the interactive UI.")
 
-    _run(_init())
+    try:
+        _run(_init())
+    finally:
+        lifecycle.release(lease)
 
 
 def _interop_state_lines(report) -> list[str]:

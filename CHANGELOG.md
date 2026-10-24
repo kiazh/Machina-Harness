@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.2.4 — 2026-10-23
+
+- `machina`, `machina serve`, and `machina init` now start Docker Desktop/Engine when needed, then start or create the managed `machina-db` PostgreSQL container automatically.
+- A newly created container receives a generated password, a persisted `DATABASE_URL`, an automatic schema initialization, and an `unless-stopped` restart policy.
+- The Windows installer now starts Docker Desktop and attempts a winget install of Docker Desktop when it is missing; the Bash installer starts Docker Desktop/Engine before provisioning.
+- Kept native/external PostgreSQL untouched; `MACHINA_DB_MANAGE=0` still opts out.
+
 ## 1.2.3 — 2026-10-22
 
 - Added `machina stop`, which shuts down the HTTP server first, then the TUI/gateway, and finally the installer-managed PostgreSQL container after the last client releases its lease.

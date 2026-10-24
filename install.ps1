@@ -11,7 +11,9 @@
 #
 # Requires Git for Windows, Python 3.11+ (with venv), and Node.js 22.19+ for
 # the terminal UI. PostgreSQL+pgvector or Docker Desktop is required for the
-# database. The installer never uses a shell string to execute user input.
+# database; if Docker Desktop is missing the installer tries winget, then
+# starts it and provisions the container automatically. The installer never
+# uses a shell string to execute user input.
 
 $ErrorActionPreference = "Stop"
 $RepoUrl = if ($env:REPO_URL) { $env:REPO_URL } else { "https://github.com/kiazh/Machina-Harness.git" }
@@ -166,19 +168,52 @@ function Ensure-UserPath($Directory) {
     if (($env:Path -split ";") -notcontains $Directory) { $env:Path = "$env:Path;$Directory" }
 }
 
-function Start-DockerDatabase($EnvFile) {
-    $docker = Get-Command docker -ErrorAction SilentlyContinue
-    if (-not $docker) { return $false }
+function Start-DockerDesktop {
     & docker info *> $null
-    if ($LASTEXITCODE -ne 0) { return $false }
+    if ($LASTEXITCODE -eq 0) { return $true }
+    $paths = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\Docker Desktop.exe")
+    )
+    $exe = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $exe) { return $false }
+    Write-Step "Starting Docker Desktop"
+    Start-Process -FilePath $exe | Out-Null
+    for ($i = 0; $i -lt 90; $i++) {
+        Start-Sleep -Seconds 2
+        & docker info *> $null
+        if ($LASTEXITCODE -eq 0) { return $true }
+    }
+    return $false
+}
+
+function Ensure-Docker {
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $docker) {
+        Write-Warn "Docker Desktop is not installed; trying winget"
+        if (-not (Install-WingetPackage "Docker.DockerDesktop" "Docker Desktop")) { return $false }
+        Refresh-ToolPaths
+        $docker = Get-Command docker -ErrorAction SilentlyContinue
+        if (-not $docker) {
+            Write-Warn "Docker Desktop was installed but is not on PATH yet; log out/in or restart, then run: machina init"
+            return $false
+        }
+    }
+    return (Start-DockerDesktop)
+}
+
+function Start-DockerDatabase($EnvFile) {
+    if (-not (Ensure-Docker)) { return $false }
     $name = "machina-db"
     $exists = (& docker ps -a --filter "name=^/$name$" --format "{{.Names}}").Trim()
     if (-not $exists) {
         $password = New-HexSecret 16
         Write-Step "Starting PostgreSQL with Docker"
-        & docker run -d --name $name -e POSTGRES_USER=postgres -e "POSTGRES_PASSWORD=$password" -e POSTGRES_DB=machina -p 127.0.0.1:5432:5432 pgvector/pgvector:pg16 | Out-Null
+        & docker run -d --name $name --restart unless-stopped -e POSTGRES_USER=postgres -e "POSTGRES_PASSWORD=$password" -e POSTGRES_DB=machina -p 127.0.0.1:5432:5432 pgvector/pgvector:pg16 | Out-Null
         if ($LASTEXITCODE -ne 0) { return $false }
     } else {
+        & docker update --restart unless-stopped $name *> $null
         & docker start $name *> $null
         $inspect = (& docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $name)
         $password = ($inspect | Where-Object { $_ -match "^POSTGRES_PASSWORD=" } | ForEach-Object { $_.Substring(18) } | Select-Object -First 1)
