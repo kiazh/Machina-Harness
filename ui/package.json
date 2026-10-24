@@ -22,7 +22,7 @@
     "@types/node": "24.19.1",
     "@typescript-eslint/eslint-plugin": "^8.71.2",
     "@typescript-eslint/parser": "^8.71.2",
-    "eslint": "^8.57.1",
+    "eslint": "^10.13.0",
     "pyright": "1.1.414",
     "typescript": "~5.8.0",
     "typescript-language-server": "6.0.2"
