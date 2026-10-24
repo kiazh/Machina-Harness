@@ -43,7 +43,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.5 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.5 release notes](docs/verification/RELEASE_1.2.5.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.6 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.6 release notes](docs/verification/RELEASE_1.2.6.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 

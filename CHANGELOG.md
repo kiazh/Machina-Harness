@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.6 — 2026-10-24
+
+- The Windows installer now detects a virtualenv created by a different Python version and rebuilds it, avoiding ABI-broken extension packages.
+- The installer verifies `typer`, `asyncpg`, and `fastapi` imports after dependency installation and rebuilds the virtualenv once if any package is incomplete or corrupt.
+- Documented the repair command for an existing broken Windows virtualenv.
+
 ## 1.2.5 — 2026-10-23
 
 - Pinned Typer below 0.21.2 so fresh Windows installs do not pull the new `annotated-doc` dependency and fail at startup with `ImportError: cannot import name 'Doc'`.

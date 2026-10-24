@@ -291,6 +291,18 @@ if (-not (Test-Path ".\pyproject.toml")) { Fail "Machina checkout is missing pyp
 
 $venv = Join-Path $AppDir ".venv"
 $venvPython = Join-Path $venv "Scripts\python.exe"
+if (Test-Path $venvPython) {
+    # Extension packages (asyncpg, cryptography) are ABI-specific. A venv
+    # created by an older Python can import broken or missing extension
+    # modules after an installer upgrade; rebuild it instead of layering
+    # packages onto an incompatible interpreter.
+    $venvVersion = (& $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null)
+    $wantVersion = (& $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null)
+    if ($venvVersion -and $wantVersion -and $venvVersion -ne $wantVersion) {
+        Write-Warn "Existing .venv uses Python $venvVersion but $wantVersion is selected; rebuilding it"
+        Remove-Item -Recurse -Force $venv
+    }
+}
 if (-not (Test-Path $venvPython)) {
     Write-Step "Creating virtualenv (.venv)"
     & $python -m venv $venv
@@ -307,6 +319,21 @@ if ($Dev) {
     & $venvPython -m pip install -e .
 }
 if ($LASTEXITCODE -ne 0) { Fail "Machina dependency installation failed" }
+
+# A previous interrupted install can leave a partial package in site-packages
+# (for example asyncpg without its exceptions module). Verify the imports the
+# CLI actually needs and rebuild the venv once before declaring success.
+& $venvPython -c "import typer, asyncpg, fastapi" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "The virtualenv has broken packages; rebuilding it"
+    Remove-Item -Recurse -Force $venv
+    & $python -m venv $venv
+    & $venvPython -m pip install --quiet --upgrade pip
+    if ($Dev) { & $venvPython -m pip install -e ".[dev]" } else { & $venvPython -m pip install -e . }
+    if ($LASTEXITCODE -ne 0) { Fail "Machina dependency installation failed after rebuilding .venv" }
+    & $venvPython -c "import typer, asyncpg, fastapi" 2>$null
+    if ($LASTEXITCODE -ne 0) { Fail "Python packages are still broken after rebuilding .venv; check antivirus/Python 3.12 installation and retry." }
+}
 
 $machina = Join-Path $venv "Scripts\machina.exe"
 if (-not (Test-Path $machina)) { Fail "Installation completed but machina.exe was not created" }
