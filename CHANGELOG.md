@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.2.5 — 2026-10-23
+
+- Pinned Typer below 0.21.2 so fresh Windows installs do not pull the new `annotated-doc` dependency and fail at startup with `ImportError: cannot import name 'Doc'`.
+- Re-running the installer downgrades an existing broken Typer installation in the Machina virtual environment.
+
 ## 1.2.4 — 2026-10-23
 
 - `machina`, `machina serve`, and `machina init` now start Docker Desktop/Engine when needed, then start or create the managed `machina-db` PostgreSQL container automatically.
