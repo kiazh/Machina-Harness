@@ -230,6 +230,7 @@ export class ComposerInput extends Editor {
     override handleInput(data: string): void {
         // A terminal with mouse reporting can deliver a raw SGR mouse report if
         // the host did not decode it. Never let that leak into the draft.
+        // eslint-disable-next-line no-control-regex -- raw mouse reports intentionally match ESC
         if (/\x1b\[<\d+(?:;\d+)*[Mm]/.test(data)) return;
         if (matchesKey(data, Key.enter) && this.onSubmitBlocked?.()) return;
         if (this.attachmentPaste !== undefined || data.includes("\x1b[200~")) {
