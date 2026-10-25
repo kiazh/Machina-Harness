@@ -30,10 +30,13 @@ command to your user PATH. If Docker Desktop is missing, the installer
 attempts a winget install before falling back to manual database setup.
 
 When you launch `machina`, run `machina serve`, or run `machina init`, Machina
-checks the managed database: it starts Docker Desktop/Engine if needed, starts
-an existing `machina-db` container, or creates and initializes one when the
-loopback `DATABASE_URL` is the installer default. You do not need to run
-Docker or PostgreSQL manually first.
+checks the database: it starts Docker Desktop/Engine if needed, starts an
+existing `machina-db` container, or creates and initializes one when the
+loopback `DATABASE_URL` is the installer default. If a native PostgreSQL server
+is already reachable but the `machina` database is missing, `machina init`
+creates the database and enables the required extensions. If port 5432 is
+already occupied, the Windows installer provisions Docker on a free port and
+writes both `DATABASE_URL` and `MACHINA_DB_PORT` accordingly.
 
 **Requirements:** Python 3.11+, Node.js 22.19+, and PostgreSQL with pgvector.
 On Windows, Docker Desktop is the simplest database option. The installer can
@@ -43,7 +46,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.6 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.6 release notes](docs/verification/RELEASE_1.2.6.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.7 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.7 release notes](docs/verification/RELEASE_1.2.7.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -113,7 +116,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,509 passed, 2 skipped (DevTools suite, real PostgreSQL) |
+| Backend tests | 6,505 passed, 8 skipped (DevTools suite, real PostgreSQL) |
 | Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
@@ -819,7 +822,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,509 tests with 2 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,505 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 

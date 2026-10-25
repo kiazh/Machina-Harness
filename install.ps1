@@ -21,7 +21,7 @@ $InstallDir = if ($env:MACHINA_INSTALL_DIR) { $env:MACHINA_INSTALL_DIR } else { 
 $NoUI = ($env:MACHINA_NO_UI -eq "1")
 $Dev = ($env:MACHINA_DEV -eq "1")
 $SkipInit = ($env:MACHINA_SKIP_INIT -eq "1")
-$DefaultDb = "postgresql://postgres:postgres@localhost:5432/machina"
+$DefaultDb = "postgresql://postgres:postgres@127.0.0.1:5432/machina"
 
 function Write-Step($Message) { Write-Host "[install] $Message" -ForegroundColor Cyan }
 function Write-Warn($Message) { Write-Host "[warn] $Message" -ForegroundColor Yellow }
@@ -192,7 +192,10 @@ function Ensure-Docker {
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) {
         Write-Warn "Docker Desktop is not installed; trying winget"
-        if (-not (Install-WingetPackage "Docker.DockerDesktop" "Docker Desktop")) { return $false }
+        if (-not (Install-WingetPackage "Docker.DockerDesktop" "Docker Desktop")) {
+            Write-Warn "winget is unavailable or Docker Desktop installation failed. Install Docker Desktop manually, or install pgvector into an existing PostgreSQL server."
+            return $false
+        }
         Refresh-ToolPaths
         $docker = Get-Command docker -ErrorAction SilentlyContinue
         if (-not $docker) {
@@ -203,23 +206,54 @@ function Ensure-Docker {
     return (Start-DockerDesktop)
 }
 
+function Test-LocalPortInUse([int]$Port) {
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    return ($listeners.Count -gt 0)
+}
+
+function Select-DockerDbPort {
+    foreach ($candidate in 5432..5440) {
+        if (-not (Test-LocalPortInUse $candidate)) { return $candidate }
+    }
+    return 5432
+}
+
+function Get-DockerDbPort($Name) {
+    $mapping = (& docker port $Name 5432/tcp 2>$null | Select-Object -First 1)
+    if ($mapping -match ':(\d+)\s*$') { return [int]$Matches[1] }
+    return 5432
+}
+
+function Test-InstallerDefaultDb($EnvFile) {
+    $url = Get-EnvValue $EnvFile "DATABASE_URL"
+    if (-not $url) { return $true }
+    return ($url -match '^postgres(?:ql)?://[^@]+@(?:127\.0\.0\.1|localhost):\d+/machina(?:\?.*)?$')
+}
+
 function Start-DockerDatabase($EnvFile) {
+    if (-not (Test-InstallerDefaultDb $EnvFile)) {
+        Write-Warn "DATABASE_URL points at a custom PostgreSQL; not replacing it with Docker."
+        return $false
+    }
     if (-not (Ensure-Docker)) { return $false }
     $name = "machina-db"
-    $exists = (& docker ps -a --filter "name=^/$name$" --format "{{.Names}}").Trim()
+    $exists = ((& docker ps -a --filter "name=^/$name$" --format "{{.Names}}" 2>$null) -join "").Trim()
     if (-not $exists) {
+        $port = Select-DockerDbPort
         $password = New-HexSecret 16
-        Write-Step "Starting PostgreSQL with Docker"
-        & docker run -d --name $name --restart unless-stopped -e POSTGRES_USER=postgres -e "POSTGRES_PASSWORD=$password" -e POSTGRES_DB=machina -p 127.0.0.1:5432:5432 pgvector/pgvector:pg16 | Out-Null
+        Write-Step "Starting PostgreSQL with Docker on 127.0.0.1:$port"
+        & docker run -d --name $name --restart unless-stopped -e POSTGRES_USER=postgres -e "POSTGRES_PASSWORD=$password" -e POSTGRES_DB=machina -p "127.0.0.1:${port}:5432" pgvector/pgvector:pg16 | Out-Null
         if ($LASTEXITCODE -ne 0) { return $false }
     } else {
         & docker update --restart unless-stopped $name *> $null
         & docker start $name *> $null
+        $port = Get-DockerDbPort $name
         $inspect = (& docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $name)
         $password = ($inspect | Where-Object { $_ -match "^POSTGRES_PASSWORD=" } | ForEach-Object { $_.Substring(18) } | Select-Object -First 1)
     }
     if (-not $password) { return $false }
-    Set-EnvValue $EnvFile "DATABASE_URL" "postgresql://postgres:$password@127.0.0.1:5432/machina"
+    Set-EnvValue $EnvFile "MACHINA_DB_PORT" "$port"
+    Set-EnvValue $EnvFile "DATABASE_URL" "postgresql://postgres:$password@127.0.0.1:$port/machina"
     for ($i = 0; $i -lt 40; $i++) {
         & docker exec $name pg_isready -U postgres *> $null
         if ($LASTEXITCODE -eq 0) { return $true }
@@ -271,6 +305,10 @@ $cwdLooksLikeRepo = (Test-Path ".\pyproject.toml") -and (Test-Path ".\machina") 
 if ($cwdLooksLikeRepo) {
     $AppDir = (Get-Location).Path
     Write-Step "Using current checkout: $AppDir"
+    Push-Location $AppDir
+    & git pull --ff-only 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Could not update the checkout (offline or local changes); using files on disk." }
+    Pop-Location
 } else {
     $AppDir = [System.IO.Path]::GetFullPath($InstallDir)
     if (Test-Path $AppDir) {
@@ -368,22 +406,30 @@ if (-not $oauth -or $oauth -eq "replace-with-a-base64-32-byte-key") {
 if (-not (Get-EnvValue $envFile "DATABASE_URL")) { Set-EnvValue $envFile "DATABASE_URL" $DefaultDb }
 $env:MACHINA_ENV_FILE = $envFile
 
+$databaseReady = $null
 if (-not $SkipInit) {
+    $databaseReady = $false
     Write-Step "Initializing the database schema"
     & $machina init
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -eq 0) {
+        $databaseReady = $true
+        Write-Step "Database schema ready"
+    } else {
+        Write-Step "Trying the managed Docker PostgreSQL fallback"
         if (Start-DockerDatabase $envFile) {
             Write-Step "Docker PostgreSQL ready; retrying schema initialization"
             & $machina init
+            if ($LASTEXITCODE -eq 0) {
+                $databaseReady = $true
+                Write-Step "Database schema ready"
+            }
         }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "machina init failed. Start PostgreSQL+pgvector (or Docker Desktop) and set DATABASE_URL in $envFile."
-            Write-Warn "Docker example:"
-            Write-Warn "  docker run -d --name machina-db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=machina -p 127.0.0.1:5432:5432 pgvector/pgvector:pg16"
-            Write-Warn "Then run: `"$machina`" init"
+        if (-not $databaseReady) {
+            Write-Warn "The database is not ready yet."
+            Write-Warn "Install Docker Desktop or install pgvector into the PostgreSQL server at:"
+            Write-Warn "  $(Get-EnvValue $envFile 'DATABASE_URL')"
+            Write-Warn "Then re-run: `"$machina`" init"
         }
-    } else {
-        Write-Step "Database schema ready"
     }
 } else {
     Write-Step "Skipping database initialization"
@@ -391,6 +437,9 @@ if (-not $SkipInit) {
 
 & $machina doctor
 Ensure-UserPath (Join-Path $venv "Scripts")
+if ($databaseReady -eq $false) {
+    Fail "Machina files were installed, but the database is not ready. Fix the database issue above, then run: `"$machina`" init"
+}
 Write-Host ""
 Write-Host "Machina is installed." -ForegroundColor Green
 Write-Host "Next:"

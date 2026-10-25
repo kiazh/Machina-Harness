@@ -1497,11 +1497,26 @@ def init(
         console.print(f"  Database: {escape(db.dsn.split('@')[-1])}")
         try:
             with output.spinner("Creating schema..."):
-                await db.connect()
+                import asyncpg
+
+                try:
+                    await db.connect()
+                except asyncpg.InvalidCatalogNameError:
+                    # The server is reachable but the target database has not
+                    # been created yet. This is the common native-PostgreSQL
+                    # case on fresh Windows installs.
+                    output.muted(f"Database {db.dsn.split('/')[-1]} is missing; creating it...")
+                    from machina.db.provision import ensure_database
+
+                    await ensure_database(db.dsn)
+                    await db.connect()
                 await db.initialize_schema()
             console.print("  Schema: [green]✓ created[/green]")
         except Exception as e:
-            console.print(f"  Schema: [red]✗ failed[/red] ({escape(str(e))})")
+            message = escape(str(e))
+            if "vector" in str(e).lower():
+                message += " — install pgvector or use the pgvector Docker image"
+            console.print(f"  Schema: [red]✗ failed[/red] ({message})")
             raise typer.Exit(1) from None
         finally:
             await db.close()

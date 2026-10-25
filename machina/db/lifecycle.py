@@ -51,6 +51,15 @@ def _state_dir() -> Path:
     return Path(override).expanduser() if override else _home() / "run" / "db-clients"
 
 
+def _managed_port() -> int:
+    raw = os.environ.get("MACHINA_DB_PORT", "5432").strip()
+    try:
+        port = int(raw or "5432")
+    except ValueError:
+        return 5432
+    return port if 1 <= port <= 65535 else 5432
+
+
 def _database_url() -> str:
     value = os.environ.get("DATABASE_URL", "").strip()
     if value:
@@ -78,7 +87,10 @@ def _managed_container() -> str | None:
         return None
     if (parsed.path or "").lstrip("/") not in {"machina", ""}:
         return None
-    if parsed.port not in {None, 5432}:
+    managed_port = _managed_port()
+    configured_port = parsed.port or 5432
+    allowed_ports = {managed_port} if "MACHINA_DB_PORT" in os.environ else {5432}
+    if configured_port not in allowed_ports:
         return None
     container = os.environ.get("MACHINA_DB_CONTAINER", _CONTAINER).strip() or _CONTAINER
     return container
@@ -145,7 +157,8 @@ def _start_docker_daemon() -> bool:
 
 def _create_container(container: str) -> bool:
     password = secrets.token_hex(16)
-    url = f"postgresql://postgres:{password}@127.0.0.1:5432/machina"
+    port = _managed_port()
+    url = f"postgresql://postgres:{password}@127.0.0.1:{port}/machina"
     try:
         result = subprocess.run(
             [
@@ -163,7 +176,7 @@ def _create_container(container: str) -> bool:
                 "-e",
                 "POSTGRES_DB=machina",
                 "-p",
-                "127.0.0.1:5432:5432",
+                f"127.0.0.1:{port}:5432",
                 "pgvector/pgvector:pg16",
             ],
             capture_output=True,
@@ -201,7 +214,7 @@ def _create_container(container: str) -> bool:
     try:
         from machina.security.env_file import find_env_file, set_env_values
 
-        set_env_values({"DATABASE_URL": url}, find_env_file())
+        set_env_values({"DATABASE_URL": url, "MACHINA_DB_PORT": str(port)}, find_env_file())
     except Exception:
         # Do not advertise credentials that were not persisted: the next
         # start would use the default URL and fail.
@@ -215,6 +228,7 @@ def _create_container(container: str) -> bool:
             )
         return False
     os.environ["DATABASE_URL"] = url
+    os.environ["MACHINA_DB_PORT"] = str(port)
     try:
         from machina.core.config import config
 

@@ -1,5 +1,14 @@
 # Release notes
 
+## 1.2.7 — 2026-10-24
+
+- `machina init` now creates a missing database and enables `vector` and `pg_trgm` on an already-reachable PostgreSQL server instead of failing with `database "machina" does not exist`.
+- The Windows installer detects an occupied PostgreSQL port and provisions the Docker container on the next free port (typically 5433), updating `DATABASE_URL` and `MACHINA_DB_PORT` together.
+- The database lifecycle honors `MACHINA_DB_PORT`, so later `machina` launches start the alternate-port container correctly.
+- The Windows installer now fails with a clear error when the database is not ready instead of printing “Machina is installed” after a failed `machina init`.
+- Docker installation failures now explain whether winget was unavailable and what to install manually.
+- Re-running the installer from inside an existing checkout now fast-forwards the repository first, so installer fixes apply instead of silently reusing stale code.
+
 ## 1.2.6 — 2026-10-24
 
 - The Windows installer now detects a virtualenv created by a different Python version and rebuilds it, avoiding ABI-broken extension packages.

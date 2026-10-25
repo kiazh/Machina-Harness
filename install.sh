@@ -268,6 +268,12 @@ fi
 if [ -z "$INSTALL_DIR" ] && is_repo_dir "$(pwd)"; then
   APP_DIR="$(pwd)"
   log "Using current checkout: $APP_DIR"
+  # A re-run from inside the checkout must also pick up new installer fixes.
+  if git -C "$APP_DIR" pull --ff-only 2>/dev/null; then
+    log "Checkout updated to latest"
+  else
+    warn "Could not git pull (offline or diverged); using local checkout as-is"
+  fi
 else
   if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR="./machina"; fi
   APP_DIR="$INSTALL_DIR"
