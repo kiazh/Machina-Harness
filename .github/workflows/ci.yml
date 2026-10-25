@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: kiazh/Machina-DevTools
-          ref: fc454a2ce1718d3a36cf2098086b80248b4eea39
+          ref: 38cb3050e74e11fca5b5a18370d416dc2dd2d4c2
           path: .ci-devtools
           persist-credentials: false
 

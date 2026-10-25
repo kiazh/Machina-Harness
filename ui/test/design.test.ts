@@ -347,4 +347,8 @@ test("H01 required themes are readable with distinct semantic roles", async () =
 test("sanitizePastedText removes terminal colour residue but keeps prose", () => {
 	const input = "\x1b[38;5;28mhello\x1b[0m [38;5;80mworld[0m\nnext line";
 	assert.equal(sanitizePastedText(input), "hello world\nnext line");
+	assert.equal(
+		sanitizePastedText("before\x1b[<35;44;19M[<35;44;19Mafter<35;44;19M"),
+		"beforeafter",
+	);
 });

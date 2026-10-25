@@ -90,7 +90,14 @@ export function sanitizeDisplay(input: string): string {
  * visible residue. Newlines and ordinary text are preserved.
  */
 export function sanitizePastedText(input: string): string {
-	const withoutLiteralSgr = input.replace(/\[\d+(?:;\d+)*m/g, "");
+	// Terminal copies can also contain SGR mouse reports: ESC [ < b ; x ; y M/m.
+	// Remove both the escape-prefixed form (sanitizeDisplay would also handle
+	// it) and the literal residue a renderer may leave behind.
+	const withoutMouse = input
+		.replace(/\x1b\[<\d+(?:;\d+)*[Mm]/g, "")
+		.replace(/\[<\d+(?:;\d+)*[Mm]/g, "")
+		.replace(/<\d+(?:;\d+)*[Mm]/g, "");
+	const withoutLiteralSgr = withoutMouse.replace(/\[\d+(?:;\d+)*m/g, "");
 	return sanitizeDisplay(withoutLiteralSgr);
 }
 

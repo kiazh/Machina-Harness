@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.2.12 — 2026-10-25
+
+- Composer paste now also strips literal SGR mouse reports (`[<35;44;19M`-style) that Windows terminals can leave in copied text, in addition to ANSI color sequences. Raw mouse reports are ignored if a host delivers one as input.
+
 ## 1.2.11 — 2026-10-25
 
 - Composer paste now strips terminal SGR/ANSI control sequences, including literal colour residue copied from a terminal, before the draft is created. Pasted prose, paths, and line breaks are preserved.
