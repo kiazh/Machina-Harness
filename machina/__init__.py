@@ -1,6 +1,6 @@
 """Machina — Self-hosted multi-agent AI orchestration framework."""
 
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 
 from machina.observability.safe_logging import install
 

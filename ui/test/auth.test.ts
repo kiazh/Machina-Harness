@@ -137,12 +137,16 @@ test("/auth (bare) prints the signed-in status card with actions", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_IN };
 	await run("/auth", host);
-	assert.deepEqual(host.calls, [{ method: "auth.chatgpt.status", params: {} }]);
+	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
+	assert.deepEqual(
+		host.calls.slice(1).map((call) => call.method),
+		["auth.grok.status", "auth.copilot.status"],
+	);
 	const text = host.text();
 	assert.match(text, /signed in via Machina token store/);
 	assert.match(text, /acct-ui/);
-	assert.match(text, /Expires\s+2027-01-15T08:00:00Z/);
-	assert.match(text, /Last refresh\s+2026-10-14T00:00:00Z/);
+	assert.match(text, /Expires:?\s+2027-01-15T08:00:00Z/);
+	assert.match(text, /Last refresh:?\s+2026-10-14T00:00:00Z/);
 	assert.match(text, /Actions: \/auth sign-in · \/auth import-codex · \/auth sign-out/);
 });
 
@@ -225,7 +229,7 @@ test("/auth import-codex reports the import and the resulting status", async () 
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.importCodex"] = { imported: true, status: SIGNED_IN };
 	await run("/auth import-codex", host);
-	assert.deepEqual(host.calls, [{ method: "auth.chatgpt.importCodex", params: {} }]);
+	assert.equal(host.calls[0]!.method, "auth.chatgpt.importCodex");
 	assert.equal(host.printed[0]!.kind, "success");
 	assert.match(host.text(), /Imported the Codex CLI's OpenAI credentials/);
 	assert.match(host.text(), /acct-ui/);
@@ -273,7 +277,7 @@ test("unknown /auth options are rejected with the available subcommands", async 
 test("/auth offers completion-friendly subcommands", async () => {
 	const completions = (await authCommand.getArgumentCompletions!("")) ?? [];
 	const values = completions.map((item) => item.value);
-	assert.deepEqual(values, ["status", "sign-in", "import-codex", "sign-out"]);
+	assert.deepEqual(values, ["status", "chatgpt", "grok", "copilot", "sign-in", "import-codex", "sign-out"]);
 	const signIn = (await authCommand.getArgumentCompletions!("sign-i")) ?? [];
 	assert.deepEqual(
 		signIn.map((item) => item.value),
@@ -311,4 +315,46 @@ test("renderAuthStatus and formatAuthExpiry handle unknown values", () => {
 	assert.equal(formatAuthExpiry(0), "1970-01-01T00:00:00Z");
 	assert.match(renderAuthStatus(SIGNED_OUT), /not signed in/);
 	assert.match(renderAuthStatus(SIGNED_IN), /signed in via Machina token store/);
+});
+
+// ─── Grok and Copilot subscription surfaces ────────────────────────────────
+
+test("/auth grok sign-in waits for the device-flow event and activates the provider", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
+	host.responses["auth.grok.login"] = {
+		url: "https://accounts.x.ai/device",
+		userCode: "ABCD-EFGH",
+		verificationUri: "https://accounts.x.ai/device",
+		expiresIn: 300,
+	};
+	host.responses["models.list"] = { provider: "grok", source: "models.dev", models: [{ id: "grok-4.7" }] };
+	host.responses["config.set"] = { key: "provider", value: "grok" };
+	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "grok-4.7", provider: "grok" };
+	const pending = run("/auth grok sign-in", host);
+	await flush();
+	assert.match(host.text(), /ABCD-EFGH/);
+	host.emit({
+		protocolVersion: 2,
+		sessionId: "",
+		turnId: "",
+		type: "auth.grok.completed",
+		account_id: "grok-user",
+		expiry: 1_800_000_000,
+	});
+	await pending;
+	assert.match(host.text(), /Signed in to Grok/);
+	assert.equal(host.handlers.size, 0);
+});
+
+test("/auth copilot status is shown alongside the other providers", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.chatgpt.status"] = { status: SIGNED_OUT };
+	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
+	host.responses["auth.copilot.status"] = {
+		status: { signedIn: true, source: "gh", accountId: "octocat", tokenFamily: "fine-grained" },
+	};
+	await run("/auth", host);
+	assert.match(host.text(), /GitHub Copilot: signed in \(octocat, fine-grained\)/);
+	assert.match(host.text(), /\/auth grok/);
 });

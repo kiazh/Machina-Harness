@@ -601,3 +601,37 @@ export interface ChatGPTImportResult {
  imported: boolean;
  status: ChatGPTAuthStatus;
 }
+
+// ─── Grok and Copilot subscription sign-in (auth.<provider>.*) ───────────────
+
+export interface SubscriptionStatus {
+ signedIn: boolean;
+ source: string | null;
+ expired?: boolean | null;
+ expiresAt?: number | null;
+ accountId?: string | null;
+ lastRefresh?: string | null;
+ tokenFamily?: string | null;
+}
+
+export interface SubscriptionStatusResult {
+ status: SubscriptionStatus;
+}
+
+export interface SubscriptionLoginResult {
+ pending?: boolean;
+ url?: string;
+ userCode?: string;
+ verificationUri?: string;
+ expiresIn?: number;
+}
+
+export interface SubscriptionLogoutResult {
+ removed: boolean;
+ status: SubscriptionStatus;
+}
+
+export interface CopilotImportResult {
+ imported: boolean;
+ status: SubscriptionStatus;
+}

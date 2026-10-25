@@ -82,6 +82,9 @@ def main(
     if mode is not None:
         _apply_cli_mode(mode)
     if ctx.invoked_subcommand is None:
+        from machina.update import auto_update
+
+        auto_update()
         raise typer.Exit(launch_ui(mode=mode))
 
 
@@ -1821,6 +1824,9 @@ def serve(
     """Start the Machina HTTP API server."""
     import uvicorn
 
+    from machina.update import auto_update
+
+    auto_update()
     console.print("[bold]Machina API[/bold]")
     console.print(f"  Host: {escape(host)}")
     console.print(f"  Port: {port}")

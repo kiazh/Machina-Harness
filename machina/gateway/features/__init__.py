@@ -26,6 +26,15 @@ from machina.gateway.features.auth_chatgpt import (
     auth_chatgpt_logout,
     auth_chatgpt_status,
 )
+from machina.gateway.features.auth_subscriptions import (
+    auth_copilot_import_gh,
+    auth_copilot_login,
+    auth_copilot_logout,
+    auth_copilot_status,
+    auth_grok_login,
+    auth_grok_logout,
+    auth_grok_status,
+)
 from machina.gateway.features.config import (
     config_get,
     profile_get,
@@ -164,6 +173,13 @@ METHODS: dict[str, Handler] = {
     "auth.chatgpt.login": auth_chatgpt_login,
     "auth.chatgpt.logout": auth_chatgpt_logout,
     "auth.chatgpt.importCodex": auth_chatgpt_import_codex,
+    "auth.grok.status": auth_grok_status,
+    "auth.grok.login": auth_grok_login,
+    "auth.grok.logout": auth_grok_logout,
+    "auth.copilot.status": auth_copilot_status,
+    "auth.copilot.login": auth_copilot_login,
+    "auth.copilot.importGh": auth_copilot_import_gh,
+    "auth.copilot.logout": auth_copilot_logout,
     "mcp.list": mcp_list,
     "mcp.status": mcp_status,
     "mcp.configure": mcp_configure,

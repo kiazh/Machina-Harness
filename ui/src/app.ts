@@ -3693,7 +3693,14 @@ export class App implements FeatureHost {
 		for (const handler of [...this.featureEventHandlers]) handler(event);
 		// Feature-level frames carry no session/turn: they settle command
 		// flows above and must not enter turn bookkeeping or hidden tails.
-		if (event.type === "auth.chatgpt.completed" || event.type === "auth.chatgpt.failed") return;
+		if (
+			event.type === "auth.chatgpt.completed" ||
+			event.type === "auth.chatgpt.failed" ||
+			event.type === "auth.grok.completed" ||
+			event.type === "auth.grok.failed" ||
+			event.type === "auth.copilot.completed" ||
+			event.type === "auth.copilot.failed"
+		) return;
 		this.shell.sync();
 		if (event.type === "growth.status") {
 			// Background training lands after the turn retires (and the

@@ -42,11 +42,16 @@ writes both `DATABASE_URL` and `MACHINA_DB_PORT` accordingly.
 On Windows, Docker Desktop is the simplest database option. The installer can
 also use an existing local PostgreSQL with pgvector.
 
+Interactive launches check `origin/main` and fast-forward a clean source
+checkout before opening the UI; set `MACHINA_AUTO_UPDATE=0` to opt out. The
+`/auth` page manages ChatGPT, Grok, and GitHub Copilot subscription sign-in
+in one place.
+
 See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.8 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.8 release notes](docs/verification/RELEASE_1.2.8.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.9 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.9 release notes](docs/verification/RELEASE_1.2.9.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -116,7 +121,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,505 passed, 8 skipped (DevTools suite, real PostgreSQL) |
+| Backend tests | 6,512 passed, 8 skipped (DevTools suite, real PostgreSQL) |
 | Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
@@ -696,9 +701,9 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
-| `chatgpt` | `machina auth login` | Choose from the account's model catalog |
-| `copilot` | `machina auth copilot login` | Choose a model available to your account |
-| `grok` | `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
+| `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog (GPT-6.1 Sol, GPT-6 Luna; no GPT-6.1 Luna exists) |
+| `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
+| `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
 | `ollama` | A running Ollama service | `llama3.1`; the model must be installed |
 | `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
 
@@ -822,7 +827,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,505 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,512 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 
@@ -1203,6 +1208,7 @@ Common environment groups:
 | Skill directories | `MACHINA_SKILLS_DIR`, `MACHINA_LEARNED_SKILLS_DIR` |
 | Web services | `SEARXNG_URL`; optional Firecrawl stack settings in config |
 | MCP OAuth storage | `MACHINA_OAUTH_MASTER_KEY` (base64-encoded 32-byte key) |
+| Interactive updates | `MACHINA_AUTO_UPDATE` (default `1`; fast-forwards a clean checkout) |
 
 See [.env.example](.env.example) and [`core/config.py`](machina/core/config.py) for the full set.
 

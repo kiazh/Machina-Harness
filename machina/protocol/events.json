@@ -81,6 +81,20 @@
     },
     "auth.chatgpt.failed": {
       "reason": "string"
+    },
+    "auth.grok.completed": {
+      "account_id": "string|null",
+      "expiry": "number|null"
+    },
+    "auth.grok.failed": {
+      "reason": "string"
+    },
+    "auth.copilot.completed": {
+      "account_id": "string|null",
+      "token_family": "string|null"
+    },
+    "auth.copilot.failed": {
+      "reason": "string"
     }
   }
 }

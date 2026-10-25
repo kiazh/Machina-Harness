@@ -17,6 +17,10 @@ export type CanonicalEvent = { protocolVersion: 2; sessionId: string; turnId: st
 	| { type: "turn.cleanup_pending"; reason?: string }
 	| { type: "auth.chatgpt.completed"; account_id: string|null; expiry: number|null }
 	| { type: "auth.chatgpt.failed"; reason: string }
+	| { type: "auth.grok.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.grok.failed"; reason: string }
+	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
+	| { type: "auth.copilot.failed"; reason: string }
 );
 export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnId: string } & (
 	{ type: "message.start" }
@@ -36,5 +40,9 @@ export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnI
 	| { type: "turn.cleanup_pending"; reason?: string }
 	| { type: "auth.chatgpt.completed"; account_id: string|null; expiry: number|null }
 	| { type: "auth.chatgpt.failed"; reason: string }
+	| { type: "auth.grok.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.grok.failed"; reason: string }
+	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
+	| { type: "auth.copilot.failed"; reason: string }
 );
 export type GatewayEvent = CanonicalEvent | LegacyGatewayEvent;

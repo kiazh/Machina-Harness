@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.2.9 — 2026-10-24
+
+- The interactive launcher now checks `origin/main` and fast-forwards a clean source checkout, then re-executes into the updated code. `MACHINA_AUTO_UPDATE=0` disables it; dirty checkouts are left untouched.
+- `/auth` is now a unified subscription page for ChatGPT, Grok, and GitHub Copilot, including device-flow sign-in, status, import, and sign-out actions.
+- Successful `/auth` sign-in activates the matching provider and a catalog model for the current session and future launches, addressing turns that kept using the previous provider after login.
+- Clarified model naming: OpenAI ships GPT-6.1 Sol, but Luna remains GPT-6 Luna; the picker keeps `gpt-6-luna` rather than inventing a `gpt-6.1-luna` id.
+
 ## 1.2.8 — 2026-10-24
 
 - When winget cannot install Docker Desktop, the Windows installer now downloads Docker's official signed installer and runs it silently instead of giving up.
