@@ -87,8 +87,11 @@ function Find-Python {
 
 function Find-Node {
     $candidates = @(
-        (Join-Path $env:ProgramFiles "nodejs\node.exe"),
-        (Join-Path $env:LOCALAPPDATA "Programs\nodejs\node.exe")
+        (Join-Path $env:ProgramFiles "nodejs
+ode.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs
+odejs
+ode.exe")
     )
     $candidates += @("node")
     foreach ($candidate in $candidates) {
@@ -188,18 +191,54 @@ function Start-DockerDesktop {
     return $false
 }
 
+function Install-DockerDesktopDirect {
+    if ($env:MACHINA_AUTO_INSTALL_DOCKER -eq "0") { return $false }
+    $url = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+    $installer = Join-Path $env:TEMP "DockerDesktopInstaller.exe"
+    Write-Step "Downloading Docker Desktop from Docker"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+    } catch {
+        Write-Warn "Could not download Docker Desktop: $($_.Exception.Message)"
+        return $false
+    }
+    $signature = Get-AuthenticodeSignature $installer
+    if ($signature.Status -ne "Valid") {
+        Write-Warn "Docker Desktop installer signature was not valid; refusing to run it."
+        Remove-Item $installer -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    Write-Step "Installing Docker Desktop (Windows may ask for administrator permission)"
+    $process = Start-Process -FilePath $installer -ArgumentList @("install", "--quiet", "--accept-license") -Wait -PassThru
+    Remove-Item $installer -Force -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0) {
+        Write-Warn "Docker Desktop installer exited with code $($process.ExitCode). It may need a reboot."
+        return $false
+    }
+    Refresh-ToolPaths
+    $dockerBin = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin"
+    if (Test-Path (Join-Path $dockerBin "docker.exe")) { $env:Path = "$dockerBin;$env:Path" }
+    return (Start-DockerDesktop)
+}
+
 function Ensure-Docker {
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) {
         Write-Warn "Docker Desktop is not installed; trying winget"
         if (-not (Install-WingetPackage "Docker.DockerDesktop" "Docker Desktop")) {
-            Write-Warn "winget is unavailable or Docker Desktop installation failed. Install Docker Desktop manually, or install pgvector into an existing PostgreSQL server."
-            return $false
+            Write-Warn "winget could not install Docker Desktop; trying the official installer"
+            return (Install-DockerDesktopDirect)
         }
         Refresh-ToolPaths
         $docker = Get-Command docker -ErrorAction SilentlyContinue
         if (-not $docker) {
-            Write-Warn "Docker Desktop was installed but is not on PATH yet; log out/in or restart, then run: machina init"
+            $dockerBin = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin"
+            if (Test-Path (Join-Path $dockerBin "docker.exe")) { $env:Path = "$dockerBin;$env:Path" }
+            $docker = Get-Command docker -ErrorAction SilentlyContinue
+        }
+        if (-not $docker) {
+            Write-Warn "Docker Desktop was installed but is not usable yet; it may need a reboot."
             return $false
         }
     }

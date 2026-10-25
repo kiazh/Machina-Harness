@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.8 — 2026-10-24
+
+- When winget cannot install Docker Desktop, the Windows installer now downloads Docker's official signed installer and runs it silently instead of giving up.
+- Added `MACHINA_AUTO_INSTALL_DOCKER=0` to opt out of automatic Docker Desktop installation.
+- Documented the remaining hard requirement: Docker Desktop needs WSL2/Hyper-V and may require administrator approval or a reboot; without it, a native PostgreSQL server must already provide pgvector.
+
 ## 1.2.7 — 2026-10-24
 
 - `machina init` now creates a missing database and enables `vector` and `pg_trgm` on an already-reachable PostgreSQL server instead of failing with `database "machina" does not exist`.
