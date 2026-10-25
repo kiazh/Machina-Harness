@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.10 — 2026-10-25
+
+- `/auth` now opens a provider/action menu instead of printing a status card; select a provider, then sign in, sign out, import, or inspect status.
+- Windows now-playing detection and transport controls use the native System Media Transport Controls API through WinRT, so the music bar works with Windows media sessions.
+- Legacy Windows Ctrl+Arrow encodings are normalized for the composer/editor; failed agent turns now include the redacted typed provider error so subscription failures are actionable.
+
 ## 1.2.9 — 2026-10-24
 
 - The interactive launcher now checks `origin/main` and fast-forwards a clean source checkout, then re-executes into the updated code. `MACHINA_AUTO_UPDATE=0` disables it; dirty checkouts are left untouched.

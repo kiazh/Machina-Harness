@@ -51,7 +51,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
 
-**Release status:** **1.2.9 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.9 release notes](docs/verification/RELEASE_1.2.9.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.10 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.10 release notes](docs/verification/RELEASE_1.2.10.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -121,7 +121,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,512 passed, 8 skipped (DevTools suite, real PostgreSQL) |
+| Backend tests | 6,514 passed, 8 skipped (DevTools suite, real PostgreSQL) |
 | Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
@@ -827,7 +827,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,512 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,514 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 
