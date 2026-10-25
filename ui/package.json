@@ -24,7 +24,7 @@
     "@typescript-eslint/parser": "^8.71.2",
     "eslint": "^8.57.1",
     "pyright": "1.1.414",
-    "typescript": "~5.8.0",
+    "typescript": "~7.0.2",
     "typescript-language-server": "6.0.2"
   }
 }
