@@ -12,7 +12,9 @@ the new code. Dirty checkouts are never overwritten. Disable with
 
 ## Unified `/auth`
 
-`/auth` now lists and manages all three subscription providers:
+`/auth` now opens an interactive provider/action menu. Select a provider,
+then sign in, sign out, import, or inspect status. It manages all three
+subscription providers:
 
 - ChatGPT — browser PKCE, Codex import, status, sign-out
 - Grok — xAI device flow, status, sign-out
@@ -21,7 +23,8 @@ the new code. Dirty checkouts are never overwritten. Disable with
 Tokens never cross the gateway wire. A successful sign-in activates that
 provider and a model from its catalog for the current session and future
 launches, so the next agent turn no longer stays pinned to the previous
-provider.
+provider. Failed turns now include the redacted provider error instead of a
+bare `agent turn failed`.
 
 ## Models
 
@@ -32,5 +35,7 @@ that real id and does not offer a non-existent `gpt-6.1-luna`.
 
 - Backend auth/update/catalog tests pass.
 - UI typecheck and 1,161 UI tests pass.
+- Windows media uses the native WinRT System Media Transport Controls bridge;
+  unavailable sessions report honestly instead of fabricating metadata.
 - Backend, UI, and Docker CI jobs pass.
 - Wheel and source distribution checks pass.

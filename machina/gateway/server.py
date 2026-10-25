@@ -1198,10 +1198,24 @@ class Gateway:
                 # below — completion means the turn is no longer owned.
                 _cancelled = True
                 emit("message.stopping", reason="cancelled")
-            except Exception:
+            except Exception as exc:
                 _cancelled = _ownership_lost.is_set()
                 logger.exception("Turn %s failed", turn_id)
-                emit("error", message="agent turn failed")
+                from machina.core.exceptions import ProviderError, ValidationError
+                from machina.memory.redaction import redact_diagnostic
+
+                # Only typed provider/validation failures may cross the wire;
+                # arbitrary runtime exceptions stay generic so internal
+                # implementation details are not exposed to the UI.
+                detail = (
+                    redact_diagnostic(exc).strip()[:500]
+                    if isinstance(exc, (ProviderError, ValidationError))
+                    else ""
+                )
+                emit(
+                    "error",
+                    message="agent turn failed" + (f": {detail}" if detail else ""),
+                )
             finally:
                 if turn_scope_token is not None:
                     end_turn_scope(turn_scope_token)

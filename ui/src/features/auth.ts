@@ -328,8 +328,78 @@ async function signOut(host: FeatureHost, provider: Provider): Promise<void> {
 	else host.print(`Already signed out of ${provider}.`, "plain");
 }
 
+async function providerStatus(host: FeatureHost, provider: Provider): Promise<SubscriptionStatus | null> {
+	if (provider === "chatgpt") {
+		try {
+			const result = await host.request<ChatGPTStatusResult>("auth.chatgpt.status");
+			return {
+				signedIn: result.status.signedIn,
+				source: result.status.source,
+				expired: result.status.expired,
+				expiresAt: result.status.expiresAt,
+				accountId: result.status.accountId,
+				lastRefresh: result.status.lastRefresh,
+			};
+		} catch {
+			return null;
+		}
+	}
+	try {
+		const result = await host.request<SubscriptionStatusResult>(`auth.${provider}.status`);
+		return result.status;
+	} catch {
+		return null;
+	}
+}
+
+function providerLabel(provider: Provider, status: SubscriptionStatus | null): string {
+	const state = status?.signedIn ? `signed in${status.accountId ? ` as ${status.accountId}` : ""}` : "signed out";
+	if (provider === "chatgpt") return `ChatGPT subscription — ${state}`;
+	if (provider === "grok") return `Grok subscription — ${state}`;
+	return `GitHub Copilot — ${state}`;
+}
+
+async function providerMenu(host: FeatureHost, provider: Provider): Promise<void> {
+	const status = await providerStatus(host, provider);
+	const signedIn = status?.signedIn === true;
+	const items: Array<{ value: string; label: string; description?: string }> = [
+		{
+			value: signedIn ? "sign-out" : "sign-in",
+			label: signedIn ? `Sign out of ${provider}` : `Sign in to ${provider}`,
+			description: signedIn ? "Remove Machina's token store for this provider" : "Browser/device authorization",
+		},
+		{ value: "status", label: "Show status" },
+	];
+	if (provider === "chatgpt") items.push({ value: "import-codex", label: "Import Codex CLI credentials" });
+	if (provider === "copilot") items.push({ value: "import-gh", label: "Import gh CLI credentials" });
+	const choice = await host.pick(`${providerLabel(provider, status)} — choose an action`, items);
+	if (!choice) return;
+	await dispatch(host, provider, String(choice.value));
+}
+
+async function openAuthMenu(host: FeatureHost): Promise<void> {
+	const result = await statuses(host);
+	const items = [
+		{ value: "chatgpt", label: providerLabel("chatgpt", result.chatgpt), description: "OpenAI account (ChatGPT subscription)" },
+		{ value: "grok", label: providerLabel("grok", result.grok), description: "xAI Grok subscription" },
+		{ value: "copilot", label: providerLabel("copilot", result.copilot), description: "GitHub Copilot seat" },
+		{ value: "status", label: "Show all sign-in statuses" },
+	];
+	const choice = await host.pick("Subscriptions — sign in or out", items);
+	if (!choice) return;
+	if (choice.value === "status") {
+		await showStatus(host);
+		return;
+	}
+	await providerMenu(host, choice.value as Provider);
+}
+
 async function dispatch(host: FeatureHost, provider: Provider, sub: string): Promise<void> {
-	const command = sub || "status";
+	const command = sub || "menu";
+	if (command === "menu") {
+		await providerMenu(host, provider);
+		return;
+	}
 	if (command === "status") {
 		await showStatus(host, provider);
 		return;
@@ -371,6 +441,8 @@ export const authCommand: Command = {
 		const [sub, rest] = splitSub(args);
 		switch (sub) {
 			case "":
+				await openAuthMenu(host);
+				return;
 			case "status":
 				await showStatus(host);
 				return;

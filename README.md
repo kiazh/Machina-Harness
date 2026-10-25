@@ -1343,7 +1343,7 @@ scripts/            Operator script mount point and setup guidance
 | Code completion is missing | Check `/lsp status`; language servers must be installed separately; on macOS, try `/editor complete` if `Ctrl+Space` is intercepted |
 | Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras |
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
-| The music bar is empty or prompts for permission | Check platform support and macOS Automation permissions, or hide it with `/music off` |
+| The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
 
 ## License and credits
 

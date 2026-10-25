@@ -136,7 +136,7 @@ function failedEvent(reason: string): GatewayEvent {
 test("/auth (bare) prints the signed-in status card with actions", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_IN };
-	await run("/auth", host);
+	await run("/auth status", host);
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
 	assert.deepEqual(
 		host.calls.slice(1).map((call) => call.method),
@@ -163,7 +163,7 @@ test("/auth reports an expired token honestly", async () => {
 	host.responses["auth.chatgpt.status"] = {
 		status: { ...SIGNED_IN, source: "codex", expired: true },
 	};
-	await run("/auth", host);
+	await run("/auth status", host);
 	assert.match(host.text(), /signed in via Codex CLI credentials \(expired — refreshes on next use\)/);
 });
 
@@ -354,7 +354,7 @@ test("/auth copilot status is shown alongside the other providers", async () => 
 	host.responses["auth.copilot.status"] = {
 		status: { signedIn: true, source: "gh", accountId: "octocat", tokenFamily: "fine-grained" },
 	};
-	await run("/auth", host);
+	await run("/auth status", host);
 	assert.match(host.text(), /GitHub Copilot: signed in \(octocat, fine-grained\)/);
 	assert.match(host.text(), /\/auth grok/);
 });

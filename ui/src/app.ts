@@ -187,6 +187,33 @@ const SHIFT_F12_SEQUENCE = "\x1b[24;2~";
 const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+←/→ panes";
 
 /**
+ * Normalize modifier-arrow encodings used by Windows consoles.
+ *
+ * Windows Terminal/ConPTY normally sends the standard xterm form
+ * (\x1b[1;5D), which pi-tui parses. A few console hosts drop the leading
+ * "1;" and send \x1b[5D instead. Rewrite only those unambiguous variants so
+ * the focused editor and the workspace shortcuts see one canonical key.
+ */
+function normalizeModifierArrow(data: string): string {
+	switch (data) {
+		case "\x1b[5D":
+			return "\x1b[1;5D";
+		case "\x1b[5C":
+			return "\x1b[1;5C";
+		case "\x1b[6D":
+			return "\x1b[1;6D";
+		case "\x1b[6C":
+			return "\x1b[1;6C";
+		case "\x1bO5D":
+			return "\x1b[1;5D";
+		case "\x1bO5C":
+			return "\x1b[1;5C";
+		default:
+			return data;
+	}
+}
+
+/**
  * Row cap for the keyboard-shortcuts menu. The documented list is long, so it
  * gets a couple more rows than the shared default
  * ({@link DEFAULT_MENU_VISIBLE_ROWS}) while still scrolling within the box.
@@ -548,7 +575,7 @@ export class App implements FeatureHost {
 		}
 		this.tui.setFocus(this.editor);
 		this.syncCursorBlink();
-		this.inputListenerDisposer = this.tui.addInputListener((data) => this.onKey(data));
+		this.inputListenerDisposer = this.tui.addInputListener((data) => this.onInput(data));
 
 		this.footer.cwd = process.cwd();
 		this.footer.status = "offline";
@@ -1667,6 +1694,26 @@ export class App implements FeatureHost {
 			label: row.label,
 			...(row.description === undefined ? {} : { description: row.description }),
 		}));
+	}
+
+	private onInput(data: string): { consume: boolean } | undefined {
+		const normalized = normalizeModifierArrow(data);
+		const result = this.onKey(normalized);
+		if (result) return result;
+		if (normalized === data) return undefined;
+		// The toolkit only sees modifier-arrow sequences in its canonical xterm
+		// form. Dispatch an unrecognized legacy encoding ourselves instead of
+		// letting the focused component receive the original bytes.
+		if (this.activeRegion === "chat-composer") {
+			this.editor.handleInput(normalized);
+			this.tui.requestRender();
+			return { consume: true };
+		}
+		if (this.activeRegion === "editor" && this.integration) {
+			this.integration.view.handleInput(normalized);
+			return { consume: true };
+		}
+		return undefined;
 	}
 
 	private onKey(data: string): { consume: boolean } | undefined {

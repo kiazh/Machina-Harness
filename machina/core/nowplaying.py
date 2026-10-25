@@ -1,4 +1,8 @@
-"""System now-playing detection (macOS) — layered sources.
+"""System now-playing detection — macOS and Windows.
+
+On Windows the System Media Transport Controls WinRT bridge in
+:mod:`machina.core.nowplaying_windows` supplies the same read/transport API.
+The macOS layers below remain the default on Darwin.
 
 The pinned music bar shows whatever is playing on this computer. macOS has no
 single public API for that, so this module tries layers in order and returns
@@ -604,8 +608,12 @@ def _empty(error: str | None = None) -> dict[str, Any]:
 
 
 def _detect() -> dict[str, Any]:
+    if sys.platform == "win32":
+        from machina.core.nowplaying_windows import detect_now_playing as detect_windows
+
+        return detect_windows()
     if sys.platform != "darwin":
-        return _empty("system now-playing requires macOS")
+        return _empty("system now-playing requires macOS or Windows")
 
     permission_denied: str | None = None
     applescript_budget = time.monotonic() + 4.0
@@ -748,8 +756,16 @@ def send_now_playing_command(action: str) -> dict[str, Any]:
     caller re-reads state afterwards; `ok` only means the source accepted the
     command, not that the UI should guess the new state.
     """
+    if sys.platform == "win32":
+        from machina.core.nowplaying_windows import send_now_playing_command as command_windows
+
+        return command_windows(action)
     if sys.platform != "darwin":
-        return {"ok": False, "source": None, "error": "system now-playing requires macOS"}
+        return {
+            "ok": False,
+            "source": None,
+            "error": "system now-playing requires macOS or Windows",
+        }
     if action not in _MR_COMMANDS:
         return {"ok": False, "source": None, "error": f"unknown action {action!r}"}
     current = detect_now_playing(cache=False)
@@ -795,6 +811,7 @@ def describe_sources() -> dict[str, Any]:
     """Diagnostics: which layers are usable on this machine."""
     return {
         "platform": sys.platform,
+        "windows_media": sys.platform == "win32",
         "mediaremote": _load_media_remote() is not None,
         "cli": _cli_binary()[0] if _cli_binary() else None,
         "apps": ["Spotify", "Music"],

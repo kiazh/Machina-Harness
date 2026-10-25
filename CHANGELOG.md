@@ -3,8 +3,11 @@
 ## 1.2.9 — 2026-10-24
 
 - The interactive launcher now checks `origin/main` and fast-forwards a clean source checkout, then re-executes into the updated code. `MACHINA_AUTO_UPDATE=0` disables it; dirty checkouts are left untouched.
-- `/auth` is now a unified subscription page for ChatGPT, Grok, and GitHub Copilot, including device-flow sign-in, status, import, and sign-out actions.
+- `/auth` is now an interactive subscription menu for ChatGPT, Grok, and GitHub Copilot: select a provider, then sign in, sign out, import, or inspect status.
+- Windows now-playing detection and transport controls use the native System Media Transport Controls API (`winrt`), so the music bar works with Spotify, browsers, and other Windows media sessions.
+- Normalized legacy Windows Ctrl+Arrow encodings to the standard xterm sequences; composer/editor word motion continues to accept Alt+Arrow as a fallback.
 - Successful `/auth` sign-in activates the matching provider and a catalog model for the current session and future launches, addressing turns that kept using the previous provider after login.
+- Failed agent turns now include a redacted provider error detail instead of only the generic `agent turn failed` notice.
 - Clarified model naming: OpenAI ships GPT-6.1 Sol, but Luna remains GPT-6 Luna; the picker keeps `gpt-6-luna` rather than inventing a `gpt-6.1-luna` id.
 
 ## 1.2.8 — 2026-10-24
