@@ -32,6 +32,7 @@ import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DEL
 import type { AnimationSubscription } from "./design/motion.ts";
 import { SHORTCUT_ROWS } from "./design/shortcuts.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
+import { sanitizePastedText } from "./design/text.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
@@ -1781,7 +1782,7 @@ export class App implements FeatureHost {
                 if (epoch !== this.imageEpoch || this.exiting) return [];
                 const paths = imagePaths(text);
                 if (paths) return Promise.all(paths.map(readImageFile));
-                if (text) this.editor.insertTextAtCursor(text);
+                if (text) this.editor.insertTextAtCursor(sanitizePastedText(text));
                 else this.print("No image or text found in the clipboard. Drop an image file to attach it.", "info");
                 return [];
             });

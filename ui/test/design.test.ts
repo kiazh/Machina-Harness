@@ -9,6 +9,7 @@ import {
 	countRenderedLines,
 	hasNoTerminalControls,
 	sanitizeDisplay,
+	sanitizePastedText,
 	shapePreview,
 	singleLine,
 	truncateDisplay,
@@ -340,4 +341,10 @@ test("H01 required themes are readable with distinct semantic roles", async () =
 		const b = value.slice(5, 7);
 		assert.equal(`${r}${g}${b}`.toLowerCase(), `${r}${r}${r}`.toLowerCase(), `mono.${slot} carries no hue`);
 	}
+});
+
+
+test("sanitizePastedText removes terminal colour residue but keeps prose", () => {
+	const input = "\x1b[38;5;28mhello\x1b[0m [38;5;80mworld[0m\nnext line";
+	assert.equal(sanitizePastedText(input), "hello world\nnext line");
 });

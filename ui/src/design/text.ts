@@ -81,6 +81,19 @@ export function sanitizeDisplay(input: string): string {
 	return out;
 }
 
+/**
+ * Clean clipboard text before it becomes editable draft content.
+ *
+ * Terminal copies often carry SGR runs. Even terminals that display them
+ * as color also produce literal "[38;5;…m" text when the copy crossed a
+ * renderer boundary, so strip both escape-prefixed sequences and that
+ * visible residue. Newlines and ordinary text are preserved.
+ */
+export function sanitizePastedText(input: string): string {
+	const withoutLiteralSgr = input.replace(/\[\d+(?:;\d+)*m/g, "");
+	return sanitizeDisplay(withoutLiteralSgr);
+}
+
 /** True when a string carries no cursor-moving/control sequences. */
 export function hasNoTerminalControls(text: string): boolean {
 	// Allow printable text, \n, safe SGR color, and normal graphemes.

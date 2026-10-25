@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.2.11 — 2026-10-25
+
+- Composer paste now strips terminal SGR/ANSI control sequences, including literal colour residue copied from a terminal, before the draft is created. Pasted prose, paths, and line breaks are preserved.
+
 ## 1.2.10 — 2026-10-25
 
 - `/auth` now opens a provider/action menu instead of printing a status card; select a provider, then sign in, sign out, import, or inspect status.

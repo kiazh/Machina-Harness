@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { ICONS } from "./design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
-import { sanitizeDisplay } from "./design/text.ts";
+import { sanitizeDisplay, sanitizePastedText } from "./design/text.ts";
 import { LIMITS } from "./design/tokens.ts";
 import { transcriptInset } from "./design/spacing.ts";
 import { Menu } from "./components/Menu.ts";
@@ -239,7 +239,7 @@ export class ComposerInput extends Editor {
             this.attachmentPaste += data;
             const end = this.attachmentPaste.indexOf("\x1b[201~");
             if (end < 0) return;
-            const text = this.attachmentPaste.slice(0, end);
+            const text = sanitizePastedText(this.attachmentPaste.slice(0, end));
             const remaining = this.attachmentPaste.slice(end + 6);
             this.attachmentPaste = undefined;
             if (!this.onPaste?.(text)) super.handleInput(`\x1b[200~${text}\x1b[201~`);
