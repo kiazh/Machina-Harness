@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.2.14 — 2026-10-25
+
+- Composer paste sanitization also covers non-bracketed paste paths (for example right-click paste in Windows Terminal), not only bracketed paste and Ctrl+V. Extended-colour SGR forms such as `[38:2::r:g:b m` are stripped as well.
+
 ## 1.2.13 — 2026-10-25
 
 - `/auth` provider menus now always offer **Sign in** (re-authenticate), even when already signed in; **Sign out** remains alongside it. This lets an imported Codex credential be replaced without first signing out.

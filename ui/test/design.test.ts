@@ -10,6 +10,7 @@ import {
 	hasNoTerminalControls,
 	sanitizeDisplay,
 	sanitizePastedText,
+	hasTerminalPasteResidue,
 	shapePreview,
 	singleLine,
 	truncateDisplay,
@@ -351,4 +352,8 @@ test("sanitizePastedText removes terminal colour residue but keeps prose", () =>
 		sanitizePastedText("before\x1b[<35;44;19M[<35;44;19Mafter<35;44;19M"),
 		"beforeafter",
 	);
+	assert.equal(sanitizePastedText("[38:2::255:0:0mred[0m"), "red");
+	assert.equal(hasTerminalPasteResidue("plain text"), false);
+	assert.equal(hasTerminalPasteResidue("[38;5;28m"), true);
+	assert.equal(hasTerminalPasteResidue("\x1b[A"), false);
 });

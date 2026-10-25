@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { ICONS } from "./design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
-import { sanitizeDisplay, sanitizePastedText } from "./design/text.ts";
+import { hasTerminalPasteResidue, sanitizeDisplay, sanitizePastedText } from "./design/text.ts";
 import { LIMITS } from "./design/tokens.ts";
 import { transcriptInset } from "./design/spacing.ts";
 import { Menu } from "./components/Menu.ts";
@@ -248,6 +248,13 @@ export class ComposerInput extends Editor {
             this.attachmentPaste = undefined;
             if (!this.onPaste?.(text)) super.handleInput(`\x1b[200~${text}\x1b[201~`);
             if (remaining) this.handleInput(remaining);
+            return;
+        }
+        if (hasTerminalPasteResidue(data)) {
+            // Non-bracketed paste (notably right-click paste on Windows) reaches
+            // this branch as one text chunk. Keep its controls out of the draft.
+            const clean = sanitizePastedText(data);
+            if (clean) this.insertTextAtCursor(clean);
             return;
         }
         if (!this.onPaste?.(data)) super.handleInput(data);

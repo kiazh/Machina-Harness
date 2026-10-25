@@ -97,8 +97,18 @@ export function sanitizePastedText(input: string): string {
 		.replace(/\x1b\[<\d+(?:;\d+)*[Mm]/g, "")
 		.replace(/\[<\d+(?:;\d+)*[Mm]/g, "")
 		.replace(/<\d+(?:;\d+)*[Mm]/g, "");
-	const withoutLiteralSgr = withoutMouse.replace(/\[\d+(?:;\d+)*m/g, "");
+	const withoutLiteralSgr = withoutMouse.replace(/\[\d+(?:[;:]\d*)*m/g, "");
 	return sanitizeDisplay(withoutLiteralSgr);
+}
+
+/** True when terminal colour/mouse residue is present in a text chunk. */
+export function hasTerminalPasteResidue(input: string): boolean {
+	return (
+		/\x1b\[[0-9;:?]*m/.test(input) ||
+		/\[\d+(?:[;:]\d*)*m/.test(input) ||
+		/\x1b\[<\d+(?:;\d+)*[Mm]/.test(input) ||
+		/\[?<\d+(?:;\d+)*[Mm]/.test(input)
+	);
 }
 
 /** True when a string carries no cursor-moving/control sequences. */
