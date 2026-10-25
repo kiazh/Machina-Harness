@@ -1279,7 +1279,7 @@ wheels = [
 
 [[package]]
 name = "machina"
-version = "1.2.12"
+version = "1.2.13"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
@@ -1351,7 +1351,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
-    { name = "langgraph", marker = "extra == 'workflow-trial'", specifier = ">=1.2.12" },
+    { name = "langgraph", marker = "extra == 'workflow-trial'", specifier = ">=1.2.13" },
     { name = "langgraph-checkpoint-postgres", marker = "extra == 'workflow-trial'", specifier = ">=3.1.2" },
     { name = "mcp", specifier = "==2.3.0" },
     { name = "mcp", marker = "extra == 'connectors'", specifier = "==2.3.0" },

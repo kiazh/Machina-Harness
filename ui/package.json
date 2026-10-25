@@ -1,6 +1,6 @@
 {
   "name": "machina-ui",
-  "version": "1.2.12",
+  "version": "1.2.13",
   "private": true,
   "description": "Machina terminal UI (TypeScript, built on @earendil-works/pi-tui). Talks to the Python gateway over JSON-RPC on stdio.",
   "type": "module",

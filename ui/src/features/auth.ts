@@ -364,12 +364,15 @@ async function providerMenu(host: FeatureHost, provider: Provider): Promise<void
 	const signedIn = status?.signedIn === true;
 	const items: Array<{ value: string; label: string; description?: string }> = [
 		{
-			value: signedIn ? "sign-out" : "sign-in",
-			label: signedIn ? `Sign out of ${provider}` : `Sign in to ${provider}`,
-			description: signedIn ? "Remove Machina's token store for this provider" : "Browser/device authorization",
+			value: "sign-in",
+			label: signedIn ? `Sign in again to ${provider}` : `Sign in to ${provider}`,
+			description: signedIn ? "Re-run authorization and replace the stored token" : "Browser/device authorization",
 		},
-		{ value: "status", label: "Show status" },
 	];
+	if (signedIn) {
+		items.push({ value: "sign-out", label: `Sign out of ${provider}`, description: "Remove Machina's token store for this provider" });
+	}
+	items.push({ value: "status", label: "Show status" });
 	if (provider === "chatgpt") items.push({ value: "import-codex", label: "Import Codex CLI credentials" });
 	if (provider === "copilot") items.push({ value: "import-gh", label: "Import gh CLI credentials" });
 	const choice = await host.pick(`${providerLabel(provider, status)} — choose an action`, items);

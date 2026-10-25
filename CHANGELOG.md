@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.2.13 — 2026-10-25
+
+- `/auth` provider menus now always offer **Sign in** (re-authenticate), even when already signed in; **Sign out** remains alongside it. This lets an imported Codex credential be replaced without first signing out.
+- Untyped agent-turn failures now include the exception class name (for example `RuntimeError`) so a remaining ChatGPT failure can be diagnosed without exposing arbitrary exception text.
+
 ## 1.2.12 — 2026-10-25
 
 - Composer paste now also strips literal SGR mouse reports (`[<35;44;19M`-style) that Windows terminals can leave in copied text, in addition to ANSI color sequences. Raw mouse reports are ignored if a host delivers one as input.
