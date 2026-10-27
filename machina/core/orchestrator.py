@@ -371,7 +371,9 @@ class Orchestrator:
                 agent = await self._default_agent(
                     definition, authority=child_authority, session=child
                 )
-            message_id = await self._record_start(parent_session_id, from_agent, agent_name, task)
+            message_id = await self._record_start(
+                parent_session_id, from_agent, agent_name, task, child_session_id=child.id
+            )
             depth_token = delegation_depth.set(_hop_count)
             authority_token = parent_authority_var.set(child_authority)
             child_task = self._build_delegation_prompt(agent_name, task, handoff)
@@ -704,19 +706,26 @@ class Orchestrator:
 
     # ─── persistence ──────────────────────────────────────────────────────
     async def _record_start(
-        self, session_id: uuid.UUID | None, from_agent: str, to_agent: str, task: str
+        self,
+        session_id: uuid.UUID | None,
+        from_agent: str,
+        to_agent: str,
+        task: str,
+        *,
+        child_session_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         message_id = uuid.uuid4()
         await db.execute(
             """
-            INSERT INTO agent_messages (id, session_id, from_agent, to_agent, task, status)
-            VALUES ($1, $2, $3, $4, $5, 'pending')
+            INSERT INTO agent_messages (id, session_id, from_agent, to_agent, task, status, child_session_id)
+            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
             """,
             message_id,
             session_id,
             from_agent,
             to_agent,
             task,
+            child_session_id,
         )
         return message_id
 
@@ -740,7 +749,7 @@ class Orchestrator:
         """Return session delegations in chronological order with redacted responses."""
         rows = await db.fetch(
             """
-            SELECT id, from_agent, to_agent, task, response, status, tokens_used, created_at, completed_at
+            SELECT id, from_agent, to_agent, task, response, status, tokens_used, created_at, completed_at, child_session_id
             FROM agent_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2
             """,
             session_id,
@@ -749,6 +758,7 @@ class Orchestrator:
         return [
             {
                 "id": str(r["id"]),
+                "childSessionId": str(r["child_session_id"]) if r["child_session_id"] else None,
                 "fromAgent": r["from_agent"],
                 "toAgent": r["to_agent"],
                 "task": r["task"],

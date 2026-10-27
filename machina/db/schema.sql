@@ -321,6 +321,7 @@ ALTER TABLE IF EXISTS agents DROP COLUMN IF EXISTS max_iterations;
 CREATE TABLE IF NOT EXISTS agent_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    child_session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,
     from_agent TEXT NOT NULL,
     to_agent TEXT NOT NULL,
     task TEXT NOT NULL,
