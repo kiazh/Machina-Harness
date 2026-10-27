@@ -247,6 +247,7 @@ MAX_PENDING_LEARNING_REVIEWS = 16
 # a 1s cap aborted healthy network tools and cost another LLM call to react.
 _TOOL_TIMEOUTS: dict[str, float] = {
     "share_memory": 60.0,
+    "web_search": 45.0,
     "web_extract": 45.0,
     "web_research": 120.0,
     "web_crawl": 120.0,
