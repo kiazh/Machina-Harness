@@ -242,6 +242,11 @@ async def list_agents(query: str = "") -> str:
         ]
         if not agents:
             return f"No agents match {query.strip()!r}."
+    else:
+        # The bounded default roster must still show the standard roles even
+        # when an alphabetically sorted specialist catalog is much larger.
+        core = {"harness": 0, "researcher": 1, "coder": 2}
+        agents = sorted(agents, key=lambda agent: core.get(agent.name, 3))
     shown = agents[:12]
     lines = [f"- {agent.name}: {agent.description or '(no description)'}" for agent in shown]
     if len(agents) > len(shown):

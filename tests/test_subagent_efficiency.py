@@ -36,3 +36,23 @@ async def test_agent_discovery_is_bounded_and_searchable(monkeypatch):
     assert roster.count("- specialist-") == 12
     assert "18 more agents" in roster
     assert "specialist-29" in await list_agents(query="topic 29")
+
+
+@pytest.mark.asyncio
+async def test_default_roster_keeps_core_roles_visible_with_many_specialists(monkeypatch):
+    from machina.core.agent_def import agent_registry
+
+    async def agents():
+        return [
+            SimpleNamespace(name=f"a-specialist-{index}", description="specialist")
+            for index in range(20)
+        ] + [
+            SimpleNamespace(name=name, description="core")
+            for name in ("harness", "researcher", "coder")
+        ]
+
+    monkeypatch.setattr(agent_registry, "list", agents)
+    roster = await list_agents()
+    assert all(f"- {name}:" in roster for name in ("harness", "researcher", "coder"))
+    assert roster.count("\n-") == 11
+    assert "11 more agents" in roster
