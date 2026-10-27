@@ -12,10 +12,13 @@ import asyncio
 import logging
 import os
 import stat
+import threading
 import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from weakref import WeakKeyDictionary
 
 from machina.core.agent_def import AgentDef, agent_registry
 from machina.core.assembler import PromptAssembler, get_token_count, truncate_to_tokens
@@ -53,6 +56,47 @@ delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
 child_observer: ContextVar[Callable[[uuid.UUID, str, str], None] | None] = ContextVar(
     "delegated_child_observer", default=None
 )
+
+
+class _DelegateCapacity:
+    """Share the configured worker limit among callers on each event loop."""
+
+    def __init__(self) -> None:
+        self._states: WeakKeyDictionary = WeakKeyDictionary()
+        self._guard = threading.Lock()
+
+    def _state(self):
+        loop = asyncio.get_running_loop()
+        with self._guard:
+            state = self._states.get(loop)
+            if state is None:
+                state = (asyncio.Condition(), [0])
+                self._states[loop] = state
+            return state
+
+    @asynccontextmanager
+    async def slot(self):
+        condition, active = self._state()
+
+        def current_limit() -> int:
+            try:
+                return max(1, min(int(config.get("max_delegate_concurrency") or 4), 64))
+            except (TypeError, ValueError):
+                return 4
+
+        async with condition:
+            while active[0] >= current_limit():
+                await condition.wait()
+            active[0] += 1
+        try:
+            yield
+        finally:
+            async with condition:
+                active[0] -= 1
+                condition.notify_all()
+
+
+_delegate_capacity = _DelegateCapacity()
 
 
 class AgentNotFoundError(Exception):
@@ -374,6 +418,7 @@ class Orchestrator:
             message_id = await self._record_start(
                 parent_session_id, from_agent, agent_name, task, child_session_id=child.id
             )
+            nested_delegation = delegation_depth.get() > 0
             depth_token = delegation_depth.set(_hop_count)
             authority_token = parent_authority_var.set(child_authority)
             child_task = self._build_delegation_prompt(agent_name, task, handoff)
@@ -381,41 +426,48 @@ class Orchestrator:
                 child_task += f"\n\n## Expected Output\n{expected_output}"
             if expected_artifact_path:
                 child_task += f"\n\n## Expected Artifact\n{expected_artifact_path}"
-            if observer is None or not hasattr(agent, "run_stream"):
+            if nested_delegation:
+                # Product child agents cannot delegate. Keep internal recursive
+                # orchestrator calls from deadlocking while the parent holds a slot.
                 response = await agent.run(child.id, child_task, verbose=False)
             else:
-                from contextlib import aclosing
+                async with _delegate_capacity.slot():
+                    await self._record_status(message_id, "running")
+                    if observer is None or not hasattr(agent, "run_stream"):
+                        response = await agent.run(child.id, child_task, verbose=False)
+                    else:
+                        from contextlib import aclosing
 
-                from machina.memory.redaction import StreamingSecretRedactor
+                        from machina.memory.redaction import StreamingSecretRedactor
 
-                def announce(kind: str, value: str = "") -> None:
-                    try:
-                        observer(child.id, kind, value)
-                    except Exception as error:
-                        record_failure("orchestrator.child_observer", error)
+                        def announce(kind: str, value: str = "") -> None:
+                            try:
+                                observer(child.id, kind, value)
+                            except Exception as error:
+                                record_failure("orchestrator.child_observer", error)
 
-                announce("start", agent_name)
-                observer_started = True
-                redactor = StreamingSecretRedactor()
-                response = None
-                async with aclosing(
-                    agent.run_stream(child.id, child_task, verbose=False)
-                ) as events:
-                    async for event in events:
-                        if event.type == "text":
-                            safe = redactor.feed(event.content or "")
-                            if safe:
-                                announce("text", safe)
-                        elif event.type == "tool_call":
-                            announce("tool", event.tool_name)
-                        elif event.type == "done":
-                            tail = redactor.flush()
-                            if tail:
-                                announce("text", tail)
-                            response = event.response
-                if response is None:
-                    raise RuntimeError("delegated stream ended without a result")
-                announce("done", response.outcome)
+                        announce("start", agent_name)
+                        observer_started = True
+                        redactor = StreamingSecretRedactor()
+                        response = None
+                        async with aclosing(
+                            agent.run_stream(child.id, child_task, verbose=False)
+                        ) as events:
+                            async for event in events:
+                                if event.type == "text":
+                                    safe = redactor.feed(event.content or "")
+                                    if safe:
+                                        announce("text", safe)
+                                elif event.type == "tool_call":
+                                    announce("tool", event.tool_name)
+                                elif event.type == "done":
+                                    tail = redactor.flush()
+                                    if tail:
+                                        announce("text", tail)
+                                    response = event.response
+                        if response is None:
+                            raise RuntimeError("delegated stream ended without a result")
+                        announce("done", response.outcome)
         except asyncio.CancelledError:
             if message_id is not None:
                 try:
@@ -718,7 +770,7 @@ class Orchestrator:
         await db.execute(
             """
             INSERT INTO agent_messages (id, session_id, from_agent, to_agent, task, status, child_session_id)
-            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+            VALUES ($1, $2, $3, $4, $5, 'queued', $6)
             """,
             message_id,
             session_id,
@@ -744,6 +796,18 @@ class Orchestrator:
             _redacted(response),
             tokens,
         )
+
+    async def _record_status(self, message_id: uuid.UUID, status: str) -> None:
+        """Persist a queued-to-running transition before a worker starts."""
+        try:
+            await db.execute(
+                "UPDATE agent_messages SET status = $2 WHERE id = $1 AND status = 'queued'",
+                message_id,
+                status,
+            )
+        except Exception as error:
+            # Status telemetry cannot prevent the actual child work from running.
+            record_failure("orchestrator.delegate.status", error)
 
     async def history(self, session_id: uuid.UUID, limit: int = 50) -> list[dict]:
         """Return session delegations in chronological order with redacted responses."""

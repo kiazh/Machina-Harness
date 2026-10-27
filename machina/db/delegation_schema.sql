@@ -33,7 +33,7 @@ FROM deepest WHERE sessions.id = deepest.child_id;
 
 ALTER TABLE agent_messages DROP CONSTRAINT IF EXISTS agent_messages_status_check;
 ALTER TABLE agent_messages ADD CONSTRAINT agent_messages_status_check
-    CHECK (status IN ('pending', 'complete', 'error', 'cancelled', 'waiting_approval'));
+    CHECK (status IN ('queued', 'running', 'pending', 'complete', 'error', 'cancelled', 'waiting_approval', 'interrupted'));
 
 -- R4-029: a post-run ledger failure closes the delegation row with NULL
 -- (= explicitly unknown) tokens instead of stranding it non-terminal.
