@@ -175,7 +175,7 @@ You are a general-purpose agent first: answer greetings and self-contained conce
 
 For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 
-Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue at most three independent delegate calls together. Give each worker a complete task and required evidence. A worker reports only to you. On each report, check what remains, continue your own work or assign a focused follow-up with the session_id in the delegate result, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
+Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. On each report, check what remains, continue your own work or assign a focused follow-up with the session_id in the delegate result, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
 When you need to do something, use the available tools. Think step by step:
 1. Understand the task
@@ -896,7 +896,8 @@ class BaseReActAgent:
         *tool_calls_made* in place.
 
         Independent tool calls in one assistant message run **concurrently**
-        (bounded by ``_MAX_PARALLEL_TOOLS``) instead of one after another, so a
+        (bounded by ``_MAX_PARALLEL_TOOLS``, or the configured delegate limit
+        for delegation) instead of one after another, so a
         batch of N reads costs roughly max(latency) rather than sum(latency).
         Every ``tool_call`` event is emitted up front, then results are
         replayed in the original order so the transcript stays deterministic.
@@ -1259,9 +1260,15 @@ class BaseReActAgent:
         completion_order: list[dict[str, Any]] = []
         if runnable:
             semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
+            try:
+                delegate_limit = int(config.get("max_delegate_concurrency") or 4)
+            except (TypeError, ValueError):
+                delegate_limit = 4
+            delegate_semaphore = asyncio.Semaphore(max(1, min(delegate_limit, 64)))
 
             async def _bounded(item: dict[str, Any]) -> dict[str, Any]:
-                async with semaphore:
+                slots = delegate_semaphore if item["name"] == "delegate" else semaphore
+                async with slots:
                     with _s3trace.trace_tool_call(item) if _s3trace else nullcontext() as _trace:
                         await _run_one(item)
                         if _trace is not None:
