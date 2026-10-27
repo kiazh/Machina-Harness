@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Container, stripTerminalSequences, type Component, type OverlayHandle, type TUI } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
+import { applyModel } from "../src/features/models.ts";
 import type { GatewayClient } from "../src/gateway.ts";
 import type { GatewayEvent, SessionInfo } from "../src/protocol.ts";
 import { Transcript } from "../src/transcript.ts";
@@ -1146,6 +1147,7 @@ function makePinApp() {
 	// Scripted dialog intent only: confirmations accept, the optional provider
 	// key stays empty. Every RPC and the command/session flow stay real.
 	app.pick = async (_title, items) => items.find((item) => item.value === "yes") ?? items[0];
+	app.pickCentered = app.pick;
 	app.askText = async () => "";
 	return { app, tui, client };
 }
@@ -1163,13 +1165,13 @@ async function waitForPromptOutcome(client: PinClient, notices: string[]): Promi
 	}
 }
 
-test("R4-024 /provider switch mirrors the authoritative route into the session snapshot", async () => {
+test("R4-024 model selection mirrors its provider route into the session snapshot", async () => {
 	const { app, client } = makePinApp();
 	await app.start();
 	client.named.add("acme");
-	await appSubmit(app, "/provider acme");
+	await applyModel(app, { model: "acme-1", provider: "acme", description: "custom model" });
 	assert.equal(app.session()?.provider, "acme", "the app snapshot follows the gateway's pinned provider");
-	assert.equal(app.session()?.model, "openrouter/free", "the untouched model part is preserved");
+	assert.equal(app.session()?.model, "acme-1", "the selected model is pinned with its provider");
 	await app.exit();
 });
 
@@ -1178,9 +1180,9 @@ test("R4-024 provider remove re-pins the session and the next turn uses the fall
 	await app.start();
 	const spy = spyTranscript(app);
 	const editor = tui.focused as unknown as { handleInput(data: string): void };
-	// Scripted user flow: add a provider, switch to it, then remove it.
+	// Scripted user flow: add a provider, choose its model, then remove it.
 	await appSubmit(app, "/provider add acme http://127.0.0.1:9000/v1");
-	await appSubmit(app, "/provider acme");
+	await applyModel(app, { model: "acme-1", provider: "acme", description: "custom model" });
 	await appSubmit(app, "/provider remove acme");
 	// The next prompt must execute on the fallback provider the removal
 	// reported — never on the deleted pin.

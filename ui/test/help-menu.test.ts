@@ -249,7 +249,7 @@ test("HM-06 HELP_KEYS covers Composer, Workspace and Global contexts", () => {
 	assert.ok(contexts.has("Workspace"));
 	assert.ok(contexts.has("Global"));
 	assert.ok(HELP_KEYS.some((key) => key.label.includes("Ctrl+P — quick open")));
-	assert.ok(HELP_KEYS.some((key) => key.label.includes("F6 / Shift+F6")));
+	assert.ok(HELP_KEYS.some((key) => key.label.includes("Ctrl+N then N / P")));
 	for (const key of HELP_KEYS) {
 		assert.ok(key.label.trim().length > 0, "every key row has a label");
 		assert.ok(key.context.trim().length > 0, "every key row has a context");
@@ -259,8 +259,8 @@ test("HM-06 HELP_KEYS covers Composer, Workspace and Global contexts", () => {
 // ─── legacy fallback host ───────────────────────────────────────────────────
 
 const LEGACY_KEYS = [
-	"Keys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+Shift+←/→ switch agents",
-	"Workspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · F12 definition · Shift+F12 references · F2 rename · F6/Shift+F6 cycle focus · Ctrl+→ maximize chat · Ctrl+← back to the 50/50 split (editor focus; composer word motion: Ctrl+←/→) · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept)",
+	"Keys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+N then J/K switch agents",
+	"Workspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · Ctrl+N then D definition, R references, M rename · N/P cycle focus · C maximize chat, E maximize editor, S restore split · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept) · /settings keyboard shortcuts to edit",
 ].join("\n");
 
 class RecordingHost {

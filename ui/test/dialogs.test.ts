@@ -109,11 +109,12 @@ test("? opens shortcuts on an empty composer and Esc restores input", async (t) 
 	assert.equal(requests.filter(method => method === "prompt.submit").length, 1);
 });
 
-test("F1 opens shortcuts without erasing a draft and ? stays text inside forms", async (t) => {
+test("Ctrl+N then H opens shortcuts without erasing a draft and ? stays text inside forms", async (t) => {
 	const { app, tui, type } = await boot();
 	t.after(() => app.exit());
 	type("A question?");
-	type("\x1bOP");
+	type("\x0e");
+	type("h");
 	tui.renderNow(true);
 	assert.match(tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Keyboard shortcuts/);
 	type("\x1b");

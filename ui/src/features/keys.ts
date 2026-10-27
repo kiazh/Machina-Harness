@@ -59,6 +59,10 @@ export interface KeyRow {
 	set: boolean;
 	/** False for keyless-local provider rows: nothing to set or clear. */
 	editable: boolean;
+	/** Whether Delete may clear/remove this row. Defaults to true. */
+	clearable?: boolean;
+	/** Built-in provider credential associated with this row, when any. */
+	credentialKey?: string;
 	description: string;
 	/** User-added provider name for provider rows (absent for catalog keys). */
 	provider?: string;
@@ -136,6 +140,7 @@ export const keysCommand: Command = {
 	async run(args, host) {
 		const [sub, rest] = splitSub(args);
 		if (!sub) {
+			if (host.openKeysEditor) { await host.openKeysEditor(); return; }
 			await openMenu(host);
 			return;
 		}
@@ -145,6 +150,7 @@ export const keysCommand: Command = {
 			return;
 		}
 		if (sub === "set") {
+			if (!rest.trim() && host.openKeysEditor) { await host.openKeysEditor(); return; }
 			const persist = !/(^|\s)--no-save(\s|$)/.test(rest);
 			const cleaned = rest.replace(/(^|\s)--no-save(?=\s|$)/, " ").trim();
 			const space = cleaned.search(/\s/);

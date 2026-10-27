@@ -27,11 +27,13 @@ export class Footer implements Component {
 	/** Subagents in the visible session's family (0 hides the segment). */
 	subagents = 0;
 	/**
-	 * Workspace key hints (e.g. "Ctrl+T explorer · Ctrl+←/→ panes"), set by
+	 * Workspace key hints (e.g. "Ctrl+T explorer · Ctrl+N then C/E/S panes"), set by
 	 * the App only while the workspace is available. Hidden first when the
 	 * row runs out of room; compact viewports drop it entirely.
 	 */
 	workspaceHints = "";
+	/** Transient hint while a two-key shortcut is waiting for its letter. */
+	keyHint = "";
 	private currentStatus: FooterStatus = "ready";
 	/** Compact single-row mode for short viewports (hints hide first). */
 	compact = false;
@@ -137,7 +139,7 @@ export class Footer implements Component {
 		const tail = `${status}${agents}${tokens}`;
 		const metadata = theme.dim(sanitizeDisplay([this.model, this.branch, this.mode].filter(Boolean).join(" / ")));
 		const core = metadata ? `${metadata} / ${tail}` : tail;
-		const hint = theme.dim("? shortcuts · / commands");
+		const hint = this.keyHint ? theme.accent(this.keyHint) : theme.dim("? shortcuts · / commands");
 		const room = Math.max(0, width - 2);
 		let left = core;
 		if (visibleWidth(left) > room) {

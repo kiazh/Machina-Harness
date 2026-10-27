@@ -120,6 +120,15 @@ const PERSONA_EXAMPLE = "Be concise, warm, and direct. Explain tradeoffs clearly
 
 // ─── /provider helpers: list, add, remove user-added providers ──────────────
 
+async function confirmProvider(host: FeatureHost, question: string, action: string): Promise<boolean> {
+	const pick = host.pickCentered?.bind(host) ?? host.pick.bind(host);
+	const choice = await pick(question, [
+		{ value: "no", label: "Cancel" },
+		{ value: "yes", label: action },
+	]);
+	return choice?.value === "yes";
+}
+
 function providerRow(p: ProviderInfo): string[] {
 	return [
 		p.selected ? `${p.name} (current)` : p.name,
@@ -135,12 +144,12 @@ async function printProviders(host: FeatureHost): Promise<void> {
 	const rows = result.providers.map(providerRow);
 	const body = table(["Provider", "Kind", "Base URL", "Key", "Models"], rows, 36);
 	host.print(
-		`${body}\n\nCurrent: ${result.selected}\nUser-added provider keys live in .env (never shown; manage with /provider add).`,
+		`${body}\n\nCurrent model route: ${result.selected}\nUser-added provider keys live in .env (never shown; manage with /provider).`,
 		"plain",
 	);
 }
 
-async function addProvider(host: FeatureHost, rest: string): Promise<void> {
+export async function addProvider(host: FeatureHost, rest: string, editBaseUrl?: string): Promise<void> {
 	const parts = rest.trim().split(/\s+/).filter(Boolean);
 	let name = parts[0] ?? "";
 	let baseUrl = parts[1] ?? "";
@@ -151,30 +160,36 @@ async function addProvider(host: FeatureHost, rest: string): Promise<void> {
 				description: "Lowercase letters, digits and dashes (e.g. my-vllm). Used in /provider and /models.",
 				placeholder: "my-provider",
 				maxLength: 32,
+				centered: true,
 			}))?.trim().toLowerCase() ?? "";
 		if (!name) return;
 	}
-	if (!baseUrl) {
+	if (!baseUrl || editBaseUrl !== undefined) {
 		baseUrl =
 			(await host.askText({
 				title: `Base URL for ${name}`,
 				description: "OpenAI-compatible endpoint; /models is fetched from it and chat goes to /chat/completions.",
+				initial: editBaseUrl,
 				placeholder: "http://127.0.0.1:8000/v1",
 				maxLength: 500,
+				centered: true,
 			}))?.trim() ?? "";
 		if (!baseUrl) return;
 	}
 	const key = await host.askText({
 		title: `API key for ${name} (optional)`,
-		description: "Leave empty for keyless local endpoints. Stored in .env like /keys — masked, never shown again.",
+		description: editBaseUrl === undefined
+			? "Leave empty for keyless local endpoints. Stored in .env like /keys — masked, never shown again."
+			: "Leave empty to keep the existing key. A new key is masked and stored in .env.",
 		placeholder: "leave empty for no key",
 		secret: true,
 		allowEmpty: true,
+		centered: true,
 	});
 	// Escape cancels the whole flow; blank submits "" as the keyless path.
 	if (key === undefined) return;
 	const trimmed = key.trim();
-	const confirmed = await confirm(host, `Add provider "${name}" at ${baseUrl}?`, "Add");
+	const confirmed = await confirmProvider(host, `${editBaseUrl === undefined ? "Add" : "Update"} provider "${name}" at ${baseUrl}?`, editBaseUrl === undefined ? "Add" : "Update");
 	if (!confirmed) return;
 	let result: ProviderAddResult;
 	try {
@@ -187,14 +202,14 @@ async function addProvider(host: FeatureHost, rest: string): Promise<void> {
 		return;
 	}
 	if (result.fetchError) {
-		host.print(
-			`Provider "${result.provider}" saved, but model fetch failed: ${result.fetchError}\nFix the URL/key and re-run /provider add ${result.provider} ${result.baseUrl}.`,
+			host.print(
+			`Provider "${result.provider}" saved, but model fetch failed: ${result.fetchError}\nOpen /provider and edit its URL or key.`,
 			"warning",
 		);
 	} else {
 		const preview = result.models.slice(0, 8).map((m) => m.id).join(", ");
 		host.print(
-			`Provider "${result.provider}" added — ${result.models.length} model(s) pulled${preview ? `: ${preview}${result.models.length > 8 ? ", …" : ""}` : ""}.\nSwitch with /provider ${result.provider}, then pick a model with /models (or /default-model).`,
+			`Provider "${result.provider}" ${editBaseUrl === undefined ? "added" : "updated"} — ${result.models.length} model(s) pulled${preview ? `: ${preview}${result.models.length > 8 ? ", …" : ""}` : ""}.\nChoose one of its models with /models to use it.`,
 			"success",
 		);
 	}
@@ -205,7 +220,7 @@ async function addProvider(host: FeatureHost, rest: string): Promise<void> {
 	}
 }
 
-async function removeProvider(host: FeatureHost, rest: string): Promise<void> {
+export async function removeProvider(host: FeatureHost, rest: string): Promise<void> {
 	let name = rest.trim().toLowerCase();
 	let listed: ProvidersListResult | undefined;
 	try {
@@ -233,7 +248,7 @@ async function removeProvider(host: FeatureHost, rest: string): Promise<void> {
 	const info = named.find((p) => p.name === name);
 	const traces = describeProviderTraces(name, info);
 	const question = `Remove provider "${name}"? Deletes ${traces}.${info?.selected ? " It is the active provider — falls back to openrouter." : ""}`;
-	const confirmed = await confirm(host, question, "Remove");
+	const confirmed = await confirmProvider(host, question, "Remove");
 	if (!confirmed) return;
 	try {
 		const result = await host.request<ProviderRemoveResult>("providers.remove", { name });
@@ -251,7 +266,7 @@ async function removeProvider(host: FeatureHost, rest: string): Promise<void> {
 		host.print(removalSummary(result), "success");
 		if (result.switchedTo) {
 			host.print(
-				`Active provider fell back to ${result.switchedTo}${result.modelResetTo ? ` (model ${result.modelResetTo})` : ""}. Pick a new default with /provider and /models.`,
+				`Active route fell back to ${result.switchedTo}${result.modelResetTo ? ` (model ${result.modelResetTo})` : ""}. Choose a model with /models.`,
 				"warning",
 			);
 		}
@@ -664,7 +679,8 @@ async function settingsChatCategory(host: FeatureHost): Promise<SettingsFlow> {
 			continue;
 		}
 		if (choice.value === "providers") {
-			await printProviders(host);
+			if (host.openProviderEditor) await host.openProviderEditor();
+			else await printProviders(host);
 			continue;
 		}
 		await openProfileMenu(host);
@@ -706,6 +722,7 @@ export async function openSettingsMenu(host: FeatureHost): Promise<void> {
 			});
 		}
 		items.push({ value: "cat-appearance", label: "Appearance", description: `theme ${getSkin()}` });
+		items.push({ value: "cat-keybindings", label: "Keyboard shortcuts", description: "View and change keys" });
 		if (workspaceAvailable && surface) {
 			const rows = ui.lspRows();
 			items.push({
@@ -734,6 +751,9 @@ export async function openSettingsMenu(host: FeatureHost): Promise<void> {
 				break;
 			case "cat-appearance":
 				flow = await settingsAppearanceCategory(host);
+				break;
+			case "cat-keybindings":
+				await host.openKeybindings?.();
 				break;
 			case "cat-lsp":
 				if (surface) flow = await settingsLspCategory(host, surface, ui);
@@ -807,17 +827,14 @@ export const settingsCommands: Command[] = [
 			if (session) {
 				await host.request("session.setModel", { sessionId: session.id, model: query });
 			}
-			host.print("Provider unchanged — use /provider if this id belongs to another provider.", "plain");
+			host.print("This ID is outside the catalog, so it keeps the current model route.", "plain");
 		},
 	},
 	{
 		name: "provider",
-		description: "Show or set a provider; add/remove user-added providers",
-		argumentHint: "[list|add [name url]|remove [name]|openrouter|openai|anthropic|chatgpt|copilot|google|mistral|groq|together|deepseek|xai|opencode|kimi|custom|ollama|<name>]",
+		description: "Manage provider URLs and credentials",
+		argumentHint: "[provider name]",
 		getArgumentCompletions: options([
-			["list", "List built-in and user-added providers"],
-			["add", "Add a provider (name + base URL + optional key)"],
-			["remove", "Remove a user-added provider"],
 			["openrouter", "OpenRouter (multi-model)"],
 			["openai", "OpenAI direct"],
 			["anthropic", "Anthropic direct"],
@@ -836,6 +853,10 @@ export const settingsCommands: Command[] = [
 		]),
 		async run(args, host) {
 			const [sub, rest] = splitSub(args);
+			if (host.openProviderEditor && sub !== "list" && sub !== "add" && sub !== "remove") {
+				await host.openProviderEditor(sub || undefined);
+				return;
+			}
 			if (sub === "list") {
 				await printProviders(host);
 				return;
@@ -853,17 +874,10 @@ export const settingsCommands: Command[] = [
 				host.print(`Provider: ${config.provider}`, "plain");
 				host.print(
 					"OpenAI account models need no API key — sign in with /auth first. " +
-						"User-added providers: /provider list · /provider add · /provider remove.",
+						"Open /provider to add, edit, or remove custom providers.",
 					"plain",
 				);
-			} else {
-				const provider = args.toLowerCase();
-				await setConfig(host, "provider", provider, false);
-				const session = host.session();
-				if (session) {
-					await host.request("session.setModel", { sessionId: session.id, provider });
-				}
-			}
+			} else host.print("Provider is chosen with the model. Open /provider to manage URLs and keys.", "plain");
 		},
 	},
 	{

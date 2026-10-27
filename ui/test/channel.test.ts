@@ -53,6 +53,14 @@ test("times out when the gateway never answers", async () => {
 	await assert.rejects(ch.request("slow", {}, 20), /did not answer slow/);
 });
 
+test("zero timeout keeps a delegated request pending until the gateway answers", async () => {
+	const { ch, sent } = channel();
+	const pending = ch.request<string>("agents.run", {}, 0);
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	ch.handleLine(JSON.stringify({ jsonrpc: "2.0", id: sent[0]!.id, result: "finished" }));
+	assert.equal(await pending, "finished");
+});
+
 test("close rejects pending and future requests", async () => {
 	const { ch } = channel();
 	const pending = ch.request("x");

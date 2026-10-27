@@ -19,8 +19,9 @@ import { stripTerminalSequences, TuiAltScreen, type Terminal } from "@earendil-w
 import { App } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { runCommand } from "../src/features/index.ts";
+import { familyRootOf, isFamilySession, listFamilySessions } from "../src/family.ts";
 import type { GatewayClient } from "../src/gateway.ts";
-import type { GatewayEvent, ResumeResult, SessionInfo } from "../src/protocol.ts";
+import { RpcError, type GatewayEvent, type ResumeResult, type SessionInfo } from "../src/protocol.ts";
 
 const MAIN: SessionInfo = {
 	id: "11111111-1111-4111-8111-111111111111",
@@ -60,6 +61,39 @@ const UNRELATED: SessionInfo = {
 	lastActivity: null,
 	parentSessionId: null,
 };
+
+test("family discovery uses the direct gateway query when available", async () => {
+	const calls: string[] = [];
+	const family = await listFamilySessions({
+		async request<T>(method: string): Promise<T> {
+			calls.push(method);
+			if (method === "session.family") return { sessions: [MAIN, CHILD, UNRELATED] } as T;
+			throw new Error(`unexpected ${method}`);
+		},
+	}, MAIN);
+	assert.deepEqual(family.map((session) => session.id), [MAIN.id, CHILD.id]);
+	assert.deepEqual(calls, ["session.family"]);
+});
+
+test("family discovery falls back for an older gateway", async () => {
+	const calls: string[] = [];
+	const family = await listFamilySessions({
+		async request<T>(method: string): Promise<T> {
+			calls.push(method);
+			if (method === "session.family") throw new RpcError(-32601, "method not found");
+			if (method === "session.list") return { sessions: [MAIN, CHILD, UNRELATED] } as T;
+			throw new Error(`unexpected ${method}`);
+		},
+	}, MAIN);
+	assert.deepEqual(family.map((session) => session.id), [MAIN.id, CHILD.id]);
+	assert.deepEqual(calls, ["session.family", "session.list"]);
+});
+
+test("a user-created fork starts a separate family", () => {
+	const fork: SessionInfo = { ...CHILD, isFork: true };
+	assert.equal(familyRootOf(fork), fork.id);
+	assert.equal(isFamilySession(fork, MAIN.id), false);
+});
 
 function terminal(columns = 100, rows = 30) {
 	let input: (data: string) => void = () => {};
@@ -105,6 +139,11 @@ class FakeClient {
 				return { session: this.sessions[0] ?? MAIN } as T;
 			case "session.list":
 				return { sessions: this.sessions } as T;
+			case "session.family": {
+				const current = this.sessions.find((session) => session.id === params.sessionId);
+				const root = current?.parentSessionId ?? params.sessionId;
+				return { sessions: this.sessions.filter((session) => session.id === root || session.parentSessionId === root) } as T;
+			}
 			case "session.resume": {
 				const fixture = this.resume.get(String(params.sessionId));
 				if (fixture) return fixture as T;
@@ -183,7 +222,7 @@ test("(a) events for a hidden agent session are buffered and appear when switchi
 	assert.equal(internals(app).sessionTails.get(CHILD.id)?.blocks.length, 2, "deltas and tool are buffered while hidden");
 
 	// Ctrl+Shift+→ cycles to the child session.
-	type("\x1b[1;6C");
+	type("\x0e"); type("j");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id, "cycle key switched to the child session");
 	tui.renderNow(true);
@@ -221,7 +260,7 @@ test("(b) buffered tail over fetched history has no duplicates", async (t) => {
 		toolCalls: 1,
 		cancelled: false,
 	});
-	type("\x1b[1;6C");
+	type("\x0e"); type("j");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	tui.renderNow(true);
@@ -273,12 +312,14 @@ test("(d) Down on the empty composer opens the subagent menu with run state and 
 
 	// Give the child a live turn, then hide it again: the menu must show
 	// its run state while the main session stays visible.
-	type("\x1b[1;6C");
+	type("\x0e"); type("j");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
-	client.autoTurnId = "child-turn";
+	// Delegated work is already running in the gateway; the child view is read-only.
+	internals(app).inFlight.add(CHILD.id);
 	await app.submitTurn("child task");
-	type("\x1b[1;6C");
+	assert.equal(client.requests.some((request) => request.method === "prompt.submit"), false);
+	type("\x0e"); type("j");
 	await settle();
 	assert.equal(app.session()?.id, MAIN.id, "cycling wraps back to the main session");
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);
@@ -379,7 +420,7 @@ test("(f) session switching preserves in-flight guards and token totals", async 
 	await app.submitTurn("second main turn");
 	assert.equal(state.inFlight.has(MAIN.id), true);
 
-	type("\x1b[1;6C");
+	type("\x0e"); type("j");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	assert.equal(state.inFlight.has(MAIN.id), true, "hidden in-flight guard survives the switch");
@@ -387,7 +428,7 @@ test("(f) session switching preserves in-flight guards and token totals", async 
 	assert.equal(state.sessionTokensById.get(MAIN.id), 42, "token totals survive the switch");
 	assert.equal(state.sessionTokensById.get(CHILD.id), undefined, "the child's token state is untouched");
 
-	type("\x1b[1;6D");
+	type("\x0e"); type("k");
 	await settle();
 	assert.equal(app.session()?.id, MAIN.id);
 	assert.equal(state.footer.tokens, 42, "returning restores the preserved total");
@@ -441,7 +482,7 @@ test("only turn starts scan for an unknown session, and a foreign id is negative
 	const { app, client } = await boot({ sessions: [MAIN] });
 	t.after(() => app.exit());
 	await settle();
-	const listCalls = () => client.requests.filter((request) => request.method === "session.list").length;
+	const listCalls = () => client.requests.filter((request) => request.method === "session.family").length;
 	const baseline = listCalls();
 
 	// Deltas (or any non-turn-start frame) from an unfamiliar session are

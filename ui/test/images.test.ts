@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { ImageDraft, imagePaths, readImageFile, clipboardImage, runClipboardCommand } from "../src/images.ts";
 
@@ -9,7 +10,8 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 
 test("Finder drops support quoted paths, escaped spaces and file URLs", () => {
     assert.deepEqual(imagePaths("'/tmp/a image.png' /tmp/b\\ image.jpg "), ["/tmp/a image.png", "/tmp/b image.jpg"]);
-    assert.deepEqual(imagePaths("file:///tmp/my%20image.png"), ["/tmp/my image.png"]);
+    const droppedPath = resolve("/tmp/my image.png");
+    assert.deepEqual(imagePaths(pathToFileURL(droppedPath).href), [droppedPath]);
     assert.equal(imagePaths("explain /tmp/a.png"), null);
     assert.equal(imagePaths("/mcp"), null);
     assert.equal(imagePaths("https://example.com/a.png"), null);

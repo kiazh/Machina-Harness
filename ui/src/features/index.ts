@@ -65,7 +65,7 @@ const helpCommand: Command = {
 			return;
 		}
 		host.print(
-			`${helpText(COMMANDS)}\n\nKeys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+Shift+←/→ switch agents\nWorkspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · F12 definition · Shift+F12 references · F2 rename · F6/Shift+F6 cycle focus · Ctrl+→ maximize chat · Ctrl+← back to the 50/50 split (editor focus; composer word motion: Ctrl+←/→) · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept)`,
+			`${helpText(COMMANDS)}\n\nKeys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+N then J/K switch agents\nWorkspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · Ctrl+N then D definition, R references, M rename · N/P cycle focus · C maximize chat, E maximize editor, S restore split · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept) · /settings keyboard shortcuts to edit`,
 			"plain",
 		);
 	},

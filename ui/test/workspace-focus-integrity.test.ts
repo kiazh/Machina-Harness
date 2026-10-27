@@ -283,9 +283,11 @@ async function openEditorFile(app: App): Promise<{ integration: Integration; doc
 	return { integration, documentId };
 }
 
-const CtrlRight = "\x1b[1;5C";
 const CtrlLeft = "\x1b[1;5D";
-const F6 = "\x1b[17~";
+function pressGuide(tui: { press(data: string): void }, key: string): void {
+	tui.press("\x0e");
+	tui.press(key);
+}
 const ESC = "\x1b";
 const ENTER = "\r";
 const CTRL_W = "\x17";
@@ -303,7 +305,7 @@ test("maximizing chat while the editor owns focus reconciles the region to the c
 	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(tui.focused, integration.pane, "the pane owns keys while editing");
 
-	tui.press(CtrlRight); // editor-scoped: maximize chat
+	pressGuide(tui, "c"); // F8: maximize chat
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).workspaceLayout?.editor, undefined, "the editor region is hidden");
 	assert.equal(internals(app).activeRegion, "chat-composer", "focus reconciled to the only visible region");
@@ -315,12 +317,12 @@ test("maximizing chat while the editor owns focus reconciles the region to the c
 	assert.equal(integration.tabs.count(), 1, "Ctrl+W in the composer does not close the hidden editor's tab");
 
 	// Ctrl+Left restores the split even after focus moves to the composer.
-	tui.press(CtrlLeft);
+	pressGuide(tui, "s");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await app.exit();
 });
 
-test("F6 re-asserts focus when only the composer remains visible", async () => {
+test("Ctrl+N then N re-asserts focus when only the composer remains visible", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
@@ -329,16 +331,16 @@ test("F6 re-asserts focus when only the composer remains visible", async () => {
 	// Close the explorer so a chat maximize leaves a single-region cycle.
 	tui.press(CTRL_T);
 	assert.equal(internals(app).workspaceLayout?.explorer, undefined, "the explorer drawer is closed");
-	tui.press(CtrlRight);
+	pressGuide(tui, "c");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).activeRegion, "chat-composer");
 
-	// Simulate focus drift (a losing component cleared it); F6 must hand the
+	// Simulate focus drift (a losing component cleared it); the shortcut hands the
 	// only visible region its focus instead of early-returning.
 	tui.setFocus(null);
-	tui.press(F6);
+	pressGuide(tui, "n");
 	assert.equal(internals(app).activeRegion, "chat-composer");
-	assert.equal(tui.focused, internals(app).editor, "F6 re-asserted the composer's focus");
+	assert.equal(tui.focused, internals(app).editor, "focus shortcut re-asserted composer focus");
 	await app.exit();
 });
 
@@ -372,10 +374,10 @@ test("closing the last dialog restores the composer as the recorded region", asy
 	await app.start();
 	await waitForWorkspace(app);
 	await openEditorFile(app);
-	tui.press(F6); // editor → explorer
+	pressGuide(tui, "n"); // editor → explorer
 	assert.equal(internals(app).activeRegion, "explorer");
 
-	tui.press("\x1bOP"); // F1: shortcuts picker dialog
+	pressGuide(tui, "h"); // shortcuts picker dialog
 	assert.equal(internals(app).dialogs.length, 1, "a dialog is open");
 	internals(app).dialogs[0]!.cancel();
 	await settle();
@@ -457,7 +459,7 @@ test("moving focus off the editor dismisses the inline completion", async () => 
 	await settle();
 	assert.ok(internals(app).completionSession, "the suggestion is active in the editor");
 
-	tui.press(F6); // editor → explorer: the list's region loses focus
+	pressGuide(tui, "n"); // editor → explorer: the list's region loses focus
 	assert.equal(internals(app).activeRegion, "explorer");
 	assert.equal(internals(app).completionSession, undefined, "the editor-scoped suggestion was dismissed");
 	await app.exit();
@@ -568,7 +570,7 @@ test("a hidden editor cannot keep keys: drift is reconciled before Ctrl+S saves"
 	integration.store.insertText(documentId, "dirty");
 	assert.equal(integration.store.getDocument(documentId)?.dirty, true);
 
-	tui.press(CtrlRight); // editor-scoped: maximize chat, unmount the pane
+	pressGuide(tui, "c"); // F8: maximize chat, unmount the pane
 	assert.equal(internals(app).workspaceLayout?.editor, undefined);
 
 	// Two independent drift sources: the TUI still targets the removed pane,
@@ -704,7 +706,7 @@ test("a hostile dialog title cannot carry bidi/controls into the rendered menu",
 	assert.ok(overlay, "the dialog rendered");
 	const rendered = overlay.render(80).join("\n");
 	assert.ok(!/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(rendered), "no bidi/isolate control survives");
-	assert.ok(!rendered.includes("\x07"), "no BEL survives");
+	assert.ok(!rendered.includes("\x0e"), "no BEL survives");
 	assert.ok(!rendered.includes("[31m"), "an SGR payload in a label is stripped, not painted");
 	assert.match(rendered, /Save evil/, "the honest visible title remains");
 	internals(app).dialogs[0]!.cancel();
@@ -809,7 +811,7 @@ for (const leaveEditor of [false, true]) {
 				tui.press(key);
 				pane.handleInput(key);
 			}
-			if (leaveEditor) tui.press(F6);
+			if (leaveEditor) pressGuide(tui, "n");
 			await new Promise((resolve) => setTimeout(resolve, 220));
 			await settle();
 			const calls = client.requests.filter((r) => r.method === "workspace.intelligence" && r.params.operation === "completion");

@@ -155,7 +155,7 @@ DEFAULTS: dict[str, Any] = {
     "provider": "openrouter",
     # Legacy storage/config compatibility only; runtime uses model context capacity.
     "context_budget": 8000,
-    "turn_timeout": 300,
+    "turn_timeout": 0,
     "agent_id": "harness",
     "temperature": 0.7,
     "max_tokens": 4096,
@@ -384,6 +384,7 @@ DEFAULTS: dict[str, Any] = {
     # 16 KiB by validate_value (UI_PREFERENCES_MAX_BYTES); never holds source
     # text or secrets.
     "ui_preferences": "",
+    "keybindings": "",
     # Pinned now-playing bar (TUI): shows what is playing on this computer —
     # any app (browser video, Spotify, Music, …) — via the gateway's
     # nowplaying.get detection. Local-only: metadata never leaves the
@@ -500,6 +501,12 @@ def validate_value(key: str, value: Any) -> Any:
         if len(value.encode("utf-8")) > UI_PREFERENCES_MAX_BYTES:
             raise ValueError(f"ui_preferences is too long (max {UI_PREFERENCES_MAX_BYTES} bytes)")
         return value
+    if key == "keybindings":
+        if not isinstance(value, str):
+            raise ValueError("keybindings must be a string")
+        if len(value.encode("utf-8")) > UI_PREFERENCES_MAX_BYTES:
+            raise ValueError(f"keybindings is too long (max {UI_PREFERENCES_MAX_BYTES} bytes)")
+        return value
     if key not in DEFAULTS:
         return value
     default_value = DEFAULTS[key]
@@ -536,7 +543,7 @@ def validate_value(key: str, value: Any) -> Any:
 
 def _check_int_bounds(key: str, val: int) -> None:
     bounds: dict[str, tuple[int, int | None]] = {
-        "turn_timeout": (1, 3600),
+        "turn_timeout": (0, 3600),
         "approval_timeout": (1, 3600),
         "context_budget": (100, None),
         "max_tokens": (1, MAX_TOKENS),
@@ -607,7 +614,7 @@ class Config:
     model: str = "openrouter/free"
     provider: str = "openrouter"
     context_budget: int = 8000
-    turn_timeout: int = 300
+    turn_timeout: int = 0
     agent_id: str = "harness"
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -741,6 +748,7 @@ class Config:
     # Versioned global UI preferences (editor prefs); see DEFAULTS and
     # UI_PREFERENCES_MAX_BYTES for the bound.
     ui_preferences: str = ""
+    keybindings: str = ""
     # n4: compaction_check_enabled was dead config surface (no production
     # reader); it was removed rather than kept as a misleading toggle.
 

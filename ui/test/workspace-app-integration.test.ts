@@ -10,6 +10,8 @@
 // FeatureHost surface, and controller RPCs through the real adapter.
 
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import {
 	CURSOR_MARKER,
@@ -616,19 +618,25 @@ test("a direct viewport click restores the caret with no key input (item 1)", as
 
 // ─── keys ───────────────────────────────────────────────────────────────────
 
-test("Ctrl+Right maximizes chat from the editor; hiding reconciles focus and Ctrl+Left restores the split", async () => {
+function pressGuide(tui: FakeTUI, key: string): void {
+	tui.press("\x0e");
+	tui.press(key);
+}
+
+test("Ctrl+N pane commands work from the editor and composer", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 	assert.equal(internals(app).activeRegion, "chat-composer");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 
-	// Composer focus keeps the keys' word-motion meaning: the layout is
-	// untouched (the CodeRabbit finding: the maximize branch must sit behind
-	// the editor-region gate).
-	tui.press("\x1b[1;5C");
-	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Right never maximizes chat");
-	tui.press("\x1b[1;5D");
+	// Pane commands work from the composer too; the editor can be brought
+	// into view without relying on modified arrows.
+	pressGuide(tui, "c");
+	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat", "composer can maximize chat");
+	pressGuide(tui, "e");
+	assert.equal(internals(app).workspaceLayout?.effectiveMode, "editor", "composer can bring the editor in");
+	pressGuide(tui, "s");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 
 	// Editor region: the global bindings win there.
@@ -636,16 +644,25 @@ test("Ctrl+Right maximizes chat from the editor; hiding reconciles focus and Ctr
 	assert.equal(internals(app).activeRegion, "editor");
 
 	// Ctrl+Left while already split is a no-op, never a second toggle.
-	tui.press("\x1b[1;5D");
+	pressGuide(tui, "s");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "already split: no-op");
 	assert.equal(internals(app).integration?.controller.getLayoutInput().requestedMode, "split");
 
-	tui.press("\x1b[1;5C");
+	pressGuide(tui, "c");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat", "chat maximized");
 	// Hiding the editor reconciles focus to the composer. Ctrl+Left remains
 	// available to restore the split from maximized chat.
 	assert.equal(internals(app).activeRegion, "chat-composer", "focus follows the hidden editor");
+	const composerEditor = internals(app).editor as { setText(text: string): void; getCursor(): { col: number }; handleInput(data: string): void };
+	composerEditor.setText("hello world");
 	tui.press("\x1b[1;5D");
+	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat", "draft Ctrl+Left keeps word motion");
+	// FakeTUI drives listeners only; a real TUI forwards an unconsumed key to
+	// its focused editor. Check that final leg of the input path explicitly.
+	composerEditor.handleInput("\x1b[1;5D");
+	assert.equal(composerEditor.getCursor().col, 6, "focused composer moves one word");
+	composerEditor.setText("");
+	pressGuide(tui, "s");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await runCommand({ name: "workspace", args: "split" }, app);
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "the split stays reachable via the command");
@@ -658,15 +675,34 @@ test("Ctrl+Right maximizes chat from the editor; hiding reconciles focus and Ctr
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "editor");
 	internals(app).setFocusForRegion("editor");
 	assert.equal(internals(app).activeRegion, "editor");
-	tui.press("\x1b[1;5C");
+	pressGuide(tui, "c");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).activeRegion, "chat-composer", "the hidden editor never keeps the keys");
-	tui.press("\x1b[1;5D");
+	pressGuide(tui, "s");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await runCommand({ name: "workspace", args: "split" }, app);
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "the 50/50 split stays reachable");
 	assert.equal(internals(app).integration?.controller.getLayoutInput().requestedMode, "split");
 	await app.exit();
+});
+
+test("Ctrl+Shift+Arrow reaches file selection when the editor is focused", async () => {
+	const { app } = makeApp();
+	await app.start();
+	try {
+		await waitForWorkspace(app);
+		await internals(app).openWorkspacePath("a.ts");
+		assert.equal(internals(app).activeRegion, "editor");
+		const keys = app as unknown as {
+			familyRows(): unknown[];
+			handleWorkspaceKey(data: string): { consume: boolean } | undefined;
+		};
+		keys.familyRows = () => [{}, {}];
+		const input = (app as unknown as { onKey(data: string): { consume: boolean } | undefined }).onKey("\x1b[1;6C");
+		assert.equal(input, undefined, "editor owns word selection even with multiple agents");
+	} finally {
+		await app.exit();
+	}
 });
 
 test("Ctrl+C with an editor selection falls through to the view instead of exiting", async () => {
@@ -712,8 +748,8 @@ test("Ctrl+V with the editor focused falls through to the view; the composer kee
 	assert.equal(loads.length, 0, "the composer image path never ran");
 
 	// Composer region: the global image-aware handler consumes it (as before).
-	tui.press("\x1b[17~"); // F6 → explorer
-	tui.press("\x1b[17~"); // F6 → chat-composer
+	pressGuide(tui, "n"); // next → explorer
+	pressGuide(tui, "n"); // next → chat-composer
 	assert.equal(internals(app).activeRegion, "chat-composer");
 	const consumed = dispatch("\x16");
 	assert.deepEqual(consumed, { consume: true }, "composer region: Ctrl+V is consumed by the global handler");
@@ -917,7 +953,7 @@ test("the shortcuts picker lists Ctrl+W, drops /attach and documents the split k
 	const closetab = items.find((item) => item.value === "closetab");
 	assert.equal(closetab?.label, "Ctrl+W — close tab");
 	const chatmax = items.find((item) => item.value === "chatmax");
-	assert.equal(chatmax?.label, "Ctrl+→ maximize chat · Ctrl+← 50/50 split (editor focus)");
+	assert.equal(chatmax?.label, "Ctrl+N then C chat · E editor · S split");
 	const intel = items.find((item) => item.value === "intel");
 	assert.match(intel?.description ?? "", /macOS may steal Ctrl\+Space/, "the macOS Ctrl+Space caveat names the fallback");
 	assert.match(intel?.description ?? "", /\/editor complete/);
@@ -925,26 +961,26 @@ test("the shortcuts picker lists Ctrl+W, drops /attach and documents the split k
 	assert.match(wsroot?.description ?? "", /ratio\|side/, "workspace subcommands stay discoverable");
 });
 
-test("F6 cycles composer → editor → explorer and retargets TUI focus", async () => {
+test("Ctrl+N then N cycles composer → editor → explorer and retargets TUI focus", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 	assert.equal(internals(app).activeRegion, "chat-composer");
 
-	tui.press("\x1b[17~");
+	pressGuide(tui, "n");
 	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(tui.focused, internals(app).integration?.pane, "editing focus moved to the pane");
 
 	// The explorer is open by default (fresh state), so it is part of the cycle.
-	tui.press("\x1b[17~");
+	pressGuide(tui, "n");
 	assert.equal(internals(app).activeRegion, "explorer");
 	assert.notEqual(tui.focused, internals(app).integration?.pane);
 
-	tui.press("\x1b[17~");
+	pressGuide(tui, "n");
 	assert.equal(internals(app).activeRegion, "chat-composer", "cycles back");
-	// Shift+F6 walks backwards from the composer to the explorer.
-	tui.press("\x1b[17;2~");
-	assert.equal(internals(app).activeRegion, "explorer", "shift+F6 cycles in reverse");
+	// Ctrl+N then P walks backwards from the composer to the explorer.
+	pressGuide(tui, "p");
+	assert.equal(internals(app).activeRegion, "explorer", "Ctrl+N then P cycles in reverse");
 	await app.exit();
 });
 
@@ -961,7 +997,7 @@ test("Ctrl+S saves the active buffer with the disk revision expectation", async 
 	await settle();
 	const saves = client.requests.filter((entry) => entry.method === "workspace.save");
 	assert.equal(saves.length, 1);
-	assert.equal(saves[0]?.params.uri, "file:///ws/src/a.ts");
+	assert.equal(saves[0]?.params.uri, pathToFileURL(resolve("/ws/src/a.ts")).href);
 	assert.equal(saves[0]?.params.expectedRevision, "rev-1");
 	assert.equal(saves[0]?.params.text, "hello\n");
 	await app.exit();
@@ -1085,7 +1121,7 @@ test("Ctrl+P opens the Quick Open overlay, Enter opens the file, Esc closes it",
 	assert.equal(internals(app).quickOpenPane, undefined, "overlay closed on open");
 	const reads = client.requests.filter((entry) => entry.method === "workspace.read");
 	assert.equal(reads.length, 1);
-	assert.equal(reads[0]?.params.uri, "file:///ws/src/a.ts");
+	assert.equal(reads[0]?.params.uri, pathToFileURL(resolve("/ws/src/a.ts")).href);
 
 	// Reopen and close with Esc through the app's key funnel.
 	tui.press("\x10");
@@ -1416,6 +1452,21 @@ function scriptPicks(
 	return { calls };
 }
 
+test("/settings opens the keyboard shortcuts editor", async () => {
+	const { app } = makeApp();
+	await app.start();
+	try {
+		let opened = 0;
+		app.openKeybindings = async () => { opened++; };
+		const picks = scriptPicks(app, ["cat-keybindings", undefined]);
+		await runCommand({ name: "settings", args: "" }, app);
+		assert.equal(opened, 1);
+		assert.ok(picks.calls[0]?.items.some((item) => item.value === "cat-keybindings"));
+	} finally {
+		await app.exit();
+	}
+});
+
 test("/settings menu: Editor prefs persist to ui_preferences and reach the live view", async () => {
 	const { app, client } = makeApp();
 	await app.start();
@@ -1661,7 +1712,7 @@ test("footer workspace hints appear with a live workspace and clear on close", a
 	await app.start();
 	await waitForWorkspace(app);
 	const footer = (app as unknown as { footer: { workspaceHints: string } }).footer;
-	assert.equal(footer.workspaceHints, "Ctrl+T explorer · Ctrl+←/→ panes");
+	assert.equal(footer.workspaceHints, "Ctrl+T explorer · Ctrl+N then C/E/S panes");
 	await runCommand({ name: "workspace", args: "close" }, app);
 	assert.equal(footer.workspaceHints, "", "closed workspace clears the hints");
 	await app.exit();

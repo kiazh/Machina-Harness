@@ -4,7 +4,7 @@
 import { keyValues, shortId, table, when } from "../format.ts";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import type { AgentInfo, AgentHistoryResult, AgentSaveResult, DelegationResult, ResumeResult, SessionInfo } from "../protocol.ts";
-import { listFamilySessions } from "../family.ts";
+import { familyRootOf, listFamilySessions } from "../family.ts";
 import { splitSub } from "../commands.ts";
 import { confirm, options, requireArgs, requireSession, type Command, type FeatureHost } from "./types.ts";
 
@@ -18,7 +18,7 @@ export function agentSessionItems(
 	current: SessionInfo,
 	running: Map<string, boolean>,
 ): SelectItem[] {
-	const rootId = current.parentSessionId ?? current.id;
+	const rootId = familyRootOf(current);
 	return family.map((session) => ({
 		value: session.id,
 		label: `${session.id === rootId ? "main · " : ""}${session.title || shortId(session.id)}${session.id === current.id ? " (current)" : ""}`,
@@ -28,7 +28,7 @@ export function agentSessionItems(
 
 export const agentsCommand: Command = {
 	name: "agents",
-	description: "Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+Shift+←/→)",
+	description: "Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K)",
 	argumentHint: "[list|show|save|history|delete|sessions|switch]",
 	getArgumentCompletions: options([
 		["list", "All available agents"],
@@ -63,7 +63,7 @@ export const agentsCommand: Command = {
 				const running = new Map((host.familySessions?.() ?? []).map((row) => [row.session.id, row.running]));
 				const family = await listFamilySessions(host, current);
 				if (family.length <= 1) {
-					host.print("No delegated agent sessions in this family yet. Use /delegate to start one; Ctrl+Shift+←/→ cycles subagents.", "plain");
+					host.print("No delegated agent sessions in this family yet. Use /delegate to start one; Ctrl+N then J/K cycles subagents.", "plain");
 					return;
 				}
 				const choice = await host.pick("Switch to an agent session", agentSessionItems(family, current, running));

@@ -795,13 +795,15 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Find a file | `Ctrl+P` or `/quickopen` |
 | Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
 | Show or hide the file explorer | `Ctrl+T` or `/explorer` |
-| Change pane focus | `F6` / `Shift+F6` |
+| Change pane focus | `Ctrl+N`, then `N` / `P` |
 | Show code completion | `Ctrl+Space` or `/editor complete` |
-| Go to definition / find references | `F12` / `Shift+F12` |
-| Maximize / restore chat | `Ctrl+Right` / `Ctrl+Left` |
+| Go to definition / find references | `Ctrl+N`, then `D` / `R` |
+| Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
+| Switch between agents | `Ctrl+N`, then `J` / `K` |
+| Change keyboard shortcuts | `/settings` → Keyboard shortcuts |
 | Paste an image | `Ctrl+V` |
 | Stop a response | `Esc` after dismissing any open popup |
-| See keyboard shortcuts | `F1` or `?` on empty input |
+| See keyboard shortcuts | `Ctrl+N`, then `H`; or `?` on empty input |
 
 Some terminals or operating systems intercept shortcuts; the slash commands are the fallbacks. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
 
@@ -1135,9 +1137,8 @@ machina chat -p deepseek -m deepseek-chat "Explain this project"
 
 | Command | Purpose |
 |---|---|
-| `/provider` / `/provider list` | Show or change the provider; list connections |
-| `/provider add` | Save a named OpenAI-compatible endpoint |
-| `/models` / `/models catalog` | Choose a model; inspect the selected catalog |
+| `/provider` | Manage provider URLs and credentials; add or remove custom endpoints |
+| `/models` / `/models catalog` | Choose a model and its provider route; inspect the selected catalog |
 | `/default-model` | Save a default choice |
 | `/effort` | Adjust reasoning effort where supported |
 | `/auth` / `/keys` | Account sign-in or provider keys |
@@ -1171,7 +1172,7 @@ Precedence: explicit overrides > environment variables > saved configuration > d
 | `temperature` / `max_tokens` | `0.7` / `4096` | Sampling and response ceiling |
 | `max_delegate_concurrency` | `4` | Child agents active at once in a parallel batch |
 | `execution_mode` | `ask` | Default authority preset for new sessions |
-| `turn_timeout` / `approval_timeout` | `300` / `300` | Turn and approval-wait limits, in seconds |
+| `turn_timeout` / `approval_timeout` | `0` / `300` | Optional turn limit (`0` disables it) and approval-wait limit, in seconds |
 | `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables |
 | `compression_enabled` | `true` | Allow older context to be compressed |
 | `compression_threshold` / `compression_target_ratio` | `0.8` / `0.5` | Trigger and target proportions |

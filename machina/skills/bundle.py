@@ -18,7 +18,9 @@ class ECCBundle:
     def __init__(self, root: Path | None = None) -> None:
         # Independent of MACHINA_SKILLS_DIR: local overrides cannot remove defaults.
         self.root = root or Path(__file__).resolve().parents[2] / "skills" / "ecc"
-        payload = (self.root / "manifest.json").read_bytes()
+        # Git may check out tracked text with CRLF on Windows. The pinned
+        # digest describes repository (LF) bytes, so canonicalize only CRLF.
+        payload = (self.root / "manifest.json").read_bytes().replace(b"\r\n", b"\n")
         if hashlib.sha256(payload).hexdigest() != MANIFEST_SHA256:
             raise ValueError("ECC manifest integrity mismatch")
         self.manifest = json.loads(payload)
@@ -39,7 +41,7 @@ class ECCBundle:
         cached = self._content.get(relative)
         if cached and cached[:2] == fingerprint:
             return cached[2]
-        payload = target.read_bytes()
+        payload = target.read_bytes().replace(b"\r\n", b"\n")
         if hashlib.sha256(payload).hexdigest() != self.manifest["files"][relative]:
             raise ValueError(f"ECC resource integrity mismatch: {relative}")
         try:

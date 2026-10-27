@@ -29,6 +29,8 @@ export interface AskTextOptions {
 	 * cancelled. Defaults to false.
 	 */
 	allowEmpty?: boolean;
+	/** Keep this form centered with the provider manager. */
+	centered?: boolean;
 }
 
 export type AskTextResult = string | undefined;
@@ -58,6 +60,8 @@ export interface FeatureHost {
 	/** Update details (e.g. title) of the current session. */
 	updateSession(session: SessionInfo): void;
 	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
+	/** Centered choice menu for provider management, when available. */
+	pickCentered?(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
 	/** Check multiple items; undefined means cancelled. Nothing starts here. */
 	pickMany(title: string, items: SelectItem[]): Promise<SelectItem[] | undefined>;
 	/**
@@ -123,6 +127,12 @@ export interface FeatureHost {
 	 * `/settings` menu. Optional: hosts without it fall back to the text dump.
 	 */
 	uiSettings?(): UiSettingsHost | undefined;
+	/** Open the centered keybinding editor when this host has a terminal UI. */
+	openKeybindings?(): Promise<void>;
+	/** Open the centered searchable API key editor. */
+	openKeysEditor?(): Promise<void>;
+	/** Open the centered searchable provider editor. */
+	openProviderEditor?(providerName?: string): Promise<void>;
 	/**
 	 * Music surface (pinned now-playing bar): playback control, library
 	 * rescanning and folder/enabled persistence. Optional: hosts without it

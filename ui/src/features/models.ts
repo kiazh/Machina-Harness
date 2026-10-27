@@ -12,16 +12,15 @@
 // ("deepseek") or a model family ("gpt") narrows to those rows; section
 // headers yield while a filter is active.
 //
-// Cross-provider picks are never silent: if the same model id exists under
-// the current provider that row wins, otherwise a one-line confirm asks
-// before the provider is switched. `/models <query>` searches all groups;
+// A selected model row carries its provider, even when another provider has
+// the same model ID. `/models <query>` searches all groups;
 // `/models catalog` prints the selected provider's catalog as a table.
 
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { keyValues, table } from "../format.ts";
 import type { ConfigSetResult, ModelsListResult, ProvidersListResult } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
-import { confirm, type Command, type FeatureHost } from "./types.ts";
+import { type Command, type FeatureHost } from "./types.ts";
 
 export interface ModelEntry {
 	model: string;
@@ -57,6 +56,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 export const CURATED_MODELS: ModelEntry[] = [
 	{ model: "openrouter/free", provider: "openrouter", description: "Default free tier (multi-model)" },
 	{ model: "gpt-6.1-sol", provider: "openai", description: "OpenAI direct flagship" },
+	{ model: "gpt-6-luna", provider: "openai", description: "OpenAI direct, efficient model" },
 	{ model: "claude-sonnet-5-5", provider: "anthropic", description: "Anthropic direct flagship" },
 	{ model: "gpt-6-luna", provider: "chatgpt", description: "ChatGPT subscription — /auth sign-in first" },
 	{ model: "gemini-4-argon", provider: "google", description: "Google direct, 1M context" },
@@ -316,9 +316,7 @@ export function filterCuratedModels(query: string): ModelEntry[] {
 }
 
 /**
- * Apply a picked row. Crossing providers is never silent: the same model id
- * under the current provider always wins, and any real switch asks a
- * one-line confirm first. Returns the applied entry (undefined on cancel).
+ * Apply the exact picked model row, including its provider route.
  */
 export async function applyGroupedPick(host: FeatureHost, grouped: GroupedModels, value: string): Promise<ModelEntry | undefined> {
 	const separator = value.indexOf("::");
@@ -328,34 +326,15 @@ export async function applyGroupedPick(host: FeatureHost, grouped: GroupedModels
 	const entries = grouped.groups.flatMap((group) => group.entries);
 	const picked = entries.find((entry) => entry.provider === provider && entry.model === model);
 	if (!picked) return undefined;
-	let target = picked;
-	if (picked.provider !== grouped.current) {
-		const shadow = entries.find((entry) => entry.provider === grouped.current && entry.model === picked.model);
-		if (shadow) {
-			host.print(`"${picked.model}" also exists under ${grouped.current} — keeping the current provider.`, "info");
-			target = shadow;
-		} else {
-			const ok = await confirm(
-				host,
-				`Switch provider ${grouped.current} → ${picked.provider} for "${picked.model}"?`,
-				"Switch",
-			);
-			if (!ok) {
-				host.print("Provider unchanged.", "plain");
-				return undefined;
-			}
-			host.print(`Switching provider: ${grouped.current} → ${picked.provider}`, "info");
-		}
-	}
-	await applyModel(host, target);
-	const group = grouped.groups.find((candidate) => candidate.provider === target.provider);
+	await applyModel(host, picked);
+	const group = grouped.groups.find((candidate) => candidate.provider === picked.provider);
 	if (group?.fromCatalog) {
 		host.print(`Catalog: ${group.entries.length} model(s) from ${group.provider} (${group.source})`, "plain");
 	}
 	if (group?.fetchError) {
 		host.print(`Live catalog for ${group.provider} failed: ${group.fetchError}`, "warning");
 	}
-	return target;
+	return picked;
 }
 
 /** Open the grouped picker; applies the selection through applyGroupedPick. */

@@ -11,7 +11,7 @@ import { isWorkspaceEvent, type WorkspaceEvent } from "./workspace/protocol.ts";
 type Pending = {
 	resolve: (value: unknown) => void;
 	reject: (reason: Error) => void;
-	timer: NodeJS.Timeout;
+	timer?: NodeJS.Timeout;
 };
 
 export class JsonRpcChannel {
@@ -31,15 +31,15 @@ export class JsonRpcChannel {
 		if (this.closedError) return Promise.reject(this.closedError);
 		const id = this.nextId++;
 		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			const timer = timeoutMs > 0 ? setTimeout(() => {
 				this.pending.delete(id);
 				reject(new Error(`gateway did not answer ${method} within ${timeoutMs} ms`));
-			}, timeoutMs);
+			}, timeoutMs) : undefined;
 			this.pending.set(id, { resolve: (v) => resolve(v as T), reject, timer });
 			try {
 				this.send(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 			} catch (error) {
-				clearTimeout(timer);
+				if (timer) clearTimeout(timer);
 				this.pending.delete(id);
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
@@ -80,7 +80,7 @@ export class JsonRpcChannel {
 		const pending = this.pending.get(message.id);
 		if (!pending) return;
 		this.pending.delete(message.id);
-		clearTimeout(pending.timer);
+		if (pending.timer) clearTimeout(pending.timer);
 		if (message.error) {
 			const code = typeof message.error.code === "number" ? message.error.code : -32603;
 			pending.reject(new RpcError(code, String(message.error.message ?? "unknown gateway error")));
@@ -93,7 +93,7 @@ export class JsonRpcChannel {
 	close(error: Error): void {
 		this.closedError = error;
 		for (const { reject, timer } of this.pending.values()) {
-			clearTimeout(timer);
+			if (timer) clearTimeout(timer);
 			reject(error);
 		}
 		this.pending.clear();

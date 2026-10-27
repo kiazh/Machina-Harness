@@ -505,6 +505,50 @@ class SessionManager:
             )
         return [self._row_to_session(r) for r in rows]
 
+    async def list_family(self, root_id: uuid.UUID, limit: int = 2000) -> list[Session]:
+        """Read a root and its direct delegated children in one indexed query."""
+        rows = await db.fetch(
+            """
+            SELECT id, title, agent_id, status, goal, model, provider, context_budget,
+                   execution_mode, parent_session_id, is_fork, delegation_authority,
+                   created_at, last_activity
+            FROM sessions
+            WHERE id = $1 OR (parent_session_id = $1 AND is_fork IS NOT TRUE)
+            ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END, created_at, id
+            LIMIT $2
+            """,
+            root_id,
+            limit + 1,
+        )
+        if len(rows) > limit:
+            raise ValueError("too many delegated sessions to list")
+        return [self._row_to_session(row) for row in rows]
+
+    async def list_tree(self, root_id: uuid.UUID, limit: int = 2000) -> list[Session]:
+        """Read a root and all delegated descendants for a complete export."""
+        rows = await db.fetch(
+            """
+            WITH RECURSIVE family AS (
+                SELECT id, 0 AS depth FROM sessions WHERE id = $1
+                UNION ALL
+                SELECT child.id, family.depth + 1
+                FROM sessions child JOIN family ON child.parent_session_id = family.id
+                WHERE family.depth < 10 AND child.is_fork IS NOT TRUE
+            )
+            SELECT s.id, s.title, s.agent_id, s.status, s.goal, s.model, s.provider,
+                   s.context_budget, s.execution_mode, s.parent_session_id, s.is_fork,
+                   s.delegation_authority, s.created_at, s.last_activity
+            FROM family JOIN sessions s ON s.id = family.id
+            ORDER BY family.depth, s.created_at, s.id
+            LIMIT $2
+            """,
+            root_id,
+            limit + 1,
+        )
+        if len(rows) > limit:
+            raise ValueError("too many delegated sessions to export")
+        return [self._row_to_session(row) for row in rows]
+
     def _row_to_session(self, row: asyncpg.Record) -> Session:
         state = {}
         state_msgpack = row.get("state_msgpack")

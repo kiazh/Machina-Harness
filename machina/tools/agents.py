@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import difflib
 import logging
 import uuid
@@ -51,7 +50,8 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
         "that suits a specialist (e.g. 'researcher' to gather info, 'coder' to edit code). "
         "Independent subtasks fan out: issue one delegate call per subtask in a single "
         "block (no more than three) and they run in parallel. "
-        "Call list_agents first to see who is available."
+        "Use list_agents with a task keyword only when the built-in roles do not fit. "
+        "The result includes a child session id; pass it as session_id for a follow-up."
     ),
     parameters={
         "type": "object",
@@ -69,6 +69,10 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
                 "type": "string",
                 "description": "Workspace-relative file the child must produce",
             },
+            "session_id": {
+                "type": "string",
+                "description": "Optional child session UUID from an earlier delegate result for a follow-up",
+            },
         },
         "required": ["agent", "task"],
     },
@@ -78,12 +82,11 @@ async def delegate(
     task: str,
     expected_output: str | None = None,
     expected_artifact_path: str | None = None,
+    session_id: str | None = None,
 ) -> str:
-    """Delegate *task* to *agent* and return its response."""
+    """Delegate *task* to *agent* and return its response and child id."""
     from machina.core.orchestrator import (
         AgentNotFoundError,
-        Orchestrator,
-        delegation_deadline,
         delegation_depth,
         orchestrator,
     )
@@ -147,6 +150,12 @@ async def delegate(
             _resolve_contract_path(expected_artifact_path)
         except ValueError as _e:
             raise ToolError(f"{_e}") from _e
+    resume_session_id = None
+    if session_id is not None:
+        try:
+            resume_session_id = uuid.UUID(session_id)
+        except (ValueError, TypeError):
+            raise ToolError("session_id must be a child session UUID") from None
     parent_session_id = current_session_id.get()
     from_agent = "delegate-tool"
     if parent_session_id is not None:
@@ -161,15 +170,6 @@ async def delegate(
         # Optional fallback preserves the primary outcome; report no payload.
         record_failure("tools.delegate.parent_authority", _boundary_error)
         parent_authority = None
-    # Let the orchestrator own the deadline so a timed-out child can return
-    # its usage receipt after cancellation drains the child's provider work.
-    # The orchestrator constant is authoritative (120s); clip to any
-    # inherited shorter deadline.
-    deadline = asyncio.get_running_loop().time() + Orchestrator.DELEGATION_TIMEOUT_SECONDS
-    inherited_deadline = delegation_deadline.get()
-    deadline_token = delegation_deadline.set(
-        min(deadline, inherited_deadline) if inherited_deadline is not None else deadline
-    )
     try:
         # Optional output-contract kwargs are forwarded only when set, so
         # contract-free calls keep the exact legacy call shape.
@@ -178,6 +178,8 @@ async def delegate(
             _contract_kwargs["expected_output"] = expected_output
         if expected_artifact_path is not None:
             _contract_kwargs["expected_artifact_path"] = expected_artifact_path
+        if resume_session_id is not None:
+            _contract_kwargs["resume_session_id"] = resume_session_id
         result = await orchestrator.delegate(
             agent,
             task,
@@ -195,8 +197,6 @@ async def delegate(
     except Exception as e:
         logger.exception("delegate tool failed")
         raise ToolError(f"delegation failed: {redact_diagnostic(e)}") from None
-    finally:
-        delegation_deadline.reset(deadline_token)
 
     label = (
         "failed"
@@ -206,7 +206,7 @@ async def delegate(
         else "responded"
     )
     receipt = DelegationToolResult(
-        f"[{agent} {label}]\n{result.response}",
+        f"[{agent} {label}]\nChild session: {result.session_id}\n{result.response}",
         needs_approval=getattr(result, "needs_approval", []),
         tokens_used=getattr(result, "tokens", 0),
     )
@@ -218,17 +218,37 @@ async def delegate(
 
 @registry.register(
     name="list_agents",
-    description="List the agents you can delegate to, with their descriptions.",
-    parameters={"type": "object", "properties": {}},
+    description="Find delegation specialists by task keyword. Without a query, show a short roster.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Optional task or specialty keyword"},
+        },
+    },
 )
-async def list_agents() -> str:
+async def list_agents(query: str = "") -> str:
     """Return the available agents and what they are for."""
     from machina.core.agent_def import agent_registry
 
     agents = await agent_registry.list()
     if not agents:
         return "No agents are available."
-    return "\n".join(f"- {a.name}: {a.description or '(no description)'}" for a in agents)
+    needle = query.strip().casefold()
+    if needle:
+        agents = [
+            agent
+            for agent in agents
+            if needle in agent.name.casefold() or needle in agent.description.casefold()
+        ]
+        if not agents:
+            return f"No agents match {query.strip()!r}."
+    shown = agents[:12]
+    lines = [f"- {agent.name}: {agent.description or '(no description)'}" for agent in shown]
+    if len(agents) > len(shown):
+        lines.append(
+            f"{len(agents) - len(shown)} more agents; use list_agents with a task keyword."
+        )
+    return "\n".join(lines)
 
 
 @registry.register(

@@ -244,6 +244,7 @@ class Gateway:
             "initialize": self._initialize,
             "session.create": self._session_create,
             "session.list": self._session_list,
+            "session.family": self._session_family,
             "session.resume": self._session_resume,
             "usage.get": self._usage_get,
             "prompt.submit": self._prompt_submit,
@@ -724,6 +725,18 @@ class Gateway:
         if len(sessions) > limit:
             result["nextCursor"] = str(offset + limit)
         return result
+
+    async def _session_family(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List one delegated family without paging through unrelated chats."""
+        self.require_db()
+        session = await self.get_session(params)
+        root_id = (
+            session.parent_session_id
+            if not session.is_fork and session.parent_session_id
+            else session.id
+        )
+        family = await session_manager.list_family(root_id)
+        return {"sessions": [session_to_dict(member) for member in family]}
 
     async def _session_resume(self, params: dict[str, Any]) -> dict[str, Any]:
         self.require_db()
@@ -1309,7 +1322,7 @@ class Gateway:
         emits terminal completion after its actual cleanup. A late result cannot
         turn a requested cancellation into success.
         """
-        timeout = float(config.get("turn_timeout") or 300)
+        timeout = float(config.get("turn_timeout"))
         sid = str(session_id)
         current = asyncio.current_task()
         turn_kwargs = {"images": images} if images else {}
@@ -1351,7 +1364,7 @@ class Gateway:
                 approval_started = self._approval_wait_started.get(turn_id)
                 if approval_started is not None:
                     waited += max(0.0, now - approval_started)
-                if now - start - waited >= timeout:
+                if timeout > 0 and now - start - waited >= timeout:
                     logger.warning("Turn %s exceeded compute timeout", turn_id)
                     self._write(
                         {

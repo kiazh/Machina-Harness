@@ -244,10 +244,10 @@ async def _stream_session(
 
             agent = await _owned_step(build_owned_agent(), 300)
             _record_stage("waiting_for_provider")
-            # Total turn timeout: a per-anext wait_for against a fixed
-            # deadline so a hung provider cannot hold the stream forever.
+            # An explicit positive turn_timeout remains available; zero lets
+            # per-operation guards and ownership checks govern long work.
             try:
-                timeout = float(config.get("turn_timeout") or 300)
+                timeout = float(config.get("turn_timeout"))
             except (TypeError, ValueError):
                 timeout = 300.0
             deadline = asyncio.get_running_loop().time() + timeout
@@ -267,8 +267,8 @@ async def _stream_session(
             _step_context["ctx"] = contextvars.copy_context()
             stream = engine.stream()
             while True:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
+                remaining = deadline - asyncio.get_running_loop().time() if timeout > 0 else None
+                if remaining is not None and remaining <= 0:
                     raise TimeoutError("turn timed out")
                 try:
                     turn_event = await _owned_step(stream.__anext__(), remaining)

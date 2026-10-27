@@ -4,6 +4,8 @@
 // (same harness shape as workspace-app-integration.test.ts).
 
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
@@ -22,6 +24,7 @@ const SESSION_A: SessionInfo = {
 };
 
 const SOURCE = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+const DOCUMENT_URI = pathToFileURL(resolve("/ws/src/a.ts")).href;
 
 function workspaceIdentity(): Record<string, unknown> {
 	return {
@@ -334,7 +337,7 @@ test("selection attaches the exact fenced block with a visible unsaved scope", a
 	assert.ok(draft.includes("const b = 2;\nconst c = 3;\n"), "the exact selected source is present");
 	assert.equal(
 		notices.at(-1)?.text,
-		"Attached src/a.ts L3–4 (unsaved, v1) — file:///ws/src/a.ts — review and send when ready.",
+		`Attached src/a.ts L3–4 (unsaved, v1) — ${DOCUMENT_URI} — review and send when ready.`,
 	);
 	assert.equal(notices.at(-1)?.kind, "info");
 	assert.equal(client.emits(), 0, "attachment never submits the message");
@@ -355,7 +358,7 @@ test("a clean selection is labelled saved and the range is exact", async () => {
 	assert.ok(draft.includes("```javascript\nconst c = 3;\n```"), "single-line exact block");
 	assert.equal(
 		notices.at(-1)?.text,
-		"Attached src/a.ts L3 (saved, v0) — file:///ws/src/a.ts — review and send when ready.",
+		`Attached src/a.ts L3 (saved, v0) — ${DOCUMENT_URI} — review and send when ready.`,
 	);
 	assert.equal(client.emits(), 0);
 	await app.exit();
@@ -402,7 +405,7 @@ test("Ctrl+Shift+A (Kitty CSI-u) attaches while the editor region is focused", a
 	tui.press("\x1b[97;6u"); // Ctrl+Shift+A
 	assert.equal(
 		notices.at(-1)?.text,
-		"Attached src/a.ts L2–3 (saved, v0) — file:///ws/src/a.ts — review and send when ready.",
+		`Attached src/a.ts L2–3 (saved, v0) — ${DOCUMENT_URI} — review and send when ready.`,
 	);
 	assert.ok(internals(app).editor.getText().includes("const b = 2;\n"));
 	assert.equal(client.emits(), 0);

@@ -10,6 +10,8 @@ export interface SessionInfo {
 	lastActivity: string | null;
 	/** Delegating session id for child sessions; null/absent for roots. */
 	parentSessionId?: string | null;
+	/** A user-created fork starts its own family. */
+	isFork?: boolean;
 }
 
 export interface InitializeResult {

@@ -18,6 +18,7 @@ from machina.core.config import config, is_configured_secret
 from machina.core.context import context_manager
 from machina.core.metrics import metrics
 from machina.core.models import Session
+from machina.core.session import session_manager
 from machina.db.connection import db
 from machina.observability.diagnostics import record_failure
 
@@ -59,7 +60,24 @@ class ServiceError(Exception):
 
 
 async def export_markdown(session: Session) -> str:
-    """Render a session's conversation as Markdown.
+    """Render the main session and all delegated children as Markdown."""
+    root = session
+    for _ in range(10):
+        if root.parent_session_id is None or root.is_fork:
+            break
+        parent = await session_manager.get(root.parent_session_id)
+        if parent is None:
+            break
+        root = parent
+    family = await session_manager.list_tree(root.id)
+    if not family:
+        family = [session]
+    sections = [await _export_one_session(member) for member in family]
+    return "\n\n---\n\n".join(sections)
+
+
+async def _export_one_session(session: Session) -> str:
+    """Render one session's conversation as Markdown.
 
     Policy (AH-002): exports are redacted — secret-looking strings are
     replaced before rendering so raw transcripts never leak via

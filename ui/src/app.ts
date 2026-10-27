@@ -12,6 +12,8 @@ import {
 	isViewportTUI,
 	Key,
 	matchesKey,
+	parseKey,
+	type OverlayOptions,
 	type OverlayHandle,
 	type SelectItem,
 	type TUI,
@@ -22,7 +24,7 @@ import { ComposerBox, Footer, header, Picker, SecretForm, TextForm, ThinkingIndi
 import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
 import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsFilters, type SkillsPreviewResult, type SkillsSearchParams, type SkillsSearchResult, type SkillsSectionParams, type SkillsSectionResult } from "./components/SkillsMenu.ts";
-import { HELP_KEYS, HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
+import { HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
@@ -30,7 +32,11 @@ import { OutputStore, OutputViewer, type OutputRecord } from "./components/Outpu
 import { ProblemsPane } from "./components/ProblemsPane.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
-import { SHORTCUT_ROWS } from "./design/shortcuts.ts";
+import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides } from "./keybindings.ts";
+import { KeybindingsDialog } from "./components/KeybindingsDialog.ts";
+import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
+import { loadKeyRows, redactSecret } from "./features/keys.ts";
+import { addProvider, removeProvider } from "./features/settings.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
 import { sanitizePastedText } from "./design/text.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
@@ -49,6 +55,7 @@ import type {
 	ConfigResult,
 	GatewayEvent,
 	HistoryEntry,
+	ProvidersListResult,
 	InitializeResult,
 	ResumeResult,
 	SessionInfo,
@@ -170,22 +177,8 @@ function workspaceShellKey(input: LayoutInput, columns: number, rows: number, ch
 	].join("|");
 }
 
-/**
- * Legacy xterm sequences pi-tui 1.0.0 cannot express through `matchesKey`:
- * its f-key matcher requires modifier 0, so shift+F# never matches. The app
- * decodes these two explicitly for Shift+F6 (focus cycle) and Shift+F12
- * (references); `matchesKey` forms are kept alongside for a future toolkit.
- */
-const SHIFT_F6_SEQUENCE = "\x1b[17;2~";
-const SHIFT_F12_SEQUENCE = "\x1b[24;2~";
-
-/**
- * Footer workspace hints (closing pass), shown only while a workspace
- * identity is live. Truthful to the editor-scoped Ctrl+←/→ semantics:
- * Ctrl+→ maximizes chat and Ctrl+← returns to the 50/50 split while the
- * editor region owns focus (the composer keeps its word motion).
- */
-const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+←/→ panes";
+/** Workspace hint shown while a workspace identity is live. */
+const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+N then C/E/S panes";
 
 /**
  * Normalize modifier-arrow encodings used by Windows consoles.
@@ -330,6 +323,10 @@ export class App implements FeatureHost {
 	private readonly transcript: Transcript;
 	private readonly composer: ComposerBox;
 	private readonly editor: Editor;
+	private readonly keybindings = new AppKeybindings();
+	private pendingKeyLeader: { key: string; at: number } | undefined;
+	private pendingKeyLeaderTimer: ReturnType<typeof setTimeout> | undefined;
+	private keybindingSave: Promise<unknown> = Promise.resolve();
 	private readonly coordinator: AnimationCoordinator;
 	private readonly footer: Footer;
 	/**
@@ -488,16 +485,11 @@ export class App implements FeatureHost {
 	/** Global editor preferences (ui_preferences); defaults until loaded. */
 	private uiPrefs: UiPreferences = defaultUiPreferences();
 
-	// Match the server turn timeout (turn_timeout=300s) so the UI does not
-	// time out and unlock while the server is still running the turn (which
-	// would surface as a confusing TURN_IN_PROGRESS on the next submit).
+	// Diagnostic notice only; it never cancels the turn.
 	private static readonly IN_FLIGHT_TIMEOUT_MS = 300_000;
 
-	// `/delegate` client budget: the orchestrator enforces its own
-	// DELEGATION_TIMEOUT_SECONDS = 120s per child run (core/orchestrator.py),
-	// so the client clock must outlast that budget; a timeout equal to the
-	// server's aborts the RPC while the child is still winding down.
-	private static readonly DELEGATION_TIMEOUT_MS = 150_000;
+	// Delegated runs settle when their work completes or the user cancels.
+	private static readonly DELEGATION_TIMEOUT_MS = 0;
 
 	// `/harnesses` wind-down grace: the gateway kills a delegated run's whole
 	// process tree at the deadline it was given, then drains and redacts the
@@ -611,6 +603,7 @@ export class App implements FeatureHost {
 			Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
 			try {
 				const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
+				this.keybindings.set(parseBindingOverrides(config.keybindings));
 				if (typeof config.theme === "string" && config.theme) {
 					setSkin(config.theme);
 					// The startup frame is already on screen. Use the same
@@ -721,7 +714,7 @@ export class App implements FeatureHost {
 	 * Client clock per method. A client timeout at or below its backend
 	 * deadline aborts the RPC while the other side is still working, so both
 	 * budgets below outlast their server-side counterpart (finding H22).
-	 * - `agents.run`: the orchestrator enforces DELEGATION_TIMEOUT_SECONDS.
+	 * - `agents.run`: no fixed clock; individual work has its own safeguards.
 	 * - `interop.run`: `/harnesses` passes the gateway's own deadline
 	 *   (`interop.list.runTimeoutSeconds`) as `timeout`; wait past it by the
 	 *   wind-down grace. The feature refuses to start a run whose deadline the
@@ -849,6 +842,89 @@ export class App implements FeatureHost {
 				await this.integration?.controller.lspStatus();
 			},
 		};
+	}
+
+	async openKeybindings(): Promise<void> {
+		await this.openDialog<void>((close) => new KeybindingsDialog(
+			this.tui,
+			this.keybindings.get(),
+			(overrides) => {
+				this.keybindings.set(overrides);
+				this.keybindingSave = this.keybindingSave.catch(() => {}).then(() =>
+					this.client.request("config.set", { key: "keybindings", value: JSON.stringify(overrides), persist: true }, 30_000),
+				).catch((error: unknown) => this.print(`Could not save keybindings: ${String(error)}`, "warning"));
+			},
+			() => close(),
+		), { width: 68, maxHeight: 18, anchor: "center" });
+		await this.keybindingSave;
+	}
+
+	async openKeysEditor(): Promise<void> {
+		const { rows } = await loadKeyRows(this);
+		const choice = await this.openDialog<KeysDialogChoice>((close) => new KeysDialog(
+			this.tui, rows, (selected) => close(selected), () => close(),
+		), { width: 68, maxHeight: 19, anchor: "center" });
+		if (!choice) return;
+		if (choice.action !== "set" && choice.action !== "clear") return;
+		if (choice.action === "clear") { await this.clearCredential(choice.key); return; }
+		await this.editCredential(choice.key);
+	}
+
+	private async editCredential(key: string): Promise<void> {
+		const value = await this.askText({
+			title: `Set ${key}`,
+			description: "Paste the value. It is masked and never displayed.",
+			placeholder: "••••••••", secret: true, centered: true,
+		});
+		if (value === undefined) return;
+		try {
+			const result = await this.request<{ message?: string }>("secrets.set", { key, value, persist: true });
+			this.print(result.message ?? `${key} set and saved.`, "success");
+		} catch (error) {
+			this.print(`Could not save ${key}: ${redactSecret(value, error instanceof Error ? error.message : String(error))}`, "error");
+		}
+	}
+
+	private async clearCredential(key: string): Promise<void> {
+		const confirmed = await this.pickCentered(`Clear ${key}? This removes it from this session and .env.`, [
+			{ value: "no", label: "Cancel" }, { value: "yes", label: "Clear" },
+		]);
+		if (confirmed?.value !== "yes") return;
+		const result = await this.request<{ message?: string }>("secrets.clear", { key });
+		this.print(result.message ?? `${key} cleared.`, "success");
+	}
+
+	async openProviderEditor(providerName = ""): Promise<void> {
+		const listed = await this.request<ProvidersListResult>("providers.list");
+		const credentialNames = new Set(["openrouter", "openai", "anthropic", "google", "mistral", "groq", "together", "deepseek", "xai", "opencode", "kimi", "custom"]);
+		const rows = listed.providers.map((provider) => ({
+			key: provider.name,
+			status: provider.selected ? "current" : provider.kind === "named" ? "custom" : "built-in",
+			set: provider.selected,
+			editable: true,
+			clearable: provider.kind === "named",
+			credentialKey: provider.kind === "builtin" && credentialNames.has(provider.name) ? `${provider.name.toUpperCase()}_API_KEY` : undefined,
+			description: `${provider.kind} ${provider.baseUrl ?? ""} ${provider.keySet ? "key set" : ""}`,
+		}));
+		const choice = await this.openDialog<KeysDialogChoice>((close) => new KeysDialog(
+			this.tui, rows, (selected) => close(selected), () => close(), "Providers", providerName,
+		), { width: 68, maxHeight: 19, anchor: "center" });
+		if (!choice) return;
+		if (choice.action === "addProvider") { await addProvider(this, ""); return; }
+		if (choice.action === "removeProvider") { await removeProvider(this, choice.key); return; }
+		if (choice.action === "editCredential" || choice.action === "removeCredential") {
+			const key = rows.find((row) => row.key === choice.key)?.credentialKey;
+			if (key) {
+				if (choice.action === "editCredential") await this.editCredential(key);
+				else await this.clearCredential(key);
+			}
+			return;
+		}
+		if (choice.action === "editProvider") {
+			const existing = listed.providers.find((provider) => provider.name === choice.key);
+			if (existing?.kind === "named") await addProvider(this, existing.name, existing.baseUrl ?? undefined);
+			return;
+		}
 	}
 
 	// ─── music (pinned now-playing bar) ─────────────────────────────────────
@@ -1174,7 +1250,7 @@ export class App implements FeatureHost {
 	/**
 	 * Down on an empty composer: the same family picker as /agents sessions.
 	 * Selecting switches through FamilyStore.open (the one-resume-at-a-time
-	 * path shared with Ctrl+Shift+←/→); choosing the visible session is a
+	 * path shared with Ctrl+N then J/K); choosing the visible session is a
 	 * no-op. Listing failures are reported quietly.
 	 */
 	private async openSubagentMenu(): Promise<void> {
@@ -1219,7 +1295,7 @@ export class App implements FeatureHost {
 		return this.family.isMember(sessionId);
 	}
 
-	/** Ctrl+Shift+←/→: cycle the family; wraps around. */
+	/** Ctrl+N then J/K: cycle the family; wraps around. */
 	private cycleFamily(direction: 1 | -1): Promise<void> {
 		return this.family.cycle(direction);
 	}
@@ -1295,6 +1371,13 @@ export class App implements FeatureHost {
 		);
 	}
 
+	pickCentered(title: string, items: SelectItem[]): Promise<SelectItem | undefined> {
+		return this.openDialog<SelectItem>((close) => new Picker(
+			sanitizeDisplay(title), sanitizeSelectItems(items), close, () => close(),
+			DEFAULT_MENU_VISIBLE_ROWS, undefined, this.tui,
+		), { width: 68, maxHeight: 12, anchor: "center" });
+	}
+
 	pickMany(title: string, items: SelectItem[]): Promise<SelectItem[] | undefined> {
 		return this.openDialog<SelectItem[]>((close) => {
 			const menu = new Menu(sanitizeDisplay(title), sanitizeSelectItems(items), {
@@ -1353,14 +1436,14 @@ export class App implements FeatureHost {
 				form.onSubmit = close;
 				form.onCancel = () => close();
 				return form;
-			});
+			}, safe.centered ? { width: 68, maxHeight: 14, anchor: "center" } : undefined);
 		}
 		return this.openDialog<string>((close) => {
 			const form = new TextForm(this.tui, editorTheme, safe);
 			form.onSubmit = close;
 			form.onCancel = () => close();
 			return form;
-		});
+		}, safe.centered ? { width: 68, maxHeight: 14, anchor: "center" } : undefined);
 	}
 
 	/**
@@ -1466,7 +1549,7 @@ export class App implements FeatureHost {
 		return `harness-${this.currentProfile}`;
 	}
 
-	private openDialog<T>(create: (close: (value?: T) => void) => Component): Promise<T | undefined> {
+	private openDialog<T>(create: (close: (value?: T) => void) => Component, overlayOptions?: OverlayOptions): Promise<T | undefined> {
 		if (this.exiting) return Promise.resolve(undefined);
 		return new Promise((done) => {
 			let settled = false;
@@ -1499,10 +1582,9 @@ export class App implements FeatureHost {
 			};
 			const component = create(close);
 			// Each dialog owns its handle, including when approvals interrupt a form.
-			// Full-screen sheet: 100% height with no bottom margin, so the overlay
-			// is bounded only by the terminal and fills whatever the component
-			// renders up to the viewport.
-			const handle = this.tui.showOverlay(component, {
+			// Existing dialogs use a bottom sheet; focused settings can request
+			// a centered, bounded overlay through overlayOptions.
+			const handle = this.tui.showOverlay(component, overlayOptions ?? {
 				width: "100%",
 				maxHeight: "100%",
 				anchor: "bottom-center",
@@ -1570,6 +1652,10 @@ export class App implements FeatureHost {
 		}
 		if (this.exiting) return;
 		this.exiting = true;
+		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
+		this.pendingKeyLeaderTimer = undefined;
+		this.pendingKeyLeader = undefined;
+		this.footer.keyHint = "";
 		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
 		// cancel loop below never sees it; tear it down explicitly so its
 		// pending provider timer dies with the app.
@@ -1684,13 +1770,13 @@ export class App implements FeatureHost {
     }
 
 	/**
-	 * `?` / F1 shortcut picker rows, from the single source shared with
+	 * `?` / Ctrl+N then H shortcut picker rows, from the single source shared with
 	 * `/help` (design/shortcuts.ts). Workspace rows only make sense while the
 	 * feature is live, but they stay listed so the shortcuts remain
 	 * discoverable; unavailable ones no-op with one notice.
 	 */
 	private shortcutItems(): SelectItem[] {
-		return SHORTCUT_ROWS.map((row) => ({
+		return effectiveShortcutRows(this.keybindings.get()).map((row) => ({
 			value: row.value,
 			label: row.label,
 			...(row.description === undefined ? {} : { description: row.description }),
@@ -1699,6 +1785,35 @@ export class App implements FeatureHost {
 
 	private onInput(data: string): { consume: boolean } | undefined {
 		const normalized = normalizeModifierArrow(data);
+		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
+		this.pendingKeyLeaderTimer = undefined;
+		this.footer.keyHint = "";
+		if (this.dialogs.length || this.approvalDialogs.size || this.quickOpenPane) {
+			this.pendingKeyLeader = undefined;
+			return this.onKey(normalized);
+		}
+		const pending = this.pendingKeyLeader;
+		this.pendingKeyLeader = undefined;
+		if (pending && Date.now() - pending.at < 5_000) {
+			if (matchesKey(normalized, Key.escape)) return { consume: true };
+			const next = parseKey(normalized);
+			if (next) this.onKey(`${pending.key} ${next.length === 1 ? next.toLowerCase() : next}`);
+			return { consume: true };
+		}
+		for (const leader of this.keybindings.leaders()) {
+			if (matchesKey(normalized, leader as Parameters<typeof matchesKey>[1])) {
+				this.pendingKeyLeader = { key: leader, at: Date.now() };
+				this.footer.keyHint = `${leader.toUpperCase()} then letter · Esc cancels`;
+				this.pendingKeyLeaderTimer = setTimeout(() => {
+					this.pendingKeyLeader = undefined;
+					this.pendingKeyLeaderTimer = undefined;
+					this.footer.keyHint = "";
+					this.tui.requestRender();
+				}, 5_000);
+				this.tui.requestRender();
+				return { consume: true };
+			}
+		}
 		const result = this.onKey(normalized);
 		if (result) return result;
 		if (normalized === data) return undefined;
@@ -1736,7 +1851,7 @@ export class App implements FeatureHost {
 		// otherwise reach the stop/exit branches below): returning early lets
 		// the focused overlay component receive everything else.
 		if (this.quickOpenPane) {
-			if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+			if (matchesKey(data, Key.escape) || this.keybindings.matches(data, "stop")) {
 				this.quickOpenPane.dismiss();
 				return { consume: true };
 			}
@@ -1772,8 +1887,8 @@ export class App implements FeatureHost {
         // EditorView.handleInput, which pastes via the injected clipboard).
         // Returning undefined lets the focused component see it; the composer
         // (and forwarded ⌘V) keep the image-aware global handler below.
-        if (matchesKey(data, Key.ctrl("v")) && this.activeRegion === "editor") return undefined;
-        if (matchesKey(data, Key.ctrl("v")) || matchesKey(data, Key.super("v"))) {
+        if (this.keybindings.matches(data, "pasteImage") && this.activeRegion === "editor") return undefined;
+        if (this.keybindings.matches(data, "pasteImage") || this.keybindings.matches(data, "pasteImageMac")) {
             const epoch = this.imageEpoch;
             this.loadImages(async () => {
                 const image = await clipboardImage();
@@ -1790,7 +1905,7 @@ export class App implements FeatureHost {
         }
 
 		const questionKey = matchesKey(data, Key.question) || matchesKey(data, Key.shift("?")) || matchesKey(data, Key.shift("/"));
-		if (matchesKey(data, Key.f1) || (questionKey && !this.editor.getText() && !this.editor.isShowingAutocomplete())) {
+		if (this.keybindings.matches(data, "shortcuts") || (questionKey && !this.editor.getText() && !this.editor.isShowingAutocomplete())) {
 			// Selecting the `/help — all commands` row dispatches the real
 			// command, so with the palette surface it opens the searchable
 			// overlay; other rows are documentation and just close.
@@ -1804,7 +1919,7 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 
-		if (matchesKey(data, Key.ctrl("c"))) {
+		if (this.keybindings.matches(data, "stop")) {
 			// A focused editor owns Ctrl+C while it has selected text; the
 			// global exit/cancel/clear route must not preempt a copy.
 			if (this.activeRegion === "editor" && this.integration?.view.hasSelection()) {
@@ -1816,25 +1931,22 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return { consume: true };
 		}
-		if (matchesKey(data, Key.ctrl("d")) && !this.running && !this.editor.getText()) {
+		if (this.keybindings.matches(data, "exit") && !this.running && !this.editor.getText()) {
 			void this.exit();
 			return { consume: true };
 		}
-		if (matchesKey(data, Key.escape) && this.running && !this.editor.isShowingAutocomplete()) {
+		if (this.keybindings.matches(data, "cancelTurn") && this.running && !this.editor.isShowingAutocomplete()) {
 			this.cancel();
 			return { consume: true };
 		}
-		if (matchesKey(data, Key.ctrl("l")) && !this.running) {
+		if (this.keybindings.matches(data, "clear") && !this.running) {
 			this.clear();
 			return { consume: true };
 		}
-		// Agent family: Ctrl+Shift+←/→ cycles the current family (main session
-		// plus delegated subagents). Chosen because nothing else in the app
-		// binds them — the editor uses plain/alt/ctrl arrows for movement and
-		// ctrl+pageUp/PageDown for paging; the alt screen uses ctrl+up/down.
-		// Consumed only while a multi-member family exists.
-		const cycle = matchesKey(data, Key.ctrlShift("right")) ? 1 : matchesKey(data, Key.ctrlShift("left")) ? -1 : 0;
-		if (cycle !== 0 && this.familyRows().length > 1) {
+		// Agent family: Ctrl+N then J/K cycles from the composer. Ctrl+Shift+Arrow
+		// remains available for word selection in the file editor.
+		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
+		if (cycle !== 0 && this.activeRegion === "chat-composer" && this.familyRows().length > 1) {
 			void this.cycleFamily(cycle as 1 | -1);
 			return { consume: true };
 		}
@@ -1844,7 +1956,7 @@ export class App implements FeatureHost {
 		// Down handling (movement and history). Dialogs and approvals were
 		// already given the key above.
 		if (
-			matchesKey(data, Key.down) &&
+			this.keybindings.matches(data, "agentMenu") &&
 			!this.editor.getText() &&
 			!this.editor.isShowingAutocomplete() &&
 			this.familyRows().length > 1
@@ -2374,7 +2486,7 @@ export class App implements FeatureHost {
 		// Re-assert the TUI's real focus against the composed geometry: pi-tui
 		// keeps delivering keys to a removed component, so a pane that was
 		// unmounted after the check above (or a focus cleared by an overlay)
-		// must be healed before the next keystroke, not on F6.
+		// must be healed before the next keystroke, not on a focus shortcut.
 		this.reconcileFocus();
 		this.tui.requestRender();
 	}
@@ -2482,7 +2594,7 @@ export class App implements FeatureHost {
 
 	private cycleFocus(direction: 1 | -1): void {
 		const regions = this.focusRegions();
-		// A single visible region still takes focus: after a chat maximize F6
+		// A single visible region still takes focus: after a chat maximize
 		// must hand the composer its focus instead of early-returning.
 		if (regions.length <= 1) {
 			this.setFocusForRegion(regions[0] ?? "chat-composer");
@@ -2567,14 +2679,14 @@ export class App implements FeatureHost {
 		if (!integration) return undefined;
 		const ready = integration.controller.phase === "ready";
 		// Ctrl+P — Quick Open overlay (fallback: /quickopen; palette-safe).
-		if (matchesKey(data, Key.ctrl("p")) && ready) {
+		if (this.keybindings.matches(data, "quickOpen") && ready) {
 			void this.openQuickOpen();
 			return { consume: true };
 		}
 		if (!this.workspaceLayoutActive) return undefined;
 		// Ctrl+T — explorer toggle (terminal new-tab risk documented; /explorer
 		// and the palette remain the fallback).
-		if (matchesKey(data, Key.ctrl("t"))) {
+		if (this.keybindings.matches(data, "explorer")) {
 			this.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };
 		}
@@ -2582,73 +2694,63 @@ export class App implements FeatureHost {
 		// NOT in the chat composer: the composer's Editor owns Ctrl+W as
 		// delete-word-backward, and stealing it there would break typing
 		// (CodeRabbit pass-2 major; composer scoping per the ADR matrix).
-		if (matchesKey(data, Key.ctrl("w")) && this.activeRegion !== "chat-composer") {
+		if (this.keybindings.matches(data, "closeTab") && this.activeRegion !== "chat-composer") {
 			this.closeActiveWorkspaceTab();
 			return { consume: true };
 		}
-		// F6 / Shift+F6 — cycle focus. pi-tui 1.0.0's matchesKey cannot express
-		// shift+F-keys (the f-key branch requires modifier 0), so the legacy
-		// xterm sequence is decoded explicitly; the matchesKey form is kept for
-		// a future toolkit that supports it.
-		const shiftedCycle = data === SHIFT_F6_SEQUENCE;
-		if (matchesKey(data, Key.f6) || shiftedCycle) {
-			this.cycleFocus(shiftedCycle ? -1 : 1);
+		// Ctrl+N then N/P cycles focus without modifier-arrow ambiguity.
+		const previousFocus = this.keybindings.matches(data, "focusPrevious");
+		if (this.keybindings.matches(data, "focusNext") || previousFocus) {
+			this.cycleFocus(previousFocus ? -1 : 1);
 			return { consume: true };
 		}
-		// Maximizing chat moves focus to the composer; keep the return shortcut
-		// reachable there. In split mode the composer retains word motion.
-		if (ready && integration.controller.mode === "chat" && matchesKey(data, Key.ctrl("left"))) {
+		// Pane modes are available from every workspace region. Text fields keep
+		// their ordinary Ctrl+Arrow navigation because these use a prefix.
+		if (ready && this.keybindings.matches(data, "restoreSplit")) {
 			this.workspaceHostSurface?.restoreSplit();
 			return { consume: true };
 		}
-		if (!ready || this.activeRegion !== "editor") return undefined;
-		// Ctrl+Right — toggle chat maximize; Ctrl+Left — always return to the
-		// 50/50 split (never a second toggle: after mode hops the split must
-		// stay reachable). These are EDITOR-scoped: while the composer owns
-		// focus in split mode, Ctrl+←/→ keep their standard word-motion meaning. When the
-		// editor region owns focus, the global bindings win there; editor word
-		// motion stays alt+arrows (help text).
-		if (matchesKey(data, Key.ctrl("right"))) {
+		if (ready && this.keybindings.matches(data, "chatMaximize")) {
 			this.workspaceHostSurface?.toggleChatMaximize();
 			return { consume: true };
 		}
-		if (matchesKey(data, Key.ctrl("left"))) {
-			this.workspaceHostSurface?.restoreSplit();
+		if (ready && this.keybindings.matches(data, "editorMaximize")) {
+			this.workspaceHostSurface?.toggleEditorMaximize();
 			return { consume: true };
 		}
+		if (!ready || this.activeRegion !== "editor") return undefined;
 		// Ctrl+Shift+A — attach the editor selection to the composer draft
 		// (plan §20 explicit sharing). Delivered as a distinct CSI-u sequence
 		// only under the Kitty keyboard protocol; legacy terminals send Ctrl+A,
 		// which this never consumes (the editor's select-all stays intact).
 		// /attach is the fallback everywhere.
-		if (matchesKey(data, Key.ctrlShift("a"))) {
+		if (this.keybindings.matches(data, "attach")) {
 			const result = this.attachSelectionToDraft();
 			this.print(result.notice, result.ok ? "info" : "warning");
 			return { consume: true };
 		}
 		// Ctrl+Space — completion at the cursor (explicit-only in v1; the
 		// legacy NUL byte is accepted when the Kitty protocol is inactive).
-		if (matchesKey(data, Key.ctrl("space")) || data === "\x00") {
+		if (this.keybindings.matches(data, "complete")) {
 			void this.startCompletion();
 			return { consume: true };
 		}
-		// F12 / Shift+F12 — go to definition / find references.
-		const shiftedReferences = data === SHIFT_F12_SEQUENCE;
-		if (matchesKey(data, Key.shift("f12")) || shiftedReferences) {
+		// Ctrl+N then D/R — go to definition / find references.
+		if (this.keybindings.matches(data, "references")) {
 			void this.runDefinitionOrReferences("references");
 			return { consume: true };
 		}
-		if (matchesKey(data, Key.f12)) {
+		if (this.keybindings.matches(data, "definition")) {
 			void this.runDefinitionOrReferences("definition");
 			return { consume: true };
 		}
-		// F2 — rename preview (honest "unavailable" until the service offers it).
-		if (matchesKey(data, Key.f2)) {
+		// Ctrl+N then M — rename preview (honest "unavailable" until supported).
+		if (this.keybindings.matches(data, "rename")) {
 			void this.runRenamePreview();
 			return { consume: true };
 		}
 		// Ctrl+S — compare-and-swap save of the active buffer.
-		if (matchesKey(data, Key.ctrl("s"))) {
+		if (this.keybindings.matches(data, "save")) {
 			void this.saveActiveDocument();
 			return { consume: true };
 		}
@@ -2672,11 +2774,13 @@ export class App implements FeatureHost {
 	/** Root-relative display path for attachment banners (never a raw URI). */
 	private workspaceRelativePath(uri: string): string {
 		const display = uriDisplayPath(uri);
-		const root = this.integration?.controller.identity?.resolvedRoot;
+		const normalizedDisplay = display.replace(/^\/(?=[A-Za-z]:\/)/, "");
+		const rawRoot = this.integration?.controller.identity?.resolvedRoot;
+		const root = rawRoot ? resolve(rawRoot).replace(/\\/g, "/") : undefined;
 		if (root) {
 			const prefix = root.endsWith("/") ? root : `${root}/`;
-			if (display === root) return inlineSafe(display);
-			if (display.startsWith(prefix)) return inlineSafe(display.slice(prefix.length));
+			if (normalizedDisplay === root) return inlineSafe(normalizedDisplay);
+			if (normalizedDisplay.startsWith(prefix)) return inlineSafe(normalizedDisplay.slice(prefix.length));
 		}
 		const parts = display.split("/").filter((segment) => segment.length > 0);
 		return inlineSafe(parts[parts.length - 1] ?? display);
@@ -2858,7 +2962,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	/** F12 / Shift+F12: request, pick among multiple targets, then jump. */
+	/** Ctrl+N then D/R: request, pick among multiple targets, then jump. */
 	private async runDefinitionOrReferences(operation: "definition" | "references"): Promise<void> {
 		const integration = this.integration;
 		const context = this.activeEditorContext();
@@ -2922,7 +3026,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	/** F2: prepare a rename preview; the honest v1 answer is "unavailable". */
+	/** Ctrl+N then M: prepare a rename preview when available. */
 	private async runRenamePreview(): Promise<void> {
 		const integration = this.integration;
 		const context = this.activeEditorContext();
@@ -3349,7 +3453,8 @@ export class App implements FeatureHost {
 		void this.openDialog<{ run?: string; prefill?: string }>((close) => {
 			const menu = new HelpMenu({
 				commands: helpMenuCommands(SLASH_COMMANDS),
-				keys: HELP_KEYS,
+				keys: effectiveShortcutRows(this.keybindings.get()).map(({ context, label, description }) =>
+					description === undefined ? { context, label } : { context, label, description }),
 				initialQuery,
 				title: "Help",
 				tui: this.tui,
@@ -3519,6 +3624,11 @@ export class App implements FeatureHost {
             return;
         }
 		const inFlight = this.current && this.inFlight.has(this.current.id);
+		if (!command && this.current?.parentSessionId && !this.current.isFork) {
+			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
+			this.tui.requestRender();
+			return;
+		}
 		switch (guardSubmit(command, Boolean(inFlight))) {
 			case "turn-busy":
 				this.transcript.addNotice("The previous turn is still finishing. Try again shortly.", "warning");
@@ -3588,6 +3698,11 @@ export class App implements FeatureHost {
     async submitTurn(text: string, images: ImageAttachment[] = []): Promise<void> {
 		if (!this.current) {
 			this.transcript.addNotice("Not connected to a session. Try /new.", "warning");
+			return;
+		}
+		if (this.current.parentSessionId && !this.current.isFork) {
+			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
+			this.tui.requestRender();
 			return;
 		}
 		const sessionId = this.current.id;
@@ -3675,7 +3790,7 @@ export class App implements FeatureHost {
 	}
 
 	/**
-	 * Local watchdog: a UI diagnostic deadline (300s, matching the server
+	 * Local watchdog: a UI diagnostic deadline (900s, matching the server
 	 * turn timeout), never ownership authority. On expiry while connected it
 	 * warns once, retains the in-flight guard, and leaves inspection, cancel
 	 * and exit available. It never advertises resubmission.

@@ -7,7 +7,7 @@ import { CURATED_MODELS, buildModelPickerRows, fetchModelGroups, filterCuratedMo
 import { Menu } from "../src/components/Menu.ts";
 import { resolvePrefix, table } from "../src/format.ts";
 import { listAllSessions, type SessionListHost } from "../src/features/sessions.ts";
-import type { ConfigResult, HistoryEntry, SessionInfo } from "../src/protocol.ts";
+import { RpcError, type ConfigResult, type HistoryEntry, type SessionInfo } from "../src/protocol.ts";
 import type { OAuthProgressHandle, OAuthProgressOptions } from "../src/features/types.ts";
 
 const SESSION: SessionInfo = {
@@ -736,24 +736,23 @@ test("/model is an alias for /default-model", () => {
 	assert.deepEqual(parseCommand("/model deepseek-chat"), { name: "default-model", args: "deepseek-chat" });
 });
 
-test("/provider re-pins the current session", async () => {
+test("/provider name no longer changes the model route", async () => {
 	const host = new FakeHost();
 	host.responses["config.set"] = { model: "m", provider: "deepseek", key: "provider", value: "deepseek" };
 	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "m", provider: "deepseek" };
 	await run("/provider deepseek", host);
-	assert.deepEqual(host.calls.map((c) => [c.method, c.params]), [
-		["config.set", { key: "provider", value: "deepseek", persist: false }],
-		["session.setModel", { sessionId: SESSION.id, provider: "deepseek" }],
-	]);
+	assert.ok(!host.calls.some((call) => call.method === "config.set" || call.method === "session.setModel"));
+	assert.match(host.last().text, /chosen with the model/);
 });
 
-test("/provider completions and hint cover the sign-in and gateway providers", async () => {
+test("/provider completions cover the sign-in and gateway providers without duplicate management commands", async () => {
 	const provider = SLASH_COMMANDS.find((c) => c.name === "provider")!;
 	const values = (await provider.getArgumentCompletions!(""))?.map((item) => item.value) ?? [];
 	for (const name of ["chatgpt", "opencode", "custom"]) {
 		assert.ok(values.includes(name), `missing completion ${name}`);
-		assert.match(provider.argumentHint ?? "", new RegExp(`\\b${name}\\b`), `missing hint ${name}`);
 	}
+	assert.equal(provider.argumentHint, "[provider name]");
+	assert.ok(!values.includes("add") && !values.includes("remove"));
 	const filtered = (await provider.getArgumentCompletions!("chat"))?.map((item) => item.value) ?? [];
 	assert.deepEqual(filtered, ["chatgpt"]);
 });
@@ -938,6 +937,7 @@ test("listAllSessions honors maxPages and throws one bounded error", async () =>
 
 test("/agents sessions shares the bounded scanner", async () => {
 	const host = new FakeHost();
+	host.responses["session.family"] = () => { throw new RpcError(-32601, "method not found"); };
 	let requests = 0;
 	host.responses["session.list"] = () => {
 		requests++;
@@ -1214,12 +1214,12 @@ test("/keys expert set failure redacts the value", async () => {
 	assert.match(host.last().text, /\[redacted\]/);
 });
 
-test("/models picker applies a cross-provider model after a one-line confirm", async () => {
+test("/models picker applies the provider carried by the chosen model row", async () => {
 	const host = new FakeHost();
 	host.responses["models.list"] = { provider: "openrouter", source: "none", models: [], fetchError: null };
 	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
 	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "llama3.1", provider: "ollama" };
-	host.picks.push("ollama::llama3.1", "yes");
+	host.picks.push("ollama::llama3.1");
 	await run("/models", host);
 	assert.deepEqual(
 		host.calls.filter((c) => c.method !== "providers.list").map((c) => [c.method, c.params]),
@@ -1231,13 +1231,13 @@ test("/models picker applies a cross-provider model after a one-line confirm", a
 		],
 	);
 	// providers.list is unavailable (older gateway): the curated groups still
-	// render, the picker offers cross-provider rows, and the switch is asked.
+	// render, and the picker applies the chosen cross-provider row.
 	assert.equal(host.calls[0]!.method, "providers.list");
-	assert.match(host.pickTitles.join("\n"), /Switch provider openrouter → ollama for "llama3.1"\?/);
+	assert.ok(!host.pickTitles.some((title) => title.includes("Switch provider")));
 	assert.match(host.last().text, /\/keys/);
 });
 
-test("/models never switches providers without the confirm", async () => {
+test("/models does not ask to switch when a model row names its provider", async () => {
 	const host = new FakeHost();
 	host.current = { ...SESSION, provider: "chatgpt" };
 	host.responses["providers.list"] = {
@@ -1251,13 +1251,15 @@ test("/models never switches providers without the confirm", async () => {
 		p.provider === "deepseek"
 			? { provider: "deepseek", source: "none", models: [], fetchError: null }
 			: { provider: "chatgpt", source: "live", fetchError: null, models: [{ id: "gpt-6-luna" }] };
-	host.picks.push("deepseek::deepseek-v4-flash", "no");
+	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
+	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" };
+	host.picks.push("deepseek::deepseek-v4-flash");
 	await run("/models", host);
-	assert.ok(!host.calls.some((c) => c.method === "config.set" || c.method === "session.setModel"));
-	assert.match(host.last().text, /Provider unchanged/);
+	assert.ok(host.calls.some((c) => c.method === "session.setModel" && c.params.provider === "deepseek"));
+	assert.ok(!host.pickTitles.some((title) => title.includes("Switch provider")));
 });
 
-test("/models prefers the same model id under the current provider", async () => {
+test("/models honors the selected provider when two providers share a model id", async () => {
 	const host = new FakeHost();
 	host.current = { ...SESSION, provider: "openai" };
 	host.responses["providers.list"] = {
@@ -1279,11 +1281,11 @@ test("/models prefers the same model id under the current provider", async () =>
 	assert.deepEqual(
 		host.calls.filter((c) => c.method === "config.set").map((c) => c.params),
 		[
-			{ key: "provider", value: "openai" },
+			{ key: "provider", value: "chatgpt" },
 			{ key: "model", value: "gpt-6.1-sol" },
 		],
 	);
-	assert.ok(host.printed.some((p) => /also exists under openai/.test(p.text)));
+	assert.ok(!host.printed.some((p) => /also exists under openai/.test(p.text)));
 });
 
 test("/models filters by query and warns when nothing matches", async () => {
@@ -1296,6 +1298,7 @@ test("/models filters by query and warns when nothing matches", async () => {
 });
 
 test("/models curated list includes the ChatGPT account and OpenCode Zen defaults", () => {
+	assert.ok(CURATED_MODELS.some((e) => e.provider === "openai" && e.model === "gpt-6-luna"));
 	const chatgpt = CURATED_MODELS.find((e) => e.provider === "chatgpt");
 	assert.equal(chatgpt?.model, "gpt-6-luna");
 	assert.match(chatgpt?.description ?? "", /\/auth/);
@@ -1482,7 +1485,7 @@ test("/provider list shows built-in and user-added providers", async () => {
 	const text = host.last().text;
 	assert.match(text, /acme \(current\)/);
 	assert.match(text, /127\.0\.0\.1:9000\/v1/);
-	assert.match(text, /Current: acme/);
+	assert.match(text, /Current model route: acme/);
 });
 
 test("/provider add collects name/URL/key and reports the pulled models", async () => {
@@ -1506,7 +1509,7 @@ test("/provider add collects name/URL/key and reports the pulled models", async 
 	assert.ok(host.asked.some((a) => a.secret === true), "key collected through a masked editor");
 	const texts = host.printed.map((p) => p.text).join("\n");
 	assert.match(texts, /2 model\(s\) pulled: m1, m2/);
-	assert.match(texts, /Switch with \/provider acme/);
+	assert.match(texts, /Choose one of its models with \/models/);
 	assert.ok(!texts.includes("sk-secret-value"), "key never echoed");
 });
 
@@ -1601,7 +1604,7 @@ test("/provider remove confirms what will be deleted and reports the cleanup", a
 		["session.setModel", { sessionId: SESSION.id, provider: "openrouter", model: "openrouter/free" }],
 	]);
 	assert.ok(host.printed.some((p) => /Provider "acme" removed — store entry, MACHINA_PROVIDER_ACME_API_KEY line in \.env, 3 cached model\(s\), registry entry\./.test(p.text)));
-	assert.match(host.last().text, /Active provider fell back to openrouter \(model openrouter\/free\)/);
+	assert.match(host.last().text, /Active route fell back to openrouter \(model openrouter\/free\)/);
 });
 
 test("/provider remove reports traces that were already gone without pretending", async () => {
@@ -1655,7 +1658,7 @@ test("/providers is an alias for /provider", async () => {
 	host.responses["providers.list"] = { selected: "openrouter", providers: [{ name: "openrouter", kind: "builtin", selected: true }] };
 	await run("/providers list", host);
 	assert.deepEqual(host.calls, [{ method: "providers.list", params: {} }]);
-	assert.match(host.last().text, /Current: openrouter/);
+	assert.match(host.last().text, /Current model route: openrouter/);
 });
 
 test("/effort routes through per-model validation with session identity", async () => {

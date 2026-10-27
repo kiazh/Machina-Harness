@@ -1,7 +1,7 @@
 """Multi-agent orchestration (Phase 5).
 
 Builds a :class:`~machina.core.agent.ReActAgent` from an :class:`AgentDef` and runs a
-delegated task against a fresh child session, recording the exchange in
+delegated task against a fresh or resumed child session, recording the exchange in
 ``agent_messages``. Supports running several delegations sequentially (each sees
 the previous results) or in parallel.
 """
@@ -47,7 +47,6 @@ def _redacted(text: str) -> str:
 
 
 delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
-delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
 
 
 class AgentNotFoundError(Exception):
@@ -70,7 +69,6 @@ class Orchestrator:
     """Runs tasks on named agents and records them in ``agent_messages``."""
 
     MAX_HOP_COUNT = 10  # Maximum delegation depth to prevent circular delegation
-    DELEGATION_TIMEOUT_SECONDS = 120.0
     PROMPT_VERSION = "1.0.0"  # Version of the delegation prompt template
 
     @staticmethod
@@ -113,7 +111,9 @@ class Orchestrator:
         self._owns_factory_agents = agent_factory is None
         self._agent_factory = agent_factory
 
-    async def _default_agent(self, definition: AgentDef, authority: dict | None = None):
+    async def _default_agent(
+        self, definition: AgentDef, authority: dict | None = None, session=None
+    ):
         from machina.core.agent_factory import (
             build_agent_for_session,
             cap_child_authority,
@@ -122,20 +122,17 @@ class Orchestrator:
         from machina.core.models import Session as _Session
 
         tools = cap_child_authority(authority or {}, definition_tool_cap(definition))
-        # Build through the shared factory for identical dependency wiring;
-        # synthesize a session view carrying the child identity.
-        import uuid as _uuid
-
-        view = _Session(
-            id=_uuid.uuid4(),
+        # Use the child's pinned route for both first runs and follow-ups.
+        view = session or _Session(
+            id=uuid.uuid4(),
             agent_id=definition.name,
             model=definition.model,
             provider=definition.provider,
         )
-        agent = await build_agent_for_session(view, authority=authority)
+        agent = await build_agent_for_session(view, authority=authority, delegated=True)
         # Enforce the capped tool list (definition ∩ parent caps).
         if tools is not None:
-            agent.allowed_tools = tools
+            agent.allowed_tools = [name for name in agent.allowed_tools or [] if name in tools]
         return agent
 
     @staticmethod
@@ -195,8 +192,9 @@ class Orchestrator:
         authority: dict | None = None,
         expected_output: str | None = None,
         expected_artifact_path: str | None = None,
+        resume_session_id: uuid.UUID | None = None,
     ) -> DelegationResult:
-        """Run *task* on *agent_name* in a fresh child session.
+        """Run *task* on *agent_name* in a fresh or owned child session.
 
         Args:
             agent_name: Name of the agent to delegate to.
@@ -212,6 +210,7 @@ class Orchestrator:
             expected_artifact_path: Workspace-relative file the child must
                 produce; verified present and non-empty after a non-paused
                 child completes. ``None`` disables verification (unchanged).
+            resume_session_id: Existing child session for a follow-up task.
 
         Raises:
             ValueError: If hop count exceeds MAX_HOP_COUNT (deadlock guard).
@@ -235,7 +234,11 @@ class Orchestrator:
                 raise AgentNotFoundError(f"no agent named {agent_name!r}")
             definition = BUILTIN_AGENTS[agent_name]
 
-        handoff = await self._parent_context(parent_session_id) if parent_session_id else ""
+        handoff = (
+            await self._parent_context(parent_session_id)
+            if parent_session_id and resume_session_id is None
+            else ""
+        )
 
         from machina.core.agent_factory import (
             cap_child_authority,
@@ -295,17 +298,31 @@ class Orchestrator:
 
         from machina.core.agent_factory import resolve_provider_model
 
-        child_provider, child_model = resolve_provider_model(definition=definition)
-        child = await session_manager.create(
-            title=f"{agent_name}: {task[:50]}",
-            agent_id=agent_name,
-            model=child_model,
-            provider=child_provider,
-            context_budget=config.get("context_budget"),
-            execution_mode=parent_mode,
-            parent_session_id=parent_session_id,
-            delegation_authority=child_authority,
-        )
+        created_child = resume_session_id is None
+        if resume_session_id is not None:
+            child = await session_manager.get_fresh(resume_session_id)
+            if (
+                child is None
+                or parent_session_id is None
+                or child.parent_session_id != parent_session_id
+                or child.agent_id != agent_name
+                or child.is_fork
+                or child.status != "active"
+            ):
+                raise ValueError("follow-up session is not this parent's delegated agent")
+            child_authority = merge_authority(child.delegation_authority, child_authority)
+        else:
+            child_provider, child_model = resolve_provider_model(definition=definition)
+            child = await session_manager.create(
+                title=f"{agent_name}: {task[:50]}",
+                agent_id=agent_name,
+                model=child_model,
+                provider=child_provider,
+                context_budget=config.get("context_budget"),
+                execution_mode=parent_mode,
+                parent_session_id=parent_session_id,
+                delegation_authority=child_authority,
+            )
         # Phase 4.5/6 + LP-08: same factory/accounting/cancellation pipeline
         # as normal turns. Child authority = definition ∩ parent caps, and the
         # broker enforces it at execution (not just on the stored agent).
@@ -323,10 +340,9 @@ class Orchestrator:
         agent = None
         message_id: uuid.UUID | None = None
         depth_token = None
-        deadline_token = None
         authority_token = None
         try:
-            if inherited_grant is not None:
+            if inherited_grant is not None and created_child:
                 await permission_store.save_grant(
                     {
                         "session_id": str(child.id),
@@ -343,23 +359,18 @@ class Orchestrator:
             if self._agent_factory is not None:
                 agent = self._agent_factory(definition)
             else:
-                agent = await self._default_agent(definition, authority=child_authority)
+                agent = await self._default_agent(
+                    definition, authority=child_authority, session=child
+                )
             message_id = await self._record_start(parent_session_id, from_agent, agent_name, task)
             depth_token = delegation_depth.set(_hop_count)
-            loop = asyncio.get_running_loop()
-            deadline_token = delegation_deadline.set(
-                delegation_deadline.get() or loop.time() + self.DELEGATION_TIMEOUT_SECONDS
-            )
             authority_token = parent_authority_var.set(child_authority)
             child_task = self._build_delegation_prompt(agent_name, task, handoff)
             if expected_output:
                 child_task += f"\n\n## Expected Output\n{expected_output}"
             if expected_artifact_path:
                 child_task += f"\n\n## Expected Artifact\n{expected_artifact_path}"
-            response = await asyncio.wait_for(
-                agent.run(child.id, child_task, verbose=False),
-                timeout=max(0, delegation_deadline.get() - loop.time()),
-            )
+            response = await agent.run(child.id, child_task, verbose=False)
         except asyncio.CancelledError:
             if message_id is not None:
                 try:
@@ -379,7 +390,7 @@ class Orchestrator:
                     record_failure("orchestrator.delegate", accounting_error)
             raise
         except Exception as e:
-            if message_id is None:
+            if message_id is None and created_child:
                 # Build or start-row failure: no row was recorded and the child
                 # never ran; re-raise so the finally archives/closes cleanly.
                 raise
@@ -396,8 +407,6 @@ class Orchestrator:
         finally:
             if depth_token is not None:
                 delegation_depth.reset(depth_token)
-            if deadline_token is not None:
-                delegation_deadline.reset(deadline_token)
             if authority_token is not None:
                 try:
                     from machina.core.agent_factory import parent_authority_var as _pav

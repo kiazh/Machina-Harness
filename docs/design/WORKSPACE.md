@@ -37,18 +37,19 @@ language servers.
 | Ctrl+P | Quick Open | `/quickopen` |
 | Ctrl+S | Save the active document (compare-and-swap; conflicts are shown) | command palette |
 | Ctrl+Space | Completion | `/editor complete` |
-| F12 / Shift+F12 | Definition / References | command palette |
-| F2 | Rename preview (only where the server supports it; otherwise an honest notice) | — |
-| F6 / Shift+F6 | Cycle focus: chat → editor → explorer → problems | commands |
-| Ctrl+Left / Ctrl+Right | `Ctrl+Right` maximizes chat from the editor. `Ctrl+Left` returns to the 50/50 split from the editor or maximized chat. In split mode the chat composer keeps word motion | `/workspace chat\|split` |
+| Ctrl+N, then D / R | Definition / References | command palette |
+| Ctrl+N, then M | Rename preview (only where the server supports it; otherwise an honest notice) | — |
+| Ctrl+N, then N / P | Cycle focus: chat → editor → explorer → problems | commands |
+| Ctrl+N, then C / E / S | Maximize chat / maximize editor / restore the 50/50 split | `/workspace chat\|editor\|split` |
 | Ctrl+T | Toggle explorer (some terminals use this for a new tab) | `/explorer` |
 | Ctrl+W | Close the active editor tab (dirty → Save/Discard/Cancel). **Not** bound in the chat composer, where it remains delete-word-backward | `/editor close` |
 | Esc | Dismisses the top editor popup first; a second Esc stops a running turn | — |
 
-`Ctrl+Right` is gated to the editor region. `Ctrl+Left` also restores the split
-from maximized chat, after focus moves to the composer. In split mode the chat
-composer keeps its standard word motion. Editor word motion stays on
-`alt+arrows`. Some terminals intercept `Ctrl+W` (close tab/window) or `Ctrl+T`
+The pane commands work from either the composer or the editor: `Ctrl+N` then `C`
+maximizes chat, `E` brings the editor in, and `S` restores the split.
+`Ctrl+Left/Right` stays available for
+word motion in text fields. Editor word motion also works with `alt+arrows`.
+All shortcuts can be changed in `/settings` → Keyboard shortcuts. Some terminals intercept `Ctrl+W` (close tab/window) or `Ctrl+T`
 (new tab) before the app sees them; the command fallbacks above always work.
 
 ## Language servers

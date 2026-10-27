@@ -255,7 +255,7 @@ export const sessionCommands: Command[] = [
 	},
 	{
 		name: "export",
-		description: "Save this conversation as Markdown",
+		description: "Save this conversation and its subagents as Markdown",
 		argumentHint: "[file.md]",
 		async run(args, host) {
 			const current = requireSession(host);

@@ -111,6 +111,7 @@ async def build_agent_for_session(
     provider_override: str | None = None,
     model_override: str | None = None,
     authority: dict | None = None,
+    delegated: bool | None = None,
 ):
     """Build a ReActAgent honoring definition + shared services + authority.
 
@@ -128,6 +129,9 @@ async def build_agent_for_session(
     from machina.core.agent import ReActAgent
     from machina.core.agent_def import agent_registry
     from machina.core.provider import get_provider
+
+    if delegated is None:
+        delegated = session.parent_session_id is not None and not session.is_fork
 
     # A resumed/forked child keeps the restrictions stamped at delegation.
     # Newly supplied authority can narrow these caps but cannot replace them.
@@ -178,17 +182,16 @@ async def build_agent_for_session(
                 memory_retriever = MemoryRetriever(store=memory_store)
             except Exception:
                 memory_retriever = None
-            try:
-                from machina.memory.consolidator import MemoryConsolidator
+            if not delegated:
+                try:
+                    from machina.memory.consolidator import MemoryConsolidator
 
-                # Extraction is an LLM job: the consolidator must carry the
-                # session provider, or every consolidation fails with
-                # "no LLM provider available for memory extraction".
-                memory_consolidator = MemoryConsolidator(llm_provider=llm)
-            except Exception:
-                memory_consolidator = None
+                    memory_consolidator = MemoryConsolidator(llm_provider=llm)
+                except Exception:
+                    memory_consolidator = None
 
-        rag_pipeline = await _shared_rag_pipeline()
+        if not delegated:
+            rag_pipeline = await _shared_rag_pipeline()
 
         # Authority caps (LP-08): key presence/None semantics, never truthiness.
         # tools absent/None = no parent restriction; [] = zero permitted tools.
@@ -219,6 +222,7 @@ async def build_agent_for_session(
             rag_pipeline=rag_pipeline,
             allowed_tools=allowed_tools,
             soul_spec=soul_spec,
+            delegated=delegated,
         )
     except BaseException:
         from machina.core.background_tasks import await_joined

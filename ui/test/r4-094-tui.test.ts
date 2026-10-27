@@ -309,7 +309,7 @@ test("R4-094(f) the FULL HOST notice points at /approvals revoke", async () => {
 
 // ─── (g) /delegate client budget ───────────────────────────────────────────
 
-test("R4-094(g) the /delegate client timeout outlasts the 120s gateway delegation budget", async (t) => {
+test("R4-094(g) delegated runs have no fixed client timeout", async (t) => {
 	const { app, client } = await boot();
 	t.after(() => app.exit());
 	await settle();
@@ -318,10 +318,7 @@ test("R4-094(g) the /delegate client timeout outlasts the 120s gateway delegatio
 	await request("agents.run", { sessionId: MAIN.id, steps: [{ agent: "a", task: "t" }] });
 	const call = client.requests.find((item) => item.method === "agents.run");
 	assert.ok(call, "the delegation request was dispatched");
-	assert.ok(
-		(call.timeoutMs ?? 0) > 120_000,
-		`client timeout ${call.timeoutMs}ms must exceed the orchestrator's DELEGATION_TIMEOUT_SECONDS=120`,
-	);
+	assert.equal(call.timeoutMs, 0);
 });
 
 // ─── (h) /keys allowlist ───────────────────────────────────────────────────

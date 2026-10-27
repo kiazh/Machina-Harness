@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from functools import lru_cache
 
 from cachetools import TTLCache
 
@@ -100,6 +101,10 @@ def _provider_name(provider) -> str:
         return ""
     if isinstance(provider, str):
         return provider.lower()
+    spec = getattr(provider, "spec", None)
+    spec_name = getattr(spec, "name", None)
+    if isinstance(spec_name, str) and spec_name:
+        return spec_name.lower()
     try:
         name = type(provider).__name__
         name = name.removesuffix("Provider")
@@ -114,6 +119,18 @@ def _is_openrouter(provider) -> bool:
 
 def _is_chatgpt(provider) -> bool:
     return _provider_name(provider) == "chatgpt"
+
+
+@lru_cache(maxsize=32)
+def _bundled_windows(provider: str) -> dict[str, int]:
+    """Exact model capacities from the same bundled catalog as the picker."""
+    from machina.core.provider.models_dev import provider_models
+
+    return {
+        row["id"].lower(): row["contextWindow"]
+        for row in provider_models(provider)
+        if isinstance(row.get("contextWindow"), int) and row["contextWindow"] > 0
+    }
 
 
 def context_window_for(
@@ -132,9 +149,9 @@ def context_window_for(
     verified snapshot, in that order. Catalog metadata is authoritative when
     it resolves: the curated table below is only a fallback for providers
     without a catalog, so a stale local entry can never override live
-    discovery. Base, local and other direct providers always use the curated
-    fallback so one serving's capacity never leaks into another provider's
-    estimate.
+    discovery. Built-in direct providers use exact ids from their bundled
+    model-menu catalog before the generic family fallback. Other providers
+    retain that fallback, so one serving's capacity cannot leak into another.
     """
     # Anything non-string (e.g. test doubles) behaves like an unknown model.
     name = model.lower() if isinstance(model, str) else ""
@@ -169,6 +186,11 @@ def context_window_for(
         window = window_for(name, account_id=str(account_id or ""), base_url=base_url)
         if window:
             return window
+    provider_name = _provider_name(provider)
+    if provider_name and provider_name != "chatgpt":
+        bundled = _bundled_windows(provider_name).get(name)
+        if bundled is not None:
+            return bundled
     best = 0
     window = DEFAULT_CONTEXT_WINDOW
     for key, value in MODEL_CONTEXT_WINDOWS.items():

@@ -14,7 +14,7 @@
 
 import type { FamilySession } from "./features/types.ts";
 import { listAllSessions, type SessionListHost } from "./features/sessions.ts";
-import type { HistoryEntry, ResumeResult, SessionInfo } from "./protocol.ts";
+import { RpcError, type HistoryEntry, type ResumeResult, type SessionInfo } from "./protocol.ts";
 
 /** Upper bound on cursor pages scanned for a family (features/sessions.ts owns the protocol). */
 export const MAX_FAMILY_PAGES = 10;
@@ -27,12 +27,12 @@ const MAX_TRACKED_UNKNOWN = 64;
 
 /** Root rule: a delegated session belongs to its parent's family; otherwise its own. */
 export function familyRootOf(session: SessionInfo): string {
-	return session.parentSessionId ?? session.id;
+	return session.isFork ? session.id : session.parentSessionId ?? session.id;
 }
 
 /** The one family predicate: the root itself or one of its direct children. */
 export function isFamilySession(session: SessionInfo, rootId: string): boolean {
-	return session.id === rootId || session.parentSessionId === rootId;
+	return session.id === rootId || (!session.isFork && session.parentSessionId === rootId);
 }
 
 /**
@@ -42,14 +42,23 @@ export function isFamilySession(session: SessionInfo, rootId: string): boolean {
 export async function listFamilySessions(host: SessionListHost, current: SessionInfo): Promise<SessionInfo[]> {
 	const rootId = familyRootOf(current);
 	const members = new Map<string, SessionInfo>();
-	await listAllSessions(host, {
-		maxPages: MAX_FAMILY_PAGES,
-		onPage: (page) => {
-			for (const session of page) {
-				if (isFamilySession(session, rootId)) members.set(session.id, session);
-			}
-		},
-	});
+	try {
+		const result = await host.request<{ sessions: SessionInfo[] }>("session.family", { sessionId: current.id });
+		for (const session of result.sessions) {
+			if (isFamilySession(session, rootId)) members.set(session.id, session);
+		}
+	} catch (error) {
+		if (!(error instanceof RpcError && error.code === -32601)) throw error;
+		// Older gateways lack session.family; preserve their bounded list route.
+		await listAllSessions(host, {
+			maxPages: MAX_FAMILY_PAGES,
+			onPage: (page) => {
+				for (const session of page) {
+					if (isFamilySession(session, rootId)) members.set(session.id, session);
+				}
+			},
+		});
+	}
 	members.set(current.id, current); // the visible session always wins
 	const root = members.get(rootId);
 	const children = [...members.values()].filter((session) => session.id !== rootId);
@@ -113,7 +122,7 @@ export class FamilyStore {
 		this.members = [session, ...this.members.filter((member) => member.id !== session.id)];
 		// Current is a child and its root was not listed yet: keep a stub so
 		// the main marker and the family rule stay explainable.
-		if (session.parentSessionId && !this.members.some((member) => member.id === rootId)) {
+		if (session.parentSessionId && !session.isFork && !this.members.some((member) => member.id === rootId)) {
 			this.members.push({
 				id: rootId,
 				title: "",
@@ -161,13 +170,7 @@ export class FamilyStore {
 		}
 		this.pending = true;
 		try {
-			const found: SessionInfo[] = [];
-			await listAllSessions(this.host, {
-				maxPages: MAX_FAMILY_PAGES,
-				onPage: (page) => {
-					found.push(...page);
-				},
-			});
+			const found = await listFamilySessions(this.host, current);
 			// The family root may have changed while listing; never install
 			// rows for a family the user already left.
 			const still = this.host.current();
@@ -221,7 +224,7 @@ export class FamilyStore {
 		}
 	}
 
-	/** Ctrl+Shift+←/→: cycle the family; wraps around. */
+	/** Ctrl+N then J/K: cycle the family; wraps around. */
 	async cycle(direction: 1 | -1): Promise<void> {
 		const rows = this.rows();
 		if (rows.length < 2) return;
