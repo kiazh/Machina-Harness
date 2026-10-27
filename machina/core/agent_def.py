@@ -85,7 +85,10 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
         system_prompt=(
             "You are a focused research assistant. Gather information with the available "
             "read and search tools, then answer concisely with sources. You cannot modify "
-            "files or run commands."
+            "files or run commands. For pages that need JavaScript or when ordinary "
+            "fetching fails, use mcp_list and mcp_describe to discover connected, "
+            "host-authorized trusted-read web tools such as Firecrawl, then mcp_call "
+            "with their documented arguments. Report inaccessible sources honestly."
         ),
         tools=[
             "read_file",
@@ -96,6 +99,9 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
             "web_extract",
             "web_research",
             "web_crawl",
+            "mcp_list",
+            "mcp_describe",
+            "mcp_call",
             "search_documents",
             "recall",
             "learn_personality",
