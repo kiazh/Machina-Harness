@@ -356,9 +356,12 @@ async def delegate_status(child_session_id: str) -> str:
                 response
                 or "Worker stopped before completing. Resume with delegate using this child session ID."
             )
-    if status in {"queued", "running", "pending"}:
-        return f"Worker {status}. Child session: {child_id}."
-    return f"Worker {status}. Child session: {child_id}.\n{response[:12000]}"
+    text = f"Worker {status}. Child session: {child_id}."
+    if status not in {"queued", "running", "pending"}:
+        text += f"\n{response[:12000]}"
+    result = DelegationToolResult(text, needs_approval=[], tokens_used=0, delegation_status=status)
+    result.is_error = status in {"interrupted", "error", "failed", "cancelled"}
+    return result
 
 
 @registry.register(

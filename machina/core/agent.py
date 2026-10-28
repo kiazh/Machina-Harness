@@ -289,6 +289,8 @@ def _tool_outcome(item: dict[str, Any]) -> str:
     preview = str(item.get("result") or "")
     if item.get("_needs_approval") or item.get("_needs_approvals"):
         return "paused"
+    if item.get("_delegation_status") == "waiting_approval":
+        return "paused"
     if item.get("_delegation_status") in {"queued", "running", "interrupted", "pending"}:
         return item["_delegation_status"]
     if item.get("_denied") or preview.startswith("Permission denied:"):
