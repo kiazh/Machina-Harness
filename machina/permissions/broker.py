@@ -77,6 +77,11 @@ def get_current_turn() -> str:
         return ""
 
 
+def get_current_principal() -> str:
+    """Return the transport principal for the current execution context."""
+    return _principal.get()
+
+
 def set_approval_handler(
     handler: ApprovalHandler | None,
     *,

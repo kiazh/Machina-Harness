@@ -89,7 +89,7 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 3600,
-                "description": "Optional inline wait override; 0 waits until completion",
+                "description": "Optional inline wait override; 0 waits until completion. One-shot headless chat always waits for completion.",
             },
         },
         "required": ["agent", "task"],
@@ -248,6 +248,12 @@ async def delegate(
                 )
             except (TypeError, ValueError):
                 wait_limit = 120
+            from machina.permissions.broker import get_current_principal
+
+            if get_current_principal() == "headless":
+                # The one-shot CLI closes its event loop after the turn. A
+                # detached worker would be lost before it could report back.
+                wait_limit = 0
             if wait_limit:
                 done, _ = await asyncio.wait({operation}, timeout=wait_limit)
                 if not done:
