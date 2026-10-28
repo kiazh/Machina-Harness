@@ -381,7 +381,10 @@ class _ExtractedText(HTMLParser):
 
 @registry.register(
     name="web_extract",
-    description="Extract content from a URL",
+    description=(
+        "Extract text from a public URL using static HTTP. This does not run JavaScript; "
+        "sparse results include a browser-backed retrieval hint."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -402,7 +405,11 @@ async def web_extract(url: str) -> str:
     """
     if not url or not url.strip():
         raise ValidationError("Empty URL")
-    return await extract_url_text(url)
+    content = await extract_url_text(url)
+    notice = static_fetch_notice(content)
+    if notice:
+        return f"{content}\n\n[Fetch note: {notice}]".strip()
+    return content
 
 
 # Extraction bounds: the raw-body cap is generous so real pages (often a few
@@ -439,6 +446,23 @@ def extract_text_from_html(content: str, text_limit: int = _EXTRACT_TEXT_LIMIT) 
             line.strip() for line in "".join(parser.parts).splitlines() if line.strip()
         )
     return content[:text_limit]
+
+
+_STATIC_FETCH_NOTICE_MIN_CHARS = 160
+
+
+def static_fetch_notice(content: str) -> str:
+    """Explain when a sparse static response may be an unrendered app shell."""
+    visible = " ".join(content.split())
+    if len(visible) >= _STATIC_FETCH_NOTICE_MIN_CHARS:
+        return ""
+    return (
+        f"Possible incomplete static fetch ({len(visible)} visible characters). "
+        "JavaScript-rendered content may be missing. If expected content is absent, "
+        "discover a connected browser-backed web tool with mcp_list, inspect its schema "
+        "with mcp_describe, and call it with mcp_call. If none is available, report the "
+        "source as incomplete."
+    )
 
 
 async def extract_url_text(url: str, *, text_limit: int = _EXTRACT_TEXT_LIMIT) -> str:

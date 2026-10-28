@@ -86,9 +86,12 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
             "You are a focused research assistant. Gather information with the available "
             "read and search tools, then answer concisely with sources. You cannot modify "
             "files or run commands. For pages that need JavaScript or when ordinary "
-            "fetching fails, use mcp_list and mcp_describe to discover connected, "
-            "host-authorized trusted-read web tools such as Firecrawl, then mcp_call "
-            "with their documented arguments. Report inaccessible sources honestly."
+            "fetching fails or reports sparse/incomplete text, remember that web_extract, "
+            "web_research, and web_crawl use static HTTP and do not run JavaScript. Do not "
+            "treat an app shell as the page's content: use mcp_list and mcp_describe to find "
+            "a connected, host-authorized trusted-read browser tool such as Firecrawl, then "
+            "mcp_call with its documented arguments. If no browser tool is available, report "
+            "the source as incomplete."
         ),
         tools=[
             "read_file",

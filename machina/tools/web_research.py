@@ -12,7 +12,7 @@ from machina.memory.redaction import redact_secrets, redacted_excerpt
 from machina.rag.loaders import Document
 from machina.tools.agents import active_agent_scope
 from machina.tools.base import registry
-from machina.tools.builtins import _search_web_results, extract_url_text
+from machina.tools.builtins import _search_web_results, extract_url_text, static_fetch_notice
 from machina.tools.rag import acquire_rag_pipeline, release_rag_pipeline
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,8 @@ _RESEARCH_TEXT_LIMIT = 60_000
     name="web_research",
     description=(
         "Search the public web, fetch up to three pages, and save their text to the active "
-        "session's RAG context for later turns. Returns excerpts and source URLs."
+        "session's RAG context for later turns. Uses static HTTP and does not run JavaScript; "
+        "sparse results include a browser-backed retrieval hint. Returns excerpts and source URLs."
     ),
     parameters={
         "type": "object",
@@ -138,6 +139,9 @@ async def web_research(query: str, limit: int = 3) -> str:
                         redacted_excerpt(content).replace("\n", " "),
                     )
                 )
+                notice = static_fetch_notice(content)
+                if notice:
+                    lines.append(f"[Fetch note: {notice}]")
             except Exception as error:
                 failures += 1
                 logger.info("web research source failed (%s): %s", stored_url, error)
