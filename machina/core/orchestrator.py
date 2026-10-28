@@ -488,16 +488,26 @@ class Orchestrator:
                         announce("done", response.outcome)
         except asyncio.CancelledError:
             if message_id is not None:
+                from machina.core.runtime import runtime_services
+
+                shutdown = runtime_services._shutting_down
+                status = "interrupted" if shutdown else "cancelled"
+                detail = (
+                    "Runtime shutdown interrupted the worker. Review its child session and "
+                    "resume with delegate using the child session ID; effects may be uncertain."
+                    if shutdown
+                    else "cancelled"
+                )
                 try:
                     tokens = await self._charged_child_tokens(child.id, agent_name)
                     await self._record_end(
-                        message_id, status="cancelled", response="cancelled", tokens=tokens
+                        message_id, status=status, response=detail, tokens=tokens
                     )
                 except DelegationAccountingError as accounting_error:
                     # R4-029: spend unknown — close the row with NULL tokens rather
                     # than strand it; the cancellation itself still propagates.
                     await self._close_row_with_unknown_spend(
-                        message_id, status="cancelled", response="cancelled"
+                        message_id, status=status, response=detail
                     )
                     record_failure("orchestrator.delegate", accounting_error)
                 except Exception as accounting_error:

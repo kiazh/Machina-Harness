@@ -217,6 +217,9 @@ async def delegate(
                 **_contract_kwargs,
             )
         )
+        from machina.core.runtime import runtime_services
+
+        runtime_services.track(operation)
         _background_delegations.add(operation)
 
         def forget(completed: asyncio.Task) -> None:
