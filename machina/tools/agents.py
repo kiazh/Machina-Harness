@@ -285,7 +285,7 @@ async def delegate(
 
     label = (
         "failed"
-        if result.status in ("error", "failed")
+        if result.status in ("error", "failed", "interrupted")
         else "waiting for approval"
         if result.status == "waiting_approval"
         else "responded"
@@ -344,8 +344,13 @@ async def delegate_status(child_session_id: str) -> str:
                    SET status = 'interrupted',
                        response = COALESCE(response, 'Worker stopped before completing.'),
                        completed_at = COALESCE(completed_at, now())
-                   WHERE id = $1 AND status IN ('queued', 'running', 'pending')""",
+                   WHERE id = $1 AND status IN ('queued', 'running', 'pending')
+                     AND NOT EXISTS (
+                         SELECT 1 FROM sessions WHERE id = $2 AND claim_owner IS NOT NULL
+                           AND claim_expires_at > now()
+                     )""",
                 uuid.UUID(entry["id"]),
+                uuid.UUID(child_id),
             )
             if updated == "UPDATE 0":
                 entry = await orchestrator.latest_child_delegation(

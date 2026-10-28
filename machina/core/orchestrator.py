@@ -401,7 +401,34 @@ class Orchestrator:
         observer = child_observer.get()
         observer_started = False
         response = None
+        claim_token: str | None = None
+        ownership = None
+        run_completed = False
+        agent_cleaned = False
+
+        async def cleanup_agent() -> None:
+            if agent is not None:
+                try:
+                    await join_agent_background_tasks(agent)
+                except Exception as cleanup_error:
+                    record_failure("orchestrator.delegate", cleanup_error)
+            if getattr(self, "_owns_factory_agents", False) and agent is not None:
+                try:
+                    from machina.core.agent_factory import close_agent_provider
+
+                    await close_agent_provider(agent)
+                except Exception as cleanup_error:
+                    record_failure("orchestrator.delegate", cleanup_error)
+
         try:
+            from machina.core.turns import TurnOwnership, try_begin_turn
+
+            claim_token = await try_begin_turn(child.id)
+            if claim_token is None:
+                raise ValueError("delegated child session is already running")
+            ownership = TurnOwnership(child.id, uuid.uuid4().hex, claim_token)
+            running_task = asyncio.current_task()
+            ownership.start_renewal(on_lost=running_task.cancel if running_task else None)
             if inherited_grant is not None and created_child:
                 await permission_store.save_grant(
                     {
@@ -486,18 +513,73 @@ class Orchestrator:
                         if response is None:
                             raise RuntimeError("delegated stream ended without a result")
                         announce("done", response.outcome)
+            await cleanup_agent()
+            agent_cleaned = True
+            run_completed = True
+            tokens = await self._settle_child_tokens(
+                message_id, child.id, agent_name, response.tokens_used
+            )
+            pauses = getattr(response, "needs_approval", None)
+            pauses = (
+                [dict(pause) for pause in pauses if isinstance(pause, dict)]
+                if isinstance(pauses, list)
+                else []
+            )
+            for pause in pauses:
+                pause.setdefault("session_id", str(child.id))
+                pause.setdefault("agent_id", agent_name)
+            # Typed outcomes (never prose): a failed child is an error even when
+            # its body sounds benign. Pauses keep waiting_approval semantics.
+            outcome = getattr(response, "outcome", "completed")
+            status = (
+                "waiting_approval" if pauses else ("error" if outcome == "failed" else "complete")
+            )
+            final_content = response.content
+            if status == "complete" and expected_artifact_path is not None:
+                _ok, _reason = self._check_expected_artifact(expected_artifact_path)
+                if not _ok:
+                    status = "error"
+                    final_content = _reason
+            if status == "error":
+                # Typed child failure (not a raised exception): the same redaction
+                # contract applies to the durable row, the parent chunk, and the
+                # returned result.
+                final_content = _redacted(final_content)
+            await self._record_end(message_id, status=status, response=final_content, tokens=tokens)
+            if parent_session_id is not None:
+                await context_manager.add_chunk(
+                    session_id=parent_session_id,
+                    agent_id=from_agent,
+                    chunk_type="result",
+                    payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
+                    token_count=get_token_count(final_content),
+                )
+            if status != "waiting_approval":
+                await self._delete_finished_child(child.id)
+            return DelegationResult(
+                agent=agent_name,
+                task=task,
+                response=final_content,
+                session_id=child.id,
+                tokens=tokens,
+                iterations=response.iterations,
+                status=status,
+                needs_approval=pauses,
+            )
         except asyncio.CancelledError:
             if message_id is not None:
                 from machina.core.runtime import runtime_services
 
                 shutdown = runtime_services._shutting_down
-                status = "interrupted" if shutdown else "cancelled"
+                lost = ownership is not None and ownership.ownership_lost.is_set()
+                status = "interrupted" if shutdown or lost else "cancelled"
                 detail = (
-                    "Runtime shutdown interrupted the worker. Review its child session and "
+                    "Runtime shutdown or lost ownership interrupted the worker. Review its child session and "
                     "resume with delegate using the child session ID; effects may be uncertain."
-                    if shutdown
+                    if shutdown or lost
                     else "cancelled"
                 )
+                tokens = 0
                 try:
                     tokens = await self._charged_child_tokens(child.id, agent_name)
                     await self._record_end(
@@ -510,16 +592,26 @@ class Orchestrator:
                         message_id, status=status, response=detail
                     )
                     record_failure("orchestrator.delegate", accounting_error)
+                    if lost:
+                        raise
                 except Exception as accounting_error:
                     # Accounting failures must not swallow the parent's cancellation.
                     record_failure("orchestrator.delegate", accounting_error)
-            if message_id is not None:
-                await self._delete_finished_child(child.id)
+                    if lost:
+                        raise DelegationAccountingError(
+                            "delegation accounting unavailable after ownership loss"
+                        ) from accounting_error
+                if lost:
+                    return DelegationResult(
+                        agent_name, task, detail, child.id, tokens, 0, "interrupted"
+                    )
+                if not shutdown:
+                    await self._delete_finished_child(child.id)
             raise
         except Exception as e:
-            if message_id is None and created_child:
-                # Build or start-row failure: no row was recorded and the child
-                # never ran; re-raise so the finally deletes it.
+            if message_id is None or run_completed:
+                # Preserve setup and result-persistence failures for the caller.
+                # Only a fresh child that never started is deleted below.
                 raise
             logger.exception("Delegation to %s failed", agent_name)
             raw_detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
@@ -540,86 +632,38 @@ class Orchestrator:
                     observer(child.id, phase, "")
                 except Exception as error:
                     record_failure("orchestrator.child_observer", error)
-            if depth_token is not None:
-                delegation_depth.reset(depth_token)
-            if authority_token is not None:
-                try:
-                    from machina.core.agent_factory import parent_authority_var as _pav
+            try:
+                # The remaining cleanup is bounded. Stop renewal first so its
+                # loss callback cannot cancel the owner during teardown.
+                if ownership is not None:
+                    await ownership.stop_renewal()
+                if depth_token is not None:
+                    delegation_depth.reset(depth_token)
+                if authority_token is not None:
+                    try:
+                        from machina.core.agent_factory import parent_authority_var as _pav
 
-                    _pav.reset(authority_token)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # Consolidation shares the agent provider; join it (bounded)
-            # before any close so extraction never calls a closed client.
-            if agent is not None:
-                try:
-                    await join_agent_background_tasks(agent)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # AH-AUDIT-026: shared owner-aware cleanup contract (bounded;
-            # custom test factories inject shared agents that stay open).
-            if getattr(self, "_owns_factory_agents", False) and agent is not None:
-                try:
-                    from machina.core.agent_factory import close_agent_provider
+                        _pav.reset(authority_token)
+                    except Exception as _boundary_error:
+                        record_failure("orchestrator.delegate", _boundary_error)
+                if not agent_cleaned:
+                    await cleanup_agent()
+                if message_id is None and created_child:
+                    await self._delete_finished_child(child.id)
+            finally:
+                if claim_token is not None:
+                    from machina.core.runtime import runtime_services
+                    from machina.core.turns import end_turn
 
-                    await close_agent_provider(agent)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # A child that never ran leaves no chat behind.
-            if message_id is None:
-                await self._delete_finished_child(child.id)
+                    async def release_claim() -> None:
+                        try:
+                            await end_turn(child.id, claim_token)
+                        except Exception as release_error:
+                            record_failure("orchestrator.delegate.release_claim", release_error)
 
-        tokens = await self._settle_child_tokens(
-            message_id, child.id, agent_name, response.tokens_used
-        )
-        pauses = getattr(response, "needs_approval", None)
-        pauses = (
-            [dict(pause) for pause in pauses if isinstance(pause, dict)]
-            if isinstance(pauses, list)
-            else []
-        )
-        for pause in pauses:
-            pause.setdefault("session_id", str(child.id))
-            pause.setdefault("agent_id", agent_name)
-        # Typed outcomes (never prose): a failed child is an error even when
-        # its body sounds benign. Pauses keep waiting_approval semantics.
-        outcome = getattr(response, "outcome", "completed")
-        status = "waiting_approval" if pauses else ("error" if outcome == "failed" else "complete")
-        final_content = response.content
-        if status == "complete" and expected_artifact_path is not None:
-            _ok, _reason = self._check_expected_artifact(expected_artifact_path)
-            if not _ok:
-                status = "error"
-                final_content = _reason
-        if status == "error":
-            # Typed child failure (not a raised exception): the same redaction
-            # contract applies to the durable row, the parent chunk, and the
-            # returned result.
-            final_content = _redacted(final_content)
-        await self._record_end(message_id, status=status, response=final_content, tokens=tokens)
-        if parent_session_id is not None:
-            await context_manager.add_chunk(
-                session_id=parent_session_id,
-                agent_id=from_agent,
-                chunk_type="result",
-                payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
-                token_count=get_token_count(final_content),
-            )
-        if status != "waiting_approval":
-            await self._delete_finished_child(child.id)
-        return DelegationResult(
-            agent=agent_name,
-            task=task,
-            response=final_content,
-            session_id=child.id,
-            tokens=tokens,
-            iterations=response.iterations,
-            status=status,
-            needs_approval=pauses,
-        )
+                    release_task = asyncio.create_task(release_claim())
+                    runtime_services.track(release_task, essential=True)
+                    await asyncio.shield(release_task)
 
     async def _delete_finished_child(self, child_id: uuid.UUID) -> None:
         """Discard a completed child chat after its result and usage are recorded."""
@@ -842,9 +886,13 @@ class Orchestrator:
     ) -> dict | None:
         """Look up the latest run of an owned child without a history-page limit."""
         row = await db.fetchrow(
-            """SELECT id, status, response FROM agent_messages
-               WHERE session_id = $1 AND child_session_id = $2
-               ORDER BY created_at DESC, id DESC LIMIT 1""",
+            """SELECT m.id, m.status, m.response,
+                      EXISTS (SELECT 1 FROM sessions s
+                              WHERE s.id = m.child_session_id AND s.claim_owner IS NOT NULL
+                                AND s.claim_expires_at > now()) AS claim_active
+               FROM agent_messages m
+               WHERE m.session_id = $1 AND m.child_session_id = $2
+               ORDER BY m.created_at DESC, m.id DESC LIMIT 1""",
             session_id,
             child_session_id,
         )
@@ -852,7 +900,13 @@ class Orchestrator:
             return None
         return {
             "id": str(row["id"]),
-            "status": row["status"],
+            "status": (
+                "running"
+                if row["claim_active"]
+                and row["status"]
+                in {"complete", "error", "cancelled", "interrupted", "waiting_approval"}
+                else row["status"]
+            ),
             "response": _redacted(row["response"]) if row["response"] is not None else None,
         }
 
