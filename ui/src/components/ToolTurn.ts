@@ -12,6 +12,7 @@ import { panelContentWidth, renderToolPanel } from "./ToolPanel.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
 export type ToolOutcome =
+	| "queued"
 	| "running"
 	| "awaiting_approval"
 	| "success"
@@ -30,6 +31,8 @@ export interface ToolResultView {
 
 function markerFor(outcome: ToolOutcome): string {
 	switch (outcome) {
+		case "queued":
+			return TOOL_MARKERS.queued;
 		case "running":
 			return TOOL_MARKERS.running;
 		case "awaiting_approval":
@@ -91,7 +94,9 @@ export class ToolTurn implements Component {
 		if (this.outcome !== "running" && cached) return cached;
 		const total = Math.max(0, width);
 		const inner = Math.max(1, panelContentWidth(width) - 2);
-		const marker = this.outcome === "running" && this.paused
+		const marker = this.outcome === "queued"
+			? theme.dim(markerFor(this.outcome))
+			: this.outcome === "running" && this.paused
 			? theme.dim(ICONS.interrupted)
 			: this.outcome === "running"
 			? theme.accent(this.activity.frame([...ICONS.toolActiveFrames], ACTIVITY_INTERVAL_MS, this.startedAt))
@@ -101,7 +106,9 @@ export class ToolTurn implements Component {
 		const header = `${marker} ${this.name}${this.args ? ` ${theme.muted(this.args)}` : ""}`;
 		const lines = header.split("\n").map((row) => truncateToWidth(row, panelContentWidth(width)));
 		const indent = "  ";
-		if (this.outcome === "running") {
+		if (this.outcome === "queued") {
+			lines.push(`${indent}${theme.dim("queued")}`);
+		} else if (this.outcome === "running") {
 			lines.push(`${indent}${theme.dim(this.paused ? `${this.paused === "stopping" ? "stopping" : "cleanup pending"}; outcome pending` : "running")}`);
 		} else if (this.outcome === "awaiting_approval") {
 			lines.push(`${indent}${theme.dim("awaiting approval")}`);

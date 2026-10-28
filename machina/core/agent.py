@@ -175,7 +175,7 @@ You are a general-purpose agent first: answer greetings and self-contained conce
 
 For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 
-Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. On each report, check what remains, continue your own work or assign a focused follow-up with the session_id in the delegate result, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
+Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
 When you need to do something, use the available tools. Think step by step:
 1. Understand the task
@@ -289,6 +289,8 @@ def _tool_outcome(item: dict[str, Any]) -> str:
     preview = str(item.get("result") or "")
     if item.get("_needs_approval") or item.get("_needs_approvals"):
         return "paused"
+    if item.get("_delegation_status") in {"queued", "running", "interrupted", "pending"}:
+        return item["_delegation_status"]
     if item.get("_denied") or preview.startswith("Permission denied:"):
         return "denied"
     if item.get("_outcome_unknown"):
@@ -366,7 +368,7 @@ class BaseReActAgent:
         # An explicit child allow-list enforces the same boundary at execution,
         # even if a model emits a tool name absent from its advertised schema.
         if delegated:
-            child_forbidden = {"learn_personality", "delegate", "list_agents"}
+            child_forbidden = {"learn_personality", "delegate", "delegate_status", "list_agents"}
             candidate_tools = (
                 allowed_tools
                 if allowed_tools is not None
@@ -390,7 +392,8 @@ class BaseReActAgent:
             defs = [
                 definition
                 for definition in defs
-                if definition.name not in {"learn_personality", "delegate", "list_agents"}
+                if definition.name
+                not in {"learn_personality", "delegate", "delegate_status", "list_agents"}
             ]
         elif not config.get("personality_growth_enabled") or not config.get("memory_enabled"):
             defs = [d for d in defs if d.name != "learn_personality"]
@@ -1155,6 +1158,9 @@ class BaseReActAgent:
                                     getattr(completed, "is_error", False)
                                 ) or str(completed).startswith("Error:")
                                 item["elapsed_ms"] = (time.monotonic() - start) * 1000
+                                item["_delegation_status"] = getattr(
+                                    completed, "delegation_status", ""
+                                )
                                 if getattr(completed, "outcome_unknown", False):
                                     item["_outcome_unknown"] = True
                                 from machina.tools.agents import DelegationToolResult

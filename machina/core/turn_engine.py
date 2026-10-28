@@ -470,7 +470,7 @@ class TurnEngine:
                 "name": event.tool_name,
                 "result": result[:limit],
                 "truncated": truncated,
-                "isError": event.tool_outcome in {"failed", "denied"}
+                "isError": event.tool_outcome in {"failed", "denied", "interrupted"}
                 or result.startswith("Error:"),
             }
             if event.tool_outcome:

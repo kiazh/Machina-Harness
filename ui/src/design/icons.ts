@@ -31,6 +31,7 @@ export const ICONS = {
 
 /** Tool header markers by outcome (section 6.5). */
 export const TOOL_MARKERS = {
+	queued: "…",
 	running: ICONS.toolRunning,
 	success: ICONS.success,
 	error: ICONS.error,

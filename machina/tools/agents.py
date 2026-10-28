@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import uuid
 from contextvars import ContextVar
 
+from machina.core.config import config
 from machina.core.exceptions import DelegationAccountingError, ToolError
 from machina.db.connection import db
 from machina.memory.redaction import redact_diagnostic
@@ -19,15 +21,24 @@ logger = logging.getLogger(__name__)
 # sessions isolated and avoids accepting a model-supplied parent session ID.
 current_session_id: ContextVar[uuid.UUID | None] = ContextVar("agent_session_id", default=None)
 current_agent_id: ContextVar[str | None] = ContextVar("agent_tool_owner_id", default=None)
+_background_delegations: set[asyncio.Task] = set()
 
 
 class DelegationToolResult(str):
     """Readable tool output carrying typed child pauses and cumulative spend."""
 
-    def __new__(cls, text: str, *, needs_approval: list[dict], tokens_used: int):
+    def __new__(
+        cls,
+        text: str,
+        *,
+        needs_approval: list[dict],
+        tokens_used: int,
+        delegation_status: str = "complete",
+    ):
         result = super().__new__(cls, text)
         result.needs_approval = needs_approval
         result.tokens_used = tokens_used
+        result.delegation_status = delegation_status
         return result
 
 
@@ -74,6 +85,12 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
                 "type": "string",
                 "description": "Optional child session UUID from an earlier delegate result for a follow-up",
             },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3600,
+                "description": "Optional inline wait override; 0 waits until completion",
+            },
         },
         "required": ["agent", "task"],
     },
@@ -84,6 +101,7 @@ async def delegate(
     expected_output: str | None = None,
     expected_artifact_path: str | None = None,
     session_id: str | None = None,
+    wait_seconds: int | None = None,
 ) -> str:
     """Delegate *task* to *agent* and return its response and child id."""
     from machina.core.orchestrator import (
@@ -181,15 +199,84 @@ async def delegate(
             _contract_kwargs["expected_artifact_path"] = expected_artifact_path
         if resume_session_id is not None:
             _contract_kwargs["resume_session_id"] = resume_session_id
-        result = await orchestrator.delegate(
-            agent,
-            task,
-            from_agent=from_agent,
-            parent_session_id=parent_session_id,
-            _hop_count=delegation_depth.get() + 1,
-            authority=parent_authority,
-            **_contract_kwargs,
+        child_started = asyncio.get_running_loop().create_future()
+
+        def on_started(child_session_id: uuid.UUID) -> None:
+            if not child_started.done():
+                child_started.set_result(child_session_id)
+
+        _contract_kwargs["on_started"] = on_started
+        operation = asyncio.create_task(
+            orchestrator.delegate(
+                agent,
+                task,
+                from_agent=from_agent,
+                parent_session_id=parent_session_id,
+                _hop_count=delegation_depth.get() + 1,
+                authority=parent_authority,
+                **_contract_kwargs,
+            )
         )
+        _background_delegations.add(operation)
+
+        def forget(completed: asyncio.Task) -> None:
+            _background_delegations.discard(completed)
+            if not completed.cancelled():
+                error = completed.exception()
+                if error is not None:
+                    record_failure("tools.delegate.background", error)
+
+        operation.add_done_callback(forget)
+        ready, _ = await asyncio.wait(
+            {operation, child_started}, return_when=asyncio.FIRST_COMPLETED, timeout=30
+        )
+        if operation in ready:
+            result = await operation
+        elif child_started in ready:
+            child_id = child_started.result()
+            try:
+                configured_wait = (
+                    wait_seconds
+                    if wait_seconds is not None
+                    else config.get("delegate_inline_wait_seconds")
+                )
+                wait_limit = max(
+                    0, min(int(120 if configured_wait is None else configured_wait), 3600)
+                )
+            except (TypeError, ValueError):
+                wait_limit = 120
+            if wait_limit:
+                done, _ = await asyncio.wait({operation}, timeout=wait_limit)
+                if not done:
+                    try:
+                        history = await orchestrator.history(parent_session_id, limit=500)
+                        entry = next(
+                            (
+                                item
+                                for item in history
+                                if item.get("childSessionId") == str(child_id)
+                            ),
+                            None,
+                        )
+                    except Exception as error:
+                        record_failure("tools.delegate.pending_status", error)
+                        entry = None
+                    status = entry.get("status", "running") if entry else "running"
+                    receipt = DelegationToolResult(
+                        f"[{agent} {status}]\nChild session: {child_id}\n"
+                        "Use delegate_status with this child session ID to check progress; "
+                        "use delegate with session_id after it finishes.",
+                        needs_approval=[],
+                        tokens_used=0,
+                        delegation_status=status,
+                    )
+                    receipt.is_error = False
+                    return receipt
+            result = await operation
+        else:
+            operation.cancel()
+            await asyncio.gather(operation, return_exceptions=True)
+            raise ToolError("delegated worker did not finish setup within 30 seconds")
     except AgentNotFoundError as e:
         raise ToolError(f"{e}. Use list_agents to see available agents.") from None
     except DelegationAccountingError:
@@ -210,11 +297,68 @@ async def delegate(
         f"[{agent} {label}]\nChild session: {result.session_id}\n{result.response}",
         needs_approval=getattr(result, "needs_approval", []),
         tokens_used=getattr(result, "tokens", 0),
+        delegation_status=result.status,
     )
     # Typed failure for the parent loop (never prose scanning): agent.py marks
     # tool outcome failed via getattr(result, "is_error").
     receipt.is_error = label == "failed"
     return receipt
+
+
+@registry.register(
+    name="delegate_status",
+    description="Check whether one of your delegated workers is queued, running, finished, or interrupted.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "child_session_id": {
+                "type": "string",
+                "description": "Child session ID returned by delegate",
+            }
+        },
+        "required": ["child_session_id"],
+    },
+)
+async def delegate_status(child_session_id: str) -> str:
+    """Return durable status and the result for a child owned by this session."""
+    from machina.core.orchestrator import _delegation_is_live, orchestrator
+
+    _, parent_session_id = await active_agent_scope()
+    try:
+        child_id = str(uuid.UUID(child_session_id))
+    except (ValueError, TypeError):
+        raise ToolError("child_session_id must be a UUID") from None
+    rows = await orchestrator.history(parent_session_id, limit=500)
+    entry = next((item for item in rows if item.get("childSessionId") == child_id), None)
+    if entry is None:
+        raise ToolError("no delegated worker with that child session ID belongs to this session")
+    status = entry["status"]
+    response = str(entry.get("response") or "")
+    if status in {"queued", "running", "pending"} and not _delegation_is_live(uuid.UUID(child_id)):
+        active_claim = await db.fetchval(
+            """SELECT EXISTS (
+                   SELECT 1 FROM sessions
+                   WHERE id = $1 AND claim_owner IS NOT NULL AND claim_expires_at > now()
+               )""",
+            uuid.UUID(child_id),
+        )
+        if not active_claim:
+            await db.execute(
+                """UPDATE agent_messages
+                   SET status = 'interrupted',
+                       response = COALESCE(response, 'Worker stopped before completing.'),
+                       completed_at = COALESCE(completed_at, now())
+                   WHERE id = $1 AND status IN ('queued', 'running', 'pending')""",
+                uuid.UUID(entry["id"]),
+            )
+            status = "interrupted"
+            response = (
+                response
+                or "Worker stopped before completing. Resume with delegate using this child session ID."
+            )
+    if status in {"queued", "running", "pending"}:
+        return f"Worker {status}. Child session: {child_id}."
+    return f"Worker {status}. Child session: {child_id}.\n{response[:12000]}"
 
 
 @registry.register(

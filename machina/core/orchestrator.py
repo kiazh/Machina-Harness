@@ -97,6 +97,12 @@ class _DelegateCapacity:
 
 
 _delegate_capacity = _DelegateCapacity()
+_live_delegations: dict[uuid.UUID, asyncio.Task] = {}
+
+
+def _delegation_is_live(child_session_id: uuid.UUID) -> bool:
+    task = _live_delegations.get(child_session_id)
+    return task is not None and not task.done()
 
 
 class AgentNotFoundError(Exception):
@@ -243,6 +249,7 @@ class Orchestrator:
         expected_output: str | None = None,
         expected_artifact_path: str | None = None,
         resume_session_id: uuid.UUID | None = None,
+        on_started: Callable[[uuid.UUID], None] | None = None,
     ) -> DelegationResult:
         """Run *task* on *agent_name* in a fresh or owned child session.
 
@@ -418,6 +425,17 @@ class Orchestrator:
             message_id = await self._record_start(
                 parent_session_id, from_agent, agent_name, task, child_session_id=child.id
             )
+            owner_task = asyncio.current_task()
+            if owner_task is not None:
+                _live_delegations[child.id] = owner_task
+
+                def forget(completed: asyncio.Task, child_id: uuid.UUID = child.id) -> None:
+                    if _live_delegations.get(child_id) is completed:
+                        _live_delegations.pop(child_id, None)
+
+                owner_task.add_done_callback(forget)
+            if on_started is not None:
+                on_started(child.id)
             nested_delegation = delegation_depth.get() > 0
             depth_token = delegation_depth.set(_hop_count)
             authority_token = parent_authority_var.set(child_authority)
