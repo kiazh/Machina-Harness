@@ -27,7 +27,7 @@ from machina.core.config import config
 from machina.core.context import context_manager
 from machina.core.exceptions import DelegationAccountingError
 from machina.core.session import session_manager
-from machina.db.connection import db
+from machina.db.connection import db, parse_command_count
 from machina.memory.redaction import redact_diagnostic
 from machina.observability.diagnostics import record_failure
 
@@ -474,6 +474,7 @@ class Orchestrator:
             if nested_delegation:
                 # Product child agents cannot delegate. Keep internal recursive
                 # orchestrator calls from deadlocking while the parent holds a slot.
+                await self._record_status(message_id, "running")
                 response = await agent.run(child.id, child_task, verbose=False)
             else:
                 async with _delegate_capacity.slot():
@@ -871,15 +872,13 @@ class Orchestrator:
 
     async def _record_status(self, message_id: uuid.UUID, status: str) -> None:
         """Persist a queued-to-running transition before a worker starts."""
-        try:
-            await db.execute(
-                "UPDATE agent_messages SET status = $2 WHERE id = $1 AND status = 'queued'",
-                message_id,
-                status,
-            )
-        except Exception as error:
-            # Status telemetry cannot prevent the actual child work from running.
-            record_failure("orchestrator.delegate.status", error)
+        result = await db.execute(
+            "UPDATE agent_messages SET status = $2 WHERE id = $1 AND status = 'queued'",
+            message_id,
+            status,
+        )
+        if parse_command_count(result) != 1:
+            raise RuntimeError("delegated worker could not enter running state")
 
     async def latest_child_delegation(
         self, session_id: uuid.UUID, child_session_id: uuid.UUID
