@@ -252,14 +252,8 @@ async def delegate(
                 done, _ = await asyncio.wait({operation}, timeout=wait_limit)
                 if not done:
                     try:
-                        history = await orchestrator.history(parent_session_id, limit=500)
-                        entry = next(
-                            (
-                                item
-                                for item in history
-                                if item.get("childSessionId") == str(child_id)
-                            ),
-                            None,
+                        entry = await orchestrator.latest_child_delegation(
+                            parent_session_id, child_id
                         )
                     except Exception as error:
                         record_failure("tools.delegate.pending_status", error)
@@ -331,8 +325,7 @@ async def delegate_status(child_session_id: str) -> str:
         child_id = str(uuid.UUID(child_session_id))
     except (ValueError, TypeError):
         raise ToolError("child_session_id must be a UUID") from None
-    rows = await orchestrator.history(parent_session_id, limit=500)
-    entry = next((item for item in rows if item.get("childSessionId") == child_id), None)
+    entry = await orchestrator.latest_child_delegation(parent_session_id, uuid.UUID(child_id))
     if entry is None:
         raise ToolError("no delegated worker with that child session ID belongs to this session")
     status = entry["status"]
@@ -346,7 +339,7 @@ async def delegate_status(child_session_id: str) -> str:
             uuid.UUID(child_id),
         )
         if not active_claim:
-            await db.execute(
+            updated = await db.execute(
                 """UPDATE agent_messages
                    SET status = 'interrupted',
                        response = COALESCE(response, 'Worker stopped before completing.'),
@@ -354,11 +347,20 @@ async def delegate_status(child_session_id: str) -> str:
                    WHERE id = $1 AND status IN ('queued', 'running', 'pending')""",
                 uuid.UUID(entry["id"]),
             )
-            status = "interrupted"
-            response = (
-                response
-                or "Worker stopped before completing. Resume with delegate using this child session ID."
-            )
+            if updated == "UPDATE 0":
+                entry = await orchestrator.latest_child_delegation(
+                    parent_session_id, uuid.UUID(child_id)
+                )
+                if entry is None:
+                    raise ToolError("delegated worker is no longer available")
+                status = entry["status"]
+                response = str(entry.get("response") or "")
+            else:
+                status = "interrupted"
+                response = (
+                    response
+                    or "Worker stopped before completing. Resume with delegate using this child session ID."
+                )
     text = f"Worker {status}. Child session: {child_id}."
     if status not in {"queued", "running", "pending"}:
         text += f"\n{response[:12000]}"

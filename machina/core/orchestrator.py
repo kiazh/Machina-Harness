@@ -837,6 +837,25 @@ class Orchestrator:
             # Status telemetry cannot prevent the actual child work from running.
             record_failure("orchestrator.delegate.status", error)
 
+    async def latest_child_delegation(
+        self, session_id: uuid.UUID, child_session_id: uuid.UUID
+    ) -> dict | None:
+        """Look up the latest run of an owned child without a history-page limit."""
+        row = await db.fetchrow(
+            """SELECT id, status, response FROM agent_messages
+               WHERE session_id = $1 AND child_session_id = $2
+               ORDER BY created_at DESC, id DESC LIMIT 1""",
+            session_id,
+            child_session_id,
+        )
+        if row is None:
+            return None
+        return {
+            "id": str(row["id"]),
+            "status": row["status"],
+            "response": _redacted(row["response"]) if row["response"] is not None else None,
+        }
+
     async def history(self, session_id: uuid.UUID, limit: int = 50) -> list[dict]:
         """Return session delegations in chronological order with redacted responses."""
         rows = await db.fetch(
