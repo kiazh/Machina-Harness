@@ -42,6 +42,8 @@ function toolOutcomeState(outcome: string | undefined, isError: boolean): ToolOu
 export class Transcript {
 	/** Hard bound on retained transcript blocks; older blocks are dropped. */
 	private static readonly MAX_BLOCKS = 2000;
+	/** Large live answers no longer need an animated marker every 200 ms. */
+	private static readonly STREAM_ANIMATION_LIMIT = 8192;
 
 	private readonly container: Container;
 	/** Shown while waiting for the model; removed as soon as output arrives. */
@@ -192,6 +194,7 @@ export class Transcript {
 				this.assistantSub = this.coordinator?.subscribe("assistant:stream", ACTIVITY_INTERVAL_MS);
 			}
 			this.current.append(event.text);
+			if (this.current.getText().length > Transcript.STREAM_ANIMATION_LIMIT) this.stopAssistant();
 			this.displayed += event.text;
 			this.wroteText = true;
 			return undefined;

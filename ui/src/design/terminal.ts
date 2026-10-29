@@ -11,6 +11,8 @@ const SGR = /\x1b\[([\d;]*)m/g;
 
 export class ThemeBackground {
 	private active = false;
+	private readonly paintErasedCells: boolean;
+	constructor(paintErasedCells = true) { this.paintErasedCells = paintErasedCells; }
 
 	paint(data: string, columns = 0): string {
 		const enter = data.indexOf(ENTER);
@@ -55,7 +57,7 @@ export class ThemeBackground {
 		// save/restore the cursor so subsequent content starts in its place.
 		// In transparent mode `2K` alone is exactly right: erase to the
 		// terminal's default background.
-		const fill = bg !== "" && Number.isFinite(columns) && columns > 0
+		const fill = this.paintErasedCells && bg !== "" && Number.isFinite(columns) && columns > 0
 			? `${bg}\x1b[2K\x1b7\r${" ".repeat(Math.floor(columns))}\x1b8`
 			: "\x1b[2K";
 		const painted = fg + bg + styled.split("\x1b[2K").join(fill) + RESET;
@@ -67,7 +69,7 @@ export class ThemeBackground {
 
 /** Real terminal path; renderers, overlays and blank rows share one fill. */
 export class ThemedTerminal extends ProcessTerminal {
-	private readonly background = new ThemeBackground();
+	private readonly background = new ThemeBackground(process.platform === "darwin" && process.env.TERM_PROGRAM === "Apple_Terminal");
 
 	override write(data: string): void {
 		super.write(this.background.paint(data, this.columns));

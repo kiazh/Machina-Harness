@@ -27,6 +27,7 @@ export class AssistantTurn implements Component {
 	/** Bumps on every append/setText; keys the geometry cache. */
 	private revision = 0;
 	private cachedGeometry: { revision: number; paneWidth: number; geometry: ResponseGeometry } | undefined;
+	private readonly cachedRows = new Map<number, string[]>();
 	/** Last class at the same pane width, for monotonic stream growth. */
 	private previousClass: { widthClass: ResponseWidthClass; paneWidth: number } | undefined;
 	private readonly activity: ActivitySource | undefined;
@@ -56,6 +57,7 @@ export class AssistantTurn implements Component {
 		this.display = sanitizeDisplay(this.content);
 		this.md.setText(this.display);
 		this.revision++;
+		this.cachedRows.clear();
 	}
 
 	/** Reconcile to canonical final text (replaces incompatible streamed content). */
@@ -64,6 +66,7 @@ export class AssistantTurn implements Component {
 		this.display = sanitizeDisplay(this.content);
 		this.md.setText(this.display);
 		this.revision++;
+		this.cachedRows.clear();
 		// The canonical text is a new sizing basis: stream growth history ends.
 		this.previousClass = undefined;
 	}
@@ -97,13 +100,15 @@ export class AssistantTurn implements Component {
 	}
 
 	render(width: number): string[] {
+		const cached = this.cachedRows.get(width);
+		if (!this.streaming && cached) return cached;
 		const geometry = this.responseGeometry(width);
 		if (geometry.span <= 0) return [...BLOCK_GAP];
 		const rows = this.md.render(geometry.contentWidth);
 		const frame = this.streaming
 			? this.activity?.frame(["·", "•", "●", "•"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "·"
 			: " ";
-		return [
+		const output = [
 			...BLOCK_GAP,
 			...renderAssistantFrame(rows, geometry, theme.accent(frame), {
 				border: theme.border,
@@ -112,6 +117,11 @@ export class AssistantTurn implements Component {
 				dim: theme.dim,
 			}),
 		];
+		if (!this.streaming) {
+			if (this.cachedRows.size >= 4) this.cachedRows.clear();
+			this.cachedRows.set(width, output);
+		}
+		return output;
 	}
 
 	/** Measurement hook backed by the real pi-tui Markdown renderer. */
@@ -124,5 +134,6 @@ export class AssistantTurn implements Component {
 
 	invalidate(): void {
 		this.md.invalidate();
+		this.cachedRows.clear();
 	}
 }

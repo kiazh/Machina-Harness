@@ -9,6 +9,7 @@ import { theme } from "../theme.ts";
 
 export class UserTurn implements Component {
 	private readonly raw: string;
+	private readonly cached = new Map<number, string[]>();
 
 	constructor(text: string) {
 		this.raw = text;
@@ -20,6 +21,8 @@ export class UserTurn implements Component {
 	}
 
 	render(width: number): string[] {
+		const cached = this.cached.get(width);
+		if (cached) return cached;
 		const total = Math.max(0, width);
 		const gutter = " ".repeat(transcriptInset(width));
 		const inner = Math.max(1, width - gutter.length - 2);
@@ -30,8 +33,11 @@ export class UserTurn implements Component {
 			i === 0 ? `${theme.dim(">")} ${truncateToWidth(line, inner)}` : `  ${truncateToWidth(line, inner)}`,
 		);
 		const body = out.length ? out : [`${theme.dim(">")} `];
-		return [...BLOCK_GAP, ...body.map((line) => truncateToWidth(gutter + line, total))];
+		const rows = [...BLOCK_GAP, ...body.map((line) => truncateToWidth(gutter + line, total))];
+		if (this.cached.size >= 4) this.cached.clear();
+		this.cached.set(width, rows);
+		return rows;
 	}
 
-	invalidate(): void {}
+	invalidate(): void { this.cached.clear(); }
 }

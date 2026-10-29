@@ -12,6 +12,7 @@ export const APP_BINDINGS = {
 	clear: { label: "Clear chat", key: "ctrl+l" },
 	agentNext: { label: "Next agent", key: "ctrl+n j" },
 	agentPrevious: { label: "Previous agent", key: "ctrl+n k" },
+	agentClose: { label: "Close idle agent tab", key: "ctrl+n d" },
 	quickOpen: { label: "Quick open", key: "ctrl+p" },
 	explorer: { label: "Toggle file tree", key: "ctrl+t" },
 	closeTab: { label: "Close file tab", key: "ctrl+w" },
@@ -23,7 +24,7 @@ export const APP_BINDINGS = {
 	attach: { label: "Attach selection", key: "ctrl+shift+a" },
 	complete: { label: "Inline completion", key: "ctrl+space" },
 	references: { label: "Find references", key: "ctrl+n r" },
-	definition: { label: "Go to definition", key: "ctrl+n d" },
+	definition: { label: "Go to definition", key: "ctrl+n g" },
 	rename: { label: "Rename symbol", key: "ctrl+n m" },
 	save: { label: "Save file", key: "ctrl+s" },
 } as const;
@@ -94,7 +95,7 @@ export function bindingConflicts(overrides: BindingOverrides, id: string, key: s
 const SHORTCUT_BINDINGS: Record<string, string[]> = {
 	send: ["tui.input.submit"], newline: ["tui.input.newLine"], image: ["pasteImage", "pasteImageMac"],
 	stop: ["cancelTurn"], cancel: ["stop"], exit: ["exit"], clear: ["clear"],
-	complete: ["tui.input.tab"], subagents: ["agentMenu"], tabs: ["agentNext", "agentPrevious"],
+	complete: ["tui.input.tab"], subagents: ["agentMenu"], tabs: ["agentNext", "agentPrevious", "agentClose"],
 	quickopen: ["quickOpen"], save: ["save"], closetab: ["closeTab"], explorer: ["explorer"],
 	intel: ["complete"], focus: ["focusNext", "focusPrevious"], chatmax: ["chatMaximize", "editorMaximize", "restoreSplit"],
 	help: ["shortcuts"],

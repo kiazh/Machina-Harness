@@ -31,7 +31,7 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ value: "save", context: "Workspace", label: "Ctrl+S — save file", description: "Save the active editor buffer" },
 	{ value: "closetab", context: "Workspace", label: "Ctrl+W — close tab", description: "Close the active editor tab (dirty: save/discard/cancel); the terminal may intercept" },
 	{ value: "explorer", context: "Workspace", label: "Ctrl+T — file tree", description: "Toggle the right-edge explorer; → or enter expands folders (/explorer)" },
-	{ value: "intel", context: "Workspace", label: "Ctrl+Space — inline completion", description: "Tab accepts · Esc dismisses · macOS may steal Ctrl+Space · fallback /editor complete · Ctrl+N then D definition · R references · M rename · /problems lists diagnostics" },
+	{ value: "intel", context: "Workspace", label: "Ctrl+Space — inline completion", description: "Tab accepts · Esc dismisses · macOS may steal Ctrl+Space · fallback /editor complete · Ctrl+N then G definition · R references · M rename · /problems lists diagnostics" },
 	{ value: "focus", context: "Workspace", label: "Ctrl+N then N / P — next / previous pane", description: "Composer → editor → explorer → problems" },
 	{ value: "chatmax", context: "Workspace", label: "Ctrl+N then C chat · E editor · S split", description: "Ctrl+←/→ remains word movement in text fields; edit shortcuts in Settings" },
 	{ value: "wsroot", context: "Workspace", label: "/workspace open <path> — open a folder", description: "Also /workspace split|chat|editor|ratio|side|status|close" },

@@ -54,7 +54,10 @@ const gatewayToken = crypto.randomBytes(32).toString("hex");
 // composer docks to the bottom (see App's layout root). Restored on exit.
 // Selection copy must hit the real clipboard (pbcopy/wl-copy/Set-Clipboard);
 // the framework's OSC 52 fallback lies "Copied!" on terminals that ignore it.
-const tui = new TuiAltScreen(new ThemedTerminal(), undefined, undefined, tuiClipboardOptions());
+const tui = new TuiAltScreen(new ThemedTerminal(), undefined, undefined, {
+	...tuiClipboardOptions(),
+	wheelScrollLines: 3,
+});
 const client = new GatewayClient({ python, token: gatewayToken, env: { MACHINA_GATEWAY_TOKEN: gatewayToken } });
 const app = new App(tui, client, { model: values.model, provider: values.provider, sessionId: values.session, mode: values.mode });
 

@@ -260,10 +260,13 @@ export class AppShell {
 		// every row on transcript, composer, or status.
 		const gap = density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
 		const topRow = this.workspaceRow();
+		// Viewports consume the remaining rows. A zero basis skips intrinsic
+		// measurement, which otherwise formats the entire scrollback at trial
+		// widths on every keypress and animation frame.
 		if (!topRow) {
 			return new VStack(
 				[
-					{ component: this.chatColumn(), grow: 1 },
+					{ component: this.chatColumn(), basis: 0, grow: 1 },
 					...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 					{ component: this.composer, shrink: 0 },
 					{ component: this.footer, shrink: 0 },
@@ -276,7 +279,7 @@ export class AppShell {
 		// FULL-WIDTH rows. The chat column keeps only the transcript.
 		return new VStack(
 			[
-				{ component: topRow, grow: 1 },
+				{ component: topRow, basis: 0, grow: 1 },
 				...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 				{ component: this.composer, shrink: 0 },
 				{ component: this.footer, shrink: 0 },
@@ -334,7 +337,7 @@ export class AppShell {
 					minSize: 0,
 					visible: () => bar.visible,
 				}] : []),
-				{ component: this.transcriptScroll, grow: 1, minSize: 1 },
+				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: 1 },
 			],
 			{ gap: 0 },
 		);

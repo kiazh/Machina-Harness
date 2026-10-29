@@ -7,10 +7,8 @@
 // itself a child, its parent's family shows with the child highlighted.
 // Deeper descendants stay out of the strip by design.
 //
-// Delegation is non-streaming (`agent.run`): a delegated child never emits
-// frames of its own. The child session becomes visible to this TUI when the
-// parent's `delegate` tool.complete lands (the child exists in the catalog
-// by then), or when a turn-start frame arrives from an unfamiliar session.
+// Live children are discovered at start; delegate completion refreshes older
+// transport paths that do not stream child progress.
 
 import type { FamilySession } from "./features/types.ts";
 import { listAllSessions, type SessionListHost } from "./features/sessions.ts";
@@ -242,6 +240,20 @@ export class FamilyStore {
 		const next = rows[(((index < 0 ? 0 : index) + direction) + rows.length) % rows.length]!;
 		if (next.session.id === this.host.current()?.id) return;
 		await this.open(next.session.id);
+	}
+
+	/** Hide the selected idle child tab after returning to its main session. */
+	async closeCurrent(): Promise<boolean> {
+		const current = this.host.current();
+		if (!current) return false;
+		const rows = this.rows();
+		const selected = rows.find((row) => row.session.id === current.id);
+		const main = rows.find((row) => row.main);
+		if (!selected || selected.main || selected.running || !main) return false;
+		await this.open(main.session.id);
+		if (this.host.current()?.id !== main.session.id) return false;
+		this.dismiss(selected.session.id);
+		return true;
 	}
 
 	/** Move scanned ids to the negative cache once a listing has settled. */

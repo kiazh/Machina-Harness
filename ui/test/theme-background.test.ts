@@ -81,6 +81,18 @@ test("blank viewport rows are explicitly painted on terminals without background
 	assert.ok(!resized.includes(" ".repeat(81)), "resize uses current dimensions");
 });
 
+test("background-colour erase terminals avoid sending full rows of padding", () => {
+	const fallback = new ThemeBackground(true);
+	const native = new ThemeBackground(false);
+	fallback.paint("\x1b[?1049h", 200);
+	native.paint("\x1b[?1049h", 200);
+	const input = "\x1b[2K".repeat(40);
+	const padded = fallback.paint(input, 200);
+	const compact = native.paint(input, 200);
+	assert.ok(padded.length - compact.length >= 8000);
+	assert.ok(compact.includes("\x1b[2K"));
+});
+
 test("real fullscreen launch paints every viewport row, including empty transcript space", () => {
 	const painter = new ThemeBackground();
 	const writes: string[] = [];

@@ -1954,6 +1954,10 @@ export class App implements FeatureHost {
 		// Agent family: Ctrl+N then J/K cycles from the composer. Ctrl+Shift+Arrow
 		// remains available for word selection in the file editor.
 		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
+		if (this.keybindings.matches(data, "agentClose")) {
+			void this.family.closeCurrent();
+			return { consume: true };
+		}
 		if (cycle !== 0 && this.activeRegion === "chat-composer" && this.familyRows().length > 1) {
 			void this.cycleFamily(cycle as 1 | -1);
 			return { consume: true };
@@ -2743,7 +2747,7 @@ export class App implements FeatureHost {
 			void this.startCompletion();
 			return { consume: true };
 		}
-		// Ctrl+N then D/R — go to definition / find references.
+		// Ctrl+N then G/R — go to definition / find references.
 		if (this.keybindings.matches(data, "references")) {
 			void this.runDefinitionOrReferences("references");
 			return { consume: true };

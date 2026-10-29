@@ -35,6 +35,18 @@ test("streaming response frame animates on the shared timer and settles on compl
 	assert.equal(view.render(80).map(stripTerminalSequences).join("\n"), settled);
 });
 
+test("a long streaming answer stops its redraw timer but continues to show new text", (t) => {
+	const coordinator = new AnimationCoordinator(() => {}, false);
+	t.after(() => coordinator.dispose());
+	const view = new Container();
+	const transcript = new Transcript(view, { start() {}, stop() {}, render: () => [], invalidate() {} }, coordinator);
+	const event = (text: string): GatewayEvent => ({ sessionId: "s", turnId: "t", type: "message.delta", text }) as GatewayEvent;
+	transcript.apply(event("x".repeat(8193)));
+	assert.equal(coordinator.size, 0);
+	transcript.apply(event("tail"));
+	assert.match(view.render(80).map(stripTerminalSequences).join("\n"), /tail/);
+});
+
 test("streaming response frame stays still with reduced motion and retires on suspend", (t) => {
 	t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: 1000 });
 	const coordinator = new AnimationCoordinator(() => {}, true);

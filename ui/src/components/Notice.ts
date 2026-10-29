@@ -11,6 +11,7 @@ import { theme } from "../theme.ts";
 export class Notice extends Text {
 	private readonly raw: string;
 	private readonly kind: NoticeKind;
+	private readonly cached = new Map<number, string[]>();
 
 	constructor(text: string, kind: NoticeKind = "info") {
 		super("", 0, 0);
@@ -21,6 +22,7 @@ export class Notice extends Text {
 
 	/** Re-resolve theme colors (skins switch live; text was baked at construction). */
 	refreshSkin(): void {
+		this.cached.clear();
 		// Untrusted content path (command output, recalled transcripts, MCP
 		// errors): strip terminal controls before display — same sanitizer
 		// UserTurn/ToolTurn/ApprovalCard already use (wave-3 hotfix).
@@ -44,8 +46,18 @@ export class Notice extends Text {
 	}
 
 	override render(width: number): string[] {
+		const cached = this.cached.get(width);
+		if (cached) return cached;
 		const total = Math.max(0, width);
 		const gutter = " ".repeat(transcriptInset(width));
-		return [...BLOCK_GAP, ...super.render(Math.max(1, width - gutter.length)).map((line) => truncateToWidth(gutter + line, total))];
+		const rows = [...BLOCK_GAP, ...super.render(Math.max(1, width - gutter.length)).map((line) => truncateToWidth(gutter + line, total))];
+		if (this.cached.size >= 4) this.cached.clear();
+		this.cached.set(width, rows);
+		return rows;
+	}
+
+	override invalidate(): void {
+		this.cached.clear();
+		super.invalidate();
 	}
 }

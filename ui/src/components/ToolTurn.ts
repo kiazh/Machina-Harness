@@ -59,6 +59,7 @@ export class ToolTurn implements Component {
 	private result: ToolResultView = { text: "", backendTruncated: false, locallyTruncated: false };
 	private outcome: ToolOutcome = "running";
 	private paused: "stopping" | "cleanup_pending" | undefined;
+	private readonly cached = new Map<number, string[]>();
 
 	constructor(name: string, args: Record<string, unknown>, activity: ActivitySource) {
 		this.name = sanitizeDisplay(name);
@@ -72,10 +73,12 @@ export class ToolTurn implements Component {
 	settle(result: ToolResultView, outcome: ToolOutcome): void {
 		this.result = result;
 		this.outcome = outcome;
+		this.cached.clear();
 	}
 
 	setMotionPaused(phase: "stopping" | "cleanup_pending"): void {
 		this.paused = phase;
+		this.cached.clear();
 	}
 
 	/** Re-resolve theme colors (render is lazy; nothing was baked). */
@@ -84,6 +87,8 @@ export class ToolTurn implements Component {
 	}
 
 	render(width: number): string[] {
+		const cached = this.cached.get(width);
+		if (this.outcome !== "running" && cached) return cached;
 		const total = Math.max(0, width);
 		const inner = Math.max(1, panelContentWidth(width) - 2);
 		const marker = this.outcome === "running" && this.paused
@@ -119,10 +124,15 @@ export class ToolTurn implements Component {
 		if (this.result.backendTruncated && this.outcome !== "running") {
 			lines.push(`${indent}${theme.dim("server output truncated")}`);
 		}
-		return ["", ...renderToolPanel(lines, total)];
+		const rows = ["", ...renderToolPanel(lines, total)];
+		if (this.outcome !== "running") {
+			if (this.cached.size >= 4) this.cached.clear();
+			this.cached.set(width, rows);
+		}
+		return rows;
 	}
 
-	invalidate(): void {}
+	invalidate(): void { this.cached.clear(); }
 }
 
 function styleMarker(outcome: ToolOutcome, mark: string): string {

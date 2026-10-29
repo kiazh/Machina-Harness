@@ -540,6 +540,40 @@ test("a child paused for approval keeps its inspection tab", async (t) => {
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, false);
 });
 
+test("Ctrl+N then D closes the selected idle child and returns to main", async (t) => {
+	const { app, type } = await boot({
+		sessions: [MAIN, CHILD],
+		resume: [[CHILD.id, { session: CHILD, history: [] }], [MAIN.id, { session: MAIN, history: [] }]],
+	});
+	t.after(() => app.exit());
+	await settle();
+	type("\x0e"); type("j");
+	await settle();
+	assert.equal(app.session()?.id, CHILD.id);
+	type("\x0e"); type("d");
+	await settle();
+	assert.equal(app.session()?.id, MAIN.id);
+	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id), undefined);
+});
+
+test("Ctrl+N then D leaves a running child tab open", async (t) => {
+	const { app, client, type } = await boot({
+		sessions: [MAIN, CHILD],
+		resume: [[CHILD.id, { session: CHILD, history: [] }], [MAIN.id, { session: MAIN, history: [] }]],
+	});
+	t.after(() => app.exit());
+	await settle();
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
+	});
+	type("\x0e"); type("j");
+	await settle();
+	type("\x0e"); type("d");
+	await settle();
+	assert.equal(app.session()?.id, CHILD.id);
+	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);
+});
+
 test("only turn starts scan for an unknown session, and a foreign id is negatively cached", async (t) => {
 	const { app, client } = await boot({ sessions: [MAIN] });
 	t.after(() => app.exit());
