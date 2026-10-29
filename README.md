@@ -1120,10 +1120,10 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 | Memory and instructions | `/memory`, `/growth`, `/persona`, `/skills` |
 | Context | `/context`, `/compress` |
 | Automation | `/jobs` |
-| Models and setup | `/auth`, `/keys`, `/models`, `/default-model`, `/provider`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals`, `/interop`, `/harnesses` |
+| Models and setup | `/auth`, `/keys`, `/models`, `/provider`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals`, `/interop`, `/harnesses` |
 | Information | `/status`, `/usage`, `/output`, `/mcp`, `/music`, `/help`, `/exit` |
 
-Aliases: `/settings` → `/config`, `/model` → `/default-model`, `/providers` → `/provider`, `/compact` → `/compress`.
+Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`.
 
 The CLI mirrors these capabilities: `machina sessions`, `sessions-search`, `export`, `fork`, `delete`, `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `skills`, `providers`, `auth`, `growth`, `usage`, `config`, `config-set`, `doctor`, `serve`, `stop`, and `harnesses`. Run any command with `--help`.
 
@@ -1138,8 +1138,7 @@ machina chat -p deepseek -m deepseek-chat "Explain this project"
 | Command | Purpose |
 |---|---|
 | `/provider` | Manage provider URLs and credentials; add or remove custom endpoints |
-| `/models` / `/models catalog` | Choose a model and its provider route; inspect the selected catalog |
-| `/default-model` | Save a default choice |
+| `/models` / `/models catalog` | Choose and save a model with its provider route; inspect the selected catalog |
 | `/effort` | Adjust reasoning effort where supported |
 | `/auth` / `/keys` | Account sign-in or provider keys |
 

@@ -620,7 +620,7 @@ for (const command of ["/settings", "/config"]) {
 				menuCalls++;
 				if (menuCalls === 1) return items.find((item) => item.value === "cat-chat");
 				if (menuCalls === 2) return items.find((item) => item.value === "model");
-				if (menuCalls === 3) return items[0];
+				if (menuCalls === 3) return items.find((item) => item.value.includes("::") && !item.value.startsWith("__section__"));
 				return undefined;
 			};
 			await actions.submitTurn("hello");

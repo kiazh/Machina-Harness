@@ -7,7 +7,7 @@ import type { NowPlayingBar, NowPlayingState } from "../components/NowPlayingBar
 import { sanitizeLabelText } from "../design/text.ts";
 
 /** Data-poll cadence: metadata changes are seconds-scale; frames interpolate. */
-export const NOWPLAYING_POLL_MS = 2000;
+export const NOWPLAYING_POLL_MS = 5000;
 
 export interface NowPlayingControllerOptions {
 	bar: NowPlayingBar;

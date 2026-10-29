@@ -176,6 +176,11 @@ _DEV_FALLBACKS: dict[str, str] = {
     "typescript-language-server": "ui/node_modules/.bin/typescript-language-server",
 }
 
+_NODE_ENTRYPOINTS: dict[str, str] = {
+    "pyright-langserver": "pyright/langserver.index.js",
+    "typescript-language-server": "typescript-language-server/lib/cli.mjs",
+}
+
 
 @dataclass(frozen=True)
 class LspProfile:
@@ -213,14 +218,44 @@ def resolve_profile(language: str, explicit_path: str | None = None) -> LspProfi
         return None
     profile_id, executable_name = known
     executable: str | None = None
+    args: tuple[str, ...] = ("--stdio",)
     if explicit_path:
         candidate = Path(explicit_path).expanduser()
         if _is_executable_file(candidate):
             executable = str(candidate.resolve())
+            if os.name == "nt" and candidate.suffix.lower() in {"", ".cmd", ".bat"}:
+                node = shutil.which("node")
+                entry = _NODE_ENTRYPOINTS.get(executable_name)
+                script = candidate.parent.parent / entry if entry else None
+                if node and script and script.is_file():
+                    executable = node
+                    args = (str(script), "--stdio")
+                else:
+                    executable = None
     if executable is None:
         found = shutil.which(executable_name)
         if found:
-            executable = found
+            path = Path(found)
+            if os.name == "nt" and path.suffix.lower() in {"", ".cmd", ".bat"}:
+                node = shutil.which("node")
+                entry = _NODE_ENTRYPOINTS.get(executable_name)
+                script = path.parent.parent / entry if entry else None
+                if node and script and script.is_file():
+                    executable = node
+                    args = (str(script), "--stdio")
+            else:
+                executable = found
+    # npm's extensionless .bin shims are POSIX shell scripts. Windows can
+    # report them as executable files but CreateProcess rejects them with
+    # WinError 193. Launch the package's JavaScript entrypoint with Node.
+    if os.name == "nt" and executable is None:
+        node = shutil.which("node")
+        entry = _NODE_ENTRYPOINTS.get(executable_name)
+        if node and entry:
+            script = _repo_root() / "ui" / "node_modules" / entry
+            if script.is_file():
+                executable = node
+                args = (str(script), "--stdio")
     if executable is None:
         fallback = _DEV_FALLBACKS.get(executable_name)
         if fallback:
@@ -233,7 +268,7 @@ def resolve_profile(language: str, explicit_path: str | None = None) -> LspProfi
         language_id=language.lower(),
         profile_id=profile_id,
         executable=executable,
-        args=("--stdio",),
+        args=args,
     )
 
 

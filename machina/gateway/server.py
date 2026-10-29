@@ -1078,6 +1078,13 @@ class Gateway:
                 record_failure("server.growth_emit", _boundary_error)
 
         add_growth_listener(_growth_emit)
+        from machina.core.orchestrator import child_observer
+
+        child_observer_token = child_observer.set(
+            lambda child_id, phase, value: emit(
+                "agent.child", childSessionId=str(child_id), phase=phase, value=value
+            )
+        )
         # AH-AUDIT-013: managed claim renewal for the whole turn (compute +
         # approval waits). A live renewing owner blocks takeovers; repeated
         # renewal failure means the claim lapsed — owned effects stop via
@@ -1291,6 +1298,7 @@ class Gateway:
                     # only after cleanup and ownership release succeeded.
                     complete(cancelled=_cancelled)
             finally:
+                child_observer.reset(child_observer_token)
                 # Growth notices may land with late background consolidation;
                 # keep the listener until the terminal event, then always drop it.
                 remove_growth_listener(_growth_emit)

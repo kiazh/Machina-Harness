@@ -326,7 +326,7 @@ export async function applyGroupedPick(host: FeatureHost, grouped: GroupedModels
 	const entries = grouped.groups.flatMap((group) => group.entries);
 	const picked = entries.find((entry) => entry.provider === provider && entry.model === model);
 	if (!picked) return undefined;
-	await applyModel(host, picked);
+	await applyModel(host, picked, true);
 	const group = grouped.groups.find((candidate) => candidate.provider === picked.provider);
 	if (group?.fromCatalog) {
 		host.print(`Catalog: ${group.entries.length} model(s) from ${group.provider} (${group.source})`, "plain");
@@ -343,13 +343,13 @@ export async function openGroupedModelPicker(host: FeatureHost, grouped: Grouped
 	if (warnMissingCurrent && (!currentGroup || !currentGroup.entries.length)) {
 		const reason = currentGroup?.fetchError ? `: ${currentGroup.fetchError}` : "";
 		host.print(
-			`No live catalog for provider "${grouped.current}"${reason}. Other providers are listed below; use /default-model <id> for anything off-list.`,
+			`No live catalog for provider "${grouped.current}"${reason}. Other providers are listed below.`,
 			"warning",
 		);
 	}
 	const rows = buildModelPickerRows(grouped.groups);
 	if (!rows.length) {
-		host.print("No models available from any provider right now. Use /default-model <id> to set one directly.", "warning");
+		host.print("No models available from any provider right now.", "warning");
 		return;
 	}
 	const choice = await host.pick("Models (Enter to apply)", rows);
@@ -360,8 +360,11 @@ export async function openGroupedModelPicker(host: FeatureHost, grouped: Grouped
 	if (applied.provider === "chatgpt") {
 		hints.push(["Efforts", "OpenAI account models accept low/medium/high/xhigh/max per model — see /models catalog"]);
 	}
-	hints.push(["Off-list", "Use /default-model <id> for any other model id"]);
-	hints.push(["Keys", "Missing provider key? See /keys"]);
+	if (applied.provider === "chatgpt" || applied.provider === "grok" || applied.provider === "copilot") {
+		hints.push(["Sign-in", `Account access is managed with /auth ${applied.provider}`]);
+	} else {
+		hints.push(["Keys", "Missing provider key? See /keys"]);
+	}
 	host.print(keyValues(hints), "plain");
 }
 
@@ -414,7 +417,7 @@ export const modelsCommand: Command = {
 		}
 		const matches = filterModelGroups(grouped.groups, args);
 		if (!matches.length) {
-			host.print(`No model matches "${args.trim()}" across providers. Use /default-model <id> for anything off-list.`, "warning");
+			host.print(`No model matches "${args.trim()}" across providers.`, "warning");
 			return;
 		}
 		await openGroupedModelPicker(host, { current: grouped.current, groups: matches }, false);

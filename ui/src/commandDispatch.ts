@@ -49,7 +49,7 @@ export type SubmitGuard = "allow" | "turn-busy" | "stop-first";
  * - `/growth show` reads; the bare menu or teach/feedback/forget/rollback
  *   write learned state.
  * - `/settings` and bare `/config` open settings, including the model picker.
- * - `/default-model` (alias `/model`) always picks or sets a model.
+ * - `/model` is an alias for `/models` and follows the same rule.
  *
  * Aliases are already resolved by `parseCommand`; `splitSub` lowercases the
  * first argument exactly as each handler does.
@@ -64,8 +64,6 @@ function mutatesInFlightSession(command: ParsedCommand): boolean {
 			return true;
 		case "config":
 			return splitSub(command.args)[0] === "";
-		case "default-model":
-			return true;
 		case "provider": {
 			const [sub] = splitSub(command.args);
 			return sub !== "" && sub !== "list";

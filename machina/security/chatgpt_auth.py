@@ -80,7 +80,14 @@ class ChatGPTAuthError(ProviderError):
 
 
 def auth_path() -> Path:
-    """Resolve the Machina ChatGPT token file without touching the disk."""
+    """Resolve the token file, recovering from an inaccessible default directory.
+
+    Windows can leave an ``auth`` directory owned by another account with an
+    owner-only ACL. Reading or creating its lock file then fails before a
+    Codex login can be imported. Keep that directory untouched and use a
+    separate owner-only directory under the same Machina home instead.
+    Explicit path overrides are never redirected.
+    """
     override = os.environ.get(AUTH_FILE_ENV, "").strip()
     if override:
         return Path(override).expanduser()
@@ -88,7 +95,15 @@ def auth_path() -> Path:
     with suppress(Exception):
         home = str(config.get("machina_home") or "")
     root = Path(home).expanduser() if home else Path.home() / ".machina"
-    return root / "auth" / "chatgpt.json"
+    default = root / "auth" / "chatgpt.json"
+    try:
+        with os.scandir(default.parent):
+            pass
+    except FileNotFoundError:
+        pass
+    except PermissionError:
+        return root / "auth-local" / "chatgpt.json"
+    return default
 
 
 # ---------------------------------------------------------------------------

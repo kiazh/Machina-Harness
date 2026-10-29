@@ -13,7 +13,7 @@ function guard(input: string, inFlight = true) {
 
 test("F30 idle turns allow every command, and plain prompts stay turn-busy", () => {
 	assert.equal(guard("/models", false), "allow");
-	assert.equal(guard("/default-model gpt-4o", false), "allow");
+	assert.equal(guard("/model gpt-4o", false), "allow");
 	assert.equal(guard("write a README", true), "turn-busy");
 	assert.equal(guardSubmit(undefined, true), "turn-busy");
 });
@@ -33,11 +33,10 @@ test("F30 /models blocks the picker but allows catalog reads", () => {
 	assert.equal(guard("/models CATALOG"), "allow");
 });
 
-test("F30 /default-model always mutates (including its /model alias)", () => {
-	assert.equal(guard("/default-model"), "stop-first");
-	assert.equal(guard("/default-model gpt-4o"), "stop-first");
+test("F30 /model follows the /models guard", () => {
 	assert.equal(guard("/model"), "stop-first");
 	assert.equal(guard("/model claude-3-5-sonnet-20241022"), "stop-first");
+	assert.equal(guard("/model catalog"), "allow");
 });
 
 test("F30 /provider reads are allowed; add/remove/switch stop first", () => {

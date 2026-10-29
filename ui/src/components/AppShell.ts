@@ -54,6 +54,7 @@ export class AppShell {
 	private dock: Component | undefined;
 	/** Pinned top bar above the transcript (music); hidden rows collapse. */
 	private pinnedBar: PinnedBarSlot | undefined;
+	private agentBar: (Component & { visible: boolean }) | undefined;
 	/** Created on first workspace use; its absence means today's chat-only tree. */
 	private workspace: WorkspaceShell | undefined;
 
@@ -93,6 +94,11 @@ export class AppShell {
 	setPinnedBar(bar?: PinnedBarSlot): void {
 		this.pinnedBar = bar;
 		this.applyBudgets();
+		this.rebuild();
+	}
+
+	setAgentBar(bar: Component & { visible: boolean }): void {
+		this.agentBar = bar;
 		this.rebuild();
 	}
 
@@ -316,16 +322,18 @@ export class AppShell {
 	 */
 	private chatColumn(): Component {
 		const bar = this.pinnedBar;
-		if (!bar) return this.transcriptScroll;
+		const agentBar = this.agentBar;
+		if (!bar && !agentBar) return this.transcriptScroll;
 		return new VStack(
 			[
-				{
+				...(agentBar ? [{ component: agentBar, basis: "auto" as const, shrink: 0, minSize: 0, visible: () => agentBar.visible }] : []),
+				...(bar ? [{
 					component: bar,
-					basis: "auto",
+					basis: "auto" as const,
 					shrink: 0,
 					minSize: 0,
 					visible: () => bar.visible,
-				},
+				}] : []),
 				{ component: this.transcriptScroll, grow: 1, minSize: 1 },
 			],
 			{ gap: 0 },

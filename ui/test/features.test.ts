@@ -688,52 +688,8 @@ test("/config sets a value and --save persists it", async () => {
 	assert.match(host.last().text, /Unknown setting/);
 });
 
-test("/default-model sets a custom id and saves it", async () => {
-	const host = new FakeHost();
-	host.responses["config.set"] = { model: "openai/gpt-4o", provider: "openrouter", key: "model", value: "openai/gpt-4o" };
-	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "openai/gpt-4o", provider: "openrouter" };
-	await run("/default-model openai/gpt-4o", host);
-	assert.equal(host.configured[0]!.model, "openai/gpt-4o");
-	assert.deepEqual(host.calls.map((c) => [c.method, c.params]), [
-		["config.set", { key: "model", value: "openai/gpt-4o", persist: true }],
-		["session.setModel", { sessionId: SESSION.id, model: "openai/gpt-4o" }],
-	]);
-});
-
-test("/default-model with no args opens the menu and saves the pick", async () => {
-	const host = new FakeHost();
-	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
-	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" };
-	host.picks.push("deepseek::deepseek-v4-flash");
-	await run("/default-model", host);
-	assert.deepEqual(
-		host.calls.map((c) => [c.method, c.params]),
-		[
-			["config.set", { key: "provider", value: "deepseek", persist: true }],
-			["config.set", { key: "model", value: "deepseek-v4-flash", persist: true }],
-			["session.setModel", { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" }],
-		],
-	);
-	assert.match(host.last().text, /saved as default/);
-});
-
-test("/default-model resolves a curated id directly", async () => {
-	const host = new FakeHost();
-	host.responses["config.set"] = (p: Record<string, unknown>) => ({ model: "m", provider: "p", key: p.key, value: p.value });
-	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "deepseek-chat", provider: "deepseek" };
-	await run("/default-model deepseek-v4-flash", host);
-	assert.deepEqual(
-		host.calls.map((c) => [c.method, c.params]),
-		[
-			["config.set", { key: "provider", value: "deepseek", persist: true }],
-			["config.set", { key: "model", value: "deepseek-v4-flash", persist: true }],
-			["session.setModel", { sessionId: SESSION.id, model: "deepseek-v4-flash", provider: "deepseek" }],
-		],
-	);
-});
-
-test("/model is an alias for /default-model", () => {
-	assert.deepEqual(parseCommand("/model deepseek-chat"), { name: "default-model", args: "deepseek-chat" });
+test("/model is an alias for /models", () => {
+	assert.deepEqual(parseCommand("/model deepseek-chat"), { name: "models", args: "deepseek-chat" });
 });
 
 test("/provider name no longer changes the model route", async () => {
@@ -1225,8 +1181,8 @@ test("/models picker applies the provider carried by the chosen model row", asyn
 		host.calls.filter((c) => c.method !== "providers.list").map((c) => [c.method, c.params]),
 		[
 			["models.list", { sessionId: SESSION.id }],
-			["config.set", { key: "provider", value: "ollama" }],
-			["config.set", { key: "model", value: "llama3.1" }],
+			["config.set", { key: "provider", value: "ollama", persist: true }],
+			["config.set", { key: "model", value: "llama3.1", persist: true }],
 			["session.setModel", { sessionId: SESSION.id, model: "llama3.1", provider: "ollama" }],
 		],
 	);
@@ -1281,8 +1237,8 @@ test("/models honors the selected provider when two providers share a model id",
 	assert.deepEqual(
 		host.calls.filter((c) => c.method === "config.set").map((c) => c.params),
 		[
-			{ key: "provider", value: "chatgpt" },
-			{ key: "model", value: "gpt-6.1-sol" },
+			{ key: "provider", value: "chatgpt", persist: true },
+			{ key: "model", value: "gpt-6.1-sol", persist: true },
 		],
 	);
 	assert.ok(!host.printed.some((p) => /also exists under openai/.test(p.text)));
@@ -1403,8 +1359,8 @@ test("/models groups catalogs per provider with the selected provider first", as
 	assert.deepEqual(
 		host.calls.filter((c) => c.method === "config.set").map((c) => c.params),
 		[
-			{ key: "provider", value: "chatgpt" },
-			{ key: "model", value: "gpt-6-luna" },
+			{ key: "provider", value: "chatgpt", persist: true },
+			{ key: "model", value: "gpt-6-luna", persist: true },
 		],
 	);
 	// Every catalog pull carries the session identity (round-3 finding 10),

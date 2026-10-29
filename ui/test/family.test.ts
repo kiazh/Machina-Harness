@@ -9,14 +9,14 @@
 // trailing history entries are trimmed so a completed turn or settled tool
 // renders exactly once.
 //
-// Delegation is non-streaming (agent.run): a delegated child never streams
-// frames of its own. Discovery runs on the parent's `delegate` tool.complete
-// or a turn-start frame from an unfamiliar session — never on every frame.
+// A current gateway streams child progress through agent.child frames;
+// older gateways still discover children at delegate tool completion.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { stripTerminalSequences, TuiAltScreen, type Terminal } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, TuiAltScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
+import { AgentTabBar } from "../src/components/AgentTabBar.ts";
 import { parseCommand } from "../src/commands.ts";
 import { runCommand } from "../src/features/index.ts";
 import { familyRootOf, isFamilySession, listFamilySessions } from "../src/family.ts";
@@ -93,6 +93,19 @@ test("a user-created fork starts a separate family", () => {
 	const fork: SessionInfo = { ...CHILD, isFork: true };
 	assert.equal(familyRootOf(fork), fork.id);
 	assert.equal(isFamilySession(fork, MAIN.id), false);
+});
+
+test("agent tab clicks open the selected child", () => {
+	const opened: string[] = [];
+	const bar = new AgentTabBar(
+		() => [{ session: MAIN, main: true, running: false }, { session: CHILD, main: false, running: true }],
+		() => MAIN.id,
+		(id) => opened.push(id),
+	);
+	assert.equal(bar.visible, true);
+	bar.render(80);
+	bar.handleMouse({ type: "click", button: "left", x: 10, y: 0 } as TuiMouseEvent);
+	assert.deepEqual(opened, [CHILD.id]);
 });
 
 function terminal(columns = 100, rows = 30) {
@@ -476,6 +489,55 @@ test("a parent's delegate tool.complete discovers the new child", async (t) => {
 	await settle();
 	tui.renderNow(true);
 	assert.match(screenOf(tui), /\b1 subagent\b/, "the delegate completion counts the child");
+});
+
+test("a live child appears as a running tab and streams into its inspection view", async (t) => {
+	const { app, tui, client, type } = await boot({ sessions: [MAIN] });
+	t.after(() => app.exit());
+	await settle();
+	client.sessions = [MAIN, CHILD];
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
+	});
+	await settle();
+	tui.renderNow(true);
+	assert.equal(app.session()?.id, MAIN.id, "the main agent keeps focus");
+	assert.match(screenOf(tui), /researcher ●/, "the child tab is visible while running");
+	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);
+	const familyReads = client.requests.filter((request) => request.method === "session.family").length;
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "text", value: "Found the target file.",
+	});
+	assert.equal(client.requests.filter((request) => request.method === "session.family").length, familyReads,
+		"streamed text does not poll the family catalog");
+	type("\x0e"); type("j");
+	await settle();
+	tui.renderNow(true);
+	assert.equal(app.session()?.id, CHILD.id);
+	assert.match(screenOf(tui), /Found the target file/);
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "settled", value: "",
+	});
+	await settle();
+	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id), undefined,
+		"completed child chat closes instead of remaining in the family");
+	assert.equal(app.session()?.id, MAIN.id);
+});
+
+test("a child paused for approval keeps its inspection tab", async (t) => {
+	const { app, client } = await boot({ sessions: [MAIN] });
+	t.after(() => app.exit());
+	await settle();
+	client.sessions = [MAIN, CHILD];
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
+	});
+	await settle();
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "paused", value: "",
+	});
+	await settle();
+	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, false);
 });
 
 test("only turn starts scan for an unknown session, and a foreign id is negatively cached", async (t) => {

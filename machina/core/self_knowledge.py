@@ -41,7 +41,7 @@ FEATURES = {
     "agents": "Delegated subagents (ECC roles plus built-ins) inherit parent authority and tools; /agents manages definitions, /delegate picks one. max_delegate_concurrency bounds parallel waves (default 4); roles grant no new permissions.",
     "jobs": "Jobs run interval prompts, heartbeats, UTC-cron and scripts; /jobs list|add|script|heartbeat|cron|on|off|delete manages them. Consent-needing jobs pause, never self-grant.",
     "usage": "`machina usage` and /usage show recorded tokens/requests; budgets: usage_session_token_limit, usage_session_request_limit, usage_agent_token_limit, usage_agent_request_limit (0 = unlimited).",
-    "models": "Models/providers: /models picks from catalogs, /default-model saves a default, /provider switches or adds OpenAI-compatible providers, /effort sets reasoning_effort; `machina providers` and /keys manage the inventory (keys in a git-ignored .env, 0600).",
+    "models": "Models/providers: /models picks and saves a model from catalogs, /provider manages OpenAI-compatible providers, /effort sets reasoning_effort; `machina providers` and /keys manage the inventory (keys in a git-ignored .env, 0600).",
     "auth": "/auth signs in the ChatGPT account; `machina auth chatgpt|copilot|status|logout` covers subscription sign-in, Copilot device flow and token removal. Never edits harness auth files; Codex imports are one-way.",
     "theme": "/theme previews and saves one of 53 UI skins (theme); Esc restores the previous skin.",
     "modes": "Modes ask|workspace|sandbox|full: /mode and `machina mode` set them; full is a session grant revoked via /approvals. /approvals list|allow|deny|revoke manages pending consent.",

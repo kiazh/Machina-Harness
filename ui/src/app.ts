@@ -27,6 +27,7 @@ import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsF
 import { HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
+import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { ProblemsPane } from "./components/ProblemsPane.ts";
@@ -368,6 +369,8 @@ export class App implements FeatureHost {
 	private running = false;
 	/** Session ids of turns that are still in flight (prompt submitted, no message.complete yet). */
 	private readonly inFlight = new Set<string>();
+	private readonly delegatedRunning = new Set<string>();
+	private readonly delegatedText = new Map<string, string>();
 	/** Per-session turn binding, provisional pre-RPC state and retired IDs. */
 	private readonly turns = new Map<string, SessionTurn>();
 	/** Switch recency (oldest first) for bounded per-session state. */
@@ -384,14 +387,14 @@ export class App implements FeatureHost {
 	 */
 	private readonly sessionTails = new SessionTailStore({
 		visible: () => this.current?.id,
-		running: (sessionId) => this.inFlight.has(sessionId),
+		running: (sessionId) => this.inFlight.has(sessionId) || this.delegatedRunning.has(sessionId),
 		retained: (sessionId) =>
 			sessionId === this.current?.id || this.inFlight.has(sessionId) || this.isFamilyMember(sessionId),
 	});
 	/** Family (agent family) state and actions; App owns rendering and keys. */
 	private readonly family = new FamilyStore({
 		current: () => this.current,
-		isRunning: (sessionId) => this.inFlight.has(sessionId),
+		isRunning: (sessionId) => this.inFlight.has(sessionId) || this.delegatedRunning.has(sessionId),
 		request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params ?? {}),
 		switchTo: (session, history) => this.switchTo(session, history),
 		changed: () => {
@@ -546,6 +549,11 @@ export class App implements FeatureHost {
 		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
 		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
 		this.shell.setPinnedBar(this.nowPlayingBar);
+		this.shell.setAgentBar(new AgentTabBar(
+			() => this.familyRows(),
+			() => this.current?.id,
+			(sessionId) => { void this.family.open(sessionId); },
+		));
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -1169,7 +1177,7 @@ export class App implements FeatureHost {
 		// permission store; re-read the target session's pending rows so the
 		// turn cannot sit stranded behind a card that was never re-opened.
 		void this.rehydrateApprovals(session.id);
-		this.setRunning(this.inFlight.has(session.id));
+		this.setRunning(this.inFlight.has(session.id) || this.delegatedRunning.has(session.id));
 		// Family = current.parentSessionId ?? current.id plus that root's
 		// children; refresh after the local re-seed keeps the subagent count
 		// honest.
@@ -3623,7 +3631,7 @@ export class App implements FeatureHost {
             this.print("Send image attachments with a message, rather than a slash command.", "warning");
             return;
         }
-		const inFlight = this.current && this.inFlight.has(this.current.id);
+		const inFlight = this.current && (this.inFlight.has(this.current.id) || this.delegatedRunning.has(this.current.id));
 		if (!command && this.current?.parentSessionId && !this.current.isFork) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
@@ -3851,9 +3859,48 @@ export class App implements FeatureHost {
 	}
 
 	// ─── gateway ────────────────────────────────────────────────────────────
+	private onChildEvent(event: Extract<GatewayEvent, { type: "agent.child" }>): void {
+		const childId = event.childSessionId;
+		const turnId = `delegated:${event.turnId}`;
+		if (event.phase === "start") {
+			this.delegatedRunning.add(childId);
+			this.delegatedText.set(childId, "");
+			this.refreshFamily();
+		} else if (event.phase === "text" || event.phase === "tool") {
+			const text = event.phase === "tool" ? `\n[using ${sanitizeDisplay(event.value).slice(0, 80)}]\n` : event.value;
+			this.delegatedText.set(childId, (this.delegatedText.get(childId) ?? "").concat(text).slice(-65_536));
+			const delta: GatewayEvent = {
+				protocolVersion: 2, sessionId: childId, turnId, type: "message.delta", text,
+			};
+			if (this.current?.id === childId) this.transcript.apply(delta);
+			else this.bufferHiddenEvent(delta);
+		} else if (event.phase === "settled" || event.phase === "paused") {
+			this.delegatedRunning.delete(childId);
+			const complete: GatewayEvent = {
+				protocolVersion: 2, sessionId: childId, turnId, type: "message.complete",
+				text: this.delegatedText.get(childId) ?? "", tokens: 0, iterations: 0, toolCalls: 0, cancelled: false,
+			};
+			if (this.current?.id === childId) {
+				this.transcript.apply(complete);
+				this.setRunning(false);
+			} else this.bufferHiddenEvent(complete);
+			this.delegatedText.delete(childId);
+			if (event.phase === "settled") {
+				const main = this.familyRows().find((row) => row.main)?.session.id;
+				this.family.dismiss(childId);
+				if (this.current?.id === childId && main) void this.family.open(main);
+			}
+		}
+		this.tui.requestRender();
+	}
+
 	private onEvent(event: GatewayEvent): void {
 		if (this.exiting) return;
 		for (const handler of [...this.featureEventHandlers]) handler(event);
+		if (event.type === "agent.child") {
+			this.onChildEvent(event);
+			return;
+		}
 		// Feature-level frames carry no session/turn: they settle command
 		// flows above and must not enter turn bookkeeping or hidden tails.
 		if (
@@ -3864,7 +3911,6 @@ export class App implements FeatureHost {
 			event.type === "auth.copilot.completed" ||
 			event.type === "auth.copilot.failed"
 		) return;
-		this.shell.sync();
 		if (event.type === "growth.status") {
 			// Background training lands after the turn retires (and the
 			// in-flight entry clears), so it bypasses turn tracking. Shown
@@ -3874,11 +3920,9 @@ export class App implements FeatureHost {
 			return;
 		}
 		const hidden = event.sessionId !== this.current?.id;
-		// Family bookkeeping runs before the turn-state gate. Delegation is
-		// non-streaming (agent.run), so a delegated child never emits frames
-		// of its own; the child session is already in the catalog when the
-		// parent's `delegate` tool.complete lands, so that completion is the
-		// real discovery trigger (one bounded refresh of the current family).
+		// Family bookkeeping runs before the turn-state gate. Observed child
+		// events are handled above; delegate completion also refreshes the
+		// family for transports that do not stream child progress.
 		// A turn-start frame from an unfamiliar session is the only other
 		// trigger worth a scan: later frames never rescan a foreign id
 		// (negative cache in family.ts).

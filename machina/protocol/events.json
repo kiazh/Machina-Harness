@@ -29,6 +29,11 @@
       "stage": "string",
       "detail?": "string"
     },
+    "agent.child": {
+      "childSessionId": "string",
+      "phase": "string",
+      "value": "string"
+    },
     "message.complete": {
       "text": "string",
       "tokens": "number",

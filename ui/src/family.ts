@@ -88,6 +88,7 @@ export interface FamilyHost {
 export class FamilyStore {
 	/** Current family members: main (root) first, delegated children after. */
 	private members: SessionInfo[] = [];
+	private readonly dismissed = new Set<string>();
 	/** Root of the current family (current.parentSessionId ?? current.id). */
 	private rootId: string | undefined;
 	/** Unknown-session ids already refreshed (throttled) — see noteUnknown. */
@@ -118,8 +119,11 @@ export class FamilyStore {
 			// Discovery verdicts are per family: a new root re-opens them.
 			this.unknown.clear();
 			this.foreign.clear();
+			this.dismissed.clear();
 		}
-		this.members = [session, ...this.members.filter((member) => member.id !== session.id)];
+		this.members = this.dismissed.has(session.id)
+			? this.members.filter((member) => member.id !== session.id)
+			: [session, ...this.members.filter((member) => member.id !== session.id)];
 		// Current is a child and its root was not listed yet: keep a stub so
 		// the main marker and the family rule stay explainable.
 		if (session.parentSessionId && !session.isFork && !this.members.some((member) => member.id === rootId)) {
@@ -140,8 +144,8 @@ export class FamilyStore {
 		const current = this.host.current();
 		if (!current) return [];
 		const rootId = this.rootId ?? familyRootOf(current);
-		const members = this.members.filter((member) => isFamilySession(member, rootId));
-		if (!members.some((member) => member.id === current.id)) members.unshift(current);
+		const members = this.members.filter((member) => isFamilySession(member, rootId) && !this.dismissed.has(member.id));
+		if (!this.dismissed.has(current.id) && !members.some((member) => member.id === current.id)) members.unshift(current);
 		const main = members.find((member) => member.id === rootId);
 		const ordered = main ? [main, ...members.filter((member) => member.id !== rootId)] : [...members];
 		return ordered.map((session) => ({
@@ -152,7 +156,13 @@ export class FamilyStore {
 	}
 
 	isMember(sessionId: string): boolean {
-		return this.rootId === sessionId || this.members.some((member) => member.id === sessionId);
+		return !this.dismissed.has(sessionId) && (this.rootId === sessionId || this.members.some((member) => member.id === sessionId));
+	}
+
+	dismiss(sessionId: string): void {
+		this.dismissed.add(sessionId);
+		this.members = this.members.filter((member) => member.id !== sessionId);
+		this.host.changed();
 	}
 
 	/**
@@ -177,9 +187,9 @@ export class FamilyStore {
 			if (!still || familyRootOf(still) !== rootId) return;
 			const merged = new Map<string, SessionInfo>();
 			for (const session of found) {
-				if (isFamilySession(session, rootId)) merged.set(session.id, session);
+				if (isFamilySession(session, rootId) && !this.dismissed.has(session.id)) merged.set(session.id, session);
 			}
-			merged.set(still.id, still); // the visible session always wins
+			if (!this.dismissed.has(still.id)) merged.set(still.id, still);
 			this.members = [...merged.values()];
 			this.reseed();
 			this.settleUnknown();

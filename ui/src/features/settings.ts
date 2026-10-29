@@ -18,7 +18,7 @@ import type {
 import { splitSub } from "../commands.ts";
 import { getSkin, isOpaqueBackground } from "../theme.ts";
 import type { ChatSide, WorkspaceMode } from "../workspace/state.ts";
-import { applyModel, CURATED_MODELS, filterCuratedModels, pickCuratedModel } from "./models.ts";
+import { modelsCommand } from "./models.ts";
 import { redactSecret } from "./keys.ts";
 import { applyBackgroundTransparency, applySkin } from "./theme.ts";
 import { printLspRows } from "./workspace.ts";
@@ -670,8 +670,7 @@ async function settingsChatCategory(host: FeatureHost): Promise<SettingsFlow> {
 		if (choice === "exit") return "exit";
 		if (choice === "back") return "back";
 		if (choice.value === "model") {
-			const entry = await pickCuratedModel(host, CURATED_MODELS);
-			if (entry) await applyModel(host, entry, true);
+			await modelsCommand.run("", host);
 			continue;
 		}
 		if (choice.value === "persona") {
@@ -785,49 +784,6 @@ export const settingsCommands: Command[] = [
 				return;
 			}
 			await openPersonaMenu(host);
-		},
-	},
-	{
-		name: "default-model",
-		description: "Pick the default model (menu when empty, saved across sessions)",
-		argumentHint: "[search|model-id]",
-		getArgumentCompletions: (prefix: string) => {
-			const typed = prefix.trimStart().toLowerCase();
-			if (/\s/.test(typed)) return null;
-			const items = CURATED_MODELS.filter((e) => e.model.toLowerCase().startsWith(typed)).map((e) => ({
-				value: e.model,
-				label: `${e.model} (${e.provider})`,
-				description: e.description,
-			}));
-			return items.length ? items : null;
-		},
-		async run(args, host) {
-			const query = args.trim();
-			if (!query) {
-				const entry = await pickCuratedModel(host, CURATED_MODELS);
-				if (!entry) return;
-				await applyModel(host, entry, true);
-				return;
-			}
-			const exact = CURATED_MODELS.find((e) => e.model.toLowerCase() === query.toLowerCase());
-			if (exact) {
-				await applyModel(host, exact, true);
-				return;
-			}
-			const entries = filterCuratedModels(query);
-			if (entries.length) {
-				const entry = await pickCuratedModel(host, entries);
-				if (!entry) return;
-				await applyModel(host, entry, true);
-				return;
-			}
-			// Off-list custom id: keep the current provider, save the model.
-			await setConfig(host, "model", query, true);
-			const session = host.session();
-			if (session) {
-				await host.request("session.setModel", { sessionId: session.id, model: query });
-			}
-			host.print("This ID is outside the catalog, so it keeps the current model route.", "plain");
 		},
 	},
 	{

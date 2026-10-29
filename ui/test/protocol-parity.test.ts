@@ -29,6 +29,7 @@ export const TS_EVENT_TYPES = [
 	"tool.complete",
 	"usage",
 	"growth.status",
+	"agent.child",
 	"message.complete",
 	"error",
 	"needs_approval",

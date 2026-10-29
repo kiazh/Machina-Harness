@@ -527,6 +527,17 @@ class WorkspaceService:
             raise WorkspaceError("denied", "uri must carry an absolute path")
         if "\x00" in path:
             raise WorkspaceError("denied", "uri contains a NUL byte")
+        # Windows file URIs carry a leading slash before the drive letter.
+        # os.path.normpath('/C:/...') does not remove it, so a valid in-root
+        # editor document otherwise looks outside the authorized workspace.
+        if (
+            os.name == "nt"
+            and len(path) >= 4
+            and path[0] == "/"
+            and path[1].isalpha()
+            and path[2:4] == ":/"
+        ):
+            path = path[1:]
         # Canonicalize only platform aliases outside the resolved root (e.g.
         # macOS /tmp -> /private/tmp). An in-root path keeps its requested
         # lexical identity even when a component is a symlink; resolving it

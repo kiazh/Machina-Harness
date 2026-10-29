@@ -13,6 +13,7 @@ import logging
 import os
 import stat
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -47,6 +48,11 @@ def _redacted(text: str) -> str:
 
 
 delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
+# A gateway turn may observe its own children. Other transports keep the
+# existing non-streaming path and pay no per-token event cost.
+child_observer: ContextVar[Callable[[uuid.UUID, str, str], None] | None] = ContextVar(
+    "delegated_child_observer", default=None
+)
 
 
 class AgentNotFoundError(Exception):
@@ -341,6 +347,9 @@ class Orchestrator:
         message_id: uuid.UUID | None = None
         depth_token = None
         authority_token = None
+        observer = child_observer.get()
+        observer_started = False
+        response = None
         try:
             if inherited_grant is not None and created_child:
                 await permission_store.save_grant(
@@ -370,7 +379,41 @@ class Orchestrator:
                 child_task += f"\n\n## Expected Output\n{expected_output}"
             if expected_artifact_path:
                 child_task += f"\n\n## Expected Artifact\n{expected_artifact_path}"
-            response = await agent.run(child.id, child_task, verbose=False)
+            if observer is None or not hasattr(agent, "run_stream"):
+                response = await agent.run(child.id, child_task, verbose=False)
+            else:
+                from contextlib import aclosing
+
+                from machina.memory.redaction import StreamingSecretRedactor
+
+                def announce(kind: str, value: str = "") -> None:
+                    try:
+                        observer(child.id, kind, value)
+                    except Exception as error:
+                        record_failure("orchestrator.child_observer", error)
+
+                announce("start", agent_name)
+                observer_started = True
+                redactor = StreamingSecretRedactor()
+                response = None
+                async with aclosing(
+                    agent.run_stream(child.id, child_task, verbose=False)
+                ) as events:
+                    async for event in events:
+                        if event.type == "text":
+                            safe = redactor.feed(event.content or "")
+                            if safe:
+                                announce("text", safe)
+                        elif event.type == "tool_call":
+                            announce("tool", event.tool_name)
+                        elif event.type == "done":
+                            tail = redactor.flush()
+                            if tail:
+                                announce("text", tail)
+                            response = event.response
+                if response is None:
+                    raise RuntimeError("delegated stream ended without a result")
+                announce("done", response.outcome)
         except asyncio.CancelledError:
             if message_id is not None:
                 try:
@@ -388,11 +431,13 @@ class Orchestrator:
                 except Exception as accounting_error:
                     # Accounting failures must not swallow the parent's cancellation.
                     record_failure("orchestrator.delegate", accounting_error)
+            if message_id is not None:
+                await self._delete_finished_child(child.id)
             raise
         except Exception as e:
             if message_id is None and created_child:
                 # Build or start-row failure: no row was recorded and the child
-                # never ran; re-raise so the finally archives/closes cleanly.
+                # never ran; re-raise so the finally deletes it.
                 raise
             logger.exception("Delegation to %s failed", agent_name)
             raw_detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
@@ -401,10 +446,18 @@ class Orchestrator:
             await self._record_end(
                 message_id, status="error", response=f"{type(e).__name__}: {detail}", tokens=tokens
             )
+            if message_id is not None:
+                await self._delete_finished_child(child.id)
             return DelegationResult(
                 agent_name, task, f"Error: {detail}", child.id, tokens, 0, "error"
             )
         finally:
+            if observer is not None and observer_started:
+                try:
+                    phase = "paused" if getattr(response, "needs_approval", None) else "settled"
+                    observer(child.id, phase, "")
+                except Exception as error:
+                    record_failure("orchestrator.child_observer", error)
             if depth_token is not None:
                 delegation_depth.reset(depth_token)
             if authority_token is not None:
@@ -433,14 +486,9 @@ class Orchestrator:
                 except Exception as _boundary_error:
                     # Optional fallback preserves the primary outcome; report no payload.
                     record_failure("orchestrator.delegate", _boundary_error)
-            # F12: the child never ran (build or start-recording failed); the
-            # fresh session is archived so it is not orphaned active.
+            # A child that never ran leaves no chat behind.
             if message_id is None:
-                try:
-                    await session_manager.archive(child.id)
-                except Exception as _cleanup_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate.build", _cleanup_error)
+                await self._delete_finished_child(child.id)
 
         tokens = await self._settle_child_tokens(
             message_id, child.id, agent_name, response.tokens_used
@@ -478,6 +526,8 @@ class Orchestrator:
                 payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
                 token_count=get_token_count(final_content),
             )
+        if status != "waiting_approval":
+            await self._delete_finished_child(child.id)
         return DelegationResult(
             agent=agent_name,
             task=task,
@@ -488,6 +538,13 @@ class Orchestrator:
             status=status,
             needs_approval=pauses,
         )
+
+    async def _delete_finished_child(self, child_id: uuid.UUID) -> None:
+        """Discard a completed child chat after its result and usage are recorded."""
+        try:
+            await session_manager.delete(child_id)
+        except Exception as error:
+            record_failure("orchestrator.child_cleanup", error)
 
     async def _settle_child_tokens(
         self,

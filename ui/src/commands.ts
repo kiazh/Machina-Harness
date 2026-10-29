@@ -14,7 +14,7 @@ const ALIASES: Record<string, string> = {
 	settings: "config",
 	set: "config",
 	compact: "compress",
-	model: "default-model",
+	model: "models",
 	providers: "provider",
 };
 
@@ -53,7 +53,7 @@ const HELP_GROUPS: Array<[group: string, names: string[]]> = [
 	["Memory", ["memory", "growth", "persona", "skills"]],
 	["Context", ["context", "compress"]],
 	["Automation", ["jobs"]],
-	["Setup", ["auth", "keys", "models", "default-model", "provider", "effort", "config", "theme", "profile", "profiles", "mode", "approvals", "interop", "harnesses"]],
+	["Setup", ["auth", "keys", "models", "provider", "effort", "config", "theme", "profile", "profiles", "mode", "approvals", "interop", "harnesses"]],
 	["Info", ["status", "usage", "output", "mcp", "help", "exit"]],
 ];
 

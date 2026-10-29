@@ -197,7 +197,7 @@ async function activateProvider(host: FeatureHost, provider: Provider): Promise<
 		}
 		host.print(`Active provider: ${provider} · model: ${model}`, "success");
 	} catch {
-		host.print(`Signed in. Run /provider ${provider} (optionally with a model) to activate it.`, "warning");
+		host.print(`Signed in. Choose a ${provider} model with /models to use the account.`, "warning");
 	}
 }
 
@@ -226,7 +226,7 @@ async function signInChatGPT(host: FeatureHost): Promise<void> {
 	const expiry =
 		outcome.expiry === null ? "" : ` Access token expires ${formatAuthExpiry(outcome.expiry)}.`;
 	host.print(
-		`Signed in to OpenAI${account}.${expiry} Run /provider chatgpt (optionally with a model) to use the account.`,
+		`Signed in to OpenAI${account}.${expiry} Choose a ChatGPT model with /models to use the account.`,
 		"success",
 	);
 	await activateProvider(host, "chatgpt");
