@@ -115,6 +115,7 @@ export const RPC_METHODS = [
   "skills.delete",
   "skills.learn",
   "skills.list",
+  "skills.marketplace.discover",
   "skills.marketplace.install",
   "skills.marketplace.preview",
   "skills.marketplace.search",

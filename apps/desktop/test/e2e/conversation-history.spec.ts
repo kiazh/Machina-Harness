@@ -59,7 +59,7 @@ test('routes history commands to scoped search and opens the full export action'
  await history.getByRole('button',{name:'Export full conversation',exact:true}).click();
  await expect(history).toBeHidden();
  const tools=page.getByRole('dialog',{name:'Conversation tools',exact:true});
- await expect(tools).toBeVisible();await expect(tools.getByRole('combobox',{name:'Conversation action'})).toHaveValue('export');
+ await expect(tools).toBeVisible();await expect(tools.getByRole('combobox',{name:'Conversation action'})).toHaveText('Export all transcript Markdown');
  await page.keyboard.press('Escape');await composer.fill('/history');await composer.press('Enter');
  await expect(history).toBeVisible();await expect(history.getByRole('searchbox',{name:'Search conversation history'})).toHaveValue('');
  await expect(history).toContainText('100 messages · Page 1');

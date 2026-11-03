@@ -115,11 +115,12 @@ test("styles, motion and custom wallpaper persist while editor state and draft s
   await expect(editor).toContainText("preserved across styles");
   await expect(composer).toHaveValue("Unsent draft while personalizing");
   await page.getByRole("button", { name: "Open settings", exact: true }).click();
-  await page.getByRole("combobox", { name: "Motion", exact: true }).selectOption("off");
+  await page.getByRole("combobox", { name: "Motion", exact: true }).click();
+  await page.getByRole("option", { name: "Off", exact: true }).click();
   await page.getByRole('button',{name:'Wallpaper & surfaces',exact:true}).click();
   const artwork = await page.request.get("/art/afterimage.png");
   await page.getByLabel("Upload wallpaper").setInputFiles({ name: "wallpaper.png", mimeType: "image/png", buffer: await artwork.body() });
-  await expect(page.getByRole("combobox", { name: "Background source" })).toHaveValue("custom");
+  await expect(page.getByRole("combobox", { name: "Background source" })).toHaveText("Your wallpaper");
   await expect(page.locator(".desktop-app")).toHaveAttribute("data-motion", "off");
   await page.keyboard.press("Escape");
   await expect.poll(() => page.locator(".wallpaper-layer").evaluate(element => getComputedStyle(element).backgroundImage)).toContain("blob:");

@@ -16,12 +16,20 @@ let definitions:Record<string,unknown>[]=[];
 let delegationSequence=0;
 const delegationMessages:(AgentMessage&{sessionId:string})[]=[];
 const trackedFixture=new URLSearchParams(location.search).has('tracked');
+const catalogSkills=Array.from({length:8},(_,index)=>({id:`fixture/skills/${index?'workflow-'+index:'design-basics'}`,skillSlug:index?'workflow-'+index:'design-basics',name:index?'fixture-workflow-'+index:'fixture-design-basics',source:'fixture/skills',description:'Synthetic catalog entry for browser verification.',repository:'https://github.com/fixture/skills',url:'https://skills.sh/fixture/skills/design-basics',markets:[index%2?'skillsmp':'skills.sh'],metrics:[{market:index%2?'skillsmp':'skills.sh',label:index%2?'GitHub stars':'installs',value:4200-index*310}]}));
+const catalogSources=[{id:'skills.sh',name:'skills.sh',url:'https://skills.sh',status:'ready'},{id:'skillsmp',name:'SkillsMP',url:'https://skillsmp.com',status:'ready'}];
 let trackedOperation:Record<string,unknown>|undefined;
 let trackedCompletion=0;
 const bridge: DesktopBridge = {
   async start() {},
   subscribe(listener) { emit = listener; return () => {}; },
   async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if(method.startsWith('skills.marketplace.')){
+      const target=window as unknown as {fixtureMarketplaceCalls?:{method:string;params:Record<string,unknown>}[]};(target.fixtureMarketplaceCalls??=[]).push({method,params});
+      if(method==='skills.marketplace.discover')return {featured:catalogSkills.slice(0,3),sections:[{market:'skills.sh',title:'Popular on skills.sh',description:'Ranked by installations',skills:catalogSkills.filter(row=>row.markets[0]==='skills.sh')},{market:'skillsmp',title:'Development on SkillsMP',description:'Development skills, sorted by repository stars',skills:catalogSkills.filter(row=>row.markets[0]==='skillsmp')}],markets:catalogSources} as T;
+      if(method==='skills.marketplace.search')return {query:params.query,skills:catalogSkills.filter(row=>(!params.markets||(params.markets as string[]).includes(row.markets[0]))&&row.name.toLowerCase().includes(String(params.query).toLowerCase())),markets:catalogSources} as T;
+      if(method==='skills.marketplace.preview')return {reviewId:'fixture-review',digest:'fixture-digest',source:'https://github.com/fixture/skills',revision:'fixture-revision',scope:'installation',skills:[{name:params.skill,description:'Synthetic reviewed skill',content:'Read these synthetic instructions before installing.',files:[]}]} as T;
+    }
     if(method==='operations.start'){
       const target=window as unknown as {fixtureOperationStarts?:number};target.fixtureOperationStarts=(target.fixtureOperationStarts??0)+1;
       const result=await bridge.request(String(params.method),params.params as Record<string,unknown>);

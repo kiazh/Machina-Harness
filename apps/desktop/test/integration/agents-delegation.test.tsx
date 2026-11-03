@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {chooseSelect} from '../helpers/select.ts';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,expect,it} from 'vitest';
 import {AgentsPage} from '../../src/features/agents/AgentsPage.tsx';
@@ -26,7 +27,7 @@ async function fixture(extra:Record<string,unknown>={},methods:string[]=[]){
  return {controller,calls,responses,async switchSession(){responses['session.resume']={session:{...session,id:'session-b',title:'Conversation B'},history:[]};await act(()=>controller.resume('session-b'))}};
 }
 async function openTask(){fireEvent.click((await screen.findAllByRole('button',{name:'Delegate task'}))[0]);fireEvent.change(screen.getByRole('textbox',{name:'Task'}),{target:{value:'Inspect parser'}})}
-function addReview(){fireEvent.click(screen.getByRole('button',{name:'Add step'}));fireEvent.change(screen.getByRole('combobox',{name:'Agent 2'}),{target:{value:'reviewer'}});fireEvent.change(screen.getByRole('textbox',{name:'Task 2'}),{target:{value:'Review findings'}})}
+function addReview(){fireEvent.click(screen.getByRole('button',{name:'Add step'}));chooseSelect(screen.getByRole('combobox',{name:'Agent 2'}),'reviewer');fireEvent.change(screen.getByRole('textbox',{name:'Task 2'}),{target:{value:'Review findings'}})}
 
 it('keeps the single-task flow and submits its explicit sequential mode and parent scope only once',async()=>{
  let finish!:(value:unknown)=>void;const pending=new Promise(resolve=>{finish=resolve});
@@ -44,7 +45,7 @@ it('keeps the single-task flow and submits its explicit sequential mode and pare
 it.each(['sequential','parallel'])('runs an edited %s workflow with only its remaining steps',async(mode)=>{
  const f=await fixture({'agents.run':{results:[completed,{...completed,agent:'reviewer',task:'Review findings',response:'Reviewed'}]}});
  render(<AgentsPage controller={f.controller}/>);await openTask();addReview();
- fireEvent.change(screen.getByRole('combobox',{name:'Execution'}),{target:{value:mode}});
+ chooseSelect(screen.getByRole('combobox',{name:'Execution'}),mode);
  expect(screen.getByText(mode==='parallel'?/do not receive each other’s results/:/receives earlier results/)).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Add step'}));
  fireEvent.change(screen.getByRole('textbox',{name:'Task 3'}),{target:{value:'Do not run this'}});
@@ -57,12 +58,12 @@ it.each(['sequential','parallel'])('runs an edited %s workflow with only its rem
 it.each(['rpc','result'])('retains every task and execution choice after a %s failure',async(kind)=>{
  const f=await fixture({'agents.run':kind==='rpc'?new Error('Delegation unavailable'):{results:[{...completed,status:'error',response:'Worker failed'}]}});
  render(<AgentsPage controller={f.controller}/>);await openTask();addReview();
- fireEvent.change(screen.getByRole('combobox',{name:'Execution'}),{target:{value:'parallel'}});
+ chooseSelect(screen.getByRole('combobox',{name:'Execution'}),'parallel');
  fireEvent.click(screen.getByRole('button',{name:'Run workflow'}));
  await screen.findByText(kind==='rpc'?'Delegation unavailable':'Worker failed');
  expect((screen.getByRole('textbox',{name:'Task'}) as HTMLTextAreaElement).value).toBe('Inspect parser');
  expect((screen.getByRole('textbox',{name:'Task 2'}) as HTMLTextAreaElement).value).toBe('Review findings');
- expect((screen.getByRole('combobox',{name:'Execution'}) as HTMLSelectElement).value).toBe('parallel');
+ expect(screen.getByRole('combobox',{name:'Execution'}).textContent).toContain('Parallel');
  expect((screen.getByRole('button',{name:'Run workflow'}) as HTMLButtonElement).disabled).toBe(false);
 });
 

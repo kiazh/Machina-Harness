@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {chooseSelect} from '../helpers/select.ts';
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,it} from 'vitest';
 import {SkillsPage} from '../../src/features/catalog/SkillsPage.tsx';
@@ -11,6 +12,7 @@ async function fixture(extra:Record<string,unknown>={}){
  const session={id:'session-a',model:'model',provider:'provider',title:'Conversation',status:'active',lastActivity:null};
  const server={id:'docs',display_name:'My docs',transport:'stdio',state:'disconnected',enabled:true};
  const responses:Record<string,unknown>={
+  'skills.marketplace.discover':{featured:[],sections:[{market:'skills.sh',title:'Popular on skills.sh',description:'Ranked by installations',skills:[]}],markets:[{id:'skills.sh',name:'skills.sh',url:'https://skills.sh',status:'ready'},{id:'skillsmp',name:'SkillsMP',url:'https://skillsmp.com',status:'ready'}]},
   'runtime.capabilities':{engineVersion:'test',protocolVersion:2,storageProfile:'postgres',database:'ready',methods:[]},initialize:{cwd:'test',model:'model',provider:'provider'},'config.get':{config:{}},'session.list':{sessions:[session]},'workspace.open':{workspaceId:'w',clientId:'c',epoch:1,rootLabel:'test',resolvedRoot:'/test',capabilities:[]},'session.resume':{session,history:[]},'shell.jobs':{jobs:[]},
   'skills.list':{skills:[]},'skills.marketplace.search':{provider:'skills.sh',skills:[{id:'owner/repo/demo',name:'demo',source:'owner/repo',installs:20,repository:'https://github.com/owner/repo',url:'https://skills.sh/owner/repo/demo'}]},
   'skills.marketplace.preview':{reviewId:'review-a',digest:'exact-digest',source:'https://github.com/owner/repo',revision:'revision-a',scope:'installation',skills:[{name:'demo',description:'Example skill',content:'Reviewed instructions',files:[]}]},'skills.marketplace.install':{installed:['demo'],usable:true,outcomes:[]},
@@ -25,7 +27,8 @@ it('reviews marketplace instructions before submitting the exact confirmed diges
  await waitFor(()=>expect((screen.getByRole('button',{name:'Marketplace'}) as HTMLButtonElement).disabled).toBe(false));
  fireEvent.click(screen.getByRole('button',{name:'Marketplace'}));
  fireEvent.change(screen.getByRole('textbox',{name:'Search marketplace'}),{target:{value:'demo'}});
- fireEvent.click(screen.getByRole('button',{name:'Search skills.sh'}));
+ await waitFor(()=>expect((screen.getByRole('button',{name:'Search'}) as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'Search'}));
  fireEvent.click(await screen.findByRole('button',{name:'Review demo'}));
  await screen.findByText('Reviewed instructions');
  expect(f.calls.some(call=>call.method==='skills.marketplace.install')).toBe(false);
@@ -60,11 +63,11 @@ it('clears local launch fields when saving an HTTP transport without discarding 
  fireEvent.click(await screen.findByRole('button',{name:'Inspect My docs'}));
  fireEvent.click(await screen.findByRole('button',{name:'Edit server'}));
  const transport=await screen.findByRole('combobox',{name:'Transport'});
- fireEvent.change(transport,{target:{value:'streamable_http'}});
- fireEvent.change(transport,{target:{value:'stdio'}});
+ chooseSelect(transport,'streamable_http');
+ chooseSelect(transport,'stdio');
  expect((screen.getByRole('textbox',{name:'Executable'}) as HTMLInputElement).value).toBe('node');
  expect(JSON.parse((screen.getByRole('textbox',{name:'Arguments'}) as HTMLTextAreaElement).value)).toEqual(['server.js']);
- fireEvent.change(transport,{target:{value:'streamable_http'}});
+ chooseSelect(transport,'streamable_http');
  fireEvent.change(screen.getByRole('textbox',{name:'Endpoint URL'}),{target:{value:'https://docs.example/mcp'}});
  fireEvent.change(screen.getByRole('textbox',{name:'Advanced configuration (JSON)'}),{target:{value:JSON.stringify({oauth:null,credential_profile:'docs-account',local_access:false,trust:'trusted_read'})}});
  fireEvent.click(screen.getByRole('button',{name:'Save server'}));
@@ -79,7 +82,7 @@ it.each([
  render(<McpPage controller={f.controller}/>);
  fireEvent.click(await screen.findByRole('button',{name:'Inspect My docs'}));
  fireEvent.click(await screen.findByRole('button',{name:'Edit server'}));
- fireEvent.change(await screen.findByRole('combobox',{name:'Transport'}),{target:{value:'stdio'}});
+ chooseSelect(await screen.findByRole('combobox',{name:'Transport'}),'stdio');
  fireEvent.change(screen.getByRole('textbox',{name:'Executable'}),{target:{value:'python'}});
  fireEvent.change(screen.getByRole('textbox',{name:'Arguments'}),{target:{value:'["server.py"]'}});
  fireEvent.change(screen.getByRole('textbox',{name:'Credential reference names'}),{target:{value:'LOCAL_TOKEN'}});
@@ -105,7 +108,7 @@ it('ignores an invalid hidden argv draft after switching to HTTP',async()=>{
  fireEvent.click(await screen.findByRole('button',{name:'Inspect My docs'}));
  fireEvent.click(await screen.findByRole('button',{name:'Edit server'}));
  fireEvent.change(await screen.findByRole('textbox',{name:'Arguments'}),{target:{value:'unfinished JSON'}});
- fireEvent.change(screen.getByRole('combobox',{name:'Transport'}),{target:{value:'streamable_http'}});
+ chooseSelect(screen.getByRole('combobox',{name:'Transport'}),'streamable_http');
  fireEvent.change(screen.getByRole('textbox',{name:'Endpoint URL'}),{target:{value:'https://docs.example/mcp'}});
  fireEvent.click(screen.getByRole('button',{name:'Save server'}));
  await waitFor(()=>expect(f.calls.find(call=>call.method==='mcp.configure')?.params.config).toMatchObject({transport:'streamable_http',argv:[],command:''}));

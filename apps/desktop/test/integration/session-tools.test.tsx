@@ -13,7 +13,7 @@ async function fixture(){
 }
 it('opens the requested export action and allows this read-only action while the main turn runs',async()=>{
  const f=await fixture();await f.controller.send('Working');const dialog=createRef<HTMLDialogElement>();render(<SessionTools controller={f.controller} dialog={dialog} initialAction="export" openToken={1}/>);dialog.current!.setAttribute('open','');
- expect((screen.getByRole('combobox',{name:'Conversation action'}) as HTMLSelectElement).value).toBe('export');expect((screen.getByRole('button',{name:'Apply'}) as HTMLButtonElement).disabled).toBe(false);
+ expect(screen.getByRole('combobox',{name:'Conversation action'}).textContent).toContain('Export all transcript Markdown');expect((screen.getByRole('button',{name:'Apply'}) as HTMLButtonElement).disabled).toBe(false);
 });
 it('explains disconnected controls and disables export until the engine reconnects',async()=>{
  const f=await fixture();f.emit({type:'desktop.disconnected'});const dialog=createRef<HTMLDialogElement>();render(<SessionTools controller={f.controller} dialog={dialog} initialAction="export" openToken={1}/>);dialog.current!.setAttribute('open','');
@@ -24,5 +24,5 @@ it.each([true,false])('does not let an old operation close or replace a newly op
  const dialog=createRef<HTMLDialogElement>(),close=vi.fn();const view=render(<SessionTools controller={f.controller} dialog={dialog} initialAction="rename" openToken={1}/>);dialog.current!.setAttribute('open','');Object.defineProperty(dialog.current,'close',{configurable:true,value:close});
  fireEvent.change(screen.getByRole('textbox',{name:'Conversation action text'}),{target:{value:'Rename A'}});fireEvent.click(screen.getByRole('button',{name:'Apply'}));
  view.rerender(<SessionTools controller={f.controller} dialog={dialog} initialAction="export" openToken={2}/>);await act(async()=>settle());
- expect(close).not.toHaveBeenCalled();expect((screen.getByRole('combobox',{name:'Conversation action'}) as HTMLSelectElement).value).toBe('export');expect(screen.queryByRole('alert')).toBeNull();
+ expect(close).not.toHaveBeenCalled();expect(screen.getByRole('combobox',{name:'Conversation action'}).textContent).toContain('Export all transcript Markdown');expect(screen.queryByRole('alert')).toBeNull();
 });

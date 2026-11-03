@@ -48,9 +48,9 @@ test('builds a parallel delegation and inspects this conversation’s recorded h
  await row.getByRole('button',{name:'Delegate task',exact:true}).click();
  await page.getByRole('textbox',{name:'Task',exact:true}).fill('Inspect parser');
  await page.getByRole('button',{name:'Add step',exact:true}).click();
- await page.getByRole('combobox',{name:'Agent 2',exact:true}).selectOption('fixture-reviewer');
+ await page.getByRole('combobox',{name:'Agent 2',exact:true}).click();await page.getByRole('option',{name:'fixture-reviewer',exact:true}).click();
  await page.getByRole('textbox',{name:'Task 2',exact:true}).fill('Inspect tests independently');
- await page.getByRole('combobox',{name:'Execution',exact:true}).selectOption('parallel');
+ await page.getByRole('combobox',{name:'Execution',exact:true}).click();await page.getByRole('option',{name:'Parallel',exact:true}).click();
  await expect(page.getByText(/Steps run independently/)).toBeVisible();
  await page.screenshot({path:testInfo.outputPath('delegation-workflow.png')});
  await page.getByRole('button',{name:'Run workflow',exact:true}).click();

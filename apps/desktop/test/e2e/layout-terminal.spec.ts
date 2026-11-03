@@ -10,7 +10,7 @@ test('temporarily hides navigation on a narrow editor layout and restores the sa
 
 test('saved layout can place code on the left and retain edited text',async({page})=>{
  await page.goto('/test/fixtures/workspace.html');await page.getByRole('button',{name:'Toggle code editor'}).click();const editor=page.getByRole('textbox',{name:'Code editor',exact:true});await editor.click();await editor.pressSequentially('# retained left layout');
- await page.getByRole('button',{name:'Open settings'}).click();const dialog=page.getByRole('dialog',{name:'Settings',exact:true});await dialog.getByRole('button',{name:'Workspace',exact:true}).click();await dialog.getByRole('combobox',{name:'Code editor position'}).selectOption('left');await dialog.getByRole('button',{name:'Close settings'}).click();
+ await page.getByRole('button',{name:'Open settings'}).click();const dialog=page.getByRole('dialog',{name:'Settings',exact:true});await dialog.getByRole('button',{name:'Workspace',exact:true}).click();await dialog.getByRole('combobox',{name:'Code editor position'}).click();await dialog.locator('[role=option][data-select-value=left]').click();await dialog.getByRole('button',{name:'Close settings'}).click();
  const code=await page.getByRole('region',{name:'Code workspace',exact:true}).boundingBox(),harness=await page.getByRole('region',{name:'Agent harness',exact:true}).boundingBox();expect(code!.x).toBeLessThan(harness!.x);await expect(editor).toContainText('retained left layout');
  await page.getByRole('button',{name:'Capabilities',exact:true}).click();await expect(page.getByRole('heading',{name:'Your skills',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });

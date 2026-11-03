@@ -87,6 +87,7 @@ from machina.gateway.features.jobs import (
     jobs_set_enabled,
 )
 from machina.gateway.features.marketplace import (
+    skills_marketplace_discover,
     skills_marketplace_install,
     skills_marketplace_preview,
     skills_marketplace_search,
@@ -247,6 +248,7 @@ METHODS: dict[str, Handler] = {
     "memory.stats": memory_stats,
     "skills.list": skills_list,
     "skills.marketplace.search": skills_marketplace_search,
+    "skills.marketplace.discover": skills_marketplace_discover,
     "skills.marketplace.preview": skills_marketplace_preview,
     "skills.marketplace.install": skills_marketplace_install,
     "skills.show": skills_show,

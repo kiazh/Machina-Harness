@@ -52,8 +52,19 @@ def _text(value: Any, limit: int) -> str:
 async def skills_marketplace_search(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     query = _str(params, "query", max_len=200)
     if len(query) < 2:
-        raise RpcError(INVALID_PARAMS, "Enter at least two characters to search skills.sh")
+        raise RpcError(INVALID_PARAMS, "Enter at least two characters to search skill catalogs")
     limit = _int(params, "limit", 20, 1, 50)
+    if "markets" in params:
+        from machina.skills import catalog
+
+        markets = params["markets"]
+        if (
+            not isinstance(markets, list)
+            or not 1 <= len(markets) <= 2
+            or any(not isinstance(value, str) or value not in catalog.MARKETS for value in markets)
+        ):
+            raise RpcError(INVALID_PARAMS, "Choose skills.sh, skillsmp, or both catalogs")
+        return await catalog.search(query, limit, list(dict.fromkeys(markets)))
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             async with client.stream(
@@ -103,6 +114,12 @@ async def skills_marketplace_search(gw: Gateway, params: dict[str, Any]) -> dict
         "skills": skills,
         "scope": "installation",
     }
+
+
+async def skills_marketplace_discover(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    from machina.skills import catalog
+
+    return await catalog.discover(_int(params, "limit", 12, 1, 24))
 
 
 def _stage_sync(source: str, requested: str) -> tuple[dict[str, Any], Path]:

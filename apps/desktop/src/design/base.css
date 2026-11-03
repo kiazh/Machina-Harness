@@ -134,7 +134,7 @@ svg { flex-shrink: 0; stroke-width: 1.65; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .dialog-heading h2 { font-size: 20px; letter-spacing: -.04em; font-weight: 500; margin: 10px 0 17px; }
 .settings-dialog > p { color: var(--muted); font-size: 12px; margin: 0 0 28px; }
-.settings-dialog label { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 15px 0; border-top: 1px solid var(--line); }
+.appearance-dialog:not(.unified-settings) label { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 15px 0; border-top: 1px solid var(--line); }
 .settings-dialog select { border: 1px solid var(--line); background: var(--input); border-radius: 5px; padding: 6px 10px; min-width: 95px; }
 @media (max-width: 1100px) { .desktop-app[data-explorer="true"] { --explorer-width: 160px; } .desktop-app[data-harness="true"] { --harness-width: 330px; } .preview-label { display: none; } .brand { min-width: 120px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

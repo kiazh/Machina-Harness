@@ -98,7 +98,7 @@ export function App({ controller }: { controller: DesktopController }) {
   }, [preferences.background, wallpaperRevision, controller]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if(event.isComposing||event.defaultPrevented||document.querySelector('dialog[open], [role=dialog], [role=alertdialog]'))return;
+      if(event.isComposing||event.defaultPrevented||document.querySelector('dialog[open], [role=dialog], [role=alertdialog], [data-select-popup]'))return;
       for(const command of SHORTCUT_COMMANDS){if(!matchesShortcut(event,bindings[command.id]))continue;
        if(command.id==='interrupt'){if((!controller.snapshot().running&&!controller.snapshot().backgroundOperation)||document.querySelector('.cm-tooltip'))continue;event.preventDefault();void controller.interrupt().catch(error=>controller.fail(error));return;}
        event.preventDefault();const current=controller.snapshot();

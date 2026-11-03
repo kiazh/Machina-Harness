@@ -661,3 +661,15 @@ export interface OperationSnapshot {
  error?:string;
  truncated?:boolean;
 }
+export interface MarketplaceMetric {market:string;label:string;value:number}
+export interface MarketplaceSkill {
+ id:string;name:string;source:string;skillSlug?:string;description?:string;
+ repository:string;url:string;markets?:string[];metrics?:MarketplaceMetric[];installs?:number;
+}
+export interface MarketplaceSource {id:string;name:string;url:string;status:'ready'|'unavailable';error?:string}
+export interface MarketplaceDiscovery {
+ featured:MarketplaceSkill[];
+ sections:{market:string;title:string;description:string;skills:MarketplaceSkill[]}[];
+ markets:MarketplaceSource[];
+}
+export interface MarketplaceSearch {skills:MarketplaceSkill[];markets:MarketplaceSource[];query:string}
