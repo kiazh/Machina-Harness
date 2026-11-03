@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { AppearanceStore, normalizeAppearance } from "../../src/state/appearance.ts";
 
 it("restores only supported appearance values and clamps rendering budgets", () => {
-  expect(normalizeAppearance({ preset: "remote-code", glass: -1, blur: 900, motion: "unknown", uiSize: 90, background: "https://untrusted", accent: "url(evil)" })).toMatchObject({ preset: "porcelain", glass: .2, blur: 32, motion: "subtle", uiSize: 18, background: "none", accent: "#2452ff" });
+  expect(normalizeAppearance({ preset: "remote-code", glass: -1, blur: 900, motion: "unknown", uiSize: 90, background: "https://untrusted", accent: "url(evil)" })).toMatchObject({ preset: "porcelain", glass: .2, blur: 32, motion: "subtle", uiSize: 18, background: "art", accent: "#2452ff" });
 });
 it("persists a complete preset while keeping custom wallpaper and code size", () => {
   const storage = new Map<string, string>();

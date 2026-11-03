@@ -12,7 +12,7 @@ exist; automated fixtures do not establish real-provider or macOS acceptance.
 | Context and recall | Budget, chunks, compression, recall/evidence windows, family | Richer evidence navigation |
 | Models and routing | Session-aware catalog, provenance/fetch errors, off-list IDs, effort controls | Real account/catalog availability remains provider-dependent |
 | Providers, keys and accounts | Provider add/edit/remove, transient masked key entry, ChatGPT/Copilot/Grok login/import/logout/status controls | Real-account sign-in and turn acceptance |
-| Skills marketplace | Featured discovery, popular skills.sh listings, SkillsMP development listings, multi-catalog search/filter/deduplication, exact source/revision/files/digest review, confirmed installation | Real search/review/staging accepted; no third-party skill installed into the user's registry during verification |
+| Skills marketplace | Featured discovery, popular skills.sh listings, SkillsMP development listings, multi-catalog search/filter/deduplication, conversation-independent exact source/revision/files/digest review, confirmed installation | Real search/review/staging accepted; no third-party skill installed into the user's registry during verification |
 | Installed skills and learning | Search/filter/show/remove, repository import, section reads, routing preview, proposals, approvals/reverts, health | Real model-backed learning acceptance |
 | Memory | Scoped list/search/add/share/confirmed forget and installation-wide memory approvals | Real model-backed retrieval quality |
 | Scheduled jobs | Interval/cron/heartbeat creation, optional scripts/model overrides, enable/disable/resume/delete | No job edit endpoint exists in the current CLI engine; edit-style recreation can be designed separately |
@@ -26,14 +26,16 @@ exist; automated fixtures do not establish real-provider or macOS acceptance.
 | MCP | Configuration, transport-aware edit, remove, exact connection review, connect/disconnect, tool inspection, OAuth review/lifecycle | Real external server/OAuth acceptance |
 | Profiles, personality and growth | Profile selection/create/preferences; teach/forget, notes, feedback, policy review/rollback | Real model-backed learning acceptance |
 | Permissions | Execution mode, live approvals, default selection, policy review and revocation | Real-provider approval/resume acceptance |
-| Harness integrations | Discovery, registration review, enable/remove, tracked task execution with owned process cancellation and session-selected cwd | Acceptance against locally installed external harnesses |
+| Harness integrations | Discovery, registration review, enable/remove, tracked task execution with owned process cancellation and session-selected cwd; bounded real MCP/CLI communications inspection | Acceptance against locally installed external harnesses |
 | Music | System media status and playback controls; unavailable state when unsupported | Native media-provider-specific acceptance |
 | Appearance and layouts | Nine persisted palettes, wallpaper/glass/typography/motion, layout presets, pane placement/dimensions, density and configurable keyboard shortcuts (including punctuation/international keys) | Shared keyboard-accessible dropdowns, consistent selection and compact settings search are connected; fonts and layout remain separately adjustable |
 | Availability | Offline connection action, advertised method checks, explicit errors; failed inventories do not claim to be empty | Some specialized advanced controls still need broader unavailable-state acceptance |
 | Slash commands | Local feature navigation and selected direct operations; unknown/unsupported arguments retain draft and do not reach the model | Complete CLI argument/subcommand shorthand parity |
-| Windows native | Engine transport, folder/list/read, unsaved LSP completion and real PTY tests passed | Signed distributable, clean-machine installation, updater/release pipeline |
+| Windows native | Engine transport, folder/list/read, unsaved LSP completion, versioned diagnostics and real PTY tests passed | Signed distributable, clean-machine installation, updater/release pipeline |
 | macOS native | Shared macOS code paths and a new CI build/test matrix | The CI job is configured but has not run here; actual macOS acceptance pending |
 
 This is a working migration, not a claim that every advanced CLI workflow or
 platform has been accepted. Current evidence is recorded in
 [the reliability report](../verification/DESKTOP_RELIABILITY_20261102.md).
+
+Latest connector, communications, editor and visual acceptance: [2026-11-03 report](../verification/DESKTOP_CONNECTORS_EDITOR_20261103.md).

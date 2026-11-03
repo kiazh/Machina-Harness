@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from machina.gateway.errors import INVALID_PARAMS, RpcError
-from machina.gateway.features._common import _bool, _str
+from machina.gateway.features._common import _bool, _int, _str, _uuid
 from machina.interop import (
     DetectResult,
     PlatformSpec,
@@ -274,15 +274,67 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     if params.get("sessionId") is not None:
         gw.require_db()
         options["cwd"] = _workspace_cwd(await gw.get_session(params))
+    from machina.core.harness_communications import async_finish_exchange, async_start_exchange
+
+    exchange = await async_start_exchange(
+        method="interop.run",
+        transport="cli",
+        direction="outgoing",
+        payload={"platform": spec.key, "prompt": prompt, "timeout": timeout},
+        harness=spec.key,
+        session_id=params.get("sessionId"),
+    )
+    try:
+        payload = await _run_harness(spec.key, prompt, options)
+    except asyncio.CancelledError:
+        # The existing worker cancellation path joins process teardown before
+        # this settlement is observed, so the transcript never claims an
+        # active child is already retired.
+        await async_finish_exchange(
+            exchange,
+            method="interop.run",
+            transport="cli",
+            direction="incoming",
+            payload={"status": "cancelled"},
+            status="cancelled",
+            harness=spec.key,
+            session_id=params.get("sessionId"),
+        )
+        raise
+    except Exception as exc:
+        await async_finish_exchange(
+            exchange,
+            method="interop.run",
+            transport="cli",
+            direction="incoming",
+            payload={"error": str(exc)},
+            status="failed",
+            harness=spec.key,
+            session_id=params.get("sessionId"),
+        )
+        raise
+    await async_finish_exchange(
+        exchange,
+        method="interop.run",
+        transport="cli",
+        direction="incoming",
+        payload=payload,
+        harness=spec.key,
+        session_id=params.get("sessionId"),
+    )
+    return payload
+
+
+async def _run_harness(platform: str, prompt: str, options: dict[str, Any]) -> dict[str, Any]:
     cancellation = _operation_cancel.get()
     if cancellation is None:
-        result = await asyncio.to_thread(run_task, spec.key, prompt, **options)
+        result = await asyncio.to_thread(run_task, platform, prompt, **options)
     else:
         options["cancel_event"] = cancellation
         # An executor Future is not a Task: the process entry point's blanket
         # task retirement cannot cancel and detach this completion observer.
         worker = asyncio.get_running_loop().run_in_executor(
-            None, partial(run_task, spec.key, prompt, **options)
+            None, partial(run_task, platform, prompt, **options)
         )
         interrupted = False
         while True:
@@ -305,3 +357,24 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         "stderr": _bounded(_redact(getattr(result, "stderr", "") or ""), MAX_RUN_STDERR_CHARS),
         "unsupportedReason": str(unsupported) if unsupported else None,
     }
+
+
+async def interop_communications(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """Read real, locally retained MCP and harness traffic without a model call."""
+    from machina.core.harness_communications import CommunicationsStore
+
+    limit = _int(params, "limit", 100, 1, 200)
+    cursor = _str(params, "cursor", required=False, max_len=20) or None
+    if cursor is not None and (
+        not cursor.isascii() or not cursor.isdecimal() or int(cursor) > 2**63 - 1
+    ):
+        raise RpcError(INVALID_PARAMS, "cursor must be a non-negative event ID")
+    session = str(_uuid(params, "sessionId")) if params.get("sessionId") is not None else None
+    harness = _str(params, "harness", required=False, max_len=100) or None
+    return await asyncio.to_thread(
+        CommunicationsStore().list,
+        limit=limit,
+        cursor=cursor,
+        session_id=session,
+        harness=harness,
+    )

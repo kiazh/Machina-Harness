@@ -27,7 +27,7 @@ export function normalizeAppearance(value: unknown): Appearance {
   return {
     preset, glass: clamp(raw.glass, defaults.glass, .2, 1), blur: clamp(raw.blur, defaults.blur, 0, 32),
     motion: ["full", "subtle", "off"].includes(String(raw.motion)) ? raw.motion as Motion : "subtle",
-    background: ["art", "custom", "none"].includes(String(raw.background)) ? raw.background as Appearance["background"] : "none",
+    background: ["art", "custom", "none"].includes(String(raw.background)) ? raw.background as Appearance["background"] : "art",
     accent: typeof raw.accent === "string" && /^#[\da-f]{6}$/i.test(raw.accent) ? raw.accent : defaults.accent,
     uiSize: clamp(raw.uiSize, 14, 12, 18), codeSize: clamp(raw.codeSize, 14, 11, 24),
     uiFont: font(raw.uiFont, "Segoe UI"), codeFont: font(raw.codeFont, "Cascadia Code"),

@@ -52,6 +52,7 @@ from machina.gateway.features.connector_oauth import (
     mcp_oauth_url,
 )
 from machina.gateway.features.connectors import (
+    mcp_catalog,
     mcp_config,
     mcp_configure,
     mcp_connect,
@@ -73,6 +74,7 @@ from machina.gateway.features.growth import (
 )
 from machina.gateway.features.history import session_history
 from machina.gateway.features.interop import (
+    interop_communications,
     interop_disable,
     interop_enable,
     interop_list,
@@ -196,6 +198,7 @@ METHODS: dict[str, Handler] = {
     "auth.copilot.login": auth_copilot_login,
     "auth.copilot.importGh": auth_copilot_import_gh,
     "auth.copilot.logout": auth_copilot_logout,
+    "mcp.catalog": mcp_catalog,
     "mcp.list": mcp_list,
     "mcp.config": mcp_config,
     "mcp.status": mcp_status,
@@ -223,6 +226,7 @@ METHODS: dict[str, Handler] = {
     "interop.disable": interop_disable,
     "interop.list": interop_list,
     "interop.run": interop_run,
+    "interop.communications": interop_communications,
     "session.fork": session_fork,
     "session.delete": session_delete,
     "session.rename": session_rename,

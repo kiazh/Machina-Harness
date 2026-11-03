@@ -22,6 +22,42 @@ class GatewayStub:
 
 
 @pytest.mark.asyncio
+async def test_installation_review_works_without_conversation_and_stays_gateway_owned(monkeypatch):
+    from machina.gateway.features import marketplace as module
+
+    digest = "c" * 64
+    monkeypatch.setattr(
+        module,
+        "_stage",
+        AsyncMock(
+            return_value=(
+                {"digest": digest, "skills": [{"name": "demo", "content": "read me", "files": []}]},
+                Path(__file__).parent,
+            )
+        ),
+    )
+    activate = AsyncMock(return_value={"installed": ["demo"]})
+    monkeypatch.setattr(module, "_activate", activate)
+    gateway = GatewayStub()
+    gateway.get_session = AsyncMock(side_effect=AssertionError("must not create or require a chat"))
+    review = await module.skills_marketplace_preview(
+        gateway, {"source": "owner/repo", "skill": "demo"}
+    )
+    assert review["sessionId"] is None
+    params = {"reviewId": review["reviewId"], "digest": digest, "confirmed": True}
+    with pytest.raises(RpcError) as exc:
+        await module.skills_marketplace_install(GatewayStub(), params)
+    assert exc.value.code == NOT_FOUND
+    for patch in ({"confirmed": False}, {"digest": "d" * 64}):
+        with pytest.raises(RpcError) as exc:
+            await module.skills_marketplace_install(gateway, {**params, **patch})
+        assert exc.value.code == INVALID_PARAMS
+    activate.assert_not_called()
+    assert (await module.skills_marketplace_install(gateway, params))["installed"] == ["demo"]
+    gateway.get_session.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_marketplace_uses_public_cli_search_and_rejects_foreign_sources(monkeypatch):
     from machina.gateway.features import marketplace as module
 

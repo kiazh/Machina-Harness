@@ -16,7 +16,7 @@ async function fixture(extra:Record<string,unknown>={}){
   'runtime.capabilities':{engineVersion:'test',protocolVersion:2,storageProfile:'postgres',database:'ready',methods:[]},initialize:{cwd:'test',model:'model',provider:'provider'},'config.get':{config:{}},'session.list':{sessions:[session]},'workspace.open':{workspaceId:'w',clientId:'c',epoch:1,rootLabel:'test',resolvedRoot:'/test',capabilities:[]},'session.resume':{session,history:[]},'shell.jobs':{jobs:[]},
   'skills.list':{skills:[]},'skills.marketplace.search':{provider:'skills.sh',skills:[{id:'owner/repo/demo',name:'demo',source:'owner/repo',installs:20,repository:'https://github.com/owner/repo',url:'https://skills.sh/owner/repo/demo'}]},
   'skills.marketplace.preview':{reviewId:'review-a',digest:'exact-digest',source:'https://github.com/owner/repo',revision:'revision-a',scope:'installation',skills:[{name:'demo',description:'Example skill',content:'Reviewed instructions',files:[]}]},'skills.marketplace.install':{installed:['demo'],usable:true,outcomes:[]},
-  'mcp.list':{servers:[server]},'mcp.status':{server},'mcp.tools':{tools:[],truncated:false},'mcp.preview':{digest:'connect-digest',proposal:{argv:['node','server.js'],cwd:'/project',backend:'host'}},'mcp.connect':{server:{...server,state:'connected'}},
+  'mcp.catalog':{entries:[]},'mcp.list':{servers:[server]},'mcp.status':{server},'mcp.tools':{tools:[],truncated:false},'mcp.preview':{digest:'connect-digest',proposal:{argv:['node','server.js'],cwd:'/project',backend:'host'}},'mcp.connect':{server:{...server,state:'connected'}},
   'mcp.config':{config:{id:'docs',display_name:'My docs',transport:'stdio',command:'node',argv:['server.js','--port','1234'],cwd:'/project',trust:'untrusted',secret_refs:['DOCS_TOKEN']}},'mcp.configure':{server},...extra};
  const controller=new DesktopController({async start(){},subscribe(){return()=>{}},async request<T>(method:string,params:Record<string,unknown>={}){calls.push({method,params});if(!((method==='runtime.selectWorkspace'?'workspace.open':method) in responses))throw new Error(`Unexpected ${method}`);const response=responses[method==='runtime.selectWorkspace'?'workspace.open':method];if(response instanceof Error)throw response;return response as T}});
  await controller.connect();await controller.resume(session.id);return {controller,calls,responses};
@@ -34,6 +34,23 @@ it('reviews marketplace instructions before submitting the exact confirmed diges
  expect(f.calls.some(call=>call.method==='skills.marketplace.install')).toBe(false);
  fireEvent.click(screen.getByRole('button',{name:'Install reviewed skill'}));
  await waitFor(()=>expect(f.calls.find(call=>call.method==='skills.marketplace.install')?.params).toEqual({sessionId:'session-a',reviewId:'review-a',digest:'exact-digest',confirmed:true}));
+});
+
+it('reviews and installs an app-wide skill with no open conversation',async()=>{
+ const f=await fixture();f.controller.newSession();
+ f.responses['skills.marketplace.preview']={...(f.responses['skills.marketplace.preview'] as object),sessionId:null};
+ render(<SkillsPage controller={f.controller}/>);
+ await waitFor(()=>expect((screen.getByRole('button',{name:'Marketplace'}) as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'Marketplace'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'Search marketplace'}),{target:{value:'demo'}});
+ await waitFor(()=>expect((screen.getByRole('button',{name:'Search'}) as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByRole('button',{name:'Search'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Review demo'}));
+ await screen.findByText('Reviewed instructions');
+ expect(f.calls.find(call=>call.method==='skills.marketplace.preview')?.params).toEqual({source:'owner/repo',skill:'demo'});
+ fireEvent.click(screen.getByRole('button',{name:'Install reviewed skill'}));
+ await waitFor(()=>expect(f.calls.find(call=>call.method==='skills.marketplace.install')?.params).toEqual({reviewId:'review-a',digest:'exact-digest',confirmed:true}));
+ expect(f.calls.some(call=>call.method==='prompt.submit'||call.method==='session.create')).toBe(false);
 });
 
 it('never connects a server until the exact launch review is confirmed',async()=>{

@@ -6,7 +6,8 @@ import type { DesktopBridge } from "../../src/bridge/types.ts";
 import type {AgentMessage} from '@machina/contracts/rpc';
 import {RPC_METHODS} from '@machina/contracts/rpc-methods';
 
-let emit: (event: Record<string, unknown>) => void = () => {};
+const listeners=new Set<(event:Record<string,unknown>)=>void>();
+const emit=(event:Record<string,unknown>)=>{for(const listener of listeners)listener(event)};
 const source = `from dataclasses import dataclass\nfrom pathlib import Path\n\n\n@dataclass(frozen=True)\nclass Workspace:\n    root: Path\n    trusted: bool = False\n\n    def files(self) -> list[Path]:\n        \"\"\"Return the Python files in this workspace.\"\"\"\n        return sorted(self.root.rglob("*.py"))\n\n\ndef open_workspace(path: str) -> Workspace:\n    root = Path(path).resolve()\n    if not root.is_dir():\n        raise ValueError("Choose an existing directory")\n    return Workspace(root=root)\n`;
 let jobStatus = "running";
 let foreground = true;
@@ -22,8 +23,16 @@ let trackedOperation:Record<string,unknown>|undefined;
 let trackedCompletion=0;
 const bridge: DesktopBridge = {
   async start() {},
-  subscribe(listener) { emit = listener; return () => {}; },
+  subscribe(listener) { listeners.add(listener); return () => {listeners.delete(listener)}; },
   async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if(method==='mcp.catalog')return {entries:[
+      {id:'gmail',displayName:'Gmail',kind:'connector',category:'Productivity',provider:'Google',description:'Search and read email through the official MCP server.',docsUrl:'https://developers.google.com/workspace/mcp',setup:{type:'oauth',instructions:['Requires Google Workspace Developer Preview access and a registered OAuth client.']},config:{id:'gmail',display_name:'Gmail',transport:'streamable_http',endpoint:'https://gmailmcp.googleapis.com/mcp/v1',oauth:{client_mode:'auto',scope_allowlist:['https://www.googleapis.com/auth/gmail.readonly']}}},
+      {id:'firecrawl-selfhosted',displayName:'Firecrawl · self-hosted',kind:'connector',category:'Web',provider:'Firecrawl',description:'Connect your local MCP bridge to your self-hosted Firecrawl service.',docsUrl:'https://github.com/firecrawl/firecrawl-mcp-server',setup:{type:'local_endpoint',instructions:['Use the MCP bridge endpoint, not the Firecrawl REST API URL. No cloud fallback.']},config:{id:'firecrawl-selfhosted',display_name:'Firecrawl · self-hosted',transport:'streamable_http',endpoint:'http://127.0.0.1:3000/mcp',local_access:true}},
+      {id:'machina',displayName:'Machina',kind:'harness',category:'Harnesses',provider:'Machina',description:'Expose Machina to another harness.',docsUrl:'https://github.com/kiazh/machina',setup:{type:'harness',instructions:['Register Machina in the other harness.']},config:null,runtime:{command:'python',argv:['-m','machina.mcp_server']}}
+    ]} as T;
+    if(method==='mcp.list')return {servers:[]} as T;
+    if(method==='interop.list')return {harnesses:[],runTimeoutSeconds:600} as T;
+    if(method==='interop.communications')return {events:params.cursor?[]:[{id:'1',correlationId:'fixture-exchange',direction:'incoming',phase:'request',transport:'mcp',method:'machina_status',harness:'Synthetic harness',sessionId:null,status:'running',summary:'Inspect workspace status',payload:'{"request":"status"}',truncated:false,createdAt:'2026-11-03T00:00:00Z',elapsedMs:null},{id:'2',correlationId:'fixture-exchange',direction:'outgoing',phase:'response',transport:'mcp',method:'machina_status',harness:'Synthetic harness',sessionId:null,status:'completed',summary:'Workspace ready',payload:'{"ok":true}',truncated:false,createdAt:'2026-11-03T00:00:01Z',elapsedMs:42}],nextCursor:'2',hasMore:false,retention:{maxEvents:1000,maxBytes:4194304,payloadMaxChars:12000}} as T;
     if(method.startsWith('skills.marketplace.')){
       const target=window as unknown as {fixtureMarketplaceCalls?:{method:string;params:Record<string,unknown>}[]};(target.fixtureMarketplaceCalls??=[]).push({method,params});
       if(method==='skills.marketplace.discover')return {featured:catalogSkills.slice(0,3),sections:[{market:'skills.sh',title:'Popular on skills.sh',description:'Ranked by installations',skills:catalogSkills.filter(row=>row.markets[0]==='skills.sh')},{market:'skillsmp',title:'Development on SkillsMP',description:'Development skills, sorted by repository stars',skills:catalogSkills.filter(row=>row.markets[0]==='skillsmp')}],markets:catalogSources} as T;

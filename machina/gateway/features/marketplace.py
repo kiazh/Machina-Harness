@@ -195,8 +195,8 @@ async def skills_marketplace_preview(gw: Gateway, params: dict[str, Any]) -> dic
     gw.require_db()
     source = _source(_str(params, "source", max_len=201))
     requested = _str(params, "skill", max_len=200)
-    _str(params, "sessionId", max_len=64)
-    session = await gw.get_session(params)
+    session_id = _str(params, "sessionId", required=False, max_len=64)
+    session = await gw.get_session(params) if session_id else None
     reviews = _reviews(gw)
     if len(reviews) >= _MAX_REVIEWS:
         # Evict the oldest review, with a clear expiry error if revisited.
@@ -212,8 +212,8 @@ async def skills_marketplace_preview(gw: Gateway, params: dict[str, Any]) -> dic
         raise RpcError(OPERATION_FAILED, message) from None
     review_id = str(uuid.uuid4())
     reviews[review_id] = {
-        "session": str(session.id),
-        "agent": session.agent_id,
+        "session": str(session.id) if session else None,
+        "agent": session.agent_id if session else None,
         "digest": summary["digest"],
         "staged": staged,
         "expires": time.monotonic() + _REVIEW_TTL,
@@ -221,6 +221,7 @@ async def skills_marketplace_preview(gw: Gateway, params: dict[str, Any]) -> dic
     return {
         **summary,
         "reviewId": review_id,
+        "sessionId": str(session.id) if session else None,
         "expiresInSeconds": _REVIEW_TTL,
         "scope": "installation",
         "provider": "skills.sh",
@@ -262,16 +263,23 @@ async def _activate(gw: Gateway, digest: str, staged: Path) -> dict[str, Any]:
 
 async def skills_marketplace_install(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     gw.require_db()
-    _str(params, "sessionId", max_len=64)
-    session = await gw.get_session(params)
     review_id = _str(params, "reviewId", max_len=64)
     digest = _str(params, "digest", max_len=64)
     reviews = _reviews(gw)
     review = reviews.get(review_id)
     if review is None:
         raise RpcError(NOT_FOUND, "Skill review expired or was already installed. Review it again.")
-    if review["session"] != str(session.id) or review["agent"] != session.agent_id:
-        raise RpcError(UNAUTHORIZED, "Skill review belongs to another conversation or agent")
+    session_id = _str(params, "sessionId", required=False, max_len=64)
+    if review["session"] is not None:
+        if not session_id:
+            raise RpcError(UNAUTHORIZED, "Skill review belongs to another conversation or agent")
+        session = await gw.get_session(params)
+        if review["session"] != str(session.id) or review["agent"] != session.agent_id:
+            raise RpcError(UNAUTHORIZED, "Skill review belongs to another conversation or agent")
+    elif session_id:
+        raise RpcError(UNAUTHORIZED, "Review this skill again in the current conversation")
+    # Installation reviews remain local to this authenticated Gateway instance.
+    # They neither manufacture a conversation nor transfer agent-owned consent.
     if params.get("confirmed") is not True or digest != review["digest"]:
         raise RpcError(
             INVALID_PARAMS, "Confirm the exact reviewed skill digest before installation"

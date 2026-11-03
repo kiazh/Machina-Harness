@@ -12,6 +12,7 @@ import { python } from "@codemirror/lang-python";
 import { completionSource, type IntelligenceRequest } from "./completion.ts";
 import {inlineCompletionGhost} from './ghost.ts';
 import { configureDocumentState, documentMetadataExtension } from './documentState.ts';
+import {liveDiagnostics,type DiagnosticsRequest} from './diagnostics.ts';
 const highlights = HighlightStyle.define([
   { tag: [tags.keyword, tags.operatorKeyword, tags.bool, tags.null], color: "var(--syntax-keyword)" },
   { tag: [tags.string, tags.regexp], color: "var(--syntax-string)" },
@@ -28,9 +29,10 @@ interface Props {
   onChange?: (id: string, update: ViewUpdate) => void;
   onSelection?: (id:string,state:EditorState)=>void;
   onCompletion?: IntelligenceRequest;
+  onDiagnostics?: DiagnosticsRequest;
 }
 
-export const CodeEditor = memo(function CodeEditor({ document, onReady, onChange, onCompletion,openIds,onSelection,navigation }: Props) {
+export const CodeEditor = memo(function CodeEditor({ document, onReady, onChange, onCompletion,onDiagnostics,openIds,onSelection,navigation }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const states = useRef(new Map<string, EditorState>());
@@ -38,8 +40,8 @@ export const CodeEditor = memo(function CodeEditor({ document, onReady, onChange
   const active = useRef(document.id);
   const language=useRef(new Compartment());
   const languageFor=(name:string)=>name.endsWith('.py')?[python()]:/\.[cm]?[jt]sx?$/.test(name)?[javascript({typescript:/\.tsx?$/.test(name),jsx:/\.[jt]sx$/.test(name)})]:[];
-  const callbacks = useRef({ onReady, onChange, onCompletion,onSelection });
-  callbacks.current = { onReady, onChange, onCompletion,onSelection };
+  const callbacks = useRef({ onReady, onChange, onCompletion,onDiagnostics,onSelection });
+  callbacks.current = { onReady, onChange, onCompletion,onDiagnostics,onSelection };
   function stateFor(doc: CodeDocument) {
     const changed=loaded.current.has(doc.id)&&loaded.current.get(doc.id)!==(doc.reloadToken??0);loaded.current.set(doc.id,doc.reloadToken??0);
     const existing = (changed?undefined:states.current.get(doc.id)) ?? doc.initialState;
@@ -51,6 +53,7 @@ export const CodeEditor = memo(function CodeEditor({ document, onReady, onChange
         indentOnInput(), bracketMatching(), autocompletion({ activateOnTypingDelay: 180, override: [completionSource(doc.id, (_id, state, position) => callbacks.current.onCompletion?.(active.current, state, position) ?? Promise.resolve(null))] }), highlightActiveLine(),
         highlightSelectionMatches(), documentMetadataExtension(doc),
         inlineCompletionGhost,
+        liveDiagnostics(doc.id,()=>callbacks.current.onDiagnostics),
         syntaxHighlighting(highlights),
         language.current.of(languageFor(doc.name)),
         keymap.of([{ key: "Tab", run: view => !view.composing && acceptCompletion(view) }, ...completionKeymap.filter(binding=>binding.run!==startCompletion), ...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -63,7 +66,10 @@ export const CodeEditor = memo(function CodeEditor({ document, onReady, onChange
           ".cm-lineNumbers .cm-gutterElement": { minWidth: "42px" },
           ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#b3a58f0b" },
           ".cm-cursor": { borderLeftColor: "var(--accent)" },
-          '.cm-inline-ghost':{color:'var(--muted)',opacity:'.5',pointerEvents:'none'},
+          '.cm-inline-ghost':{color:'var(--muted)',opacity:'.7',pointerEvents:'none'},
+          '.cm-tooltip':{backgroundColor:'var(--canvas)',color:'var(--ink)',border:'1px solid var(--line)',borderRadius:'4px'},
+          '.cm-tooltip-lint':{maxWidth:'min(60ch, 70vw)',fontFamily:'var(--ui-font)'},
+          '.cm-diagnostic':{padding:'8px 12px',lineHeight:'1.6',whiteSpace:'pre-wrap'},
           "&.cm-focused": { outline: "none" },
           "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "var(--hover)" },
         }),

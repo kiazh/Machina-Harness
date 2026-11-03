@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn real_python_language_completion_against_unsaved_mirror() {
+    fn real_python_language_completion_and_diagnostics_against_unsaved_mirror() {
         if std::env::var_os("MACHINA_DESKTOP_LSP_SMOKE").is_none() { return; }
         let engine = EngineSession::start(1, Arc::new(|_| {})).unwrap();
         let initialized = engine.request("initialize", json!({"protocolVersion":2})).unwrap();
@@ -162,6 +162,19 @@ mod tests {
             let result = engine.request("workspace.intelligence", request).unwrap();
             if result.pointer("/result/items").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item["label"] == "Path")) { break; }
             assert!(std::time::Instant::now() < deadline, "Python completion unavailable: state={}, freshness={}", result["state"], result["freshness"]);
+            std::thread::sleep(Duration::from_millis(150));
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let mut request = binding.clone(); request["operation"] = json!("diagnostics"); request["version"] = json!(0);
+            let result = engine.request("workspace.intelligence", request).unwrap();
+            let errors = result.pointer("/result/diagnostics").and_then(Value::as_array);
+            if result["freshness"] == "versioned" && errors.is_some_and(|rows| rows.iter().any(|row| row["severity"] == 1)) {
+                assert_eq!(result["documentVersion"], 0);
+                assert_eq!(result["source"], "editor-buffer");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "Python diagnostics unavailable: state={}, freshness={}", result["state"], result["freshness"]);
             std::thread::sleep(Duration::from_millis(150));
         }
         engine.stop();

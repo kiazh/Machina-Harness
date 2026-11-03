@@ -16,8 +16,8 @@ function Metrics({skill}:{skill:MarketplaceSkill}){
 function SkillRow({skill,rank,busy,canReview,onReview}:{skill:MarketplaceSkill;rank?:number;busy:boolean;canReview:boolean;onReview:(skill:MarketplaceSkill)=>void}){
  return <article className="marketplace-skill">
   {rank!==undefined&&<span className="marketplace-rank" aria-hidden="true">{String(rank).padStart(2,'0')}</span>}
-  <div className="marketplace-skill-copy"><h3>{skill.name}</h3><p title={skill.source}>{skill.source}</p>{skill.description&&<p className="marketplace-description">{skill.description}</p>}<Metrics skill={skill}/></div>
-  <button className="marketplace-review" disabled={busy||!canReview} aria-label={`Review ${skill.name}`} title={canReview?'Read the exact files before installing':'Open a conversation to review and install'} onClick={()=>onReview(skill)}><span>Review</span><ArrowUpRight size={13}/></button>
+  <div className="marketplace-skill-copy"><h3><button className="marketplace-title" disabled={busy} onClick={()=>onReview(skill)}>{skill.name}</button></h3><p title={skill.source}>{skill.source}</p>{skill.description&&<p className="marketplace-description">{skill.description}</p>}<Metrics skill={skill}/></div>
+  <button className="marketplace-review" disabled={busy||!canReview} aria-label={`Review ${skill.name}`} title={canReview?'Read the exact files before installing':'Connect the local engine to review'} onClick={()=>onReview(skill)}><span>Review</span><ArrowUpRight size={13}/></button>
  </article>;
 }
 
@@ -44,9 +44,9 @@ export function Marketplace({controller,busy,onReview}:{controller:DesktopContro
  const filtered=results?.skills.filter(allowed);
  const unavailable=markets.filter(market=>market.status==='unavailable');
  const allUnavailable=markets.length>0&&unavailable.length===markets.length;
- const renderSkill=(skill:MarketplaceSkill,rank?:number)=><SkillRow key={skill.id} skill={skill} rank={rank} busy={busy} canReview={!!state.session} onReview={onReview}/>;
+ const renderSkill=(skill:MarketplaceSkill,rank?:number)=><SkillRow key={skill.id} skill={skill} rank={rank} busy={busy} canReview={state.connection==='ready'} onReview={onReview}/>;
  return <section className="marketplace" aria-label="Skills marketplace">
-  <div className="marketplace-heading"><div><h1>Discover skills</h1><p>Browse workflows from skills.sh and SkillsMP.</p></div><button className="marketplace-refresh" aria-label="Refresh skill catalogs" disabled={loading} onClick={()=>{setQuery('');setRevision(value=>value+1)}}><RefreshCw size={14}/></button></div>
+  <div className="marketplace-heading"><div><h1>Discover skills</h1><p>Browse workflows from skills.sh by Vercel and SkillsMP.</p></div><button className="marketplace-refresh" aria-label="Refresh skill catalogs" disabled={loading} onClick={()=>{setQuery('');setRevision(value=>value+1)}}><RefreshCw size={14}/></button></div>
   <form className="marketplace-search" onSubmit={event=>{event.preventDefault();void search()}}>
    <label className="marketplace-search-input"><Search size={16}/><input aria-label="Search marketplace" placeholder="Search skills for the work you do…" value={query} onChange={event=>setQuery(event.target.value)} maxLength={200}/>{query&&<button type="button" aria-label="Clear marketplace search" disabled={loading} onClick={()=>{setQuery('');setResults(undefined)}}><X size={13}/></button>}</label>
    <Select aria-label="Skill catalog" disabled={loading} value={source} onChange={event=>{setSource(event.target.value);if(results)void search(results.query,event.target.value)}}><option value="all">All catalogs</option><option value="skills.sh">skills.sh</option><option value="skillsmp">SkillsMP</option></Select>
@@ -60,10 +60,9 @@ export function Marketplace({controller,busy,onReview}:{controller:DesktopContro
   {!!unavailable.length&&<div className="marketplace-source-error" role="status">{unavailable.map(market=><p key={market.id}>{market.error||`${market.name} is unavailable.`}</p>)}{!allUnavailable&&<span>Showing the available catalog.</span>}<button disabled={loading} onClick={()=>setRevision(value=>value+1)}>Retry catalogs</button></div>}
   {!loading&&results&&<div className="marketplace-search-results">{filtered?.map(skill=>renderSkill(skill))}{!filtered?.length&&!allUnavailable&&!error&&<p className="catalog-empty">No matching skills. Try another topic or catalog.</p>}</div>}
   {!loading&&!results&&discovery&&<>
-   {!!discovery.featured.filter(allowed).length&&<section className="marketplace-featured" aria-label="Featured skills"><div className="marketplace-section-heading"><h2>Featured skills</h2><span>Selected for everyday development</span></div><div>{discovery.featured.filter(allowed).map(skill=><article key={skill.id}><small>{(skill.markets??['skills.sh']).map(label).join(' · ')}</small><h3>{skill.name}</h3><p>{skill.description}</p><div><Metrics skill={skill}/><button disabled={busy||!state.session} aria-label={`Review featured ${skill.name}`} onClick={()=>onReview(skill)}>Read skill <ArrowUpRight size={12}/></button></div></article>)}</div></section>}
+   {!!discovery.featured.filter(allowed).length&&<section className="marketplace-featured" aria-label="Featured skills"><div className="marketplace-section-heading"><h2>Featured skills</h2><span>Selected for everyday development</span></div><div>{discovery.featured.filter(allowed).map(skill=><article key={skill.id}><small>{(skill.markets??['skills.sh']).map(label).join(' · ')}</small><h3><button className="marketplace-title" disabled={busy} onClick={()=>onReview(skill)}>{skill.name}</button></h3><p>{skill.description}</p><div><Metrics skill={skill}/><button disabled={busy||state.connection!=='ready'} aria-label={`Review featured ${skill.name}`} onClick={()=>onReview(skill)}>Read skill <ArrowUpRight size={12}/></button></div></article>)}</div></section>}
    <div className="marketplace-catalogs">{discovery.sections.filter(section=>source==='all'||section.market===source).map(section=><section key={section.market} aria-label={section.title}><div className="marketplace-section-heading"><div><h2>{section.title}</h2><p>{section.description}</p></div><span>{label(section.market)}</span></div>{section.skills.map((skill,index)=>renderSkill(skill,index+1))}{!section.skills.length&&!unavailable.some(row=>row.id===section.market)&&<p className="catalog-empty">No listings returned from this catalog.</p>}</section>)}</div>
   </>}
-  {!state.session&&<p className="marketplace-footnote">Open a conversation to review and install skills.</p>}
   <p className="marketplace-footnote">Popularity is reported by each catalog. Installs and repository stars measure different things. You review the files before installation.</p>
  </section>;
 }

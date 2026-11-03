@@ -3,6 +3,7 @@ import { Activity, ArrowUpRight, Files, MessageSquare, Plus, Search, Settings2, 
 import type { DesktopController } from "../state/controller.ts";
 import { Explorer } from "../features/explorer/Explorer.tsx";
 import { AppearanceStore, PRESETS, type Preset } from "../state/appearance.ts";
+import './sidebar-layout.css';
 
 export function Sidebar({ controller, onSettings, onCode, appearance }: { controller: DesktopController; onSettings: () => void; onCode:()=>void; appearance: AppearanceStore }) {
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);

@@ -96,14 +96,20 @@ export class DocumentSync {
   version(id: string): number | null { return this.buffers.get(id)?.remoteVersion ?? null; }
   async close(id:string):Promise<void>{const buffer=this.buffers.get(id);if(!buffer)return;clearTimeout(buffer.timer);if(buffer.flushing)await buffer.flushing;const result=await this.gateway.documentClose(id);if('refused' in result)throw new Error(result.refused.message);this.buffers.delete(id)}
   async completion(id: string, state: EditorState, position: LspPosition): Promise<unknown | null> {
+    return this.intelligence('completion',id,state,position);
+  }
+  async diagnostics(id:string,state:EditorState,signal?:AbortSignal):Promise<unknown|null>{
+    return this.intelligence('diagnostics',id,state,undefined,signal);
+  }
+  private async intelligence(operation:'completion'|'diagnostics',id:string,state:EditorState,position?:LspPosition,signal?:AbortSignal):Promise<unknown|null>{
     const buffer = this.buffers.get(id);
     const workspace = this.gateway.identity();
-    if (!buffer || !workspace || buffer.state?.doc !== state.doc) return null;
+    if (signal?.aborted || !buffer || !workspace || buffer.state?.doc !== state.doc) return null;
     await this.flush(id);
-    if (buffer.state?.doc !== state.doc || this.gateway.identity() !== workspace) return null;
+    if (signal?.aborted || buffer.state?.doc !== state.doc || this.gateway.identity() !== workspace) return null;
     const version = buffer.remoteVersion;
-    const result = await this.gateway.intelligence("completion", id, version, position);
-    if ("refused" in result || buffer.state?.doc !== state.doc || this.gateway.identity() !== workspace || result.workspaceId !== workspace.workspaceId || result.workspaceEpoch !== workspace.epoch || result.documentVersion !== version || result.state !== "ready" || result.freshness !== "versioned") return null;
+    const result = await this.gateway.intelligence(operation, id, version, position);
+    if (signal?.aborted || "refused" in result || this.buffers.get(id)!==buffer || buffer.state?.doc !== state.doc || this.gateway.identity() !== workspace || result.workspaceId !== workspace.workspaceId || result.workspaceEpoch !== workspace.epoch || result.documentVersion !== version || result.state !== "ready" || result.freshness !== "versioned") return null;
     return result.result;
   }
 }

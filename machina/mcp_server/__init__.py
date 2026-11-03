@@ -979,9 +979,84 @@ async def machina_delegate_many(
 # ---------------------------------------------------------------------------
 
 
+class _CommunicationsMCPServer(MCPServer):
+    """Observe the tool boundary once, including validation and cancellation."""
+
+    async def _handle_call_tool(self, ctx: Any, params: Any) -> Any:
+        from machina.core.harness_communications import (
+            async_finish_exchange,
+            async_start_exchange,
+            canonical_session,
+        )
+
+        # The initialized peer name is the only source of client identity.
+        # Do not infer a harness from process names, arguments, or a session.
+        client = getattr(getattr(ctx.session, "client_params", None), "client_info", None)
+        name = getattr(client, "name", None)
+        harness = name if isinstance(name, str) and name.strip() else None
+        arguments = params.arguments or {}
+        session_id = canonical_session(
+            arguments.get("session_id") or arguments.get("parent_session_id")
+        )
+        exchange = await async_start_exchange(
+            method=params.name,
+            transport="mcp",
+            direction="incoming",
+            payload=arguments,
+            harness=harness,
+            session_id=session_id,
+        )
+        try:
+            result = await super()._handle_call_tool(ctx, params)
+        except asyncio.CancelledError:
+            await async_finish_exchange(
+                exchange,
+                method=params.name,
+                transport="mcp",
+                direction="outgoing",
+                payload={"status": "cancelled"},
+                status="cancelled",
+                harness=harness,
+                session_id=session_id,
+            )
+            raise
+        except Exception as exc:
+            await async_finish_exchange(
+                exchange,
+                method=params.name,
+                transport="mcp",
+                direction="outgoing",
+                payload={"error": str(exc)},
+                status="failed",
+                harness=harness,
+                session_id=session_id,
+            )
+            raise
+        # Save only the public textual result; no transport metadata, headers,
+        # signed blocks, or context can reach the local transcript.
+        payload = {
+            "content": [
+                {"type": "text", "text": block.text}
+                for block in getattr(result, "content", [])
+                if getattr(block, "type", None) == "text"
+            ],
+            "isError": bool(getattr(result, "is_error", False)),
+        }
+        await async_finish_exchange(
+            exchange,
+            method=params.name,
+            transport="mcp",
+            direction="outgoing",
+            payload=payload,
+            harness=harness,
+            session_id=session_id,
+        )
+        return result
+
+
 def build_server() -> MCPServer:
     """Assemble the stdio server: status, chat, sessions, and subagents."""
-    server = MCPServer(
+    server = _CommunicationsMCPServer(
         name="machina",
         title="Machina",
         description=(

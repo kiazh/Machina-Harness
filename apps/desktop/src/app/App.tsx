@@ -77,6 +77,18 @@ export function App({ controller }: { controller: DesktopController }) {
   const change = useCallback((id: string, update: Parameters<DesktopController["changed"]>[1]) => controller.changed(id, update), [controller]);
   const selection=useCallback((id:string,state:import("@codemirror/state").EditorState)=>controller.bindEditor(id,state),[controller]);
   const complete = useCallback<import("../features/editor/completion.ts").IntelligenceRequest>((id, state, position) => controller.documents.completion(id, state, position).catch(() => null), [controller]);
+  const diagnostics=useCallback<import('../features/editor/diagnostics.ts').DiagnosticsRequest>((id,state,signal)=>controller.documents.diagnostics(id,state,signal),[controller]);
+  useEffect(()=>{
+    if(!editorMounted||!editor)return;
+    let active=true;
+    const unsubscribe=controller.bridge.subscribe(event=>{
+      if(event.type!=='workspace.diagnostics')return;
+      const workspace=controller.workspace.identity();
+      if(!workspace||event.workspaceId!==workspace.workspaceId||event.epoch!==workspace.epoch||event.uri!==controller.snapshot().activeId)return;
+      void import('../features/editor/diagnostics.ts').then(module=>{if(active&&editorView.current)editorView.current.dispatch({effects:module.refreshDiagnostics.of(null)})});
+    });
+    return()=>{active=false;unsubscribe()};
+  },[controller,editorMounted,editor]);
   useEffect(() => {
     if (previousFocus.current !== state.editorFocus) { previousFocus.current = state.editorFocus; controller.navigate('chat');setEditor(true); }
   }, [state.editorFocus]);
@@ -138,7 +150,7 @@ export function App({ controller }: { controller: DesktopController }) {
       {state.page!=='chat'&&<FeaturePage controller={controller}/>}
       <section className="editor-panel" aria-label="Code workspace" aria-hidden={!editor} inert={!editor}>{editor&&<PaneResize side={arrangement.editorSide} width={editorWidth} onChange={resizeEditor}/>}<div className="editor-toolbar"><DocumentTabs documents={state.documents} activeId={state.activeId} dirty={state.dirty} onSelect={id=>controller.selectDocument(id)} onClose={id=>{if(state.dirty.has(id)){setClosingTab(id);closeTab.current?.showModal()}else void controller.closeDocument(id).catch(error=>controller.fail(error))}}/><div className="editor-actions"><button className="icon-button" aria-label="Find a project file" title={`Find a file · ${formatShortcut(bindings.quickOpen)}`} onClick={()=>quickOpen.current?.showModal()}>⌕</button><button className="icon-button" title="New untitled file" aria-label="New untitled file" onClick={() => controller.newDocument()}><FilePlus2 size={16}/></button><button className="icon-button" title={`Save file · ${formatShortcut(bindings.save)}`} aria-label="Save file" disabled={!!active.uri&&!state.dirty.has(active.id)} onClick={() => {if(!active.uri)saveAs.current?.showModal();else void controller.save().catch(error => controller.fail(error));}}><Save size={15}/></button><button className="icon-button" aria-label="Hide code editor" onClick={() => setEditor(false)}><X size={15}/></button></div></div>
         <div className="file-breadcrumb"><span>{active.uri ? decodeURIComponent(new URL(active.uri).pathname).replace(state.workspace?.resolvedRoot?.replaceAll("\\", "/") ?? "", "").replace(/^\//, "") : "Untitled buffer"}</span><span>{active.externalRevision?'Changed on disk · ':''}{active.languageId ?? "Python"}{active.uri&&<button disabled={reloading} onClick={()=>{if(state.dirty.has(active.id))reloadFile.current?.showModal();else void controller.reloadDocument(active.id).catch(reason=>controller.fail(reason))}}>Reload</button>}</span></div>
-        {editorMounted && <Suspense fallback={<div className="code-editor" role="status">Opening editor…</div>}><CodeEditor navigation={state.editorNavigation} openIds={openIds} document={active} onReady={ready} onChange={change} onSelection={selection} onCompletion={complete}/></Suspense>}
+        {editorMounted && <Suspense fallback={<div className="code-editor" role="status">Opening editor…</div>}><CodeEditor navigation={state.editorNavigation} openIds={openIds} document={active} onReady={ready} onChange={change} onSelection={selection} onCompletion={complete} onDiagnostics={diagnostics}/></Suspense>}
         <footer className="editor-status"><span>{state.dirty.has(active.id) ? "Unsaved changes" : active.uri ? "Saved" : "Untitled"}</span><span>UTF-8 <i>·</i> {active.lineEnding ?? "LF"}</span></footer>
 
       </section>

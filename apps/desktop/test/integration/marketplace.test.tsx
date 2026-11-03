@@ -24,7 +24,7 @@ it('loads featured and popular skills from both catalogs before a query is enter
  expect(screen.getByRole('region',{name:'Development on SkillsMP'}).textContent).toContain('GitHub stars');
  expect(f.calls.filter(call=>call.method==='skills.marketplace.discover')).toHaveLength(1);
  expect(f.calls.some(call=>call.method==='skills.marketplace.search')).toBe(false);
- expect((screen.getByRole('button',{name:'Review Testing changes'}) as HTMLButtonElement).disabled).toBe(true);
+ expect((screen.getByRole('button',{name:'Review Testing changes'}) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('searches on submit and reruns the query when the catalog filter changes',async()=>{
@@ -54,4 +54,10 @@ it('does not install a late search reply into a new conversation scope',async()=
  await act(async()=>finish({query:'old',skills:[{...testing,name:'Old result'}],markets:sources}));
  expect(screen.queryByText('Old result')).toBeNull();
  expect(screen.getByRole('region',{name:'Featured skills'})).toBeTruthy();f.controller.dispose();
+});
+
+it('opens a skill review by its title without manufacturing a conversation',async()=>{
+ const f=await fixture();let chosen='';render(<Marketplace controller={f.controller} busy={false} onReview={skill=>{chosen=skill.id}}/>);
+ await screen.findByRole('region',{name:'Featured skills'});fireEvent.click(screen.getByRole('button',{name:'Testing changes'}));
+ expect(chosen).toBe(testing.id);expect(f.calls.some(call=>call.method==='session.create'||call.method==='prompt.submit')).toBe(false);
 });

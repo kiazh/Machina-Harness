@@ -27,8 +27,19 @@ async function setup(text = "one 😀\nlast\n") {
     sync.changed(document.id, { state: transaction.state, startState: state, changes: transaction.changes } as ViewUpdate);
     state = transaction.state;
   };
-  return { sync, document, request, edit };
+  return { sync, document, request, edit, getState:()=>state };
 }
+
+it('accepts only diagnostics for the captured buffer version and rejects stale or cancelled replies',async()=>{
+ const f=await setup('name');
+ let finish!:(value:unknown)=>void;
+ f.request.mockImplementation(async<T>(method:string)=>method==='workspace.intelligence'?await new Promise<unknown>(resolve=>{finish=resolve}) as T:{acceptedVersion:0} as T);
+ const fresh={workspaceId:'w',workspaceEpoch:1,documentVersion:0,state:'ready',freshness:'versioned',result:{diagnostics:[]}};
+ let pending=f.sync.diagnostics(f.document.id,f.getState());await vi.advanceTimersByTimeAsync(0);finish(fresh);expect(await pending).toEqual({diagnostics:[]});
+ pending=f.sync.diagnostics(f.document.id,f.getState());await vi.advanceTimersByTimeAsync(0);finish({...fresh,documentVersion:99});expect(await pending).toBeNull();
+ const abort=new AbortController();pending=f.sync.diagnostics(f.document.id,f.getState(),abort.signal);await vi.advanceTimersByTimeAsync(0);abort.abort();finish(fresh);expect(await pending).toBeNull();
+ pending=f.sync.diagnostics(f.document.id,f.getState());await vi.advanceTimersByTimeAsync(0);f.edit({changes:{from:4,insert:'_new'}});finish(fresh);expect(await pending).toBeNull();
+});
 
 it("flushes descending UTF-16 edits before saving the captured buffer", async () => {
   const f = await setup();

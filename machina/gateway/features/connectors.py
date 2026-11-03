@@ -1,4 +1,4 @@
-"""Read-only inspection of this harness runtime's configured MCP servers."""
+"""MCP starter catalog and management of this runtime's configured servers."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ from machina.gateway.features._common import _str
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
+
+
+async def mcp_catalog(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """List built-in non-secret setup options without changing installation state."""
+    from machina.connectors.catalog import connector_catalog
+
+    return {"entries": connector_catalog()}
 
 
 async def mcp_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
