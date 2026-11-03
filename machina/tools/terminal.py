@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -256,8 +257,46 @@ def _run_bounded(
 
 
 @registry.register(
+    name="terminal_job",
+    description="Inspect, wait for, or stop a background command in this session. Use list to list jobs; status for latest output; wait to yield up to wait_seconds (the command keeps running); stop to terminate it. Continue independent work instead of busy polling. Verify exit status before reporting success.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "job_id": {"type": "string"},
+            "action": {"type": "string", "enum": ["list", "status", "wait", "stop"]},
+            "wait_seconds": {"type": "integer", "minimum": 1, "maximum": 10},
+        },
+        "required": ["action"],
+    },
+)
+async def terminal_job(action: str = "list", job_id: str = "", wait_seconds: int = 1) -> str:
+    from machina.core.shell_jobs import shell_jobs
+    from machina.tools.agents import current_session_id
+
+    session_id = current_session_id.get()
+    if session_id is None:
+        raise ValidationError("background commands require a session")
+    if action == "list":
+        return json.dumps(shell_jobs.list(session_id))
+    try:
+        if action == "stop":
+            job = await shell_jobs.stop(session_id, job_id)
+        elif action in {"status", "wait"}:
+            job = shell_jobs.get(session_id, job_id)
+            if action == "wait":
+                if not isinstance(wait_seconds, int) or not 1 <= wait_seconds <= 10:
+                    raise ValidationError("wait_seconds must be between 1 and 10")
+                await asyncio.wait({job.task}, timeout=wait_seconds)
+        else:
+            raise ValidationError("action must be list, status, wait, or stop")
+        return json.dumps(job.snapshot(include_output=True))
+    except KeyError as error:
+        raise ValidationError("background command not found in this session") from error
+
+
+@registry.register(
     name="terminal",
-    description="Execute a shell command and return stdout/stderr. Use for git, builds, tests, etc.",
+    description="Execute a shell command for git, builds, tests, etc. Set background=true for slow work: it returns a job ID immediately; use terminal_job to check output, verify exit status, or stop it.",
     parameters={
         "type": "object",
         "properties": {
@@ -267,12 +306,20 @@ def _run_bounded(
                 "description": "Timeout in seconds (default 60, max 300)",
             },
             "workdir": {"type": "string", "description": "Working directory for the command"},
+            "background": {
+                "type": "boolean",
+                "description": "Return a job handle while the command runs. No execution deadline; use terminal_job to inspect or stop it.",
+            },
         },
         "required": ["command"],
     },
 )
-async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
+async def terminal(
+    command: str, timeout: int = 60, workdir: str = ".", background: bool = False
+) -> str:
     """Execute a shell command securely (no shell injection)."""
+    if not isinstance(background, bool):
+        raise ValidationError("background must be a boolean")
     # Validate timeout
     if not isinstance(timeout, int) or timeout < 1 or timeout > 300:
         raise ValidationError(f"timeout must be an integer between 1 and 300, got {timeout}")
@@ -292,6 +339,14 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
         raise ValidationError("command differs from broker-authorized argv")
     if authorized and snapshot.get("shell_payload", "") != parsed.payload:
         raise ValidationError("command differs from broker-authorized shell payload")
+    if authorized and bool(snapshot.get("background", False)) != background:
+        raise ValidationError("background mode differs from the broker-authorized command")
+    if (
+        authorized
+        and "timeout" in snapshot
+        and snapshot["timeout"] != (0 if background else timeout)
+    ):
+        raise ValidationError("timeout differs from the broker-authorized command")
     if parsed.payload and not authorized:
         raise ValidationError("Shell syntax requires broker authorization")
     if _mode == "full" or authorized:
@@ -386,6 +441,40 @@ async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
             image,
             *args,
         ]
+
+    from machina.tools.agents import current_session_id
+
+    if background or current_session_id.get() is not None:
+        from machina.core.shell_jobs import shell_jobs
+
+        session_id = current_session_id.get()
+        if session_id is None:
+            raise ValidationError("background commands require a session")
+        job = await shell_jobs.start(
+            session_id,
+            args,
+            resolved_workdir,
+            _sanitized_env(),
+            command,
+            cleanup=(lambda: _stop_container(container_name)) if container_name else None,
+            foreground=not background,
+            timeout=None if background else timeout,
+        )
+        if background:
+            return json.dumps(job.snapshot())
+        result = await shell_jobs.wait_foreground(session_id, job.id)
+        if not result.get("foreground", True):
+            return json.dumps(result)
+        if result.get("timedOut"):
+            raise ToolError(f"Command timed out after {timeout}s")
+        output = result.get("output", "")
+        if result.get("truncated"):
+            output += "\n[output truncated]"
+        return CommandOutput(
+            output or f"(exit code {result['returncode']}, no output)",
+            returncode=result["returncode"],
+            truncated=result.get("truncated", False),
+        )
 
     # Execute off the event loop. Stop reading and kill prolific children before
     # their output can exhaust gateway memory. Re-resolve workdir just before

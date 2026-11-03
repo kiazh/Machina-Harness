@@ -141,6 +141,75 @@ ALTER TABLE context_archive ADD COLUMN IF NOT EXISTS token_count INT NOT NULL DE
 ALTER TABLE context_archive ADD COLUMN IF NOT EXISTS original_created_at TIMESTAMPTZ;
 ALTER TABLE context_archive ADD COLUMN IF NOT EXISTS search_text TEXT;
 
+-- Stable transcript/cursor position across live-to-archive moves, including
+-- old writers that do not pass the new fields. Known NULL timestamps differ
+-- from legacy archives whose original timestamp was never recorded. Keep the
+-- guarded, one-time backfill in sync with connection.py's runtime migration.
+DO $migration$
+DECLARE
+    order_columns_added BOOLEAN := false;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid = 'context_archive'::regclass
+          AND attname = 'original_event_seq' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE context_archive ADD COLUMN original_event_seq BIGINT;
+        order_columns_added := true;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid = 'context_archive'::regclass
+          AND attname = 'original_order_known' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE context_archive
+            ADD COLUMN original_order_known BOOLEAN NOT NULL DEFAULT false;
+        order_columns_added := true;
+    END IF;
+    IF order_columns_added THEN
+        UPDATE context_archive a
+        SET original_event_seq = c.event_seq,
+            original_created_at = c.created_at,
+            original_order_known = true
+        FROM context_chunks c
+        WHERE c.id = a.chunk_id AND c.session_id = a.session_id
+          AND NOT a.original_order_known
+          AND (a.original_created_at IS NULL
+               OR a.original_created_at IS NOT DISTINCT FROM c.created_at)
+          AND (a.original_event_seq IS NULL
+               OR a.original_event_seq IS NOT DISTINCT FROM c.event_seq);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgrelid = 'context_archive'::regclass
+          AND tgname = 'context_archive_preserve_order' AND NOT tgisinternal
+    ) THEN
+        CREATE OR REPLACE FUNCTION preserve_context_archive_order()
+        RETURNS trigger LANGUAGE plpgsql AS $function$
+        DECLARE
+            source_order RECORD;
+        BEGIN
+            IF NOT NEW.original_order_known THEN
+                SELECT event_seq, created_at INTO source_order
+                FROM context_chunks
+                WHERE id = NEW.chunk_id AND session_id = NEW.session_id;
+                IF FOUND
+                   AND (NEW.original_created_at IS NULL
+                        OR NEW.original_created_at IS NOT DISTINCT FROM source_order.created_at)
+                   AND (NEW.original_event_seq IS NULL
+                        OR NEW.original_event_seq IS NOT DISTINCT FROM source_order.event_seq) THEN
+                    NEW.original_event_seq := source_order.event_seq;
+                    NEW.original_created_at := source_order.created_at;
+                    NEW.original_order_known := true;
+                END IF;
+            END IF;
+            RETURN NEW;
+        END;
+        $function$;
+        CREATE TRIGGER context_archive_preserve_order
+            BEFORE INSERT ON context_archive
+            FOR EACH ROW EXECUTE FUNCTION preserve_context_archive_order();
+    END IF;
+END;
+$migration$;
+
 -- Older installations created this table without the session foreign key.
 -- Make migration idempotent: only delete if orphan rows exist, and log the count.
 DO $$

@@ -30,6 +30,7 @@ export { formatLspStatusLine, workspaceCommands } from "./workspace.ts";
 export type { WorkspaceHost } from "./types.ts";
 
 const appCommands: Command[] = [
+	{ name: "activity", description: "View queued steering, background commands, and agents", async run(_args, host) { await host.inspectActivity?.(); } },
 	{
 		name: "clear",
 		description: "Clear the terminal and start a new chat",

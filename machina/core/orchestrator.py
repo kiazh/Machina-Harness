@@ -432,7 +432,7 @@ class Orchestrator:
                     # Accounting failures must not swallow the parent's cancellation.
                     record_failure("orchestrator.delegate", accounting_error)
             if message_id is not None:
-                await self._delete_finished_child(child.id)
+                await self._delete_finished_child(child.id, parent_session_id)
             raise
         except Exception as e:
             if message_id is None and created_child:
@@ -447,7 +447,7 @@ class Orchestrator:
                 message_id, status="error", response=f"{type(e).__name__}: {detail}", tokens=tokens
             )
             if message_id is not None:
-                await self._delete_finished_child(child.id)
+                await self._delete_finished_child(child.id, parent_session_id)
             return DelegationResult(
                 agent_name, task, f"Error: {detail}", child.id, tokens, 0, "error"
             )
@@ -488,7 +488,7 @@ class Orchestrator:
                     record_failure("orchestrator.delegate", _boundary_error)
             # A child that never ran leaves no chat behind.
             if message_id is None:
-                await self._delete_finished_child(child.id)
+                await self._delete_finished_child(child.id, parent_session_id)
 
         tokens = await self._settle_child_tokens(
             message_id, child.id, agent_name, response.tokens_used
@@ -527,7 +527,7 @@ class Orchestrator:
                 token_count=get_token_count(final_content),
             )
         if status != "waiting_approval":
-            await self._delete_finished_child(child.id)
+            await self._delete_finished_child(child.id, parent_session_id)
         return DelegationResult(
             agent=agent_name,
             task=task,
@@ -539,9 +539,15 @@ class Orchestrator:
             needs_approval=pauses,
         )
 
-    async def _delete_finished_child(self, child_id: uuid.UUID) -> None:
+    async def _delete_finished_child(
+        self, child_id: uuid.UUID, parent_id: uuid.UUID | None = None
+    ) -> None:
         """Discard a completed child chat after its result and usage are recorded."""
         try:
+            if parent_id is not None:
+                from machina.core.shell_jobs import shell_jobs
+
+                shell_jobs.transfer(child_id, parent_id)
             await session_manager.delete(child_id)
         except Exception as error:
             record_failure("orchestrator.child_cleanup", error)

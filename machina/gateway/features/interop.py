@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
+from contextvars import ContextVar
 from dataclasses import asdict
+from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from machina.gateway.errors import INVALID_PARAMS, RpcError
@@ -41,6 +45,7 @@ from machina.interop import (
 )
 
 if TYPE_CHECKING:
+    from machina.core.models import Session
     from machina.gateway.server import Gateway
 
 #: Bounds for the ``interop.run`` payload (bounded output contract).
@@ -49,6 +54,7 @@ MAX_RUN_STDERR_CHARS = 8_000
 MAX_RUN_PROMPT_CHARS = 8_000
 MAX_RUN_TIMEOUT_SECONDS = 900.0
 DEFAULT_RUN_TIMEOUT_SECONDS = 300.0
+_operation_cancel: ContextVar[threading.Event | None] = ContextVar("interop_cancel", default=None)
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
 
@@ -72,7 +78,14 @@ def supported_runs() -> dict[str, str]:
     return module.supported_runs()
 
 
-def run_task(platform: str, prompt: str, *, timeout: float = DEFAULT_RUN_TIMEOUT_SECONDS) -> Any:
+def run_task(
+    platform: str,
+    prompt: str,
+    *,
+    timeout: float = DEFAULT_RUN_TIMEOUT_SECONDS,
+    cwd: Path | None = None,
+    cancel_event: threading.Event | None = None,
+) -> Any:
     """Delegate one prompt into *platform* (frozen H1 surface, bound lazily).
 
     Returns ``machina.interop``'s ``RunResult``; read field-by-field so a shape
@@ -80,7 +93,13 @@ def run_task(platform: str, prompt: str, *, timeout: float = DEFAULT_RUN_TIMEOUT
     """
     from machina import interop as module
 
-    return module.run_task(platform, prompt, timeout=timeout)
+    if cancel_event is not None:
+        return module.run_task(
+            platform, prompt, timeout=timeout, cwd=cwd, cancel_event=cancel_event
+        )
+    if cwd is None:
+        return module.run_task(platform, prompt, timeout=timeout)
+    return module.run_task(platform, prompt, timeout=timeout, cwd=cwd)
 
 
 def state_path() -> Any:
@@ -98,7 +117,25 @@ def _redact(text: str) -> str:
 
         return redact_secrets(text).text
     except Exception:
-        return text
+        return "[redaction unavailable]"
+
+
+def _workspace_cwd(session: Session) -> Path:
+    """Resolve explicit session authority; a missing pin never chooses another project."""
+    from machina.gateway.features.desktop_workspace import WORKSPACE_STATE_KEY
+
+    pinned = session.state.get(WORKSPACE_STATE_KEY)
+    if not isinstance(pinned, str) or not Path(pinned).is_absolute():
+        raise RpcError(INVALID_PARAMS, "Session workspace is invalid; select its folder again")
+    try:
+        root = Path(pinned).resolve(strict=True)
+        if not root.is_dir():
+            raise OSError("not a directory")
+    except (OSError, ValueError, RuntimeError):
+        raise RpcError(
+            INVALID_PARAMS, "Session workspace is unavailable; select its folder again"
+        ) from None
+    return root
 
 
 def _bounded(text: str, limit: int) -> str:
@@ -233,7 +270,32 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     spec = _platform(_str(params, "platform", max_len=32))
     prompt = _str(params, "prompt", max_len=MAX_RUN_PROMPT_CHARS)
     timeout = _run_timeout(params)
-    result = await asyncio.to_thread(run_task, spec.key, prompt, timeout=timeout)
+    options: dict[str, Any] = {"timeout": timeout}
+    if params.get("sessionId") is not None:
+        gw.require_db()
+        options["cwd"] = _workspace_cwd(await gw.get_session(params))
+    cancellation = _operation_cancel.get()
+    if cancellation is None:
+        result = await asyncio.to_thread(run_task, spec.key, prompt, **options)
+    else:
+        options["cancel_event"] = cancellation
+        # An executor Future is not a Task: the process entry point's blanket
+        # task retirement cannot cancel and detach this completion observer.
+        worker = asyncio.get_running_loop().run_in_executor(
+            None, partial(run_task, spec.key, prompt, **options)
+        )
+        interrupted = False
+        while True:
+            try:
+                result = await asyncio.shield(worker)
+                break
+            except asyncio.CancelledError:
+                interrupted = True
+                cancellation.set()
+                # Joining the actual worker preserves session ownership until
+                # kill-tree/pipe teardown finishes, including repeated shutdown.
+        if interrupted:
+            raise asyncio.CancelledError
     unsupported = getattr(result, "unsupported_reason", None)
     return {
         "ok": bool(getattr(result, "ok", False)),

@@ -72,7 +72,8 @@ def action_for_tool(name: str, args: dict) -> dict:
             "argv": parsed.argv,
             "shell_payload": parsed.payload,
             "cwd": str(args.get("workdir", ".")),
-            "timeout": timeout,
+            "timeout": 0 if args.get("background") is True else timeout,
+            "capabilities": ["background-process"] if args.get("background") is True else [],
         }
     if name in ("index_document",):
         return {"operation": "file.read", "targets": [str(args.get("path", ""))]}
@@ -102,7 +103,15 @@ def action_for_tool(name: str, args: dict) -> dict:
         }
     if name in ("skill_list", "skill_read", "skill_resource"):
         return {"operation": "skill.read", "targets": [str(args.get("skill_name", ""))]}
-    if name in ("session_recall", "session_recall_window", "list_agents", "harness_status"):
+    # Observing/stopping an already authorized session-owned process cannot
+    # launch new effects; terminal_job enforces session ownership itself.
+    if name in (
+        "session_recall",
+        "session_recall_window",
+        "list_agents",
+        "harness_status",
+        "terminal_job",
+    ):
         return {"operation": "context.read", "targets": []}
     # Unknown/extensible tools: declared mutating effects become approval
     # capabilities instead of silent in-process execution. Effect-free tools

@@ -27,6 +27,33 @@ async def mcp_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     return {"server": server}
 
 
+async def mcp_config(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """Return editable non-secret fields without losing argv/cwd on an edit.
+
+    The public summary intentionally omits these fields. Detailed inspection
+    is bound to a conversation and its connector owner, like OAuth management.
+    Environment and secret references contain names only; no secret store is read.
+    """
+    from dataclasses import asdict
+
+    from machina.gateway.errors import UNAUTHORIZED
+
+    connector_id = _str(params, "id", max_len=64)
+    _str(params, "sessionId", max_len=64)
+    session = await gw.get_session(params)
+    service = gw.runtime.get_connector_service()
+    await service.refresh()
+    config = service.registry.get(connector_id)
+    if config is None:
+        raise RpcError(NOT_FOUND, "MCP server not found")
+    if config.owner and config.owner != session.agent_id:
+        raise RpcError(UNAUTHORIZED, "MCP server belongs to another agent")
+    fields = asdict(config)
+    fields.pop("owner", None)
+    revision = fields.pop("revision", None)
+    return {"config": fields, "revision": revision, "scope": "installation"}
+
+
 async def mcp_configure(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """Human transport administration; config cannot grant owner authority."""
     from machina.connectors.models import ConfigError

@@ -213,6 +213,40 @@ jobs:
           npm run typecheck
           node --test test/keybindings.test.ts test/family.test.ts test/help-menu.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts
 
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Set up Python for contract verification
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install desktop dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify generated contracts
+        run: python tools/desktop/export_contracts.py --check
+      - name: Typecheck and test desktop and contracts
+        run: npm run desktop:check
+      - name: Build desktop frontend
+        run: npm run desktop:build
+      - name: Test native shell, transport and lifecycle
+        # These tests exercise the native PTY on each host. Provider/DB smoke
+        # tests require an explicitly configured engine and run separately.
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20

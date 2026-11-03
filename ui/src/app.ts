@@ -28,6 +28,7 @@ import { HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
+import { ActivityBar, ActivityStore, type SteeringItem, type ShellJob } from "./activity.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { ProblemsPane } from "./components/ProblemsPane.ts";
@@ -370,6 +371,12 @@ export class App implements FeatureHost {
 	/** Session ids of turns that are still in flight (prompt submitted, no message.complete yet). */
 	private readonly inFlight = new Set<string>();
 	private readonly delegatedRunning = new Set<string>();
+	private readonly activity = new ActivityStore();
+	private readonly activeTools = new Map<string, Map<string, string>>();
+	private readonly nextSteering = new Map<string, string[]>();
+	private readonly steeringBusy = new Set<string>();
+	private readonly steeringFlushing = new Set<string>();
+	private readonly interruptedSteering = new Set<string>();
 	private readonly delegatedText = new Map<string, string>();
 	/** Per-session turn binding, provisional pre-RPC state and retired IDs. */
 	private readonly turns = new Map<string, SessionTurn>();
@@ -554,6 +561,7 @@ export class App implements FeatureHost {
 			() => this.current?.id,
 			(sessionId) => { void this.family.open(sessionId); },
 		));
+		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -1240,6 +1248,189 @@ export class App implements FeatureHost {
 	/** Family rows, main first, with run/current state for menus. */
 	private familyRows(): FamilySession[] {
 		return this.family.rows();
+	}
+
+	private activitySummary(): string {
+		const session = this.current;
+		if (!session) return "";
+		const queued = this.activity.queue(session.id).length + (this.nextSteering.get(session.id)?.length ?? 0);
+		const jobs = this.activity.listJobs(session.id);
+		const running = jobs.filter((job) => job.status === "running" || job.status === "stopping").length;
+		const agents = this.familyRows().filter((row) => !row.main && row.running).length;
+		const tools = this.activeTools.get(session.id);
+		const currentTool = tools?.values().next().value;
+		const failed = jobs.filter((job) => job.status === "failed").length;
+		const stopped = jobs.filter((job) => job.status === "stopped").length;
+		const finished = jobs.filter((job) => job.status === "exited").length;
+		const shell = [running ? `${running} shell running` : "", failed ? `${failed} failed` : "", finished ? `${finished} finished` : "", stopped ? `${stopped} stopped` : ""].filter(Boolean).join(" · ");
+		return [currentTool ? `${currentTool}${tools && tools.size > 1 ? ` +${tools.size - 1}` : ""}` : "", queued ? `${queued} queued` : "", shell, agents ? `${agents} agents working` : ""].filter(Boolean).join("  ·  ");
+	}
+
+	private commandActions(): { label: string; run: () => void }[] {
+		const sessionId = this.current?.id;
+		if (!sessionId) return [];
+		const jobs = this.activity.listJobs(sessionId);
+		const job = jobs.find(job => job.status === "running" && job.foreground) ?? jobs.find(job => job.status === "running") ?? jobs.at(-1);
+		if (!job) return [];
+		const run = (action: "background" | "stop" | "output") => { void this.commandAction(sessionId, job.id, action); };
+		return [
+			...(job.status === "running" && job.foreground ? [{ label: "Background", run: () => run("background") }] : []),
+			{ label: "Output", run: () => run("output") },
+			...(job.status === "running" ? [{ label: "Stop", run: () => run("stop") }] : []),
+		];
+	}
+
+	private async commandAction(sessionId: string, jobId: string, action: "background" | "stop" | "output"): Promise<void> {
+		try {
+			if (action === "output") { await this.inspectShellJob(sessionId, jobId); return; }
+			const { job } = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId, [action]: true });
+			this.activity.setJob(sessionId, job);
+			if (action === "background" && job.deadline) this.print("Command moved to background; its original execution deadline still applies.", "info");
+		} catch (error) { this.print(`Command control failed: ${message(error)}`, "error"); }
+		finally { this.syncWorkspaceShell(); this.tui.requestRender(); }
+	}
+
+	private async queueSteering(text: string): Promise<void> {
+		const session = this.current;
+		if (!session || this.steeringBusy.has(session.id)) return;
+		this.steeringBusy.add(session.id);
+		const version = this.activity.queueVersion(session.id);
+		try {
+			const result = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId: session.id, text });
+			if (result.queued) {
+				if (this.activity.queueVersion(session.id) === version) this.activity.setQueue(session.id, result.items ?? []);
+			}
+			else {
+				const pending = this.nextSteering.get(session.id) ?? [];
+				if (pending.length >= 32) throw new Error("The steering queue is full");
+				this.nextSteering.set(session.id, [...pending, text]);
+			}
+			if (this.current?.id === session.id && this.editor.getExpandedText().trim() === text.trim()) this.editor.setText("");
+			if (!result.queued && !this.inFlight.has(session.id)) await this.flushSteering(session.id);
+		} catch (error) {
+			this.print(`Could not queue steering: ${message(error)}. Your draft is retained.`, "error");
+		} finally {
+			this.steeringBusy.delete(session.id);
+			this.tui.requestRender();
+		}
+	}
+
+	private async flushSteering(sessionId: string): Promise<void> {
+		if (this.current?.id !== sessionId || this.inFlight.has(sessionId) || this.exiting || this.steeringFlushing.has(sessionId) || this.interruptedSteering.has(sessionId)) return;
+		if (!this.activity.queue(sessionId).length && !this.nextSteering.get(sessionId)?.length) return;
+		this.steeringFlushing.add(sessionId);
+		let accepted = false;
+		try {
+			const version = this.activity.queueVersion(sessionId);
+			const result = await this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId });
+			if (this.activity.queueVersion(sessionId) === version) this.activity.setQueue(sessionId, result.items);
+			if (this.current?.id !== sessionId || this.inFlight.has(sessionId)) return;
+			const local = this.nextSteering.get(sessionId)?.[0];
+			const remote = result.items[0];
+			if (local !== undefined) {
+				await this.submitTurn(local);
+				accepted = true;
+				const rest = (this.nextSteering.get(sessionId) ?? []).slice(1);
+				if (rest.length) this.nextSteering.set(sessionId, rest);
+				else this.nextSteering.delete(sessionId);
+			} else if (remote) {
+				await this.submitTurn(remote.text, [], remote.id);
+				accepted = true;
+				this.activity.setQueue(sessionId, this.activity.queue(sessionId).filter((item) => item.id !== remote.id));
+			}
+			while (this.inFlight.has(sessionId) && this.nextSteering.get(sessionId)?.length) {
+				const head = this.nextSteering.get(sessionId)![0]!;
+				const queueVersion = this.activity.queueVersion(sessionId);
+				const queued = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId, text: head });
+				if (!queued.queued) break;
+				this.nextSteering.set(sessionId, (this.nextSteering.get(sessionId) ?? []).slice(1));
+				if (this.activity.queueVersion(sessionId) === queueVersion) this.activity.setQueue(sessionId, queued.items ?? []);
+			}
+		} catch (error) {
+			this.print(`Steering is retained. Open /activity to retry: ${message(error)}`, "warning");
+		} finally {
+			this.steeringFlushing.delete(sessionId);
+			if (accepted && this.nextSteering.get(sessionId)?.length && !this.inFlight.has(sessionId) && !this.interruptedSteering.has(sessionId) && !this.exiting) {
+				setTimeout(() => { void this.flushSteering(sessionId); }, 25);
+			}
+		}
+	}
+
+	async inspectActivity(): Promise<void> {
+		const session = this.current;
+		if (!session) return;
+		const queueVersion = this.activity.queueVersion(session.id);
+		try {
+			const [queued, jobs] = await Promise.all([
+				this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId: session.id }).catch(() => ({ items: this.activity.queue(session.id) })),
+				this.request<{ jobs: ShellJob[] }>("shell.jobs", { sessionId: session.id }).catch(() => ({ jobs: this.activity.listJobs(session.id) })),
+			]);
+			if (this.activity.queueVersion(session.id) === queueVersion) this.activity.setQueue(session.id, queued.items);
+			for (const job of jobs.jobs) this.activity.setJob(session.id, job);
+			if (this.current?.id !== session.id) return;
+			const items = [
+				...queued.items.map((item) => ({ label: `Queued · ${sanitizeDisplay(item.text).replace(/\n/g, " ").slice(0, 80)}`, value: `q:${item.id}` })),
+				...jobs.jobs.map((job) => ({ label: `${job.status} · ${sanitizeDisplay(job.command).slice(0, 75)}`, value: `j:${job.id}` })),
+				...this.familyRows().filter((row) => !row.main).map((row) => ({ label: `Agent ${row.running ? "working" : "idle"} · ${row.session.title}`, value: `a:${row.session.id}` })),
+			];
+			if (this.nextSteering.get(session.id)?.length) items.unshift({ label: "Retry retained steering", value: "retry" });
+			if (!items.length) { this.print("No queued prompts or background commands. Enter queues while working; Escape interrupts."); return; }
+			const selected = await this.pickCentered("Activity", items);
+			if (!selected || this.current?.id !== session.id) return;
+			if (selected.value === "retry") { this.interruptedSteering.delete(session.id); await this.flushSteering(session.id); return; }
+			if (selected.value.startsWith("a:")) { await this.family.open(selected.value.slice(2)); return; }
+			if (selected.value.startsWith("q:")) {
+				const item = queued.items.find((value) => value.id === selected.value.slice(2));
+				if (!item) return;
+				const choice = await this.pickCentered("Queued steering", [
+					{ label: "Edit", value: "edit" }, { label: "Remove", value: "remove" },
+					...(!this.inFlight.has(session.id) ? [{ label: "Send queued prompts now", value: "send" }] : []),
+				]);
+				if (choice?.value === "send") { this.interruptedSteering.delete(session.id); await this.flushSteering(session.id); return; }
+				if (choice?.value === "edit") {
+					const text = await this.askText({ title: "Edit queued steering", initial: item.text, maxLength: 20_000 });
+					if (!text) return;
+					await this.request("prompt.steering", { sessionId: session.id, replace: item.id, text });
+				} else if (choice?.value === "remove") await this.request("prompt.steering", { sessionId: session.id, remove: item.id });
+				const queueVersion = this.activity.queueVersion(session.id);
+				const updated = await this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId: session.id });
+				if (this.activity.queueVersion(session.id) === queueVersion) this.activity.setQueue(session.id, updated.items);
+			} else {
+				const id = selected.value.slice(2);
+				const job = jobs.jobs.find((value) => value.id === id);
+				const choice = await this.pickCentered("Command", [
+					...(job?.foreground && job.status === "running" ? [{ label: "Background", value: "background", description: "Release the agent; original deadline remains" }] : []),
+					{ label: "View live output", value: "view" },
+					...(job?.status === "running" ? [{ label: "Stop command", value: "stop" }] : []),
+				]);
+				if (choice?.value === "background") await this.commandAction(session.id, id, "background");
+				else if (choice?.value === "stop") {
+					const result = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId: session.id, jobId: id, stop: true });
+					this.activity.setJob(session.id, result.job);
+				} else if (choice?.value === "view") await this.inspectShellJob(session.id, id);
+			}
+		} catch (error) { this.print(`Could not load activity: ${message(error)}`, "error"); }
+		finally { this.tui.requestRender(); }
+	}
+
+	private async inspectShellJob(sessionId: string, id: string): Promise<void> {
+		const initial = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId: id });
+		const record = (job: ShellJob): OutputRecord => ({ sessionId, toolId: id, name: `${job.status} · ${job.command}`, text: job.output ?? "", byteLength: Buffer.byteLength(job.output ?? ""), backendTruncated: job.truncated ?? false, locallyTruncated: false });
+		let viewer: OutputViewer | undefined;
+		let active = true, pending = false;
+		const timer = setInterval(() => {
+			if (!active || pending) return;
+			pending = true;
+			void this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId: id }).then(({ job }) => {
+				if (!active) return;
+				viewer?.setRecord(record(job));
+				this.activity.setJob(sessionId, job);
+				if (job.status !== "running") clearInterval(timer);
+				this.tui.requestRender();
+			}).catch(() => { clearInterval(timer); }).finally(() => { pending = false; });
+		}, 750);
+		try { await this.openDialog<void>((close) => viewer = new OutputViewer(record(initial.job), { tui: this.tui, onClose: () => close() })); }
+		finally { active = false; clearInterval(timer); }
 	}
 
 	/** FeatureHost: the current family (main first) for /agents and menus. */
@@ -1954,6 +2145,10 @@ export class App implements FeatureHost {
 		// Agent family: Ctrl+N then J/K cycles from the composer. Ctrl+Shift+Arrow
 		// remains available for word selection in the file editor.
 		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
+		if (this.keybindings.matches(data, "activity")) {
+			void this.inspectActivity();
+			return { consume: true };
+		}
 		if (this.keybindings.matches(data, "agentClose")) {
 			void this.family.closeCurrent();
 			return { consume: true };
@@ -3641,6 +3836,14 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
+		if (!command && inFlight && this.current) {
+			if (this.pendingImageLoads || /\[image \d+\]/.test(text)) {
+				this.print("Queued steering currently accepts text. Keep the image for the next turn.", "info");
+				return;
+			}
+			await this.queueSteering(text);
+			return;
+		}
 		switch (guardSubmit(command, Boolean(inFlight))) {
 			case "turn-busy":
 				this.transcript.addNotice("The previous turn is still finishing. Try again shortly.", "warning");
@@ -3707,7 +3910,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-    async submitTurn(text: string, images: ImageAttachment[] = []): Promise<void> {
+    async submitTurn(text: string, images: ImageAttachment[] = [], steeringId?: string): Promise<void> {
 		if (!this.current) {
 			this.transcript.addNotice("Not connected to a session. Try /new.", "warning");
 			return;
@@ -3723,6 +3926,7 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
+		this.interruptedSteering.delete(sessionId);
 		this.transcript.addUser(text);
 		this.setRunning(true);
 		this.inFlight.add(sessionId);
@@ -3739,7 +3943,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 		try {
             const result = await this.client.request<{ turnId?: string }>("prompt.submit", {
-                sessionId, text, ...(images.length ? { images } : {}),
+                sessionId, text, ...(images.length ? { images } : {}), ...(steeringId ? { steeringId } : {}),
             });
 			this.confirmTurn(sessionId, result?.turnId);
 		} catch (error) {
@@ -3852,6 +4056,7 @@ export class App implements FeatureHost {
 
 	private setRunning(running: boolean): void {
 		this.running = running;
+		this.composer.placeholder = running ? "Queue a message · Enter queues · Esc interrupts" : "Ask anything, or type / for commands.";
 		// AH-031: do NOT disable the composer while a turn runs — safe
 		// slash commands (/sessions, /new, /exit, /help, …) must stay
 		// usable. Prompt submits are guarded in submit()/submitTurn().
@@ -3901,7 +4106,14 @@ export class App implements FeatureHost {
 	private onEvent(event: GatewayEvent): void {
 		if (this.exiting) return;
 		for (const handler of [...this.featureEventHandlers]) handler(event);
+		if (event.type === "shell.job") {
+			this.activity.setJob(event.sessionId, event.job as unknown as ShellJob);
+			this.tui.requestRender();
+			return;
+		}
 		if (event.type === "agent.child") {
+			const binding = this.turns.get(event.sessionId);
+			if (binding && (binding.retired.includes(event.turnId) || binding.turnId !== undefined && binding.turnId !== event.turnId)) return;
 			this.onChildEvent(event);
 			return;
 		}
@@ -3975,8 +4187,24 @@ export class App implements FeatureHost {
 			}
 			record.hadEvents = true;
 		}
-		// Bound turn accepted: a hidden session keeps a live tail so switching
-		// back shows the work done while it was invisible (switchTo merges it
+		// Activity updates obey the same turn binding as transcript frames.
+		if (event.type === "steering.update") {
+			this.activity.setQueue(event.sessionId, event.items as unknown as SteeringItem[]);
+			if (this.current?.id === event.sessionId && event.delivered.length) {
+				for (const item of event.delivered as unknown as SteeringItem[]) this.transcript.addUser(item.text);
+				this.transcript.apply({ ...event, type: "message.start" });
+			}
+			this.tui.requestRender();
+			return;
+		}
+		if (event.type === "tool.start") {
+			const tools = this.activeTools.get(event.sessionId) ?? new Map<string, string>();
+			tools.set(event.id, event.name);
+			this.activeTools.set(event.sessionId, tools);
+		} else if (event.type === "tool.complete") this.activeTools.get(event.sessionId)?.delete(event.id);
+		else if (event.type === "message.complete") this.activeTools.delete(event.sessionId);
+		// A hidden session keeps a live tail so switching back shows the work
+		// done while it was invisible (switchTo merges it
 		// with the fetched history — buffered tail wins, no duplicates).
 		if (hidden) this.bufferHiddenEvent(event);
 		// Retain reported output for local inspection (visible or not, but
@@ -4092,10 +4320,14 @@ export class App implements FeatureHost {
 			// accounting arrives with message.complete.
 			this.setRunning(true);
 		} else if (summary) {
+			if (event.type === "message.complete" && event.cancelled) this.interruptedSteering.add(event.sessionId);
 			this.accountCompletion(event.sessionId, summary.tokens);
 			this.retireTurn(event.sessionId, event.turnId);
 			this.footer.tokens = this.sessionTokens;
 			this.setRunning(this.inFlight.has(event.sessionId));
+			if (event.type === "message.complete" && !event.cancelled) {
+				setTimeout(() => { void this.flushSteering(event.sessionId); }, 0);
+			}
 		}
 		this.tui.requestRender();
 	}

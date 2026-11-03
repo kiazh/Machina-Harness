@@ -8,7 +8,7 @@ import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { LIMITS } from "../design/tokens.ts";
 import { sanitizeDisplay, shapePreview } from "../design/text.ts";
 import { theme } from "../theme.ts";
-import { panelContentWidth, renderToolPanel } from "./ToolPanel.ts";
+import { panelContentWidth, renderToolPanel, renderToolSummary } from "./ToolPanel.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
 export type ToolOutcome =
@@ -115,7 +115,8 @@ export class ToolTurn implements Component {
 			lines.push(`${indent}${theme.dim("recorded output")}`);
 		}
 		if (this.result.text) {
-			const shaped = shapePreview(this.result.text, inner, LIMITS.previewLinesDefault);
+			const compact = this.outcome === "success" || this.outcome === "historical";
+			const shaped = shapePreview(this.result.text, inner, compact ? LIMITS.previewLinesCompact : LIMITS.previewLinesDefault);
 			for (const line of shaped.shown) lines.push(`${indent}${styleDiffLine(line)}`);
 			if (shaped.omitted > 0) {
 				lines.push(`${indent}${theme.dim(`… ${shaped.omitted} more line${shaped.omitted === 1 ? "" : "s"}`)}`);
@@ -124,7 +125,7 @@ export class ToolTurn implements Component {
 		if (this.result.backendTruncated && this.outcome !== "running") {
 			lines.push(`${indent}${theme.dim("server output truncated")}`);
 		}
-		const rows = ["", ...renderToolPanel(lines, total)];
+		const rows = ["", ...(this.outcome === "success" || this.outcome === "historical" ? renderToolSummary(lines, total) : renderToolPanel(lines, total))];
 		if (this.outcome !== "running") {
 			if (this.cached.size >= 4) this.cached.clear();
 			this.cached.set(width, rows);

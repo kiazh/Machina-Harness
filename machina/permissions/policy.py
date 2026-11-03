@@ -1195,6 +1195,7 @@ def build_request(
     content: str = "",
     mode: str | None = None,
     backend: str = "host",
+    workspace: str = "",
     agent_id: str = "",
     session_id: str = "",
     turn_id: str = "",
@@ -1242,7 +1243,8 @@ def build_request(
         operation=operation,
         argv=list(argv or []),
         shell_payload=shell_payload,
-        cwd=cwd or str(workspace_root()),
+        cwd=cwd or workspace or str(workspace_root()),
+        workspace_root=workspace,
         timeout=timeout,
         targets=list(targets or []),
         content_digest=hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()

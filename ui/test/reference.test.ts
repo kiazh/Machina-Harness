@@ -13,11 +13,12 @@ test("reference header keeps brand and workspace on one row", () => {
  assert.match(rows[0]!, /^>_ Machina\s+workspace · repo$/);
 });
 
-test("reference tools have quiet indented frames with bounded reading width", () => {
+test("completed tools use quiet indented log rows with bounded reading width", () => {
  const tool = new ToolTurn("read_file", {path:"install.sh"}, {frame: f => f[0] ?? ""});
  tool.settle({text:"Homebrew fallback configuration", backendTruncated:false, locallyTruncated:false}, "success");
  const rows = tool.render(160);
- assert.match(plain(rows)[1]!, /^ {4}┌─/);
+ assert.match(plain(rows)[1]!, /^ {4}✔/);
+ assert.doesNotMatch(plain(rows).join("\n"), /┌|└/);
  assert.ok(rows.every(row => visibleWidth(row) <= 108));
  assert.match(plain(rows).join("\n"), /read_file.*install.sh/);
  assert.match(plain(rows).join("\n"), /Homebrew fallback/);
@@ -64,7 +65,7 @@ test("native approval frame docks controls above composer at 140x52, 80x24, and 
    const heading = screen.findIndex(line => line.includes("Allow write_file"));
    const once = screen.findIndex(line => line.includes("Allow once"));
    const deny = screen.findIndex(line => line.includes("Deny"));
-   const composer = screen.findIndex(line => line.includes("Ask anything"));
+   const composer = screen.findIndex(line => line.includes("Ask anything") || line.includes("Queue a message"));
    assert.ok(heading >= 0 && once > heading && deny > once && composer > deny);
    assert.match(screen.at(-1)!, /awaiting approval/);
    if (rows! >= 24) assert.match(screen.join("\n"), /needs approval/);

@@ -101,7 +101,12 @@ class SessionManager:
         initial_mode = execution_mode if execution_mode is not None else get_global_default()
         if initial_mode not in MODES:
             raise ValueError("mode must be ask|workspace|sandbox|full")
-        state_msgpack = msgpack.packb(state or {}, use_bin_type=True)
+        initial_state = dict(state or {})
+        if parent_session_id and "desktop_workspace_root" not in initial_state:
+            parent = await self.get_fresh(parent_session_id)
+            if parent and isinstance(parent.state.get("desktop_workspace_root"), str):
+                initial_state["desktop_workspace_root"] = parent.state["desktop_workspace_root"]
+        state_msgpack = msgpack.packb(initial_state, use_bin_type=True)
         row = await db.fetchrow(
             """
             INSERT INTO sessions (title, agent_id, state_msgpack, status, goal, model, provider, context_budget, execution_mode, parent_session_id, delegation_authority, ancestor_session_ids, ancestor_agent_ids)

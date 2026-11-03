@@ -6,6 +6,12 @@ import { repairFill, theme } from "../theme.ts";
 export const TOOL_PANEL_MAX_WIDTH = 104;
 const indentFor = panelInset;
 export const panelContentWidth = (width: number): number => Math.max(1, Math.min(TOOL_PANEL_MAX_WIDTH, width - indentFor(width)) - 4);
+/** Completed routine work reads as a compact log, without repeated boxes. */
+export function renderToolSummary(lines: string[], width: number): string[] {
+ const indent = " ".repeat(indentFor(width));
+ const content = panelContentWidth(width);
+ return lines.map(line => truncateToWidth(indent + truncateToWidth(line, content), Math.max(0, width)));
+}
 export function renderToolPanel(lines: string[], width: number): string[] {
  if (width <= 0) return [];
  const indent = " ".repeat(indentFor(width));

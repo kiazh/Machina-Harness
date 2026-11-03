@@ -340,6 +340,7 @@ export function createLayout(transcript: Component, composer: Component, footer:
  */
 export class ComposerBox extends Box {
 	readonly editor: ComposerInput;
+	placeholder = COMPOSER_PLACEHOLDER;
 	private degradedMode = false;
 
 	constructor(tui: TUI, editorTheme: EditorTheme, options?: EditorOptions) {
@@ -378,7 +379,7 @@ export class ComposerBox extends Box {
 		// going through super.render would double-fill via the Box.
 		let body: string[];
 		if (this.editor.getText() === "") {
-			const placeholder = fill(theme.muted(truncateToWidth(`> ${COMPOSER_PLACEHOLDER}`, inner)));
+			const placeholder = fill(theme.muted(truncateToWidth(`> ${this.placeholder}`, inner)));
 			body = this.editor.windowRows >= 3 ? [fill(""), placeholder, fill("")] : [placeholder];
 		} else {
 			const rendered = this.editor.render(inner);

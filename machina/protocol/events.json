@@ -34,6 +34,13 @@
       "phase": "string",
       "value": "string"
     },
+    "steering.update": {
+      "items": "object[]",
+      "delivered": "object[]"
+    },
+    "shell.job": {
+      "job": "object"
+    },
     "message.complete": {
       "text": "string",
       "tokens": "number",

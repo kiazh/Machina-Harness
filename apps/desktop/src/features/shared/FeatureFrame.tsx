@@ -1,0 +1,7 @@
+import type {ReactNode} from 'react';
+import {ArrowLeft, RefreshCw} from 'lucide-react';
+import type {DesktopController} from '../../state/controller.ts';
+
+export function FeatureFrame({controller,title,description,busy,error,notice,unavailableReason,onRefresh,actions,children}:{controller:DesktopController;title:string;description?:string;busy?:boolean;error?:string;notice?:string;unavailableReason?:string;onRefresh?:()=>void;actions?:ReactNode;children:ReactNode}) {
+ return <section className="feature-page" aria-label={title}><div className="feature-toolbar"><button onClick={()=>controller.navigate('chat')}><ArrowLeft size={13}/>Conversation</button><span className="feature-spacer"/>{unavailableReason&&controller.snapshot().connection!=='ready'&&<button disabled={controller.snapshot().connection==='connecting'} onClick={()=>{void controller.connect()}}>Connect engine</button>}{actions}{onRefresh&&<button disabled={busy} onClick={onRefresh}><RefreshCw size={13}/>Refresh</button>}</div><div className="feature-content"><h1>{title}</h1>{description&&<p className="feature-description">{description}</p>}{unavailableReason&&!error&&<p className="feature-description" role="status">{unavailableReason}</p>}{error&&<p className="inline-error" role="alert">{error}</p>}{notice&&<p className="feature-notice" role="status">{notice}</p>}{busy&&<p className="feature-description" role="status">Loading…</p>}{children}</div></section>;
+}

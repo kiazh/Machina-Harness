@@ -40,6 +40,12 @@ def session_to_dict(session: Session) -> dict[str, Any]:
             )
         ),
         "isFork": bool(getattr(session, "is_fork", False)),
+        **(
+            {"workspaceRoot": session.state["desktop_workspace_root"]}
+            if isinstance(getattr(session, "state", None), dict)
+            and isinstance(session.state.get("desktop_workspace_root"), str)
+            else {}
+        ),
     }
 
 

@@ -1,0 +1,14 @@
+{
+  "name": "@machina/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./rpc": "./src/rpc.ts",
+    "./events": "./src/events.ts",
+    "./workspace": "./src/workspace.ts",
+    "./workspace-gateway": "./src/workspace-gateway.ts",
+    "./rpc-methods": "./src/rpc-methods.ts"
+  },
+  "scripts": {"test": "node --test test/*.test.ts"}
+}

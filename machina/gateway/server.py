@@ -203,6 +203,24 @@ class Gateway:
         self._job_runner = None
         self._warmers_task = None
         self._turns: dict[str, asyncio.Task[None]] = {}
+        from machina.gateway.operations import Operations
+
+        self.operations = Operations(self)
+        self._steering: dict[str, Any] = {}
+        from machina.core.shell_jobs import shell_jobs
+
+        if shell_jobs.closing:
+            shell_jobs.reopen()
+        self._shell_listener = lambda job: self._write(
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": self.event_payload(
+                    "shell.job", str(job.session_id), job.id, job=job.snapshot()
+                ),
+            }
+        )
+        shell_jobs.listeners.add(self._shell_listener)
         self._turn_tokens: dict[str, str] = {}
         self._turn_ownership_lost: dict[str, asyncio.Event] = {}
         self._turn_progress: dict[str, dict[str, int]] = {}
@@ -249,6 +267,9 @@ class Gateway:
             "usage.get": self._usage_get,
             "prompt.submit": self._prompt_submit,
             "prompt.cancel": self._prompt_cancel,
+            "prompt.steer": self._prompt_steer,
+            "prompt.steering": self._prompt_steering,
+            "shell.jobs": self._shell_jobs,
             "config.set": self._config_set,
             "shutdown": self._shutdown,
         }
@@ -269,10 +290,9 @@ class Gateway:
             logger.debug("method already registered, overwriting: %s", name)
         self._methods[name] = handler
 
-    # Read-only turn probe; gateway tests assert turn lifecycle, no production caller. Kept (R4-106).
     def turn_running(self, session_id: uuid.UUID) -> bool:
         task = self._turns.get(str(session_id))
-        return task is not None and not task.done()
+        return (task is not None and not task.done()) or self.operations.session_running(session_id)
 
     def _record_stage(self, turn_id: str, stage: str, **details: Any) -> None:
         """Record a progress stage for hang diagnosis (H-07).
@@ -390,6 +410,7 @@ class Gateway:
         """
         from machina.core.runtime import _bounded_join
 
+        await self.operations.close(timeout=timeout)
         if self._warmers_task is not None:
             self._warmers_task.cancel()
             try:
@@ -408,11 +429,16 @@ class Gateway:
             except (TimeoutError, Exception):
                 logger.warning("gateway job runner stop exceeded its bound; continuing")
             self._job_runner = None
+        from machina.core.shell_jobs import shell_jobs
+
+        shell_jobs.listeners.discard(self._shell_listener)
+        shell_jobs.closing = True
         tasks = [t for t in self._turns.values() if not t.done()]
         if tasks:
             leftovers = await _bounded_join(tasks, timeout=timeout, label="gateway turns")
             for t in leftovers:
                 logger.warning("gateway turn task quarantined on close: %s", t.get_name())
+        await shell_jobs.close()
         # Retired workspace LSP managers keep stopping in the background after
         # a workspace reopen; join them bounded (never cancelled) before the
         # loop closes so their process teardown is observed.
@@ -693,6 +719,11 @@ class Gateway:
             model=model,
             provider=provider,
             context_budget=config.get("context_budget"),
+            **(
+                {"state": {"desktop_workspace_root": self._desktop_workspace_root}}
+                if getattr(self, "_desktop_workspace_root", None)
+                else {}
+            ),
         )
         self._opened_session_id = session.id
         try:
@@ -803,13 +834,96 @@ class Gateway:
 
             await _end(session.id, token)
             raise RpcError(TURN_IN_PROGRESS, "a turn is already running for this session")
+        steering_id = params.get("steeringId")
+        if steering_id is not None:
+            inbox = self._steering.get(key)
+            item = (
+                next((item for item in inbox.items if item.id == steering_id), None)
+                if inbox
+                else None
+            )
+            if item is None or item.text != text:
+                from machina.core.turns import end_turn as _end
+
+                await _end(session.id, token)
+                raise RpcError(
+                    INVALID_PARAMS, "queued steering changed; refresh activity before retrying"
+                )
+            inbox.remove(item.id)
         logger.info("Turn %s started for session %s", turn_id, session.id)
         self._turn_tokens[key] = token
+        from machina.core.steering import SteeringInbox
+
+        self._steering.setdefault(key, SteeringInbox(session.id))
         image_kwargs = {"images": images} if images else {}
         self._turns[key] = asyncio.create_task(
             self._run_turn_with_timeout(session.id, turn_id, text, **image_kwargs)
         )
         return {"turnId": turn_id}
+
+    async def _shell_jobs(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.require_db()
+        from machina.core.shell_jobs import shell_jobs
+
+        session = await self.get_session(params)
+        job_id = params.get("jobId")
+        if not job_id:
+            return {"jobs": shell_jobs.list(session.id)}
+        try:
+            if params.get("background"):
+                return {
+                    "job": shell_jobs.detach(session.id, str(job_id)).snapshot(include_output=True)
+                }
+            job = (
+                (await shell_jobs.stop(session.id, str(job_id)))
+                if params.get("stop")
+                else shell_jobs.get(session.id, str(job_id))
+            )
+            return {"job": job.snapshot(include_output=True)}
+        except KeyError as error:
+            raise RpcError(
+                INVALID_PARAMS, "background command not found in this session"
+            ) from error
+
+    async def _prompt_steer(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.require_db()
+        session = await self.get_session(params)
+        key = str(session.id)
+        task = self._turns.get(key)
+        inbox = self._steering.get(key)
+        if not task or task.done() or inbox is None:
+            return {"queued": False}
+        text = params.get("text")
+        if not isinstance(text, str):
+            raise RpcError(INVALID_PARAMS, "text must be a string")
+        try:
+            item = inbox.add(text)
+        except ValueError as error:
+            raise RpcError(INVALID_PARAMS, str(error)) from error
+        return {"queued": True, "id": item.id, "items": inbox.snapshot()}
+
+    async def _prompt_steering(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.require_db()
+        session = await self.get_session(params)
+        key = str(session.id)
+        inbox = self._steering.get(key)
+        if inbox is None:
+            return {"items": []}
+        remove = params.get("remove")
+        if remove is not None:
+            inbox.remove(str(remove))
+        if params.get("replace"):
+            text = params.get("text")
+            if not isinstance(text, str):
+                raise RpcError(INVALID_PARAMS, "text must be a string")
+            try:
+                if not inbox.replace(str(params["replace"]), text):
+                    raise RpcError(
+                        INVALID_PARAMS, "this steering message has already been delivered"
+                    )
+            except ValueError as error:
+                raise RpcError(INVALID_PARAMS, str(error)) from error
+        return {"items": inbox.snapshot()}
 
     async def _prompt_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         key = str(_parse_session_id(params))
@@ -1085,6 +1199,15 @@ class Gateway:
                 "agent.child", childSessionId=str(child_id), phase=phase, value=value
             )
         )
+        from machina.core.steering import SteeringInbox, steering_inbox
+
+        inbox = self._steering.setdefault(sid, SteeringInbox(session_id))
+        inbox.changed = lambda items, delivered: emit(
+            "steering.update", items=items, delivered=delivered
+        )
+        if inbox.items:
+            inbox.notify()
+        steering_token = steering_inbox.set(inbox)
         # AH-AUDIT-013: managed claim renewal for the whole turn (compute +
         # approval waits). A live renewing owner blocks takeovers; repeated
         # renewal failure means the claim lapsed — owned effects stop via
@@ -1299,6 +1422,8 @@ class Gateway:
                     complete(cancelled=_cancelled)
             finally:
                 child_observer.reset(child_observer_token)
+                steering_inbox.reset(steering_token)
+                inbox.changed = None
                 # Growth notices may land with late background consolidation;
                 # keep the listener until the terminal event, then always drop it.
                 remove_growth_listener(_growth_emit)

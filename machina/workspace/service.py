@@ -234,6 +234,11 @@ class WorkspaceService:
 
     # ─── identity ───────────────────────────────────────────────────────────
     @property
+    def identity(self) -> WorkspaceIdentity | None:
+        """Current immutable binding, for desktop reuse without dropping mirrors."""
+        return self._identity
+
+    @property
     def workspace_id(self) -> str | None:
         return self._identity.workspace_id if self._identity is not None else None
 

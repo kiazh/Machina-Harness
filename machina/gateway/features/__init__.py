@@ -52,6 +52,7 @@ from machina.gateway.features.connector_oauth import (
     mcp_oauth_url,
 )
 from machina.gateway.features.connectors import (
+    mcp_config,
     mcp_configure,
     mcp_connect,
     mcp_disconnect,
@@ -61,6 +62,7 @@ from machina.gateway.features.connectors import (
     mcp_status,
     mcp_tools,
 )
+from machina.gateway.features.desktop_workspace import runtime_select_workspace
 from machina.gateway.features.growth import (
     growth_feedback,
     growth_forget,
@@ -69,6 +71,7 @@ from machina.gateway.features.growth import (
     growth_rollback,
     growth_teach,
 )
+from machina.gateway.features.history import session_history
 from machina.gateway.features.interop import (
     interop_disable,
     interop_enable,
@@ -82,6 +85,11 @@ from machina.gateway.features.jobs import (
     jobs_list,
     jobs_resume,
     jobs_set_enabled,
+)
+from machina.gateway.features.marketplace import (
+    skills_marketplace_install,
+    skills_marketplace_preview,
+    skills_marketplace_search,
 )
 from machina.gateway.features.memory import (
     memory_add,
@@ -104,6 +112,7 @@ from machina.gateway.features.mode import (
     mode_set,
 )
 from machina.gateway.features.nowplaying import nowplaying_command, nowplaying_get
+from machina.gateway.features.operations import operations_cancel, operations_get, operations_start
 from machina.gateway.features.providers_feature import (
     models_list,
     models_set_effort,
@@ -111,6 +120,7 @@ from machina.gateway.features.providers_feature import (
     providers_list,
     providers_remove,
 )
+from machina.gateway.features.runtime import runtime_capabilities
 from machina.gateway.features.secrets import secrets_clear, secrets_list, secrets_set
 from machina.gateway.features.sessions import (
     context_compress,
@@ -169,6 +179,11 @@ __all__ = [
 Handler = Callable[["Gateway", dict[str, Any]], Awaitable[dict[str, Any]]]
 
 METHODS: dict[str, Handler] = {
+    "operations.start": operations_start,
+    "operations.get": operations_get,
+    "operations.cancel": operations_cancel,
+    "runtime.capabilities": runtime_capabilities,
+    "runtime.selectWorkspace": runtime_select_workspace,
     "auth.chatgpt.status": auth_chatgpt_status,
     "auth.chatgpt.login": auth_chatgpt_login,
     "auth.chatgpt.logout": auth_chatgpt_logout,
@@ -181,6 +196,7 @@ METHODS: dict[str, Handler] = {
     "auth.copilot.importGh": auth_copilot_import_gh,
     "auth.copilot.logout": auth_copilot_logout,
     "mcp.list": mcp_list,
+    "mcp.config": mcp_config,
     "mcp.status": mcp_status,
     "mcp.configure": mcp_configure,
     "mcp.remove": mcp_remove,
@@ -212,6 +228,7 @@ METHODS: dict[str, Handler] = {
     "session.setGoal": session_set_goal,
     "session.setModel": session_set_model,
     "session.search": session_search,
+    "session.history": session_history,
     "session.recall": session_recall,
     "session.recall.window": session_recall_window,
     "session.export": session_export,
@@ -229,6 +246,9 @@ METHODS: dict[str, Handler] = {
     "memory.rejectAll": memory_reject_all,
     "memory.stats": memory_stats,
     "skills.list": skills_list,
+    "skills.marketplace.search": skills_marketplace_search,
+    "skills.marketplace.preview": skills_marketplace_preview,
+    "skills.marketplace.install": skills_marketplace_install,
     "skills.show": skills_show,
     "skills.learn": skills_learn,
     "skills.delete": skills_delete,

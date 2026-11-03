@@ -45,6 +45,19 @@ class _ExtendedLimits(ctypes.Structure):
     ]
 
 
+class _Accounting(ctypes.Structure):
+    _fields_ = [
+        ("TotalUserTime", ctypes.c_longlong),
+        ("TotalKernelTime", ctypes.c_longlong),
+        ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+        ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+        ("TotalPageFaultCount", wintypes.DWORD),
+        ("TotalProcesses", wintypes.DWORD),
+        ("ActiveProcesses", wintypes.DWORD),
+        ("TotalTerminatedProcesses", wintypes.DWORD),
+    ]
+
+
 def _kernel32():
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
@@ -62,6 +75,14 @@ def _kernel32():
     kernel.AssignProcessToJobObject.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    kernel.QueryInformationJobObject.restype = wintypes.BOOL
     return kernel
 
 
@@ -93,3 +114,13 @@ def create_script_job(pid: int) -> int:
 def close_script_job(job: int) -> None:
     """Close the last job handle, terminating any remaining descendants."""
     _kernel32().CloseHandle(job)
+
+
+def active_script_processes(job: int) -> int:
+    """Count live descendants even after the original launcher exits."""
+    info = _Accounting()
+    if not _kernel32().QueryInformationJobObject(
+        job, 1, ctypes.byref(info), ctypes.sizeof(info), None
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return int(info.ActiveProcesses)

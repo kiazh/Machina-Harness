@@ -455,7 +455,7 @@ def scan_repo(repo: Path, source: RepoSource, revision: str) -> RepoPlan:
     total = 0
     skill_roots = sorted(
         {
-            str(Path(p).parent)
+            Path(p).parent.as_posix()
             for p in tracked
             if Path(p).name == "SKILL.md"
             and len(Path(p).parts) == 3
@@ -743,6 +743,27 @@ def _staging_entries(root: Path) -> list[Path] | None:
         return None
 
 
+def _remove_owned_tree(path: Path, root: Path) -> None:
+    """Remove only an owned child tree, including read-only Windows git files."""
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    if (
+        path.is_symlink()
+        or resolved_path == resolved_root
+        or not resolved_path.is_relative_to(resolved_root)
+    ):
+        raise RepoInstallError("refusing cleanup outside the owned directory")
+
+    def retry_readonly(function, name, _exc):
+        target = Path(name)
+        if not target.resolve().is_relative_to(resolved_path) or target.is_symlink():
+            raise RepoInstallError("refusing cleanup outside the owned directory")
+        target.chmod(target.stat().st_mode | stat.S_IWRITE)
+        function(name)
+
+    shutil.rmtree(path, onerror=retry_readonly)
+
+
 def _prune_staging(root: Path) -> None:
     """Bound staging growth: drop entries past the count cap or TTL."""
     import time
@@ -754,14 +775,17 @@ def _prune_staging(root: Path) -> None:
     for stale in entries:
         try:
             if now - stale.stat().st_mtime > _STAGING_TTL_SECONDS:
-                shutil.rmtree(stale, ignore_errors=True)
-        except OSError:
+                _remove_owned_tree(stale, root)
+        except (OSError, RepoInstallError):
             continue
     entries = _staging_entries(root)
     if entries is None:
         return
     for stale in entries[: max(0, len(entries) - _MAX_STAGED_ENTRIES)]:
-        shutil.rmtree(stale, ignore_errors=True)
+        try:
+            _remove_owned_tree(stale, root)
+        except (OSError, RepoInstallError):
+            continue
 
 
 def write_staged_plan(plan: RepoPlan, repo_dir: Path) -> Path:
@@ -772,19 +796,13 @@ def write_staged_plan(plan: RepoPlan, repo_dir: Path) -> Path:
     """
     root = staging_root()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    key = _staging_key(plan.source, plan.revision)
+    if not re.fullmatch(r"[0-9a-f]{64}", plan.digest):
+        raise RepoInstallError("invalid staging digest")
+    # Reviews of different skills from the same commit must not replace each
+    # other's bytes. The full digest also makes repeated reviews reusable.
+    key = f"review-{plan.digest}"
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,160}", key):
         raise RepoInstallError("invalid staging key")
-    tmp_destination = root / f"{key}.staging-{os.getpid()}"
-    if tmp_destination.exists():
-        shutil.rmtree(tmp_destination, ignore_errors=True)
-    try:
-        # Links are preserved as links: scan-time confinement already
-        # refused escapes, so refused bytes are never materialized here.
-        shutil.copytree(repo_dir, tmp_destination, symlinks=True)
-    except OSError as exc:
-        shutil.rmtree(tmp_destination, ignore_errors=True)
-        raise RepoInstallError("could not stage repository files") from exc
     destination = root / key
     detail = {
         "source": plan.source.url,
@@ -810,13 +828,67 @@ def write_staged_plan(plan: RepoPlan, repo_dir: Path) -> Path:
         "skipped_oversize": plan.skipped_oversize,
     }
     plan_text = json.dumps(detail, indent=2, sort_keys=True) + "\n"
+
+    def reusable() -> bool:
+        if destination.is_symlink():
+            raise RepoInstallError("staging destination is a symbolic link")
+        try:
+            plan_file = destination / "plan.json"
+            if plan_file.stat().st_size > _PLAN_JSON_MAX_BYTES:
+                return False
+            if plan_file.read_text(encoding="utf-8") != plan_text:
+                return False
+            recorded = [
+                (relative, digest)
+                for skill in plan.skills
+                for relative, digest in skill.files.items()
+            ]
+            tracked = set(_tracked_files(destination)) if recorded else set()
+            return all(
+                relative in tracked
+                and hashlib.sha256(_read_bounded(_confined(destination, relative))).hexdigest()
+                == digest
+                for relative, digest in recorded
+            )
+        except (OSError, ValueError, RepoInstallError):
+            return False
+
+    if destination.exists():
+        if reusable():
+            return destination
+        # A failed activation must be recoverable by reviewing the source again.
+        # Retire the damaged cache atomically before publishing fresh reviewed bytes.
+        import uuid
+
+        retired = root / f"{key}.invalid-{uuid.uuid4().hex}"
+        try:
+            os.replace(destination, retired)
+            _remove_owned_tree(retired, root)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise RepoInstallError(
+                "could not replace damaged review; close its files and review again"
+            ) from exc
+    tmp_destination = Path(tempfile.mkdtemp(prefix=f"{key}.staging-", dir=root))
     try:
-        (tmp_destination / "plan.json.tmp").write_text(plan_text, encoding="utf-8")
-        _fsync_file(tmp_destination / "plan.json.tmp")
-        if destination.exists():
-            shutil.rmtree(destination, ignore_errors=True)
-        os.replace(tmp_destination, destination)
-        (destination / "plan.json.tmp").replace(destination / "plan.json")
+        # Links are preserved as links: scan-time confinement already
+        # refused escapes, so refused bytes are never materialized here.
+        shutil.copytree(repo_dir, tmp_destination, symlinks=True, dirs_exist_ok=True)
+    except OSError as exc:
+        shutil.rmtree(tmp_destination, ignore_errors=True)
+        raise RepoInstallError("could not stage repository files") from exc
+    try:
+        (tmp_destination / "plan.json").write_text(plan_text, encoding="utf-8")
+        _fsync_file(tmp_destination / "plan.json")
+        try:
+            os.replace(tmp_destination, destination)
+        except OSError:
+            # Another thread may publish this exact immutable review first.
+            if reusable():
+                _remove_owned_tree(tmp_destination, root)
+                return destination
+            raise
         _fsync_dir(destination, best_effort=True)
     except OSError as exc:
         shutil.rmtree(tmp_destination, ignore_errors=True)
@@ -833,7 +905,9 @@ def load_staged_plan(digest: str) -> tuple[dict[str, Any], Path]:
     if not root.is_dir():
         raise RepoInstallError("no staged repository found; stage a repo link first")
     corrupt: list[str] = []
-    for staged in sorted(root.iterdir()):
+    for staged in sorted(
+        root.iterdir(), key=lambda path: (not path.name.endswith(digest), path.name)
+    ):
         if not staged.is_dir() or staged.is_symlink():
             continue
         plan_file = staged / "plan.json"
@@ -1104,7 +1178,9 @@ def _build_skill(
 
 
 def _fsync_file(path: Path) -> None:
-    with open(path, "rb") as handle:
+    # Windows' CRT _commit requires a writable descriptor. Files here are
+    # freshly staged by this installer; r+b preserves their reviewed bytes.
+    with open(path, "r+b" if os.name == "nt" else "rb") as handle:
         os.fsync(handle.fileno())
 
 

@@ -25,6 +25,7 @@ async def resumed_request(record: dict, arguments: dict[str, Any]):
         **spec,
         mode=context.mode,
         backend=context.backend,
+        workspace=str(context.workspace),
         tool=tool,
         agent_id=record["agent_id"],
         session_id=record["session_id"],

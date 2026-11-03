@@ -1,0 +1,54 @@
+// Generated from machina/protocol/events.json; edit the schema, then regenerate.
+export type CanonicalEvent = { protocolVersion: 2; sessionId: string; turnId: string } & (
+	{ type: "message.start" }
+	| { type: "turn.started" }
+	| { type: "message.delta"; text: string }
+	| { type: "message.stopping"; reason: string }
+	| { type: "tool.start"; id: string; name: string; args: Record<string, unknown> }
+	| { type: "tool.complete"; id: string; name: string; result: string; isError: boolean; truncated?: boolean; outcome?: string }
+	| { type: "usage"; tokens: number }
+	| { type: "growth.status"; stage: string; detail?: string }
+	| { type: "agent.child"; childSessionId: string; phase: string; value: string }
+	| { type: "steering.update"; items: Record<string, unknown>[]; delivered: Record<string, unknown>[] }
+	| { type: "shell.job"; job: Record<string, unknown> }
+	| { type: "message.complete"; text: string; tokens: number; iterations: number; toolCalls: number; cancelled: boolean; needsApproval?: Record<string, unknown>[] }
+	| { type: "error"; message: string }
+	| { type: "needs_approval"; requestId: string; operation: string; target: string; argv: string[]; cwd: string; backend: string; capabilities: string[]; tool?: string; shell?: string; timeout?: number; network?: string[]; contentDigest?: string; contentPreview?: string; contentLength?: number; fileDiff?: Record<string, unknown>; durable?: boolean|null; status?: string; originTurnId?: string }
+	| { type: "approval.resolved"; requestId: string; status: string; originTurnId?: string }
+	| { type: "approval.resumed"; requestId: string; originTurnId: string }
+	| { type: "turn.ownership_lost"; reason?: string }
+	| { type: "turn.cleanup_pending"; reason?: string }
+	| { type: "auth.chatgpt.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.chatgpt.failed"; reason: string }
+	| { type: "auth.grok.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.grok.failed"; reason: string }
+	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
+	| { type: "auth.copilot.failed"; reason: string }
+);
+export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnId: string } & (
+	{ type: "message.start" }
+	| { type: "turn.started" }
+	| { type: "message.delta"; text: string }
+	| { type: "message.stopping"; reason: string }
+	| { type: "tool.start"; id: string; name: string; args: Record<string, unknown> }
+	| { type: "tool.complete"; id: string; name: string; result: string; isError: boolean; truncated?: boolean; outcome?: string }
+	| { type: "usage"; tokens: number }
+	| { type: "growth.status"; stage: string; detail?: string }
+	| { type: "agent.child"; childSessionId: string; phase: string; value: string }
+	| { type: "steering.update"; items: Record<string, unknown>[]; delivered: Record<string, unknown>[] }
+	| { type: "shell.job"; job: Record<string, unknown> }
+	| { type: "message.complete"; text: string; tokens: number; iterations: number; toolCalls: number; cancelled: boolean; needsApproval?: Record<string, unknown>[] }
+	| { type: "error"; message: string }
+	| { type: "permission.required"; requestId: string; operation: string; target: string; argv: string[]; cwd: string; backend: string; capabilities: string[]; tool?: string; shell?: string; timeout?: number; network?: string[]; contentDigest?: string; contentPreview?: string; contentLength?: number; fileDiff?: Record<string, unknown>; durable?: boolean|null; status?: string; originTurnId?: string }
+	| { type: "permission.resolved"; requestId: string; status: string; originTurnId?: string }
+	| { type: "approval.resumed"; requestId: string; originTurnId: string }
+	| { type: "turn.ownership_lost"; reason?: string }
+	| { type: "turn.cleanup_pending"; reason?: string }
+	| { type: "auth.chatgpt.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.chatgpt.failed"; reason: string }
+	| { type: "auth.grok.completed"; account_id: string|null; expiry: number|null }
+	| { type: "auth.grok.failed"; reason: string }
+	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
+	| { type: "auth.copilot.failed"; reason: string }
+);
+export type GatewayEvent = CanonicalEvent | LegacyGatewayEvent;

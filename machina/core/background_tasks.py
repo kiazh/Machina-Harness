@@ -71,6 +71,9 @@ async def drain_background_tasks(timeout: float = 5.0) -> int:
     writer. A second bounded pass catches tasks scheduled while draining.
     Returns how many tasks were awaited.
     """
+    from machina.core.shell_jobs import shell_jobs
+
+    await shell_jobs.close()
     scheduled = _live_tasks()
     if not scheduled:
         return 0

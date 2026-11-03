@@ -16,7 +16,8 @@ export interface ShortcutRow {
 }
 
 export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
-	{ value: "send", context: "Composer", label: "Enter — send", description: "Send a message or run a command" },
+	{ value: "send", context: "Composer", label: "Enter — send / queue steering", description: "While working, queues a message for the next safe tool boundary; Escape interrupts" },
+	{ value: "activity", context: "Composer", label: "Ctrl+N then A — activity", description: "Edit queued steering, inspect live command output, stop background jobs, or switch agents · /activity" },
 	{ value: "newline", context: "Composer", label: "Shift+Enter — new line" },
 	{ value: "image", context: "Composer", label: "Drop an image / Ctrl+V — paste image", description: "PNG, JPEG, GIF or WebP · ⌘V where forwarded by your terminal" },
 	{ value: "stop", context: "Composer", label: "Esc — stop reply", description: "Twice on empty input edits the last prompt" },

@@ -625,19 +625,19 @@ test("V01 multiline user text stays plain and assistant markdown renders inside 
 test("V02 tool previews count wrapping with honest local and backend truncation", async () => {
 	const { ToolTurn } = await import("../src/components.ts");
 	const turn = new ToolTurn("terminal", { command: "npm test" }, staticActivity);
-	// Six short rows at width 80: four shown, two omitted.
+	// Routine successes show two rows and retain an honest omitted count.
 	turn.settle(
 		{ text: ["r1", "r2", "r3", "r4", "r5", "r6"].join("\n"), backendTruncated: false, locallyTruncated: false },
 		"success",
 	);
 	const out = plain(turn, 80);
 	assert.match(out, /✔ terminal/);
-	assert.match(out, /r4/);
-	assert.doesNotMatch(out, /r5/, "default preview keeps four physical rows");
-	assert.match(out, /… 2 more lines/, "local count covers retained rendered rows only");
+	assert.match(out, /r2/);
+	assert.doesNotMatch(out, /r3/, "routine preview keeps two physical rows");
+	assert.match(out, /… 4 more lines/, "local count covers retained rendered rows only");
 	const singular = new ToolTurn("terminal", {}, staticActivity);
-	singular.settle({ text: ["a", "b", "c", "d", "e"].join("\n"), backendTruncated: false, locallyTruncated: false }, "success");
-	assert.match(plain(singular, 80), /… 1 more line\s*│$/m, "singular omitted counts read correctly");
+	singular.settle({ text: ["a", "b", "c"].join("\n"), backendTruncated: false, locallyTruncated: false }, "success");
+	assert.match(plain(singular, 80), /… 1 more line$/m, "singular omitted counts read correctly");
 	// A long wrapped row counts physical rows, not logical lines.
 	const wrapped = new ToolTurn("terminal", {}, staticActivity);
 	wrapped.settle({ text: "x".repeat(100), backendTruncated: false, locallyTruncated: false }, "success");

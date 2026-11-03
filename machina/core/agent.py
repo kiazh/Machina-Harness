@@ -177,6 +177,8 @@ For substantial work, keep a short task plan and update it as results arrive. Or
 
 Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue at most three independent delegate calls together. Give each worker a complete task and required evidence. A worker reports only to you. On each report, check what remains, continue your own work or assign a focused follow-up with the session_id in the delegate result, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions. share_memory is persistent memory, not peer chat.
 
+For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan.
+
 When you need to do something, use the available tools. Think step by step:
 1. Understand the task
 2. Decide what tools to use
@@ -288,7 +290,11 @@ def _tool_outcome(item: dict[str, Any]) -> str:
     preview = str(item.get("result") or "")
     if item.get("_needs_approval") or item.get("_needs_approvals"):
         return "paused"
-    if item.get("_denied") or preview.startswith("Permission denied:"):
+    if (
+        item.get("_denied")
+        or item.get("_steering_skipped")
+        or preview.startswith("Permission denied:")
+    ):
         return "denied"
     if item.get("_outcome_unknown"):
         return "outcome_unknown"
@@ -375,6 +381,12 @@ class BaseReActAgent:
         else:
             # None = every registered tool; a list restricts the agent to those names.
             self.allowed_tools = allowed_tools
+        if (
+            self.allowed_tools is not None
+            and "terminal" in self.allowed_tools
+            and "terminal_job" not in self.allowed_tools
+        ):
+            self.allowed_tools = [*self.allowed_tools, "terminal_job"]
         # Keep strong references to background consolidation tasks so the
         # event loop's weakref-only tracking never lets them be GC'd
         # mid-execution (the classic "Task was destroyed but it is pending"
@@ -1012,6 +1024,20 @@ class BaseReActAgent:
 
         # ── Phase C: execute concurrently, yielding completions as they finish
         async def _run_one(item: dict[str, Any]) -> None:
+            from machina.core.steering import pending_steering
+
+            def superseded() -> bool:
+                if not pending_steering(session_id):
+                    return False
+                item["_steering_skipped"] = True
+                item["result"] = (
+                    "Skipped: new user steering received. This action was NOT executed; replan."
+                )
+                item["elapsed_ms"] = 0
+                return True
+
+            if superseded():
+                return
             tool_name = item["name"]
             tool_args = item["args"]
             audit_log("tool_call_start", session_id=str(session_id), tool_name=tool_name)
@@ -1041,6 +1067,14 @@ class BaseReActAgent:
                             check_mode_cap(_inherited, _ambient["max_mode"])
                         _merged = merge_authority(_inherited, _ambient)
                         _parent_tools = _merged.get("tools")
+                        # Terminal authority includes observing/stopping its
+                        # own session jobs; this adds no launch capability.
+                        if (
+                            _parent_tools is not None
+                            and "terminal" in _parent_tools
+                            and "terminal_job" not in _parent_tools
+                        ):
+                            _parent_tools = [*_parent_tools, "terminal_job"]
                         if _parent_tools is None:
                             _merged["tools"] = self.allowed_tools
                         elif self.allowed_tools is None:
@@ -1072,7 +1106,13 @@ class BaseReActAgent:
                         if tool_name in {"mcp_call", "mcp_connect", "mcp_disconnect"}:
                             tool_timeout = int(_spec.get("timeout", 60)) + 1
                         elif tool_name == "terminal":
-                            tool_timeout = min(max(int(_spec.get("timeout", 60)), 1), _TERMINAL_CAP)
+                            # Background authorization has no execution deadline;
+                            # admission still gets a normal startup window.
+                            tool_timeout = (
+                                60
+                                if tool_args.get("background") is True
+                                else min(max(int(_spec.get("timeout", 60)), 1), _TERMINAL_CAP)
+                            )
                         from machina.core.execution_context import resolve_execution_context
 
                         _context = await resolve_execution_context(str(session_id), tool_name)
@@ -1095,6 +1135,7 @@ class BaseReActAgent:
                             content=_spec.get("content", ""),
                             mode=_mode,
                             backend=_backend,
+                            workspace=str(_context.workspace),
                             agent_id=self.agent_id,
                             session_id=str(session_id),
                             capabilities=_spec.get("capabilities"),
@@ -1102,7 +1143,7 @@ class BaseReActAgent:
                             tool=tool_name,
                             # AH-AUDIT-005/008: timeout is authorization-
                             # relevant and bound into the approved digest.
-                            timeout=int(_spec.get("timeout", 60) or 60),
+                            timeout=int(_spec.get("timeout", 60)),
                         )
                         try:
                             await _broker.guard(_req)
@@ -1162,6 +1203,8 @@ class BaseReActAgent:
                                     item["_delegated_tokens"] = completed.tokens_used
 
                             async def execute():
+                                if superseded():
+                                    return item["result"]
                                 try:
                                     completed = await registry.execute(tool_name, **tool_args)
                                 except CompletedOnCancellation as cancellation:
@@ -1990,6 +2033,11 @@ class ReActAgent(BaseReActAgent):
                 _s3_progress_history: list = []
                 # S3.1(d) END progress history
                 while True:
+                    from machina.core.shell_jobs import apply_job_updates
+                    from machina.core.steering import apply_steering, pending_steering
+
+                    apply_job_updates(session_id, messages)
+                    await apply_steering(session_id, self.agent_id, messages)
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
@@ -2048,6 +2096,14 @@ class ReActAgent(BaseReActAgent):
                         response.usage.get("prompt_tokens", 0),
                         response.usage.get("completion_tokens", 0),
                     )
+                    if pending_steering(session_id) and response.content:
+                        await self._append_assistant_content(
+                            session_id, response.content, pending_chunks
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                    if await apply_steering(session_id, self.agent_id, messages):
+                        iteration += 1
+                        continue
                     if not response.tool_calls:
                         return await self._finish_turn_completion(
                             session_id,
@@ -2153,6 +2209,11 @@ class ReActAgent(BaseReActAgent):
                 _s3_progress_history: list = []
                 # S3.1(d) END stream progress history
                 while True:
+                    from machina.core.shell_jobs import apply_job_updates
+                    from machina.core.steering import apply_steering, pending_steering
+
+                    apply_job_updates(session_id, messages)
+                    await apply_steering(session_id, self.agent_id, messages)
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
@@ -2254,6 +2315,14 @@ class ReActAgent(BaseReActAgent):
                         return
 
                     response = final_response
+                    if pending_steering(session_id) and response.content:
+                        await self._append_assistant_content(
+                            session_id, response.content, pending_chunks
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                    if await apply_steering(session_id, self.agent_id, messages):
+                        iteration += 1
+                        continue
                     if not response.tool_calls:
                         completed = await self._finish_turn_completion(
                             session_id,

@@ -13,6 +13,7 @@ export const APP_BINDINGS = {
 	agentNext: { label: "Next agent", key: "ctrl+n j" },
 	agentPrevious: { label: "Previous agent", key: "ctrl+n k" },
 	agentClose: { label: "Close idle agent tab", key: "ctrl+n d" },
+	activity: { label: "View activity and queued prompts", key: "ctrl+n a" },
 	quickOpen: { label: "Quick open", key: "ctrl+p" },
 	explorer: { label: "Toggle file tree", key: "ctrl+t" },
 	closeTab: { label: "Close file tab", key: "ctrl+w" },
@@ -99,6 +100,7 @@ const SHORTCUT_BINDINGS: Record<string, string[]> = {
 	quickopen: ["quickOpen"], save: ["save"], closetab: ["closeTab"], explorer: ["explorer"],
 	intel: ["complete"], focus: ["focusNext", "focusPrevious"], chatmax: ["chatMaximize", "editorMaximize", "restoreSplit"],
 	help: ["shortcuts"],
+	activity: ["activity"],
 };
 
 export function effectiveShortcutRows(overrides: BindingOverrides): ShortcutRow[] {

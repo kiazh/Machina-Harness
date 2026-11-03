@@ -33,6 +33,77 @@ CREATE INDEX IF NOT EXISTS idx_context_chunks_session_created_event
     ON context_chunks(session_id, created_at DESC, event_seq DESC NULLS LAST, id DESC);
 """
 
+# Preserve an event's cursor position when even an older CLI/gateway archives
+# it. Capture on the server before save-before-delete writers remove the live
+# row. The guarded backfill runs once; subsequent starts neither scan nor take
+# a DDL/write lock on context_archive. Keep in sync with schema.sql.
+_CONTEXT_ARCHIVE_EVENT_ORDER_MIGRATION = """
+DO $migration$
+DECLARE
+    order_columns_added BOOLEAN := false;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid = 'context_archive'::regclass
+          AND attname = 'original_event_seq' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE context_archive ADD COLUMN original_event_seq BIGINT;
+        order_columns_added := true;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid = 'context_archive'::regclass
+          AND attname = 'original_order_known' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE context_archive
+            ADD COLUMN original_order_known BOOLEAN NOT NULL DEFAULT false;
+        order_columns_added := true;
+    END IF;
+    IF order_columns_added THEN
+        UPDATE context_archive a
+        SET original_event_seq = c.event_seq,
+            original_created_at = c.created_at,
+            original_order_known = true
+        FROM context_chunks c
+        WHERE c.id = a.chunk_id AND c.session_id = a.session_id
+          AND NOT a.original_order_known
+          AND (a.original_created_at IS NULL
+               OR a.original_created_at IS NOT DISTINCT FROM c.created_at)
+          AND (a.original_event_seq IS NULL
+               OR a.original_event_seq IS NOT DISTINCT FROM c.event_seq);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgrelid = 'context_archive'::regclass
+          AND tgname = 'context_archive_preserve_order' AND NOT tgisinternal
+    ) THEN
+        CREATE OR REPLACE FUNCTION preserve_context_archive_order()
+        RETURNS trigger LANGUAGE plpgsql AS $function$
+        DECLARE
+            source_order RECORD;
+        BEGIN
+            IF NOT NEW.original_order_known THEN
+                SELECT event_seq, created_at INTO source_order
+                FROM context_chunks
+                WHERE id = NEW.chunk_id AND session_id = NEW.session_id;
+                IF FOUND
+                   AND (NEW.original_created_at IS NULL
+                        OR NEW.original_created_at IS NOT DISTINCT FROM source_order.created_at)
+                   AND (NEW.original_event_seq IS NULL
+                        OR NEW.original_event_seq IS NOT DISTINCT FROM source_order.event_seq) THEN
+                    NEW.original_event_seq := source_order.event_seq;
+                    NEW.original_created_at := source_order.created_at;
+                    NEW.original_order_known := true;
+                END IF;
+            END IF;
+            RETURN NEW;
+        END;
+        $function$;
+        CREATE TRIGGER context_archive_preserve_order
+            BEFORE INSERT ON context_archive
+            FOR EACH ROW EXECUTE FUNCTION preserve_context_archive_order();
+    END IF;
+END;
+$migration$;
+"""
+
 # H08: additive runtime migration for existing databases. schema.sql never
 # runs on an already-initialized database, so this must be applied by
 # ``initialize_runtime_schema`` too. Keep in sync with the memories section of
@@ -364,6 +435,7 @@ class Database:
                 with open(os.path.join(os.path.dirname(__file__), name), encoding="utf-8") as f:
                     await conn.execute(f.read())
             await conn.execute(_CONTEXT_EVENT_ORDER_MIGRATION)
+            await conn.execute(_CONTEXT_ARCHIVE_EVENT_ORDER_MIGRATION)
             await conn.execute(_MEMORY_EMBEDDING_SPACE_MIGRATION)
             await conn.execute(_USAGE_LEDGER_MIGRATION)
             await conn.execute(_TOOL_ARTIFACTS_MIGRATION)

@@ -1,0 +1,18 @@
+:root {
+  color-scheme: light;
+  --ui-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --code-font: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --canvas: oklch(97.8% .008 83);
+  --chrome: oklch(96.8% .009 83);
+  --editor: oklch(98.8% .006 83);
+  --harness: oklch(98.1% .008 83);
+  --ink: oklch(29% .014 68);
+  --muted: oklch(55% .014 68);
+  --line: oklch(89% .012 83 / .7);
+  --accent: oklch(49% .108 41);
+  --success: oklch(47% .07 156);
+  --error: oklch(48% .12 32);
+  --hover: oklch(89% .015 80 / .4);
+  --input: oklch(99% .004 83);
+  --input-line: oklch(85% .013 75);
+}

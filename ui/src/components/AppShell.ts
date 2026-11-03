@@ -55,6 +55,7 @@ export class AppShell {
 	/** Pinned top bar above the transcript (music); hidden rows collapse. */
 	private pinnedBar: PinnedBarSlot | undefined;
 	private agentBar: (Component & { visible: boolean }) | undefined;
+	private activityBar: (Component & { visible: boolean }) | undefined;
 	/** Created on first workspace use; its absence means today's chat-only tree. */
 	private workspace: WorkspaceShell | undefined;
 
@@ -99,6 +100,11 @@ export class AppShell {
 
 	setAgentBar(bar: Component & { visible: boolean }): void {
 		this.agentBar = bar;
+		this.rebuild();
+	}
+
+	setActivityBar(bar: Component & { visible: boolean }): void {
+		this.activityBar = bar;
 		this.rebuild();
 	}
 
@@ -166,6 +172,10 @@ export class AppShell {
 		const gap = this.gapRows();
 		let rows = this.composer.render(width).length + this.footer.render(width).length;
 		let sections = 3; // panes row + composer + footer
+		if (this.activityBar?.visible) {
+			rows += this.activityBar.render(width).length;
+			sections += 1;
+		}
 		if (this.dock) {
 			rows += this.dock.render(width).length;
 			sections += 1;
@@ -260,6 +270,8 @@ export class AppShell {
 		// every row on transcript, composer, or status.
 		const gap = density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
 		const topRow = this.workspaceRow();
+		const activity = this.activityBar;
+		const activityEntries = activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : [];
 		// Viewports consume the remaining rows. A zero basis skips intrinsic
 		// measurement, which otherwise formats the entire scrollback at trial
 		// widths on every keypress and animation frame.
@@ -268,6 +280,7 @@ export class AppShell {
 				[
 					{ component: this.chatColumn(), basis: 0, grow: 1 },
 					...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
+					...activityEntries,
 					{ component: this.composer, shrink: 0 },
 					{ component: this.footer, shrink: 0 },
 				],
@@ -281,6 +294,7 @@ export class AppShell {
 			[
 				{ component: topRow, basis: 0, grow: 1 },
 				...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
+				...activityEntries,
 				{ component: this.composer, shrink: 0 },
 				{ component: this.footer, shrink: 0 },
 			],

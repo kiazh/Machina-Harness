@@ -198,6 +198,13 @@ def _search_text_for(payload: dict[str, Any]) -> str | None:
     return text[:20000] or None
 
 
+def _archive_created_at(row: asyncpg.Record) -> datetime | None:
+    """Preserve captured NULL times while retaining the legacy archive fallback."""
+    if row.get("original_order_known"):
+        return row.get("original_created_at")
+    return row.get("original_created_at") or row["archived_at"]
+
+
 class ContextManager:
     """CRUD for context chunks stored as MessagePack with batch insert support."""
 
@@ -825,8 +832,9 @@ class ContextManager:
                 UNION ALL
                 SELECT chunk_id, session_id, COALESCE(agent_id, 'harness'), chunk_type,
                        payload_msgpack, token_count, {embedding_column},
-                       COALESCE(original_created_at, archived_at), NULL::timestamptz,
-                       NULL::bigint,
+                       CASE WHEN original_order_known THEN original_created_at
+                            ELSE COALESCE(original_created_at, archived_at) END,
+                       NULL::timestamptz, original_event_seq,
                        0, archived_at, id
                 FROM context_archive WHERE session_id = $1
                   AND chunk_type IN ('user_message', 'assistant_message', 'tool_call', 'compression_summary')
@@ -1522,7 +1530,8 @@ class ContextManager:
                 payload=payload,
                 token_count=row.get("token_count") or 0,
                 embedding=emb,
-                created_at=row.get("original_created_at") or row["archived_at"],
+                created_at=_archive_created_at(row),
+                event_seq=row.get("original_event_seq"),
             )
             results.append((chunk, sim))
         return results
@@ -1573,7 +1582,8 @@ class ContextManager:
                     chunk_type=row.get("chunk_type") or "document",
                     payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
                     token_count=row.get("token_count") or 0,
-                    created_at=row.get("original_created_at") or row["archived_at"],
+                    created_at=_archive_created_at(row),
+                    event_seq=row.get("original_event_seq"),
                 ),
                 float(row["similarity"]),
             )
@@ -1613,7 +1623,8 @@ class ContextManager:
                     chunk_type=row.get("chunk_type") or "document",
                     payload=msgpack.unpackb(row["payload_msgpack"], raw=False),
                     token_count=row.get("token_count") or 0,
-                    created_at=row.get("original_created_at") or row["archived_at"],
+                    created_at=_archive_created_at(row),
+                    event_seq=row.get("original_event_seq"),
                 ),
                 float(row["similarity"]),
             )

@@ -95,6 +95,7 @@ export interface FeatureHost {
 	onGatewayEvent?(handler: (event: GatewayEvent) => void): () => void;
 	/** Inspect locally retained tool output; never re-executes tools. */
 	inspectOutput(toolId?: string): Promise<void>;
+	inspectActivity?(): Promise<void>;
 	/** Active user profile id (preferences bucket + new-chat agent scope). */
 	profileId(): string;
 	/** Switch the active profile (existing chats keep theirs). */

@@ -145,7 +145,7 @@ export class ApprovalCard implements Component {
 		rows.push(`argv: ${d.argv.map((a) => JSON.stringify(clean(a))).join(" ") || "(none)"}`);
 		rows.push(`Session: ${d.sessionId.slice(0, 8)}  turn: ${(d.originTurnId ?? d.transportTurnId ?? "").slice(0, 8)}  request: ${d.requestId.slice(0, 8)}`);
 		rows.push(`cwd: ${d.cwd || "(unknown)"}  backend: ${d.backend || "(unknown)"}`);
-		rows.push(`Timeout: ${d.timeout === undefined ? "unspecified" : `${d.timeout}s`}`);
+		rows.push(`Timeout: ${d.timeout === undefined ? "unspecified" : d.timeout === 0 && d.capabilities.includes("background-process") ? "none · background command (can be stopped)" : `${d.timeout}s`}`);
 		rows.push(`Capabilities: ${d.capabilities.length ? d.capabilities.join(", ") : "(none)"}`);
 		if (d.network?.length) rows.push(`Network: ${d.network.join(", ")}`);
 		if (d.shell) rows.push(`Shell: ${d.shell}`);

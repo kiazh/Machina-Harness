@@ -1,0 +1,38 @@
+import {useEffect,useRef,useState} from 'react';
+import {invoke,isTauri} from '@tauri-apps/api/core';
+import {Terminal as XTerm} from '@xterm/xterm';
+import {FitAddon} from '@xterm/addon-fit';
+import {Plus,X} from 'lucide-react';
+import '@xterm/xterm/css/xterm.css';
+import './interactive-terminal.css';
+
+export interface TerminalOpened {id:number;shell:string;cwd:string}
+interface TerminalRead {data:number[];truncated:boolean;exited:boolean;exitCode:number|null;error:string|null}
+interface ShellTab extends TerminalOpened {exited?:boolean;exitCode?:number|null}
+export type TerminalInvoke=<T>(command:string,args?:Record<string,unknown>)=>Promise<T>;
+
+export function InteractiveTerminal({cwd,visible=true,onClose,transport=invoke,native=isTauri(),onSessionCount}:{cwd?:string;visible?:boolean;onClose:()=>void;transport?:TerminalInvoke;native?:boolean;onSessionCount?:(count:number)=>void}) {
+ const [tabs,setTabs]=useState<ShellTab[]>([]),[selected,setSelected]=useState<number>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[closing,setClosing]=useState<number>();
+ const alive=useRef(true),opening=useRef(false),ids=useRef<number[]>([]),started=useRef(false);
+ useEffect(()=>{onSessionCount?.(tabs.filter(tab=>!tab.exited).length)},[tabs,onSessionCount]);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;for(const id of ids.current)void transport('terminal_close',{id}).catch(()=>{});ids.current=[]}},[transport]);
+ async function open(){if(opening.current||!cwd||!native)return;opening.current=true;setBusy(true);setError('');try{const tab=await transport<TerminalOpened>('terminal_open',{cwd,cols:80,rows:24});if(!alive.current){await transport('terminal_close',{id:tab.id});return}ids.current.push(tab.id);setTabs(previous=>[...previous,tab]);setSelected(tab.id)}catch(reason){if(alive.current)setError(String(reason))}finally{opening.current=false;if(alive.current)setBusy(false)}}
+ useEffect(()=>{if(!started.current&&cwd&&native&&visible){started.current=true;void open()}},[cwd,native,visible]);
+ async function close(id:number){setError('');try{await transport('terminal_close',{id});if(!alive.current)return;ids.current=ids.current.filter(value=>value!==id);setTabs(previous=>{const next=previous.filter(tab=>tab.id!==id);setSelected(current=>current===id?next.at(-1)?.id:current);return next});setClosing(undefined)}catch(reason){if(alive.current)setError(String(reason))}}
+ return <section className="interactive-terminal" aria-label="Interactive shell" hidden={!visible}><header><div className="shell-tab-list" role="tablist" aria-label="Shell sessions">{tabs.map(tab=><div className="shell-tab" key={tab.id}><button role="tab" aria-selected={selected===tab.id} onClick={()=>setSelected(tab.id)}>{tab.shell} {tab.id}{tab.exited?' · exited':''}</button><button aria-label={`Close shell ${tab.id}`} onClick={()=>tab.exited?void close(tab.id):setClosing(tab.id)}><X size={12}/></button></div>)}</div><button disabled={busy||!native||!cwd||tabs.length>=8} aria-label="New shell" onClick={()=>{void open()}}><Plus size={14}/></button><button aria-label="Hide interactive shell" onClick={onClose}><X size={14}/></button></header>{!native&&<p>Interactive shells run in the native desktop app. This browser preview has no shell access.</p>}{native&&!cwd&&<p>Open a workspace before starting a shell.</p>}{error&&<p className="inline-error" role="alert">{error}</p>}{closing!==undefined&&<div className="shell-close-confirm" role="group" aria-label="Close running shell"><span>Close this shell and its running processes?</span><button onClick={()=>{void close(closing)}}>Close shell and processes</button><button onClick={()=>setClosing(undefined)}>Keep shell</button></div>}{busy&&<p role="status">Opening shell…</p>}{native&&cwd&&!tabs.length&&!busy&&<button onClick={()=>{void open()}}>Open shell in workspace</button>}<div className="shell-panes">{tabs.map(tab=><ShellPane key={tab.id} tab={tab} active={selected===tab.id&&visible} transport={transport} onError={setError} onExit={code=>setTabs(previous=>previous.map(value=>value.id===tab.id?{...value,exited:true,exitCode:code}:value))}/>)}</div></section>;
+}
+function ShellPane({tab,active,transport,onError,onExit}:{tab:ShellTab;active:boolean;transport:TerminalInvoke;onError:(error:string)=>void;onExit:(code:number|null)=>void}) {
+ const host=useRef<HTMLDivElement>(null),terminal=useRef<XTerm>(null),fit=useRef<FitAddon>(null),isVisible=useRef(active),exited=useRef(false),callbacks=useRef({onError,onExit});callbacks.current={onError,onExit};isVisible.current=active;
+ useEffect(()=>{
+  if(!host.current)return;let alive=true;let timer:ReturnType<typeof setTimeout>;let resizeTimer:ReturnType<typeof setTimeout>;let chain=Promise.resolve();let queuedBytes=0;
+  const element=host.current;const style=getComputedStyle(element);const term=new XTerm({fontFamily:style.getPropertyValue('--code-font')||'Consolas, monospace',fontSize:13,scrollback:3000,cursorBlink:false,allowTransparency:false,theme:{background:'#14161c',foreground:'#dae0ef',cursor:'#a9c2ff'},windowsPty: navigator.userAgent.includes('Windows')?{backend:'conpty'}:undefined});const sizing=new FitAddon();terminal.current=term;fit.current=sizing;term.loadAddon(sizing);term.open(element);
+  // Native writes are ordered. Bound paste/input queued behind a slow OS pipe.
+  const input=term.onData(data=>{if(exited.current)return;if(queuedBytes+data.length>256*1024){callbacks.current.onError('Terminal input is busy. Wait before pasting more text.');return}queuedBytes+=data.length;chain=chain.then(async()=>{for(let offset=0;offset<data.length;offset+=8192)await transport('terminal_write',{id:tab.id,data:data.slice(offset,offset+8192)})}).catch(reason=>{if(alive)callbacks.current.onError(String(reason))}).finally(()=>{queuedBytes-=data.length})});
+  const resize=term.onResize(size=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(alive&&!exited.current)void transport('terminal_resize',{id:tab.id,cols:Math.max(2,Math.min(500,size.cols)),rows:Math.max(1,Math.min(200,size.rows))}).catch(reason=>{if(alive)callbacks.current.onError(String(reason))})},70)});
+  const observer=new ResizeObserver(()=>{if(isVisible.current&&element.clientWidth&&element.clientHeight)sizing.fit()});observer.observe(element);
+  async function poll(){try{if(document.visibilityState==='hidden'){timer=setTimeout(()=>{void poll()},700);return}const read=await transport<TerminalRead>('terminal_read',{id:tab.id});if(!alive)return;if(read.truncated)term.writeln('\r\n[Older output was dropped while the terminal was busy.]');if(read.data.length)await new Promise<void>(resolve=>term.write(Uint8Array.from(read.data),resolve));if(!alive)return;if(read.error)callbacks.current.onError(read.error);if(read.exited){exited.current=true;term.options.disableStdin=true;term.writeln(`\r\n[Shell exited${read.exitCode!==null?` with code ${read.exitCode}`:''}]`);callbacks.current.onExit(read.exitCode);return}timer=setTimeout(()=>{void poll()},read.data.length?25:isVisible.current?100:350)}catch(reason){if(alive)callbacks.current.onError(String(reason))}}
+  void poll();return()=>{alive=false;clearTimeout(timer);clearTimeout(resizeTimer);observer.disconnect();input.dispose();resize.dispose();term.dispose();terminal.current=null;fit.current=null};
+ },[tab.id,transport]);
+ useEffect(()=>{if(active){const frame=requestAnimationFrame(()=>{if(host.current?.clientWidth){fit.current?.fit();terminal.current?.focus()}});return()=>cancelAnimationFrame(frame)}},[active]);
+ return <div ref={host} className="shell-pane" hidden={!active} aria-label={`${tab.shell} ${tab.id}`} onKeyDown={event=>event.stopPropagation()}/>;
+}

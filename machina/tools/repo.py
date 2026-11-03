@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 
 from machina.skills import enrich, repo_install
 from machina.skills.registry import log_skill_metadata_event, skill_registry
@@ -71,7 +70,7 @@ async def repo_stage(url: str) -> str:
                 repo_install.write_staged_plan(plan, repo_dir)
                 return _stage_result(plan, source, revision)
             finally:
-                shutil.rmtree(clone_parent)
+                repo_install._remove_owned_tree(clone_parent, clone_parent.parent)
                 clone_parent = None
 
         result = await _run_worker_joined(publish, capture_result=True)
@@ -82,7 +81,9 @@ async def repo_stage(url: str) -> str:
         return "Error: staging failed (filesystem error)"
     finally:
         if clone_parent is not None:
-            await _run_worker_joined(lambda: shutil.rmtree(clone_parent))
+            await _run_worker_joined(
+                lambda: repo_install._remove_owned_tree(clone_parent, clone_parent.parent)
+            )
     return result
 
 

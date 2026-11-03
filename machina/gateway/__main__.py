@@ -17,10 +17,20 @@ dispatch loop in-process.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import os
+import secrets
 import sys
+import threading
+from queue import Full, Queue
+from typing import Any
 
-if __name__ == "__main__":
+
+def isolate_protocol_streams() -> None:
+    """Detach private protocol pipes before loading services or launching children."""
+    global _protocol_in, _protocol_out
     sys.stdout.flush()
     _protocol_in = os.fdopen(os.dup(0), "rb", buffering=0)
     _protocol_out = os.fdopen(os.dup(1), "w", encoding="utf-8", newline="\n")
@@ -30,18 +40,15 @@ if __name__ == "__main__":
     os.dup2(2, 1)
     sys.stdin = open(os.devnull, encoding="utf-8")  # lives for the process
     sys.stdout = sys.stderr
+
+
+if __name__ == "__main__":
+    isolate_protocol_streams()
 else:
     # Imported (tests): keep the protocol channel on the importer's streams.
     _protocol_in = getattr(sys.stdin, "buffer", None)
     _protocol_out = sys.stdout
 
-import asyncio
-import json
-import logging
-import secrets
-import threading
-from queue import Full, Queue
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

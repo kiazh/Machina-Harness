@@ -64,6 +64,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -381,6 +382,7 @@ def _run(
     timeout: float,
     stdin_text: str | None = None,
     cwd: Path | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> _ProcessResult:
     """Run one child through the shared bounded runner (round-5 review F2).
 
@@ -391,8 +393,9 @@ def _run(
     anchor falls back to the call-time launch directory inside the leaf.
     """
     anchor: Path | None = cwd if cwd is not None else _repo_root()
-    if anchor is not None and not anchor.is_dir():
+    if cwd is None and anchor is not None and not anchor.is_dir():
         anchor = None
+    cancellation = {"cancel_event": cancel_event} if cancel_event is not None else {}
     result = _child_process().run_bounded(
         argv,
         env=env,
@@ -401,6 +404,7 @@ def _run(
         cwd=anchor,
         max_stdout=MAX_OUTPUT_CHARS,
         max_stderr=MAX_STDERR_CHARS,
+        **cancellation,
     )
     return _ProcessResult(
         returncode=result.returncode,
@@ -1380,7 +1384,14 @@ class RunResult:
     unsupported_reason: str = ""
 
 
-def run_task(platform: str, prompt: str, *, timeout: float = 300.0) -> RunResult:
+def run_task(
+    platform: str,
+    prompt: str,
+    *,
+    timeout: float = 300.0,
+    cwd: Path | None = None,
+    cancel_event: threading.Event | None = None,
+) -> RunResult:
     """Delegate one prompt to an installed harness, bounded and typed.
 
     Runs the platform's documented headless command through the shared runner
@@ -1397,6 +1408,11 @@ def run_task(platform: str, prompt: str, *, timeout: float = 300.0) -> RunResult
     unsupported/unknown platform, or a run-capable platform without a literal
     prompt mechanism is a value (``ok``/``exit_code``/``unsupported_reason``),
     never raised.
+
+    ``cwd`` binds a session-selected workspace. When supplied it is passed
+    unchanged to the child runner; an unavailable folder fails the spawn
+    instead of falling back to the Machina checkout. Omitting it preserves
+    the existing CLI workspace default.
     """
     key = (platform or "").strip().lower()
     prefix = RUN_PLATFORMS.get(key)
@@ -1443,7 +1459,19 @@ def run_task(platform: str, prompt: str, *, timeout: float = 300.0) -> RunResult
             stderr=f"{spec.label} is not installed ({spec.binaries[0]} not on PATH)",
             ok=False,
         )
-    proc = _run(command, env=_child_env(spec), timeout=timeout, stdin_text=stdin_text)
+    if cancel_event is not None:
+        proc = _run(
+            command,
+            env=_child_env(spec),
+            timeout=timeout,
+            stdin_text=stdin_text,
+            cwd=cwd,
+            cancel_event=cancel_event,
+        )
+    elif cwd is None:
+        proc = _run(command, env=_child_env(spec), timeout=timeout, stdin_text=stdin_text)
+    else:
+        proc = _run(command, env=_child_env(spec), timeout=timeout, stdin_text=stdin_text, cwd=cwd)
     stdout = _redact_output(proc.output)
     stderr = _redact_output(proc.stderr)
     if proc.timed_out:

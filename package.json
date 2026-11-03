@@ -1,0 +1,20 @@
+{
+  "name": "machina-desktop-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "desktop:dev": "node tools/desktop/run.mjs dev",
+    "desktop:web": "npm run dev --workspace @machina/desktop",
+    "desktop:check": "node --test tools/desktop/artifacts.test.mjs && npm run test --workspace @machina/contracts && npm run check --workspace @machina/desktop",
+    "desktop:build": "npm run build --workspace @machina/desktop",
+    "desktop:native": "node tools/desktop/run.mjs build",
+    "desktop:preview": "node tools/desktop/run.mjs preview",
+    "desktop:test": "npm run test --workspace @machina/desktop --"
+  }
+}

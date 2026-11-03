@@ -92,7 +92,26 @@ def _context(mode: str, tool: str, workspace: Path, backend: str | None = None) 
 
 
 async def resolve_execution_context(session_id: str | None, tool: str = "") -> ExecutionContext:
-    return _context(await resolve_effective_mode(session_id), tool, configured_workspace())
+    root = configured_workspace()
+    if session_id:
+        from machina.db.connection import db
+
+        if db.connected:
+            import uuid
+
+            from machina.core.session import session_manager
+
+            session = await session_manager.get_fresh(uuid.UUID(str(session_id)))
+            if session is None:
+                raise ValueError("Session is unavailable; no workspace authority was selected")
+            pinned = session.state.get("desktop_workspace_root")
+            if pinned is not None:
+                if not isinstance(pinned, str) or not Path(pinned).is_absolute():
+                    raise ValueError("Session workspace is invalid; select its folder again")
+                root = Path(pinned).resolve()
+                if not root.is_dir():
+                    raise ValueError("Session workspace is unavailable; select its folder again")
+    return _context(await resolve_effective_mode(session_id), tool, root)
 
 
 def execution_context(

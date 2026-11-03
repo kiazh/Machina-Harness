@@ -4,6 +4,22 @@
 
 Machina is a terminal AI workspace: chat beside your code, delegate to specialist agents, automate recurring work, and return to the same conversations after a restart. It runs on your machine and your PostgreSQL database, and it can talk to cloud providers, subscription accounts, or local models.
 
+During a reply, **Enter queues steering** and **Escape interrupts**. Queued
+messages are applied at the next safe tool boundary so the agent can reconsider
+its next action. **Ctrl+N then A** or `/activity` opens pending prompts, background
+commands, and agent views. Queued text can be edited or removed before delivery.
+Slow shell commands can run with `terminal(background=true)`; the agent uses
+`terminal_job` to inspect output, wait for completion, or stop them while doing
+other work. Background commands remain visible after a turn ends, and stop when
+the gateway closes. Text steering and background job handles are session-local
+to the running gateway; delivered messages remain in the saved conversation.
+
+Running commands show **Background**, **Output**, and **Stop** controls above
+the composer. Background releases the agent to continue without rerunning the
+command; a foreground command keeps its original execution deadline. Commands
+started with `background=true` have no execution deadline. The same controls
+are available by keyboard through **Ctrl+N then A** or `/activity`.
+
 **In one sentence:** Machina keeps the model's working set small, its long-term memory governed, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
@@ -1344,6 +1360,18 @@ scripts/            Operator script mount point and setup guidance
 | Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras |
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
 | The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
+
+## Desktop engineering preview
+
+The native desktop preview puts the agent conversation first, with an editable
+companion pane, native terminal and nine personal appearance presets.
+Custom local wallpaper, glass/opacity, typography and motion controls are included.
+It uses the existing Python/PostgreSQL engine; desktop feature parity and native
+macOS acceptance are still in progress.
+
+See [desktop setup and checks](apps/desktop/README.md). From a configured checkout,
+run `npm run desktop:dev`, or build with `npm run desktop:native` and launch with
+`npm run desktop:preview`.
 
 ## License and credits
 

@@ -205,6 +205,118 @@ test("start() enables shrink-clearing so closed menus leave no ghost rows", asyn
 	await app.exit();
 });
 
+test("Enter during a turn queues steering and clears the accepted draft", async () => {
+	const { app, tui, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("work");
+	client.responses.set("prompt.steer", { queued: true, items: [{ id: "q1", text: "change direction" }] });
+	const editor = widgetWith(tui, "setText") as unknown as { setText(text: string): void; getText(): string };
+	editor.setText("change direction");
+	await (app as unknown as { submit(text: string): Promise<void> }).submit("change direction");
+	assert.equal(client.requests.filter((r) => r.method === "prompt.submit").length, 1);
+	assert.equal(client.requests.find((r) => r.method === "prompt.steer")?.params.text, "change direction");
+	assert.equal(editor.getText(), "");
+	client.emit(ev({ type: "steering.update", items: [], delivered: [{ id: "q1", text: "change direction" }] }));
+	client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+	await app.exit();
+});
+
+test("steering racing with turn completion starts the next turn once", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("work");
+	client.emit(ev({ type: "message.start" }));
+	client.responses.set("prompt.steer", { queued: false });
+	client.responses.set("prompt.steering", { items: [] });
+	await (app as unknown as { submit(text: string): Promise<void> }).submit("late steering");
+	client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	const calls = client.requests.filter((r) => r.method === "prompt.submit");
+	assert.equal(calls.length, 2);
+	assert.equal(calls[1]?.params.text, "late steering");
+	await app.exit();
+});
+
+test("a fast delivery event cannot be overwritten by the queue RPC snapshot", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("work");
+	const original = client.request.bind(client);
+	client.request = async <T>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+		if (method !== "prompt.steer") return original<T>(method, params);
+		const item = { id: "fast", text: "steer" };
+		client.emit(ev({ type: "steering.update", items: [item], delivered: [] }));
+		client.emit(ev({ type: "steering.update", items: [], delivered: [item] }));
+		return { queued: true, items: [item] } as T;
+	};
+	await (app as unknown as { submit(text: string): Promise<void> }).submit("steer");
+	const state = app as unknown as { activity: { queue(id: string): unknown[] } };
+	assert.deepEqual(state.activity.queue(SESSION_A.id), []);
+	await app.exit();
+});
+
+test("a failed follow-up read leaves queued steering available for retry", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	const state = app as unknown as { activity: { setQueue(id: string, items: unknown[]): void; queue(id: string): unknown[] }; flushSteering(id: string): Promise<void> };
+	const item = { id: "retained", text: "follow up" };
+	state.activity.setQueue(SESSION_A.id, [item]);
+	await state.flushSteering(SESSION_A.id);
+	assert.deepEqual(state.activity.queue(SESSION_A.id), [item]);
+	assert.equal(client.requests.filter((r) => r.method === "prompt.submit").length, 0);
+	client.responses.set("prompt.steering", { items: [item] });
+	await state.flushSteering(SESSION_A.id);
+	assert.equal(client.requests.find((r) => r.method === "prompt.submit")?.params.steeringId, item.id);
+	assert.deepEqual(state.activity.queue(SESSION_A.id), []);
+	await app.exit();
+});
+
+test("large queued prompts are not combined beyond the gateway input limit", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	const items = [{ id: "one", text: "a".repeat(12000) }, { id: "two", text: "b".repeat(12000) }];
+	const state = app as unknown as { activity: { setQueue(id: string, items: unknown[]): void; queue(id: string): unknown[] }; flushSteering(id: string): Promise<void> };
+	state.activity.setQueue(SESSION_A.id, items);
+	client.responses.set("prompt.steering", { items });
+	await state.flushSteering(SESSION_A.id);
+	const sent = client.requests.find((r) => r.method === "prompt.submit");
+	assert.equal(sent?.params.text, items[0]!.text);
+	assert.equal(sent?.params.steeringId, "one");
+	assert.deepEqual(state.activity.queue(SESSION_A.id), [items[1]]);
+	await app.exit();
+});
+
+test("retired steering and tool events cannot mutate the current activity", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	client.responses.set("prompt.submit", { turnId: "old" });
+	await app.submitTurn("first");
+	client.emit(ev({ type: "message.start", turnId: "old" }));
+	client.emit(ev({ type: "message.complete", turnId: "old", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+	client.responses.set("prompt.submit", { turnId: "new" });
+	await app.submitTurn("second");
+	client.emit(ev({ type: "message.start", turnId: "new" }));
+	client.emit(ev({ type: "tool.start", turnId: "new", id: "live", name: "read_file", args: {} }));
+	client.emit(ev({ type: "steering.update", turnId: "old", items: [{ id: "stale", text: "old" }], delivered: [{ id: "stale", text: "old" }] }));
+	client.emit(ev({ type: "message.complete", turnId: "old", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+	const state = app as unknown as { activity: { queue(id: string): unknown[] }; activeTools: Map<string, Map<string, string>> };
+	assert.deepEqual(state.activity.queue(SESSION_A.id), []);
+	assert.equal(state.activeTools.get(SESSION_A.id)?.has("live"), true);
+	await app.exit();
+});
+
+test("an interrupted turn does not restart itself to consume queued steering", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("work");
+	client.emit(ev({ type: "message.start" }));
+	client.emit(ev({ type: "steering.update", items: [{ id: "q", text: "pending" }], delivered: [] }));
+	client.emit(ev({ type: "message.complete", text: "", tokens: 0, iterations: 1, toolCalls: 0, cancelled: true }));
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(client.requests.filter((r) => r.method === "prompt.submit").length, 1);
+	await app.exit();
+});
+
 test("cancel() does not set running=false while the turn is still in-flight", async () => {
 	const { app, tui, client } = makeApp(SESSION_A);
 	await app.start();

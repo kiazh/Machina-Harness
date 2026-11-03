@@ -117,7 +117,8 @@ export interface OutputViewerOptions {
  * transcript scroll position; closing returns to the previous dialog.
  */
 export class OutputViewer implements Component {
-	private readonly record: OutputRecord;
+	private record: OutputRecord;
+	private wrappedCache: { text: string; width: number; rows: string[] } | undefined;
 	private readonly scroll: ScrollView;
 	private readonly tui: TUI | undefined;
 	private readonly onClose?: () => void;
@@ -142,13 +143,17 @@ export class OutputViewer implements Component {
 		else if (matchesKey(data, Key.end)) this.scroll.scrollToEnd();
 	}
 
+	setRecord(record: OutputRecord): void { this.record = record; }
+
 	render(width: number): string[] {
 		const total = Math.max(0, width);
 		const content = Math.max(1, width);
 		const rows = this.tui?.terminal.rows ?? 24;
-		const wrapped = sanitizeDisplay(this.record.text || "(empty result)")
+		const wrapped = this.wrappedCache?.text === this.record.text && this.wrappedCache.width === content
+			? this.wrappedCache.rows : sanitizeDisplay(this.record.text || "(empty result)")
 			.split("\n")
 			.flatMap((line) => wrapTextWithAnsi(line, content));
+		this.wrappedCache = { text: this.record.text, width: content, rows: wrapped };
 		// Mirror App's full-screen overlay sheet (see openDialog): the viewer
 		// owns title + status + hints rows, the ScrollView budget gets the rest.
 		const height = Math.max(4, rows);
