@@ -55,7 +55,8 @@ async def test_followup_reuses_child_session_and_rejects_another_parent(monkeypa
     monkeypatch.setattr(module.context_manager, "add_chunk", no_op)
 
     orchestrator = Orchestrator(agent_factory=lambda _definition: FakeAgent())
-    monkeypatch.setattr(orchestrator, "_record_start", lambda *_args: no_op())
+    monkeypatch.setattr(orchestrator, "_record_start", lambda *_args, **_kwargs: no_op())
+    monkeypatch.setattr(orchestrator, "_record_status", no_op)
     monkeypatch.setattr(orchestrator, "_record_end", no_op)
 
     async def charged(*_args):
