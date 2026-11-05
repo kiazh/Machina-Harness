@@ -175,7 +175,7 @@ You are a general-purpose agent first: answer greetings and self-contained conce
 
 For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 
-Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue at most three independent delegate calls together. Give each worker a complete task and required evidence. A worker reports only to you. On each report, check what remains, continue your own work or assign a focused follow-up with the session_id in the delegate result, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions. share_memory is persistent memory, not peer chat.
+Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
 For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan.
 
@@ -249,6 +249,7 @@ MAX_PENDING_LEARNING_REVIEWS = 16
 # a 1s cap aborted healthy network tools and cost another LLM call to react.
 _TOOL_TIMEOUTS: dict[str, float] = {
     "share_memory": 60.0,
+    "web_search": 45.0,
     "web_extract": 45.0,
     "web_research": 120.0,
     "web_crawl": 120.0,
@@ -290,6 +291,10 @@ def _tool_outcome(item: dict[str, Any]) -> str:
     preview = str(item.get("result") or "")
     if item.get("_needs_approval") or item.get("_needs_approvals"):
         return "paused"
+    if item.get("_delegation_status") == "waiting_approval":
+        return "paused"
+    if item.get("_delegation_status") in {"queued", "running", "interrupted", "pending"}:
+        return item["_delegation_status"]
     if (
         item.get("_denied")
         or item.get("_steering_skipped")
@@ -371,7 +376,7 @@ class BaseReActAgent:
         # An explicit child allow-list enforces the same boundary at execution,
         # even if a model emits a tool name absent from its advertised schema.
         if delegated:
-            child_forbidden = {"learn_personality", "delegate", "list_agents"}
+            child_forbidden = {"learn_personality", "delegate", "delegate_status", "list_agents"}
             candidate_tools = (
                 allowed_tools
                 if allowed_tools is not None
@@ -401,7 +406,8 @@ class BaseReActAgent:
             defs = [
                 definition
                 for definition in defs
-                if definition.name not in {"learn_personality", "delegate", "list_agents"}
+                if definition.name
+                not in {"learn_personality", "delegate", "delegate_status", "list_agents"}
             ]
         elif not config.get("personality_growth_enabled") or not config.get("memory_enabled"):
             defs = [d for d in defs if d.name != "learn_personality"]
@@ -907,7 +913,8 @@ class BaseReActAgent:
         *tool_calls_made* in place.
 
         Independent tool calls in one assistant message run **concurrently**
-        (bounded by ``_MAX_PARALLEL_TOOLS``) instead of one after another, so a
+        (bounded by ``_MAX_PARALLEL_TOOLS``, or the configured delegate limit
+        for delegation) instead of one after another, so a
         batch of N reads costs roughly max(latency) rather than sum(latency).
         Every ``tool_call`` event is emitted up front, then results are
         replayed in the original order so the transcript stays deterministic.
@@ -1194,6 +1201,9 @@ class BaseReActAgent:
                                     getattr(completed, "is_error", False)
                                 ) or str(completed).startswith("Error:")
                                 item["elapsed_ms"] = (time.monotonic() - start) * 1000
+                                item["_delegation_status"] = getattr(
+                                    completed, "delegation_status", ""
+                                )
                                 if getattr(completed, "outcome_unknown", False):
                                     item["_outcome_unknown"] = True
                                 from machina.tools.agents import DelegationToolResult
@@ -1301,9 +1311,15 @@ class BaseReActAgent:
         completion_order: list[dict[str, Any]] = []
         if runnable:
             semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
+            try:
+                delegate_limit = int(config.get("max_delegate_concurrency") or 4)
+            except (TypeError, ValueError):
+                delegate_limit = 4
+            delegate_semaphore = asyncio.Semaphore(max(1, min(delegate_limit, 64)))
 
             async def _bounded(item: dict[str, Any]) -> dict[str, Any]:
-                async with semaphore:
+                slots = delegate_semaphore if item["name"] == "delegate" else semaphore
+                async with slots:
                     with _s3trace.trace_tool_call(item) if _s3trace else nullcontext() as _trace:
                         await _run_one(item)
                         if _trace is not None:

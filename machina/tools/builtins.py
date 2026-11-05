@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import concurrent.futures
 import ipaddress
 import json
@@ -58,6 +60,73 @@ def _parse_duckduckgo_results(html: str) -> list[tuple[str, str]]:
     parser.feed(html)
     results = []
     for href, title in parser.results:
+        url = _canonical_result_url(href)
+        if url and title:
+            results.append((url, title))
+    return results
+
+
+class _BingLinks(HTMLParser):
+    """Read result headings, excluding navigation and unrelated links."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[tuple[str, str]] = []
+        self.depth = 0
+        self.heading = False
+        self.url: str | None = None
+        self.title: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "li":
+            if self.depth:
+                self.depth += 1
+            elif "b_algo" in (dict(attrs).get("class") or "").split():
+                self.depth = 1
+        if self.depth and tag == "h2":
+            self.heading = True
+        elif self.depth and self.heading and tag == "a" and self.url is None:
+            self.url = dict(attrs).get("href")
+            self.title = []
+
+    def handle_data(self, data: str) -> None:
+        if self.url is not None:
+            self.title.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self.url is not None:
+            self.results.append((self.url, "".join(self.title).strip()))
+            self.url = None
+        elif tag == "h2":
+            self.heading = False
+        elif tag == "li" and self.depth:
+            self.depth -= 1
+
+
+def _parse_bing_results(html: str) -> list[tuple[str, str]]:
+    parser = _BingLinks()
+    parser.feed(html)
+    results = []
+    for href, title in parser.results:
+        try:
+            parts = urlparse(href)
+            is_redirect = (parts.hostname or "").lower() in {
+                "bing.com",
+                "www.bing.com",
+            } and parts.path == "/ck/a"
+        except ValueError:
+            continue
+        if is_redirect:
+            encoded = parse_qs(parts.query).get("u", [""])[0]
+            if not encoded.startswith("a1"):
+                continue
+            try:
+                encoded = encoded[2:]
+                href = base64.b64decode(
+                    encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True
+                ).decode("utf-8")
+            except (ValueError, UnicodeDecodeError, binascii.Error):
+                continue
         url = _canonical_result_url(href)
         if url and title:
             results.append((url, title))
@@ -145,13 +214,28 @@ async def _search_web_results(query: str, limit: int = 5) -> list[tuple[str, str
         )
         if resp.status_code == 200:
             results = [(title, url, "") for url, title in _parse_duckduckgo_results(resp.text)]
-            return results[:limit]
+            if results:
+                return results[:limit]
     except httpx.TimeoutException:
         pass
     except httpx.HTTPError:
         pass
     except Exception as error:
         record_failure("builtins.web_search", error)
+    try:
+        resp = await asyncio.to_thread(
+            httpx.get,
+            "https://www.bing.com/search",
+            params={"q": query},
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if resp.status_code == 200:
+            return [(title, url, "") for url, title in _parse_bing_results(resp.text)][:limit]
+    except httpx.HTTPError:
+        pass
+    except Exception as error:
+        record_failure("builtins.web_search.fallback", error)
     return []
 
 
@@ -297,7 +381,10 @@ class _ExtractedText(HTMLParser):
 
 @registry.register(
     name="web_extract",
-    description="Extract content from a URL",
+    description=(
+        "Extract text from a public URL using static HTTP. This does not run JavaScript; "
+        "sparse results include a browser-backed retrieval hint."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -318,7 +405,11 @@ async def web_extract(url: str) -> str:
     """
     if not url or not url.strip():
         raise ValidationError("Empty URL")
-    return await extract_url_text(url)
+    content = await extract_url_text(url)
+    notice = static_fetch_notice(content)
+    if notice:
+        return f"{content}\n\n[Fetch note: {notice}]".strip()
+    return content
 
 
 # Extraction bounds: the raw-body cap is generous so real pages (often a few
@@ -355,6 +446,23 @@ def extract_text_from_html(content: str, text_limit: int = _EXTRACT_TEXT_LIMIT) 
             line.strip() for line in "".join(parser.parts).splitlines() if line.strip()
         )
     return content[:text_limit]
+
+
+_STATIC_FETCH_NOTICE_MIN_CHARS = 160
+
+
+def static_fetch_notice(content: str) -> str:
+    """Explain when a sparse static response may be an unrendered app shell."""
+    visible = " ".join(content.split())
+    if len(visible) >= _STATIC_FETCH_NOTICE_MIN_CHARS:
+        return ""
+    return (
+        f"Possible incomplete static fetch ({len(visible)} visible characters). "
+        "JavaScript-rendered content may be missing. If expected content is absent, "
+        "discover a connected browser-backed web tool with mcp_list, inspect its schema "
+        "with mcp_describe, and call it with mcp_call. If none is available, report the "
+        "source as incomplete."
+    )
 
 
 async def extract_url_text(url: str, *, text_limit: int = _EXTRACT_TEXT_LIMIT) -> str:

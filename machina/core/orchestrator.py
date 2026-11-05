@@ -12,10 +12,13 @@ import asyncio
 import logging
 import os
 import stat
+import threading
 import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from weakref import WeakKeyDictionary
 
 from machina.core.agent_def import AgentDef, agent_registry
 from machina.core.assembler import PromptAssembler, get_token_count, truncate_to_tokens
@@ -24,7 +27,7 @@ from machina.core.config import config
 from machina.core.context import context_manager
 from machina.core.exceptions import DelegationAccountingError
 from machina.core.session import session_manager
-from machina.db.connection import db
+from machina.db.connection import db, parse_command_count
 from machina.memory.redaction import redact_diagnostic
 from machina.observability.diagnostics import record_failure
 
@@ -53,6 +56,53 @@ delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
 child_observer: ContextVar[Callable[[uuid.UUID, str, str], None] | None] = ContextVar(
     "delegated_child_observer", default=None
 )
+
+
+class _DelegateCapacity:
+    """Share the configured worker limit among callers on each event loop."""
+
+    def __init__(self) -> None:
+        self._states: WeakKeyDictionary = WeakKeyDictionary()
+        self._guard = threading.Lock()
+
+    def _state(self):
+        loop = asyncio.get_running_loop()
+        with self._guard:
+            state = self._states.get(loop)
+            if state is None:
+                state = (asyncio.Condition(), [0])
+                self._states[loop] = state
+            return state
+
+    @asynccontextmanager
+    async def slot(self):
+        condition, active = self._state()
+
+        def current_limit() -> int:
+            try:
+                return max(1, min(int(config.get("max_delegate_concurrency") or 4), 64))
+            except (TypeError, ValueError):
+                return 4
+
+        async with condition:
+            while active[0] >= current_limit():
+                await condition.wait()
+            active[0] += 1
+        try:
+            yield
+        finally:
+            async with condition:
+                active[0] -= 1
+                condition.notify_all()
+
+
+_delegate_capacity = _DelegateCapacity()
+_live_delegations: dict[uuid.UUID, asyncio.Task] = {}
+
+
+def _delegation_is_live(child_session_id: uuid.UUID) -> bool:
+    task = _live_delegations.get(child_session_id)
+    return task is not None and not task.done()
 
 
 class AgentNotFoundError(Exception):
@@ -199,6 +249,7 @@ class Orchestrator:
         expected_output: str | None = None,
         expected_artifact_path: str | None = None,
         resume_session_id: uuid.UUID | None = None,
+        on_started: Callable[[uuid.UUID], None] | None = None,
     ) -> DelegationResult:
         """Run *task* on *agent_name* in a fresh or owned child session.
 
@@ -350,7 +401,34 @@ class Orchestrator:
         observer = child_observer.get()
         observer_started = False
         response = None
+        claim_token: str | None = None
+        ownership = None
+        run_completed = False
+        agent_cleaned = False
+
+        async def cleanup_agent() -> None:
+            if agent is not None:
+                try:
+                    await join_agent_background_tasks(agent)
+                except Exception as cleanup_error:
+                    record_failure("orchestrator.delegate", cleanup_error)
+            if getattr(self, "_owns_factory_agents", False) and agent is not None:
+                try:
+                    from machina.core.agent_factory import close_agent_provider
+
+                    await close_agent_provider(agent)
+                except Exception as cleanup_error:
+                    record_failure("orchestrator.delegate", cleanup_error)
+
         try:
+            from machina.core.turns import TurnOwnership, try_begin_turn
+
+            claim_token = await try_begin_turn(child.id)
+            if claim_token is None:
+                raise ValueError("delegated child session is already running")
+            ownership = TurnOwnership(child.id, uuid.uuid4().hex, claim_token)
+            running_task = asyncio.current_task()
+            ownership.start_renewal(on_lost=running_task.cancel if running_task else None)
             if inherited_grant is not None and created_child:
                 await permission_store.save_grant(
                     {
@@ -371,7 +449,21 @@ class Orchestrator:
                 agent = await self._default_agent(
                     definition, authority=child_authority, session=child
                 )
-            message_id = await self._record_start(parent_session_id, from_agent, agent_name, task)
+            message_id = await self._record_start(
+                parent_session_id, from_agent, agent_name, task, child_session_id=child.id
+            )
+            owner_task = asyncio.current_task()
+            if owner_task is not None:
+                _live_delegations[child.id] = owner_task
+
+                def forget(completed: asyncio.Task, child_id: uuid.UUID = child.id) -> None:
+                    if _live_delegations.get(child_id) is completed:
+                        _live_delegations.pop(child_id, None)
+
+                owner_task.add_done_callback(forget)
+            if on_started is not None:
+                on_started(child.id)
+            nested_delegation = delegation_depth.get() > 0
             depth_token = delegation_depth.set(_hop_count)
             authority_token = parent_authority_var.set(child_authority)
             child_task = self._build_delegation_prompt(agent_name, task, handoff)
@@ -379,65 +471,148 @@ class Orchestrator:
                 child_task += f"\n\n## Expected Output\n{expected_output}"
             if expected_artifact_path:
                 child_task += f"\n\n## Expected Artifact\n{expected_artifact_path}"
-            if observer is None or not hasattr(agent, "run_stream"):
+            if nested_delegation:
+                # Product child agents cannot delegate. Keep internal recursive
+                # orchestrator calls from deadlocking while the parent holds a slot.
+                await self._record_status(message_id, "running")
                 response = await agent.run(child.id, child_task, verbose=False)
             else:
-                from contextlib import aclosing
+                async with _delegate_capacity.slot():
+                    await self._record_status(message_id, "running")
+                    if observer is None or not hasattr(agent, "run_stream"):
+                        response = await agent.run(child.id, child_task, verbose=False)
+                    else:
+                        from contextlib import aclosing
 
-                from machina.memory.redaction import StreamingSecretRedactor
+                        from machina.memory.redaction import StreamingSecretRedactor
 
-                def announce(kind: str, value: str = "") -> None:
-                    try:
-                        observer(child.id, kind, value)
-                    except Exception as error:
-                        record_failure("orchestrator.child_observer", error)
+                        def announce(kind: str, value: str = "") -> None:
+                            try:
+                                observer(child.id, kind, value)
+                            except Exception as error:
+                                record_failure("orchestrator.child_observer", error)
 
-                announce("start", agent_name)
-                observer_started = True
-                redactor = StreamingSecretRedactor()
-                response = None
-                async with aclosing(
-                    agent.run_stream(child.id, child_task, verbose=False)
-                ) as events:
-                    async for event in events:
-                        if event.type == "text":
-                            safe = redactor.feed(event.content or "")
-                            if safe:
-                                announce("text", safe)
-                        elif event.type == "tool_call":
-                            announce("tool", event.tool_name)
-                        elif event.type == "done":
-                            tail = redactor.flush()
-                            if tail:
-                                announce("text", tail)
-                            response = event.response
-                if response is None:
-                    raise RuntimeError("delegated stream ended without a result")
-                announce("done", response.outcome)
+                        announce("start", agent_name)
+                        observer_started = True
+                        redactor = StreamingSecretRedactor()
+                        response = None
+                        async with aclosing(
+                            agent.run_stream(child.id, child_task, verbose=False)
+                        ) as events:
+                            async for event in events:
+                                if event.type == "text":
+                                    safe = redactor.feed(event.content or "")
+                                    if safe:
+                                        announce("text", safe)
+                                elif event.type == "tool_call":
+                                    announce("tool", event.tool_name)
+                                elif event.type == "done":
+                                    tail = redactor.flush()
+                                    if tail:
+                                        announce("text", tail)
+                                    response = event.response
+                        if response is None:
+                            raise RuntimeError("delegated stream ended without a result")
+                        announce("done", response.outcome)
+            await cleanup_agent()
+            agent_cleaned = True
+            run_completed = True
+            tokens = await self._settle_child_tokens(
+                message_id, child.id, agent_name, response.tokens_used
+            )
+            pauses = getattr(response, "needs_approval", None)
+            pauses = (
+                [dict(pause) for pause in pauses if isinstance(pause, dict)]
+                if isinstance(pauses, list)
+                else []
+            )
+            for pause in pauses:
+                pause.setdefault("session_id", str(child.id))
+                pause.setdefault("agent_id", agent_name)
+            # Typed outcomes (never prose): a failed child is an error even when
+            # its body sounds benign. Pauses keep waiting_approval semantics.
+            outcome = getattr(response, "outcome", "completed")
+            status = (
+                "waiting_approval" if pauses else ("error" if outcome == "failed" else "complete")
+            )
+            final_content = response.content
+            if status == "complete" and expected_artifact_path is not None:
+                _ok, _reason = self._check_expected_artifact(expected_artifact_path)
+                if not _ok:
+                    status = "error"
+                    final_content = _reason
+            if status == "error":
+                # Typed child failure (not a raised exception): the same redaction
+                # contract applies to the durable row, the parent chunk, and the
+                # returned result.
+                final_content = _redacted(final_content)
+            await self._record_end(message_id, status=status, response=final_content, tokens=tokens)
+            if parent_session_id is not None:
+                await context_manager.add_chunk(
+                    session_id=parent_session_id,
+                    agent_id=from_agent,
+                    chunk_type="result",
+                    payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
+                    token_count=get_token_count(final_content),
+                )
+            if status != "waiting_approval":
+                await self._delete_finished_child(child.id, parent_session_id)
+            return DelegationResult(
+                agent=agent_name,
+                task=task,
+                response=final_content,
+                session_id=child.id,
+                tokens=tokens,
+                iterations=response.iterations,
+                status=status,
+                needs_approval=pauses,
+            )
         except asyncio.CancelledError:
             if message_id is not None:
+                from machina.core.runtime import runtime_services
+
+                shutdown = runtime_services._shutting_down
+                lost = ownership is not None and ownership.ownership_lost.is_set()
+                status = "interrupted" if shutdown or lost else "cancelled"
+                detail = (
+                    "Runtime shutdown or lost ownership interrupted the worker. Review its child session and "
+                    "resume with delegate using the child session ID; effects may be uncertain."
+                    if shutdown or lost
+                    else "cancelled"
+                )
+                tokens = 0
                 try:
                     tokens = await self._charged_child_tokens(child.id, agent_name)
                     await self._record_end(
-                        message_id, status="cancelled", response="cancelled", tokens=tokens
+                        message_id, status=status, response=detail, tokens=tokens
                     )
                 except DelegationAccountingError as accounting_error:
                     # R4-029: spend unknown — close the row with NULL tokens rather
                     # than strand it; the cancellation itself still propagates.
                     await self._close_row_with_unknown_spend(
-                        message_id, status="cancelled", response="cancelled"
+                        message_id, status=status, response=detail
                     )
                     record_failure("orchestrator.delegate", accounting_error)
+                    if lost:
+                        raise
                 except Exception as accounting_error:
                     # Accounting failures must not swallow the parent's cancellation.
                     record_failure("orchestrator.delegate", accounting_error)
-            if message_id is not None:
-                await self._delete_finished_child(child.id, parent_session_id)
+                    if lost:
+                        raise DelegationAccountingError(
+                            "delegation accounting unavailable after ownership loss"
+                        ) from accounting_error
+                if lost:
+                    return DelegationResult(
+                        agent_name, task, detail, child.id, tokens, 0, "interrupted"
+                    )
+                if not shutdown:
+                    await self._delete_finished_child(child.id, parent_session_id)
             raise
         except Exception as e:
-            if message_id is None and created_child:
-                # Build or start-row failure: no row was recorded and the child
-                # never ran; re-raise so the finally deletes it.
+            if message_id is None or run_completed:
+                # Preserve setup and result-persistence failures for the caller.
+                # Only a fresh child that never started is deleted below.
                 raise
             logger.exception("Delegation to %s failed", agent_name)
             raw_detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
@@ -458,86 +633,38 @@ class Orchestrator:
                     observer(child.id, phase, "")
                 except Exception as error:
                     record_failure("orchestrator.child_observer", error)
-            if depth_token is not None:
-                delegation_depth.reset(depth_token)
-            if authority_token is not None:
-                try:
-                    from machina.core.agent_factory import parent_authority_var as _pav
+            try:
+                # The remaining cleanup is bounded. Stop renewal first so its
+                # loss callback cannot cancel the owner during teardown.
+                if ownership is not None:
+                    await ownership.stop_renewal()
+                if depth_token is not None:
+                    delegation_depth.reset(depth_token)
+                if authority_token is not None:
+                    try:
+                        from machina.core.agent_factory import parent_authority_var as _pav
 
-                    _pav.reset(authority_token)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # Consolidation shares the agent provider; join it (bounded)
-            # before any close so extraction never calls a closed client.
-            if agent is not None:
-                try:
-                    await join_agent_background_tasks(agent)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # AH-AUDIT-026: shared owner-aware cleanup contract (bounded;
-            # custom test factories inject shared agents that stay open).
-            if getattr(self, "_owns_factory_agents", False) and agent is not None:
-                try:
-                    from machina.core.agent_factory import close_agent_provider
+                        _pav.reset(authority_token)
+                    except Exception as _boundary_error:
+                        record_failure("orchestrator.delegate", _boundary_error)
+                if not agent_cleaned:
+                    await cleanup_agent()
+                if message_id is None and created_child:
+                    await self._delete_finished_child(child.id, parent_session_id)
+            finally:
+                if claim_token is not None:
+                    from machina.core.runtime import runtime_services
+                    from machina.core.turns import end_turn
 
-                    await close_agent_provider(agent)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("orchestrator.delegate", _boundary_error)
-            # A child that never ran leaves no chat behind.
-            if message_id is None:
-                await self._delete_finished_child(child.id, parent_session_id)
+                    async def release_claim() -> None:
+                        try:
+                            await end_turn(child.id, claim_token)
+                        except Exception as release_error:
+                            record_failure("orchestrator.delegate.release_claim", release_error)
 
-        tokens = await self._settle_child_tokens(
-            message_id, child.id, agent_name, response.tokens_used
-        )
-        pauses = getattr(response, "needs_approval", None)
-        pauses = (
-            [dict(pause) for pause in pauses if isinstance(pause, dict)]
-            if isinstance(pauses, list)
-            else []
-        )
-        for pause in pauses:
-            pause.setdefault("session_id", str(child.id))
-            pause.setdefault("agent_id", agent_name)
-        # Typed outcomes (never prose): a failed child is an error even when
-        # its body sounds benign. Pauses keep waiting_approval semantics.
-        outcome = getattr(response, "outcome", "completed")
-        status = "waiting_approval" if pauses else ("error" if outcome == "failed" else "complete")
-        final_content = response.content
-        if status == "complete" and expected_artifact_path is not None:
-            _ok, _reason = self._check_expected_artifact(expected_artifact_path)
-            if not _ok:
-                status = "error"
-                final_content = _reason
-        if status == "error":
-            # Typed child failure (not a raised exception): the same redaction
-            # contract applies to the durable row, the parent chunk, and the
-            # returned result.
-            final_content = _redacted(final_content)
-        await self._record_end(message_id, status=status, response=final_content, tokens=tokens)
-        if parent_session_id is not None:
-            await context_manager.add_chunk(
-                session_id=parent_session_id,
-                agent_id=from_agent,
-                chunk_type="result",
-                payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
-                token_count=get_token_count(final_content),
-            )
-        if status != "waiting_approval":
-            await self._delete_finished_child(child.id, parent_session_id)
-        return DelegationResult(
-            agent=agent_name,
-            task=task,
-            response=final_content,
-            session_id=child.id,
-            tokens=tokens,
-            iterations=response.iterations,
-            status=status,
-            needs_approval=pauses,
-        )
+                    release_task = asyncio.create_task(release_claim())
+                    runtime_services.track(release_task, essential=True)
+                    await asyncio.shield(release_task)
 
     async def _delete_finished_child(
         self, child_id: uuid.UUID, parent_id: uuid.UUID | None = None
@@ -710,19 +837,26 @@ class Orchestrator:
 
     # ─── persistence ──────────────────────────────────────────────────────
     async def _record_start(
-        self, session_id: uuid.UUID | None, from_agent: str, to_agent: str, task: str
+        self,
+        session_id: uuid.UUID | None,
+        from_agent: str,
+        to_agent: str,
+        task: str,
+        *,
+        child_session_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         message_id = uuid.uuid4()
         await db.execute(
             """
-            INSERT INTO agent_messages (id, session_id, from_agent, to_agent, task, status)
-            VALUES ($1, $2, $3, $4, $5, 'pending')
+            INSERT INTO agent_messages (id, session_id, from_agent, to_agent, task, status, child_session_id)
+            VALUES ($1, $2, $3, $4, $5, 'queued', $6)
             """,
             message_id,
             session_id,
             from_agent,
             to_agent,
             task,
+            child_session_id,
         )
         return message_id
 
@@ -742,11 +876,50 @@ class Orchestrator:
             tokens,
         )
 
+    async def _record_status(self, message_id: uuid.UUID, status: str) -> None:
+        """Persist a queued-to-running transition before a worker starts."""
+        result = await db.execute(
+            "UPDATE agent_messages SET status = $2 WHERE id = $1 AND status = 'queued'",
+            message_id,
+            status,
+        )
+        if parse_command_count(result) != 1:
+            raise RuntimeError("delegated worker could not enter running state")
+
+    async def latest_child_delegation(
+        self, session_id: uuid.UUID, child_session_id: uuid.UUID
+    ) -> dict | None:
+        """Look up the latest run of an owned child without a history-page limit."""
+        row = await db.fetchrow(
+            """SELECT m.id, m.status, m.response,
+                      EXISTS (SELECT 1 FROM sessions s
+                              WHERE s.id = m.child_session_id AND s.claim_owner IS NOT NULL
+                                AND s.claim_expires_at > now()) AS claim_active
+               FROM agent_messages m
+               WHERE m.session_id = $1 AND m.child_session_id = $2
+               ORDER BY m.created_at DESC, m.id DESC LIMIT 1""",
+            session_id,
+            child_session_id,
+        )
+        if row is None:
+            return None
+        return {
+            "id": str(row["id"]),
+            "status": (
+                "running"
+                if row["claim_active"]
+                and row["status"]
+                in {"complete", "error", "cancelled", "interrupted", "waiting_approval"}
+                else row["status"]
+            ),
+            "response": _redacted(row["response"]) if row["response"] is not None else None,
+        }
+
     async def history(self, session_id: uuid.UUID, limit: int = 50) -> list[dict]:
         """Return session delegations in chronological order with redacted responses."""
         rows = await db.fetch(
             """
-            SELECT id, from_agent, to_agent, task, response, status, tokens_used, created_at, completed_at
+            SELECT id, from_agent, to_agent, task, response, status, tokens_used, created_at, completed_at, child_session_id
             FROM agent_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2
             """,
             session_id,
@@ -755,6 +928,7 @@ class Orchestrator:
         return [
             {
                 "id": str(r["id"]),
+                "childSessionId": str(r["child_session_id"]) if r["child_session_id"] else None,
                 "fromAgent": r["from_agent"],
                 "toAgent": r["to_agent"],
                 "task": r["task"],

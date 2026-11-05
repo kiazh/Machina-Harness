@@ -69,12 +69,18 @@ def _owner(config, agent_id: str) -> None:
         raise ConnectorToolError("connector is disabled")
 
 
-def call_spec(service, arguments: dict[str, Any]) -> dict:
+def call_spec(service, arguments: dict[str, Any], *, agent_id: str | None = None) -> dict:
     name = arguments.get("name")
     tool = service.registry.lookup(name) if isinstance(name, str) else None
     if tool is None:
         raise ConnectorToolError("unknown MCP tool; list and describe it first")
     config = service._config(tool.connector_id)
+    if agent_id is None:
+        from machina.tools.agents import current_agent_id
+
+        agent_id = current_agent_id.get()
+    if agent_id == "researcher" and classify_tool(config, tool) != "trusted_read":
+        raise ConnectorToolError("researcher may only call host-authorized trusted-read MCP tools")
     supplied = arguments.get("arguments")
     validate_arguments(tool.remote_name, supplied, tool.schema)
     content = json.dumps(
@@ -225,7 +231,7 @@ async def execute_call(service, name: str, arguments: dict, *, session_id: str, 
     if config.transport == "stdio" and snapshot.get("mode") == "sandbox":
         raise ConnectorToolError("host stdio MCP is unavailable in sandbox mode")
     request = build_request(
-        **call_spec(service, {"name": name, "arguments": arguments}),
+        **call_spec(service, {"name": name, "arguments": arguments}, agent_id=agent_id),
         tool="mcp_call",
         mode=snapshot["mode"],
         backend=snapshot["backend"],
@@ -256,7 +262,7 @@ async def execute_call(service, name: str, arguments: dict, *, session_id: str, 
                 "MCP configuration wait timed out; call was not dispatched"
             ) from exc
         current = build_request(
-            **call_spec(service, {"name": name, "arguments": arguments}),
+            **call_spec(service, {"name": name, "arguments": arguments}, agent_id=agent_id),
             tool="mcp_call",
             mode=snapshot["mode"],
             backend=snapshot["backend"],

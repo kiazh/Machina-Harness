@@ -47,6 +47,7 @@ async def test_gateway_observer_receives_live_child_and_settlement(monkeypatch, 
 
     orchestration = Orchestrator(agent_factory=lambda _: ChildAgent())
     monkeypatch.setattr(orchestration, "_record_start", AsyncMock(return_value=uuid4()))
+    monkeypatch.setattr(orchestration, "_record_status", AsyncMock())
     monkeypatch.setattr(orchestration, "_record_end", AsyncMock())
     seen = []
     token = child_observer.set(

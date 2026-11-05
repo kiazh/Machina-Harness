@@ -25,6 +25,7 @@ from machina.tools.builtins import (
     _extract_links,
     extract_text_from_html,
     fetch_page_html,
+    static_fetch_notice,
 )
 from machina.tools.rag import acquire_rag_pipeline, release_rag_pipeline
 
@@ -56,7 +57,8 @@ def _bounded_int(value: object, *, name: str, low: int, high: int) -> int:
     description=(
         "Crawl a site from a starting URL, following links up to max_pages/max_depth, "
         "and save each page's text to the active session's RAG context for later "
-        "turns. Returns excerpts and source URLs."
+        "turns. Uses static HTTP and does not run JavaScript; sparse results include "
+        "a browser-backed retrieval hint. Returns excerpts and source URLs."
     ),
     parameters={
         "type": "object",
@@ -164,6 +166,9 @@ async def web_crawl(
                 )
                 lines.append(f"\n{saved}. {stored_page} ({state})")
                 lines.append(redacted_excerpt(content).replace("\n", " "))
+                notice = static_fetch_notice(content)
+                if notice:
+                    lines.append(f"[Fetch note: {notice}]")
                 if wants_links:
                     for link in _extract_links(html, page):
                         if attempted + len(queue) >= page_budget:

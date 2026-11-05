@@ -26,6 +26,12 @@ export interface TurnSummary {
  */
 function toolOutcomeState(outcome: string | undefined, isError: boolean): ToolOutcome {
 	switch (outcome) {
+		case "queued":
+			return "queued";
+		case "running":
+			return "running";
+		case "interrupted":
+			return "interrupted";
 		case "denied":
 			return "denied";
 		case "paused":

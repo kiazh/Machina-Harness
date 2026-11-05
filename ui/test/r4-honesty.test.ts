@@ -127,8 +127,11 @@ test("R4-022: a streamed denied tool renders the denied state, not the success c
 	assertRowsClean(view.render(70), "denied tool card");
 });
 
-test("R4-022: typed outcomes keep a consistent mapping (paused, failed, unknown, legacy)", () => {
+test("R4-022: typed outcomes keep a consistent mapping", () => {
 	const cases: Array<{ outcome?: string; isError: boolean; marker: string; status?: RegExp }> = [
+		{ outcome: "queued", isError: false, marker: "… terminal", status: /queued/ },
+		{ outcome: "running", isError: false, marker: "terminal", status: /running/ },
+		{ outcome: "interrupted", isError: true, marker: "○ terminal", status: /interrupted; outcome unknown/ },
 		{ outcome: "paused", isError: false, marker: "○ terminal", status: /awaiting approval/ },
 		{ outcome: "failed", isError: true, marker: "✖ terminal" },
 		{ outcome: "outcome_unknown", isError: false, marker: "? terminal", status: /completion not reported/ },

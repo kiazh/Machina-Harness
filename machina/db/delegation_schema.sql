@@ -7,6 +7,10 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ancestor_session_ids UUID[] NOT NU
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ancestor_agent_ids TEXT[] NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 
+-- A delegation record must identify its child even before the worker finishes,
+-- so an interrupted run can be inspected and its session resumed.
+ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS child_session_id UUID REFERENCES sessions(id) ON DELETE SET NULL;
+
 -- Backfill existing linked delegations once. Preserve snapshots already made by
 -- current code, including references to ancestors that have since been deleted.
 WITH RECURSIVE ancestry AS (
@@ -29,7 +33,7 @@ FROM deepest WHERE sessions.id = deepest.child_id;
 
 ALTER TABLE agent_messages DROP CONSTRAINT IF EXISTS agent_messages_status_check;
 ALTER TABLE agent_messages ADD CONSTRAINT agent_messages_status_check
-    CHECK (status IN ('pending', 'complete', 'error', 'cancelled', 'waiting_approval'));
+    CHECK (status IN ('queued', 'running', 'pending', 'complete', 'error', 'cancelled', 'waiting_approval', 'interrupted'));
 
 -- R4-029: a post-run ledger failure closes the delegation row with NULL
 -- (= explicitly unknown) tokens instead of stranding it non-terminal.

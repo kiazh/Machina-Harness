@@ -390,11 +390,12 @@ ALTER TABLE IF EXISTS agents DROP COLUMN IF EXISTS max_iterations;
 CREATE TABLE IF NOT EXISTS agent_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    child_session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,
     from_agent TEXT NOT NULL,
     to_agent TEXT NOT NULL,
     task TEXT NOT NULL,
     response TEXT,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'complete', 'error', 'cancelled')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'pending', 'complete', 'error', 'cancelled', 'waiting_approval', 'interrupted')),
     tokens_used INT DEFAULT 0,                -- NULL = spend unknown, never zero (R4-029)
     created_at TIMESTAMPTZ DEFAULT now(),
     completed_at TIMESTAMPTZ

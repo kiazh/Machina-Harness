@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import uuid
 from contextvars import ContextVar
 
+from machina.core.config import config
 from machina.core.exceptions import DelegationAccountingError, ToolError
 from machina.db.connection import db
 from machina.memory.redaction import redact_diagnostic
@@ -19,15 +21,24 @@ logger = logging.getLogger(__name__)
 # sessions isolated and avoids accepting a model-supplied parent session ID.
 current_session_id: ContextVar[uuid.UUID | None] = ContextVar("agent_session_id", default=None)
 current_agent_id: ContextVar[str | None] = ContextVar("agent_tool_owner_id", default=None)
+_background_delegations: set[asyncio.Task] = set()
 
 
 class DelegationToolResult(str):
     """Readable tool output carrying typed child pauses and cumulative spend."""
 
-    def __new__(cls, text: str, *, needs_approval: list[dict], tokens_used: int):
+    def __new__(
+        cls,
+        text: str,
+        *,
+        needs_approval: list[dict],
+        tokens_used: int,
+        delegation_status: str = "complete",
+    ):
         result = super().__new__(cls, text)
         result.needs_approval = needs_approval
         result.tokens_used = tokens_used
+        result.delegation_status = delegation_status
         return result
 
 
@@ -49,7 +60,8 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
         "Hand a self-contained task to another agent and get its result. Use for work "
         "that suits a specialist (e.g. 'researcher' to gather info, 'coder' to edit code). "
         "Independent subtasks fan out: issue one delegate call per subtask in a single "
-        "block (no more than three) and they run in parallel. "
+        "block and they run in parallel up to the configured concurrency limit; "
+        "additional calls queue. "
         "Use list_agents with a task keyword only when the built-in roles do not fit. "
         "The result includes a child session id; pass it as session_id for a follow-up."
     ),
@@ -73,6 +85,12 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
                 "type": "string",
                 "description": "Optional child session UUID from an earlier delegate result for a follow-up",
             },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3600,
+                "description": "Optional inline wait override; 0 waits until completion. One-shot headless chat always waits for completion.",
+            },
         },
         "required": ["agent", "task"],
     },
@@ -83,6 +101,7 @@ async def delegate(
     expected_output: str | None = None,
     expected_artifact_path: str | None = None,
     session_id: str | None = None,
+    wait_seconds: int | None = None,
 ) -> str:
     """Delegate *task* to *agent* and return its response and child id."""
     from machina.core.orchestrator import (
@@ -180,15 +199,87 @@ async def delegate(
             _contract_kwargs["expected_artifact_path"] = expected_artifact_path
         if resume_session_id is not None:
             _contract_kwargs["resume_session_id"] = resume_session_id
-        result = await orchestrator.delegate(
-            agent,
-            task,
-            from_agent=from_agent,
-            parent_session_id=parent_session_id,
-            _hop_count=delegation_depth.get() + 1,
-            authority=parent_authority,
-            **_contract_kwargs,
+        child_started = asyncio.get_running_loop().create_future()
+
+        def on_started(child_session_id: uuid.UUID) -> None:
+            if not child_started.done():
+                child_started.set_result(child_session_id)
+
+        _contract_kwargs["on_started"] = on_started
+        operation = asyncio.create_task(
+            orchestrator.delegate(
+                agent,
+                task,
+                from_agent=from_agent,
+                parent_session_id=parent_session_id,
+                _hop_count=delegation_depth.get() + 1,
+                authority=parent_authority,
+                **_contract_kwargs,
+            )
         )
+        from machina.core.runtime import runtime_services
+
+        runtime_services.track(operation)
+        _background_delegations.add(operation)
+
+        def forget(completed: asyncio.Task) -> None:
+            _background_delegations.discard(completed)
+            if not completed.cancelled():
+                error = completed.exception()
+                if error is not None:
+                    record_failure("tools.delegate.background", error)
+
+        operation.add_done_callback(forget)
+        ready, _ = await asyncio.wait(
+            {operation, child_started}, return_when=asyncio.FIRST_COMPLETED, timeout=30
+        )
+        if operation in ready:
+            result = await operation
+        elif child_started in ready:
+            child_id = child_started.result()
+            try:
+                configured_wait = (
+                    wait_seconds
+                    if wait_seconds is not None
+                    else config.get("delegate_inline_wait_seconds")
+                )
+                wait_limit = max(
+                    0, min(int(120 if configured_wait is None else configured_wait), 3600)
+                )
+            except (TypeError, ValueError):
+                wait_limit = 120
+            from machina.permissions.broker import get_current_principal
+
+            if get_current_principal() == "headless":
+                # The one-shot CLI closes its event loop after the turn. A
+                # detached worker would be lost before it could report back.
+                wait_limit = 0
+            if wait_limit:
+                done, _ = await asyncio.wait({operation}, timeout=wait_limit)
+                if not done:
+                    try:
+                        entry = await orchestrator.latest_child_delegation(
+                            parent_session_id, child_id
+                        )
+                    except Exception as error:
+                        record_failure("tools.delegate.pending_status", error)
+                        entry = None
+                    status = entry.get("status", "running") if entry else "running"
+                    receipt = DelegationToolResult(
+                        f"[{agent} {status}]\nChild session: {child_id}\n"
+                        "Use delegate_status with this child session ID to check progress; "
+                        "use delegate with session_id after it finishes.",
+                        needs_approval=[],
+                        tokens_used=0,
+                        delegation_status=status,
+                    )
+                    receipt.is_error = False
+                    return receipt
+            result = await operation
+        else:
+            operation.cancel()
+            await asyncio.gather(operation, return_exceptions=True)
+            raise ToolError("delegated worker did not finish setup within 30 seconds")
     except AgentNotFoundError as e:
         raise ToolError(f"{e}. Use list_agents to see available agents.") from None
     except DelegationAccountingError:
@@ -200,7 +291,7 @@ async def delegate(
 
     label = (
         "failed"
-        if result.status in ("error", "failed")
+        if result.status in ("error", "failed", "interrupted")
         else "waiting for approval"
         if result.status == "waiting_approval"
         else "responded"
@@ -209,11 +300,84 @@ async def delegate(
         f"[{agent} {label}]\nChild session: {result.session_id}\n{result.response}",
         needs_approval=getattr(result, "needs_approval", []),
         tokens_used=getattr(result, "tokens", 0),
+        delegation_status=result.status,
     )
     # Typed failure for the parent loop (never prose scanning): agent.py marks
     # tool outcome failed via getattr(result, "is_error").
     receipt.is_error = label == "failed"
     return receipt
+
+
+@registry.register(
+    name="delegate_status",
+    description="Check whether one of your delegated workers is queued, running, finished, or interrupted.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "child_session_id": {
+                "type": "string",
+                "description": "Child session ID returned by delegate",
+            }
+        },
+        "required": ["child_session_id"],
+    },
+)
+async def delegate_status(child_session_id: str) -> str:
+    """Return durable status and the result for a child owned by this session."""
+    from machina.core.orchestrator import _delegation_is_live, orchestrator
+
+    _, parent_session_id = await active_agent_scope()
+    try:
+        child_id = str(uuid.UUID(child_session_id))
+    except (ValueError, TypeError):
+        raise ToolError("child_session_id must be a UUID") from None
+    entry = await orchestrator.latest_child_delegation(parent_session_id, uuid.UUID(child_id))
+    if entry is None:
+        raise ToolError("no delegated worker with that child session ID belongs to this session")
+    status = entry["status"]
+    response = str(entry.get("response") or "")
+    if status in {"queued", "running", "pending"} and not _delegation_is_live(uuid.UUID(child_id)):
+        active_claim = await db.fetchval(
+            """SELECT EXISTS (
+                   SELECT 1 FROM sessions
+                   WHERE id = $1 AND claim_owner IS NOT NULL AND claim_expires_at > now()
+               )""",
+            uuid.UUID(child_id),
+        )
+        if not active_claim:
+            updated = await db.execute(
+                """UPDATE agent_messages
+                   SET status = 'interrupted',
+                       response = COALESCE(response, 'Worker stopped before completing.'),
+                       completed_at = COALESCE(completed_at, now())
+                   WHERE id = $1 AND status IN ('queued', 'running', 'pending')
+                     AND NOT EXISTS (
+                         SELECT 1 FROM sessions WHERE id = $2 AND claim_owner IS NOT NULL
+                           AND claim_expires_at > now()
+                     )""",
+                uuid.UUID(entry["id"]),
+                uuid.UUID(child_id),
+            )
+            if updated == "UPDATE 0":
+                entry = await orchestrator.latest_child_delegation(
+                    parent_session_id, uuid.UUID(child_id)
+                )
+                if entry is None:
+                    raise ToolError("delegated worker is no longer available")
+                status = entry["status"]
+                response = str(entry.get("response") or "")
+            else:
+                status = "interrupted"
+                response = (
+                    response
+                    or "Worker stopped before completing. Resume with delegate using this child session ID."
+                )
+    text = f"Worker {status}. Child session: {child_id}."
+    if status not in {"queued", "running", "pending"}:
+        text += f"\n{response[:12000]}"
+    result = DelegationToolResult(text, needs_approval=[], tokens_used=0, delegation_status=status)
+    result.is_error = status in {"interrupted", "error", "failed", "cancelled"}
+    return result
 
 
 @registry.register(
@@ -242,6 +406,11 @@ async def list_agents(query: str = "") -> str:
         ]
         if not agents:
             return f"No agents match {query.strip()!r}."
+    else:
+        # The bounded default roster must still show the standard roles even
+        # when an alphabetically sorted specialist catalog is much larger.
+        core = {"harness": 0, "researcher": 1, "coder": 2}
+        agents = sorted(agents, key=lambda agent: core.get(agent.name, 3))
     shown = agents[:12]
     lines = [f"- {agent.name}: {agent.description or '(no description)'}" for agent in shown]
     if len(agents) > len(shown):
