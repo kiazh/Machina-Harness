@@ -365,6 +365,10 @@ export class App implements FeatureHost {
 	private lastEscAt = 0;
 	private version = "";
 	private current: SessionInfo | undefined;
+	/** Title chosen by /new while the chat is still a client-side draft. */
+	private draftSessionTitle: string | undefined;
+	/** Shared first-message creation so two quick submits cannot make two chats. */
+	private sessionCreation: Promise<void> | undefined;
 	private readonly defaultProfile = defaultProfileId();
 	private currentProfile: string = this.defaultProfile;
 	private running = false;
@@ -657,12 +661,10 @@ export class App implements FeatureHost {
 				});
 				this.switchTo(session, history);
 			} else {
-				const agent = this.sessionAgent();
-				const { session } = await this.client.request<SessionResult>(
-					"session.create",
-					agent ? { agent } : {},
-				);
-				this.switchTo(session, []);
+				// A blank chat is client-side only. The first real message
+				// creates the session, so opening the CLI never adds an empty
+				// conversation to history.
+				this.showNewChat();
 			}
 			try {
 				// Session-scoped authority for the initial session (finding 8):
@@ -1147,6 +1149,64 @@ export class App implements FeatureHost {
 		};
 	}
 
+	/**
+	 * Render a blank chat without writing a session. The session row is
+	 * created by the first submitted message; /new and /clear use this so an
+	 * untouched draft never appears in history.
+	 */
+	private showNewChat(title?: string): void {
+		if (this.current) this.sessionTokensById.set(this.current.id, this.sessionTokens);
+		this.current = undefined;
+		this.draftSessionTitle = title?.trim() || undefined;
+		this.sessionTokens = 0;
+		this.clearImages();
+		this.editor.setText("");
+		this.transcript.clear();
+		this.transcript.addComponent(header(this.version, undefined));
+		this.footer.dispose();
+		this.footer.tokens = 0;
+		this.setRunning(false);
+		this.syncAgentCount();
+		this.tui.requestRender();
+	}
+
+	/** Host entry point for /new and post-delete navigation. */
+	newSession(title?: string): void {
+		this.showNewChat(title);
+		this.refreshSessionMode();
+	}
+
+	/** Create the durable session for a draft chat at its first message. */
+	private ensureSession(text: string): Promise<void> {
+		if (this.current) return Promise.resolve();
+		if (!this.sessionCreation) {
+			const agent = this.sessionAgent();
+			const title = this.draftSessionTitle || text.slice(0, 80);
+			this.sessionCreation = this.client
+				.request<SessionResult>("session.create", {
+					title,
+					...(agent ? { agent } : {}),
+				})
+				.then(({ session }) => {
+					this.draftSessionTitle = undefined;
+					this.current = session;
+					this.rememberSession(session.id);
+					this.sessionTokens = 0;
+					this.transcript.clear();
+					this.transcript.addComponent(header(this.version, this.headerInfo(session)));
+					this.footer.tokens = 0;
+					this.family.reseed();
+					this.syncAgentCount();
+					this.refreshSessionMode(session.id);
+					this.tui.requestRender();
+				})
+				.finally(() => {
+					this.sessionCreation = undefined;
+				});
+		}
+		return this.sessionCreation;
+	}
+
 	switchTo(session: SessionInfo, history: HistoryEntry[]): void {
 		if (this.current?.id === session.id) {
 			// Same-id re-resume of the visible session (`/resume <current>`,
@@ -1204,8 +1264,8 @@ export class App implements FeatureHost {
 	 * Best-effort: a failed refresh keeps the previous indicator rather
 	 * than blanking it, and never rejects into the switch path.
 	 */
-	private refreshSessionMode(sessionId: string): void {
-		void this.request<{ mode: string }>("mode.get", { sessionId }).catch(() => {});
+	private refreshSessionMode(sessionId?: string): void {
+		void this.request<{ mode: string }>("mode.get", sessionId ? { sessionId } : {}).catch(() => {});
 	}
 
 	updateSession(session: SessionInfo): void {
@@ -3868,6 +3928,16 @@ export class App implements FeatureHost {
             draft = this.imageDraft.prepare(text);
         }
         catch (error) { this.print(message(error), "error"); return; }
+        if (!command && !this.current) {
+            try {
+                // The chat is still a client-side draft. Materialize it only
+                // now that there is an actual message to save.
+                await this.ensureSession(draft.text);
+            } catch (error) {
+                this.print(message(error), "error");
+                return;
+            }
+        }
         const submittedImages = this.imageDraft;
         this.imageDraft = new ImageDraft();
         this.imageEpoch++;
@@ -3912,9 +3982,12 @@ export class App implements FeatureHost {
 
     async submitTurn(text: string, images: ImageAttachment[] = [], steeringId?: string): Promise<void> {
 		if (!this.current) {
-			this.transcript.addNotice("Not connected to a session. Try /new.", "warning");
-			return;
+			// Queued steering belongs to a session that must already exist;
+			// a direct turn starts a new chat and persists it on this message.
+			if (steeringId) return;
+			await this.ensureSession(text);
 		}
+		if (!this.current) return;
 		if (this.current.parentSessionId && !this.current.isFork) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();

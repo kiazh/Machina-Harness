@@ -88,7 +88,7 @@ test("real delete flow checks sessions, confirms once, and deletes only checked 
 	type("\r");
 	await new Promise(resolve => setImmediate(resolve));
 	assert.equal(requests.filter(method => method === "session.delete").length, 1);
-	assert.equal(requests.filter(method => method === "session.create").length, 1, "current session kept; only startup created a session");
+	assert.equal(requests.filter(method => method === "session.create").length, 0, "deleting history never creates a replacement empty session");
 });
 
 test("? opens shortcuts on an empty composer and Esc restores input", async (t) => {
@@ -377,6 +377,7 @@ test("output viewer opens over a draft and Esc returns to the composer", async (
 test("output viewer reports unknown ids without opening", async (t) => {
 	const { app, tui } = await boot();
 	t.after(() => app.exit());
+	await app.submitTurn("seed the session");
 	await app.inspectOutput("nope");
 	tui.renderNow(true);
 	assert.match(tui.getScreenLines().map(stripTerminalSequences).join("\n"), /No retained output/);
@@ -385,6 +386,7 @@ test("output viewer reports unknown ids without opening", async (t) => {
 test("bare output with nothing retained stays local and quiet", async (t) => {
 	const { app, tui, requests } = await boot();
 	t.after(() => app.exit());
+	await app.submitTurn("seed the session");
 	const before = requests.length;
 	await app.inspectOutput();
 	tui.renderNow(true);

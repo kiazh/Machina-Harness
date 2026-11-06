@@ -57,6 +57,12 @@ export interface FeatureHost {
 	submitTurn(text: string): Promise<void>;
 	/** Make *session* current and show *history*. */
 	switchTo(session: SessionInfo, history: HistoryEntry[]): void;
+	/**
+	 * Start a blank chat. The session is not persisted until the first
+	 * message; hosts that cannot defer creation omit this and may create one
+	 * immediately instead.
+	 */
+	newSession?(title?: string): void;
 	/** Update details (e.g. title) of the current session. */
 	updateSession(session: SessionInfo): void;
 	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
@@ -197,7 +203,7 @@ export function options(list: Array<[string, string]>): SlashCommand["getArgumen
 
 export function requireSession(host: FeatureHost): SessionInfo {
 	const session = host.session();
-	if (!session) throw new Error("No active session. Use /new.");
+	if (!session) throw new Error("No active session. Send a message to start this chat.");
 	return session;
 }
 

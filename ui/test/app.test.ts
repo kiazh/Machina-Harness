@@ -205,6 +205,61 @@ test("start() enables shrink-clearing so closed menus leave no ghost rows", asyn
 	await app.exit();
 });
 
+test("a blank startup chat is not persisted until the first message", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	assert.equal(app.session(), undefined, "no session is opened for an empty chat");
+	assert.equal(
+		client.requests.filter((request) => request.method === "session.create").length,
+		0,
+		"starting the CLI never writes a session",
+	);
+
+	client.responses.set("prompt.submit", { turnId: "t1" });
+	await app.submitTurn("first real message");
+	const created = client.requests.filter((request) => request.method === "session.create");
+	assert.equal(created.length, 1, "the first message creates exactly one session");
+	assert.equal(created[0]!.params.title, "first real message", "the message seeds the title");
+	assert.equal(app.session()?.id, SESSION_A.id);
+
+	client.emit(ev({ type: "message.start", turnId: "t1" }));
+	client.emit(ev({
+		type: "message.complete",
+		turnId: "t1",
+		text: "done",
+		tokens: 0,
+		iterations: 1,
+		toolCalls: 0,
+		cancelled: false,
+	}));
+	await app.submitTurn("second message");
+	assert.equal(
+		client.requests.filter((request) => request.method === "session.create").length,
+		1,
+		"later messages reuse the session",
+	);
+	await app.exit();
+});
+
+test("/new keeps its title as a client-side draft", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	app.newSession("Named draft");
+	assert.equal(app.session(), undefined, "/new does not open a session");
+	assert.equal(
+		client.requests.filter((request) => request.method === "session.create").length,
+		0,
+		"/new stays client-side until a message is sent",
+	);
+
+	client.responses.set("prompt.submit", { turnId: "t2" });
+	await app.submitTurn("hello");
+	const created = client.requests.filter((request) => request.method === "session.create");
+	assert.equal(created.length, 1);
+	assert.equal(created[0]!.params.title, "Named draft", "the pending title survives until creation");
+	await app.exit();
+});
+
 test("Enter during a turn queues steering and clears the accepted draft", async () => {
 	const { app, tui, client } = makeApp(SESSION_A);
 	await app.start();
@@ -258,6 +313,7 @@ test("a fast delivery event cannot be overwritten by the queue RPC snapshot", as
 test("a failed follow-up read leaves queued steering available for retry", async () => {
 	const { app, client } = makeApp(SESSION_A);
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const state = app as unknown as { activity: { setQueue(id: string, items: unknown[]): void; queue(id: string): unknown[] }; flushSteering(id: string): Promise<void> };
 	const item = { id: "retained", text: "follow up" };
 	state.activity.setQueue(SESSION_A.id, [item]);
@@ -274,6 +330,7 @@ test("a failed follow-up read leaves queued steering available for retry", async
 test("large queued prompts are not combined beyond the gateway input limit", async () => {
 	const { app, client } = makeApp(SESSION_A);
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const items = [{ id: "one", text: "a".repeat(12000) }, { id: "two", text: "b".repeat(12000) }];
 	const state = app as unknown as { activity: { setQueue(id: string, items: unknown[]): void; queue(id: string): unknown[] }; flushSteering(id: string): Promise<void> };
 	state.activity.setQueue(SESSION_A.id, items);
@@ -545,6 +602,7 @@ test("error event keeps in-flight until completion (AH-032)", async () => {
 test("growth.status quietly pulses the footer after retirement without transcript notices", async () => {
 	const { app, client, tui } = makeApp(SESSION_A);
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const internal = app as unknown as {
 		transcript: { addNotice(text: string, kind?: unknown): void };
 	};

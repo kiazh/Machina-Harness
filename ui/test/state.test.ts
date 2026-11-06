@@ -427,6 +427,7 @@ test("S02 stale events from an earlier turn mutate nothing", async () => {
 test("S03 pre-RPC events bind provisionally and resolve once", async () => {
 	const { app, tui, client } = makeApp();
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const spy = spyTranscript(app);
 	client.autoSubmit = undefined;
 	const pending = (app as unknown as { submitTurn: (text: string) => Promise<void> }).submitTurn("task");
@@ -450,6 +451,7 @@ test("S03 pre-RPC events bind provisionally and resolve once", async () => {
 test("S03 mismatched submit identity keeps the guard with a protocol error", async () => {
 	const { app, client } = makeApp();
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const spy = spyTranscript(app);
 	client.autoSubmit = undefined;
 	const pending = (app as unknown as { submitTurn: (text: string) => Promise<void> }).submitTurn("task");
@@ -1168,6 +1170,7 @@ async function waitForPromptOutcome(client: PinClient, notices: string[]): Promi
 test("R4-024 model selection mirrors its provider route into the session snapshot", async () => {
 	const { app, client } = makePinApp();
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	client.named.add("acme");
 	await applyModel(app, { model: "acme-1", provider: "acme", description: "custom model" });
 	assert.equal(app.session()?.provider, "acme", "the app snapshot follows the gateway's pinned provider");
@@ -1178,6 +1181,7 @@ test("R4-024 model selection mirrors its provider route into the session snapsho
 test("R4-024 provider remove re-pins the session and the next turn uses the fallback", async () => {
 	const { app, tui, client } = makePinApp();
 	await app.start();
+	app.switchTo(SESSION_A, []);
 	const spy = spyTranscript(app);
 	const editor = tui.focused as unknown as { handleInput(data: string): void };
 	// Scripted user flow: add a provider, choose its model, then remove it.

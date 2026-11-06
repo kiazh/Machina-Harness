@@ -202,6 +202,10 @@ async function boot(options: BootOptions = {}) {
 	for (const [id, result] of options.resume ?? []) client.resume.set(id, result);
 	const app = new App(tui, client as unknown as GatewayClient);
 	await app.start();
+	// The CLI starts on a client-side draft. These tests exercise an active
+	// session, so activate the fixture explicitly instead of relying on a
+	// startup session.create.
+	app.switchTo(client.sessions[0] ?? MAIN, []);
 	return { app, tui, type, client, term };
 }
 

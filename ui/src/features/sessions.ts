@@ -97,6 +97,10 @@ export const sessionCommands: Command[] = [
 		description: "Start a new session",
 		argumentHint: "[title]",
 		async run(args, host) {
+			if (host.newSession) {
+				host.newSession(args);
+				return;
+			}
 			const agent = host.sessionAgent();
 			const { session } = await host.request<SessionResult>(
 				"session.create",
@@ -242,12 +246,16 @@ export const sessionCommands: Command[] = [
 				}
 			}
 			if (current && deleted.has(current.id)) {
-				const agent = host.sessionAgent();
-				const { session } = await host.request<SessionResult>(
-					"session.create",
-					agent ? { agent } : {},
-				);
-				host.switchTo(session, []);
+				if (host.newSession) {
+					host.newSession();
+				} else {
+					const agent = host.sessionAgent();
+					const { session } = await host.request<SessionResult>(
+						"session.create",
+						agent ? { agent } : {},
+					);
+					host.switchTo(session, []);
+				}
 			}
 			host.print(`Deleted ${deleted.size} session${deleted.size === 1 ? "" : "s"}.${failures.length ? ` ${failures.length} could not be deleted.` : ""}`, failures.length ? "warning" : "success");
 			for (const failure of failures) host.print(failure, "error");

@@ -950,7 +950,7 @@ export const settingsCommands: Command[] = [
 		description: "Token and request usage for this session",
 		async run(_args, host) {
 			const session = host.session();
-			if (!session) throw new Error("No active session. Use /new.");
+			if (!session) throw new Error("No active session. Send a message to start this chat.");
 			const u = await host.request<UsageResult>("usage.get", { sessionId: session.id });
 			host.print(
 				keyValues([

@@ -36,6 +36,10 @@ const appCommands: Command[] = [
 		description: "Clear the terminal and start a new chat",
 		async run(_args, host) {
 			host.clear();
+			if (host.newSession) {
+				host.newSession();
+				return;
+			}
 			const agent = host.sessionAgent();
 			const { session } = await host.request<SessionResult>(
 				"session.create",

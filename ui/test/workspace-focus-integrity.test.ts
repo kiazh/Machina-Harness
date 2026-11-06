@@ -716,7 +716,7 @@ test("a hostile dialog title cannot carry bidi/controls into the rendered menu",
 
 // ─── finding 8: music detection never blocks session creation ──────────────
 
-test("startup creates the session before music detection resolves", async () => {
+test("startup does not persist an empty session while music detection resolves", async () => {
 	const { app, client } = makeApp();
 	let releaseMusic: (() => void) | undefined;
 	client.handlers.set("config.get", () => ({ config: { nowplaying_enabled: true }, secrets: [] }));
@@ -726,12 +726,18 @@ test("startup creates the session before music detection resolves", async () => 
 
 	const started = app.start();
 	await settle();
-	assert.ok(
+	assert.equal(
 		client.requests.some((entry) => entry.method === "session.create"),
-		"the session was created while music detection was still pending",
+		false,
+		"a blank startup chat stays client-side while music detection is pending",
 	);
 	releaseMusic?.();
 	await started;
+	assert.equal(
+		client.requests.some((entry) => entry.method === "session.create"),
+		false,
+		"music detection finishing never writes an empty session",
+	);
 	await app.exit();
 });
 

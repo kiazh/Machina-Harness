@@ -9,6 +9,12 @@ function fixture(blocked:string){
   const values:Record<string,unknown>={'runtime.capabilities':{engineVersion:'test',protocolVersion:2,storageProfile:'postgres',database:'ready',methods:[]},initialize:{cwd:'/test',model:'m',provider:'p'},'config.get':{config:{}},'session.list':{sessions:[]},'runtime.selectWorkspace':{workspaceId:'w',clientId:'c',epoch:1,rootLabel:'test',resolvedRoot:'/test',trusted:false,capabilities:[]},'session.create':{session:{id:'s',title:'s',model:'m',provider:'p'}},'session.fork':{session:{id:'fork-s',title:'Fork',model:'m',provider:'p'}},'session.resume':{session:{id:params.sessionId,title:'Fork',model:'m',provider:'p'},history:[]},'shell.jobs':{jobs:[]},'prompt.submit':{turnId:'t'},'prompt.steering':{items:[{id:'other-q',text:'Old conversation'}]},'prompt.steer':{queued:true,items:[{id:'q',text:params.text}]}};return values[method] as T;
  }});return {controller,calls,details,release,emit:(event:Record<string,unknown>)=>emit({sessionId:'s',turnId:'t',...event})};
 }
+it('does not create a session when connecting or starting a new conversation',async()=>{
+ const f=fixture('unused');await f.controller.connect();f.controller.newSession();
+ expect(f.calls).not.toContain('session.create');
+ await f.controller.send('first real message');
+ expect(f.calls.filter(method=>method==='session.create')).toHaveLength(1);
+});
 it('retains a prompt when starting a new conversation cancels its pending session creation',async()=>{
  const f=fixture('session.create');await f.controller.connect();const sending=f.controller.send('keep me');
  f.controller.newSession();f.release();await expect(sending).rejects.toThrow('draft');
