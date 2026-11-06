@@ -11,6 +11,8 @@
 // independently drops workspace events whose identity does not match.
 
 import type {
+	WorkspaceChangesResult,
+	WorkspaceDiffResult,
 	LspPosition,
 	WorkspaceDocumentChange,
 	WorkspaceDocumentChangeResult,
@@ -100,6 +102,8 @@ export interface WorkspaceGateway {
 		position?: LspPosition | null,
 	): Promise<WorkspaceIntelligenceResult | WorkspaceReadRefusal>;
 	lspStatus(): Promise<WorkspaceLspStatusResult | WorkspaceReadRefusal>;
+	changes():Promise<WorkspaceChangesResult|WorkspaceReadRefusal>;
+	diff(path:string,target:'working'|'staged'):Promise<WorkspaceDiffResult|WorkspaceReadRefusal>;
 	lspControl(
 		profile: string,
 		action: WorkspaceLspAction,
@@ -230,6 +234,13 @@ export class WorkspaceGatewayAdapter implements WorkspaceGateway {
 				position: position ?? null,
 			},
 		);
+	}
+
+	async changes():Promise<WorkspaceChangesResult|WorkspaceReadRefusal>{
+		return this.request('workspace.changes',this.bound(true));
+	}
+	async diff(path:string,target:'working'|'staged'):Promise<WorkspaceDiffResult|WorkspaceReadRefusal>{
+		return this.request('workspace.diff',{...this.bound(true),path,target});
 	}
 
 	async lspStatus(): Promise<WorkspaceLspStatusResult | WorkspaceReadRefusal> {

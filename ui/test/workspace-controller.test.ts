@@ -18,6 +18,8 @@ import type {
 	WorkspaceDocumentChange,
 	WorkspaceDocumentChangeResult,
 	WorkspaceDocumentOpenResult,
+	WorkspaceChangesResult,
+	WorkspaceDiffResult,
 	WorkspaceEvent,
 	WorkspaceIntelligenceResult,
 	WorkspaceListResult,
@@ -279,6 +281,31 @@ class FakeGateway implements WorkspaceGateway {
 	async lspStatus(): Promise<WorkspaceLspStatusResult | WorkspaceReadRefusal> {
 		this.record("workspace.lspStatus", {});
 		return this.lspStatusHandler();
+	}
+
+	async changes(): Promise<WorkspaceChangesResult | WorkspaceReadRefusal> {
+		this.record("workspace.changes", {});
+		return {
+			workspaceId: this.identityValue?.workspaceId ?? "ws_1",
+			workspaceEpoch: this.identityValue?.epoch ?? 1,
+			state: "ready",
+			branch: null,
+			entries: [],
+			truncated: false,
+		};
+	}
+
+	async diff(path: string, target: "working" | "staged"): Promise<WorkspaceDiffResult | WorkspaceReadRefusal> {
+		this.record("workspace.diff", { path, target });
+		return {
+			workspaceId: this.identityValue?.workspaceId ?? "ws_1",
+			workspaceEpoch: this.identityValue?.epoch ?? 1,
+			path,
+			target,
+			patch: "",
+			binary: false,
+			truncated: false,
+		};
 	}
 
 	async lspControl(

@@ -1,0 +1,57 @@
+name: Desktop release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install desktop dependencies
+        run: npm ci --ignore-scripts
+      - name: Build native desktop installers
+        run: npm run desktop:bundle
+      - name: Publish Windows desktop package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem 'apps/desktop/src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.msi', '.exe' } | Select-Object -ExpandProperty FullName)
+          if ($assets.Count -eq 0) { throw 'Desktop bundling produced no Windows installer.' }
+          gh release create $env:GITHUB_REF_NAME $assets --title "Deus Ex Machina $env:GITHUB_REF_NAME" --generate-notes
+
+  macos:
+    needs: windows
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install desktop dependencies
+        run: npm ci --ignore-scripts
+      - name: Build native desktop installer
+        run: npm run desktop:bundle
+      - name: Attach macOS desktop package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=(apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          test -e "${assets[0]}" || { echo "Desktop bundling produced no macOS disk image." >&2; exit 1; }
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber

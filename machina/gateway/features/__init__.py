@@ -167,6 +167,7 @@ from machina.gateway.features.workspace import (
     workspace_read,
     workspace_save,
 )
+from machina.gateway.features.workspace_git import workspace_changes, workspace_diff
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -297,6 +298,8 @@ METHODS: dict[str, Handler] = {
     "approvals.list": approvals_list,
     "approvals.resolve": approvals_resolve,
     "workspace.open": workspace_open,
+    "workspace.changes": workspace_changes,
+    "workspace.diff": workspace_diff,
     "workspace.list": workspace_list,
     "workspace.read": workspace_read,
     "workspace.save": workspace_save,

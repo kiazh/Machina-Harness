@@ -12,6 +12,10 @@ export const SHORTCUT_COMMANDS = [
   {id:'toggleTerminal',name:'Toggle terminal',group:'Workspace',shortcut:'Mod+`'},
   {id:'closeAgentTabs',name:'Close worker inspection tabs',group:'Agent',shortcut:'Mod+Shift+D'},
   {id:'interrupt',name:'Interrupt agent',group:'Agent',shortcut:'Escape'},
+  // New global commands stay after established actions. When the user keeps an
+  // intentional overlap, their configured existing action continues to win.
+  {id:'openCommands',name:'Search commands',group:'Workspace',shortcut:'Mod+Shift+P'},
+  {id:'openChanges',name:'Review workspace changes',group:'Workspace',shortcut:'Mod+Shift+G'},
 ] as const;
 export type ShortcutAction=typeof SHORTCUT_COMMANDS[number]['id'];
 export type Shortcuts=Record<ShortcutAction,string|null>;

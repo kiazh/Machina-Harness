@@ -34,6 +34,9 @@ MAX_RETAINED_OPERATIONS = 32
 MAX_RESULT_BYTES = 256 * 1024
 MAX_PARAMS_BYTES = 256 * 1024
 MAX_ERROR_BYTES = 4096
+MAX_APPROVAL_BYTES = 64 * 1024
+MAX_PENDING_APPROVAL_BYTES = 512 * 1024
+MAX_PENDING_APPROVALS = 64
 CLAIM_RENEW_INTERVAL_SECONDS = 30.0
 _RUN_METHODS = frozenset({"agents.run", "interop.run"})
 
@@ -233,18 +236,131 @@ class Operations:
                 self._request_cancel(operation)
                 return
 
+    async def _check_approval_owner(self, operation: _Operation) -> None:
+        from machina.core.turns import owns_claim
+
+        if operation.cancel_requested:
+            raise asyncio.CancelledError
+        if not await owns_claim(operation.session_id, operation.token):
+            operation.ownership_error = "operation lost ownership of its parent session"
+            self._request_cancel(operation)
+            raise asyncio.CancelledError
+
+    async def _approve(self, operation: _Operation, card: dict[str, Any]) -> str:
+        """Park one owned child action; the broker retains executable authority."""
+        from machina.core.orchestrator import Orchestrator
+        from machina.core.session import session_manager
+        from machina.memory.redaction import redact_value
+        from machina.permissions import store
+        from machina.permissions.broker import ApprovalDenied
+        from machina.protocol import approval_fields
+
+        request_id = str(card.get("request_id") or "")
+        turn_id = f"operation-{operation.snapshot['id']}"
+        try:
+            child_id = uuid.UUID(str(card.get("session_id") or ""))
+            child = await session_manager.get_fresh(child_id)
+            agent_id = str(card.get("agent") or "")
+            if (
+                child is None
+                or child.agent_id != agent_id
+                or child.is_fork
+                or child.status != "active"
+                or child.id == operation.session_id
+                or card.get("turn_id") != turn_id
+            ):
+                raise ValueError("approval does not belong to this operation's child")
+            ancestor = child
+            for _ in range(Orchestrator.MAX_HOP_COUNT + 1):
+                if ancestor.is_fork:
+                    raise ValueError("approval does not belong to this operation's child")
+                if ancestor.parent_session_id == operation.session_id:
+                    break
+                if ancestor.parent_session_id is None:
+                    raise ValueError("approval does not belong to this operation's child")
+                ancestor = await session_manager.get_fresh(ancestor.parent_session_id)
+                if ancestor is None:
+                    raise ValueError("approval child ancestry is unavailable")
+            else:
+                raise ValueError("approval child ancestry exceeds the delegation limit")
+            record = await store.get_approval(request_id)
+            if (
+                record is None
+                or record.get("session_id") != str(child_id)
+                or record.get("agent_id") != agent_id
+                or record.get("turn_id") != turn_id
+                or record.get("status") != "pending"
+            ):
+                raise ValueError("approval origin is unavailable")
+            proposal = redact_value(approval_fields(card))
+            review = {
+                "requestId": request_id,
+                "sessionId": str(child_id),
+                "agentId": agent_id,
+                "operation": proposal["operation"],
+                "target": proposal["target"],
+                "argv": proposal["argv"],
+                "cwd": proposal["cwd"],
+                "proposal": proposal,
+            }
+            # Claim checks may yield to another child's approver. Admit only
+            # after that await, then measure and publish without yielding so
+            # parallel cards cannot race past the shared snapshot budget.
+            await self._check_approval_owner(operation)
+            if len(json.dumps(review, ensure_ascii=False).encode("utf-8")) > MAX_APPROVAL_BYTES:
+                raise ValueError("approval review exceeds the operation size limit")
+            if len(operation.snapshot.get("approvals", [])) >= MAX_PENDING_APPROVALS:
+                raise ValueError("too many pending operation approvals")
+            if request_id in self._gateway._pending_approvals:
+                raise ValueError("approval already has a live owner")
+            pending_reviews = [*operation.snapshot.get("approvals", []), review]
+            wire_bytes = json.dumps(pending_reviews, ensure_ascii=True, allow_nan=False).encode(
+                "utf-8"
+            )
+            if len(wire_bytes) > MAX_PENDING_APPROVAL_BYTES:
+                raise ValueError("pending approval reviews exceed the operation size limit")
+        except (TypeError, ValueError) as error:
+            await store.resolve_decision(request_id, "cancelled", principal="tui")
+            raise ApprovalDenied(str(error)) from None
+
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        entry = (future, turn_id, str(child_id))
+        self._gateway._pending_approvals[request_id] = entry
+        operation.snapshot.setdefault("approvals", []).append(review)
+        try:
+            verdict = await future
+            await self._check_approval_owner(operation)
+            return verdict
+        finally:
+            if self._gateway._pending_approvals.get(request_id) is entry:
+                self._gateway._pending_approvals.pop(request_id, None)
+            operation.snapshot["approvals"] = [
+                pending
+                for pending in operation.snapshot.get("approvals", [])
+                if pending["requestId"] != request_id
+            ]
+
     async def _run(self, operation: _Operation, params: dict[str, Any]) -> None:
         from machina.gateway.features.interop import _operation_cancel
+        from machina.permissions.broker import set_approval_handler
 
         operation.entered = True
         cancel_context = _operation_cancel.set(operation.cancel_event)
         renewal = None
+        live_approvals = operation.snapshot["method"] == "agents.run"
+        turn_id = f"operation-{operation.snapshot['id']}"
         outcome: dict[str, Any]
         try:
             if operation.cancel_requested:
                 raise asyncio.CancelledError
             if operation.session_id is not None:
                 renewal = asyncio.create_task(self._renew(operation))
+            if live_approvals:
+                set_approval_handler(
+                    lambda card: self._approve(operation, card),
+                    principal="tui",
+                    turn_id=turn_id,
+                )
             result = await self._gateway._methods[operation.snapshot["method"]](params)
             encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > MAX_RESULT_BYTES:
@@ -260,6 +376,10 @@ class Operations:
         except Exception as error:
             outcome = {"status": "failed", "error": _diagnostic(error)}
         finally:
+            if live_approvals:
+                set_approval_handler(None)
+                self._gateway.cancel_turn_approvals(turn_id)
+                operation.snapshot.pop("approvals", None)
             _operation_cancel.reset(cancel_context)
             if renewal is not None:
                 renewal.cancel()

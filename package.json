@@ -15,6 +15,7 @@
     "desktop:build": "npm run build --workspace @machina/desktop",
     "desktop:native": "node tools/desktop/run.mjs build",
     "desktop:preview": "node tools/desktop/run.mjs preview",
+    "desktop:bundle": "node tools/desktop/release.mjs",
     "desktop:test": "npm run test --workspace @machina/desktop --"
   }
 }

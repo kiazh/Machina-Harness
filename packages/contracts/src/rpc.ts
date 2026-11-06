@@ -650,6 +650,11 @@ export interface CopilotImportResult {
  status: SubscriptionStatus;
 }
 /** A gateway-owned long operation; short status calls keep the transport responsive. */
+export interface OperationApproval {
+ requestId:string;sessionId:string;agentId?:string;
+ operation:string;target:string;argv?:string[];cwd?:string;expiresAt?:string;
+ proposal?:Record<string,unknown>;
+}
 export interface OperationSnapshot {
  id:string;
  method:'agents.run'|'interop.run';
@@ -660,6 +665,7 @@ export interface OperationSnapshot {
  result?:unknown;
  error?:string;
  truncated?:boolean;
+ approvals?:OperationApproval[];
 }
 export interface MarketplaceMetric {market:string;label:string;value:number}
 export interface MarketplaceSkill {

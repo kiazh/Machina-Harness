@@ -16,6 +16,21 @@ export type WorkspaceServerState =
 
 export type WorkspaceFreshness = "versioned" | "unversioned" | "pending" | "stale" | "unavailable";
 
+/** Read-only source-control inspection pinned to the selected workspace. */
+export interface WorkspaceChange {
+	path:string;oldPath?:string;status:string;
+	staged:boolean;unstaged:boolean;untracked:boolean;exists:boolean;
+}
+export interface WorkspaceChangesResult {
+	workspaceId:string;workspaceEpoch:number;
+	state:'ready'|'not_repository'|'unavailable';reason?:string;branch:string|null;
+	entries:WorkspaceChange[];truncated:boolean;
+}
+export interface WorkspaceDiffResult {
+	workspaceId:string;workspaceEpoch:number;path:string;oldPath?:string;
+	target:'working'|'staged';patch:string;binary:boolean;truncated:boolean;
+}
+
 export interface WorkspaceOpenResult {
 	workspaceId: string;
 	clientId: string;

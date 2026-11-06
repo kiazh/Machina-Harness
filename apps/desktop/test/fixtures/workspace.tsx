@@ -25,6 +25,16 @@ const bridge: DesktopBridge = {
   async start() {},
   subscribe(listener) { listeners.add(listener); return () => {listeners.delete(listener)}; },
   async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if(method==='workspace.changes'||method==='workspace.diff'){
+      const target=window as unknown as {fixtureGitCalls?:{method:string;params:Record<string,unknown>}[]};(target.fixtureGitCalls??=[]).push({method,params});
+      const mode=new URLSearchParams(location.search).get('changes');
+      const main={path:'src/workspace.py',status:'MM',staged:true,unstaged:true,untracked:false,exists:true};
+      const entries=mode==='large'?Array.from({length:350},(_,index)=>({...main,path:`src/file-${index}.py`})):[main,{path:'notes.txt',status:'??',staged:false,unstaged:false,untracked:true,exists:true},{path:'art/image.png',status:' M',staged:false,unstaged:true,untracked:false,exists:true}];
+      if(method==='workspace.changes')return {workspaceId:'fixture',workspaceEpoch:1,state:mode==='none'?'not_repository':'ready',branch:'fixture-review',entries:mode==='none'||mode==='incomplete'?[]:entries,truncated:mode==='incomplete'} as T;
+      const binary=String(params.path).endsWith('.png'),added=String(params.path)==='notes.txt';
+      const patch=binary?'':mode==='large'?`--- a/${params.path}\n+++ b/${params.path}\n@@ -1 +1,5000 @@\n-old\n${Array.from({length:5000},(_,index)=>'+new line '+index).join('\n')}\n`:added?'--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+Review this note\n':`--- a/${params.path}\n+++ b/${params.path}\n@@ -1 +1 @@\n-before\n+${params.target==='staged'?'staged change':'working change'}\n`;
+      return {workspaceId:'fixture',workspaceEpoch:1,path:params.path,target:params.target,patch,binary,truncated:false} as T;
+    }
     if(method==='mcp.catalog')return {entries:[
       {id:'gmail',displayName:'Gmail',kind:'connector',category:'Productivity',provider:'Google',description:'Search and read email through the official MCP server.',docsUrl:'https://developers.google.com/workspace/mcp',setup:{type:'oauth',instructions:['Requires Google Workspace Developer Preview access and a registered OAuth client.']},config:{id:'gmail',display_name:'Gmail',transport:'streamable_http',endpoint:'https://gmailmcp.googleapis.com/mcp/v1',oauth:{client_mode:'auto',scope_allowlist:['https://www.googleapis.com/auth/gmail.readonly']}}},
       {id:'firecrawl-selfhosted',displayName:'Firecrawl · self-hosted',kind:'connector',category:'Web',provider:'Firecrawl',description:'Connect your local MCP bridge to your self-hosted Firecrawl service.',docsUrl:'https://github.com/firecrawl/firecrawl-mcp-server',setup:{type:'local_endpoint',instructions:['Use the MCP bridge endpoint, not the Firecrawl REST API URL. No cloud fallback.']},config:{id:'firecrawl-selfhosted',display_name:'Firecrawl · self-hosted',transport:'streamable_http',endpoint:'http://127.0.0.1:3000/mcp',local_access:true}},
@@ -39,10 +49,16 @@ const bridge: DesktopBridge = {
       if(method==='skills.marketplace.search')return {query:params.query,skills:catalogSkills.filter(row=>(!params.markets||(params.markets as string[]).includes(row.markets[0]))&&row.name.toLowerCase().includes(String(params.query).toLowerCase())),markets:catalogSources} as T;
       if(method==='skills.marketplace.preview')return {reviewId:'fixture-review',digest:'fixture-digest',source:'https://github.com/fixture/skills',revision:'fixture-revision',scope:'installation',skills:[{name:params.skill,description:'Synthetic reviewed skill',content:'Read these synthetic instructions before installing.',files:[]}]} as T;
     }
+    if(method==='approvals.resolve'){
+      const target=window as unknown as {fixtureApprovalResolutions?:Record<string,unknown>[]};(target.fixtureApprovalResolutions??=[]).push(params);
+      if(trackedOperation){trackedOperation={...trackedOperation,approvals:[]};trackedCompletion=0}
+      return {resolved:true} as T;
+    }
     if(method==='operations.start'){
       const target=window as unknown as {fixtureOperationStarts?:number};target.fixtureOperationStarts=(target.fixtureOperationStarts??0)+1;
       const result=await bridge.request(String(params.method),params.params as Record<string,unknown>);
       trackedOperation={id:'fixture-operation',method:params.method,sessionId:(params.params as Record<string,unknown>).sessionId,status:'running',cancellable:true,startedAt:new Date().toISOString(),result};trackedCompletion=Infinity;
+      if(params.method==='agents.run'&&new URLSearchParams(location.search).has('approval'))trackedOperation={...trackedOperation,approvals:[{requestId:'fixture-approval',sessionId:'fixture-child',agentId:'fixture-worker',operation:'shell.exec',target:'Run workspace checks',argv:['python','-m','pytest'],cwd:'/sample-project',proposal:{backend:'host',timeout:60}}]};
       Object.assign(window,{fixtureFinishOperation:()=>{trackedCompletion=0}});
       const {result:_,...pending}=trackedOperation;return pending as T;
     }

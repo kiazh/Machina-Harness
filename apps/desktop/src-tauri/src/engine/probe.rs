@@ -13,6 +13,28 @@ pub(super) struct OwnedEngine {
     job: Option<std::os::windows::io::OwnedHandle>,
 }
 
+/// A packaged desktop client starts the Python gateway directly. It never
+/// shells through the terminal client, and a checkout is only needed by the
+/// development launcher.
+fn development_launch(
+    python: Option<std::ffi::OsString>,
+    root: Option<PathBuf>,
+) -> Result<(std::ffi::OsString, Option<PathBuf>), String> {
+    if !cfg!(any(debug_assertions, feature = "dev-engine")) {
+        return Err("No managed engine is installed; this build does not allow a development interpreter".into());
+    }
+    let python = python.unwrap_or_else(|| {
+        if cfg!(windows) { "python".into() } else { "python3".into() }
+    });
+    if let Some(root) = root {
+        if !root.join("machina/desktop/bootstrap.py").is_file() {
+            return Err("The configured development checkout does not contain the desktop engine".into());
+        }
+        return Ok((python, Some(root)));
+    }
+    Ok((python, None))
+}
+
 impl Drop for OwnedEngine {
     fn drop(&mut self) {
         self.child.stdin.take();
@@ -50,24 +72,19 @@ fn own_process(child: &mut Child) -> Result<windows_sys::Win32::Foundation::HAND
 }
 
 pub(super) fn spawn() -> Result<(OwnedEngine, String), String> {
-    if !cfg!(any(debug_assertions, feature = "dev-engine")) {
-        return Err("No managed engine is installed; this build does not allow a development interpreter".into());
-    }
-    let python = std::env::var_os("MACHINA_PYTHON")
-        .ok_or("Set MACHINA_PYTHON to the development interpreter for this feasibility build")?;
-    let root = std::env::var_os("MACHINA_REPO").map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
-    if !root.join("machina/desktop/bootstrap.py").is_file() {
-        return Err("The configured development checkout does not contain the desktop engine".into());
-    }
+    let (python, root) = development_launch(
+        std::env::var_os("MACHINA_PYTHON"),
+        std::env::var_os("MACHINA_REPO").map(PathBuf::from),
+    )?;
     let mut token_bytes = [0_u8; 32];
     getrandom::fill(&mut token_bytes).map_err(|_| "Could not create engine credentials")?;
     let token: String = token_bytes.iter().map(|v| format!("{v:02x}")).collect();
     let mut command = Command::new(python);
     command.args(["-c", "import os,runpy; gate=os.read(0,1); assert gate==bytes([0]); runpy.run_module('machina.desktop',run_name='__main__')"])
-        .current_dir(root).env("MACHINA_GATEWAY_TOKEN", &token)
+        .env("MACHINA_GATEWAY_TOKEN", &token)
         .env("PYTHONUNBUFFERED", "1").env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(root) = root { command.current_dir(root); }
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
     #[cfg(unix)]
@@ -127,6 +144,14 @@ pub fn run() -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn development_launch_uses_path_python_without_a_checkout() {
+        let (python, root) = super::development_launch(None, None).unwrap();
+        assert_eq!(python, if cfg!(windows) { "python" } else { "python3" });
+        assert!(root.is_none());
+    }
+
     #[test]
     fn real_engine_handshake_when_development_interpreter_is_supplied() {
         if std::env::var_os("MACHINA_PYTHON").is_none() { return; }

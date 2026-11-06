@@ -140,6 +140,14 @@ mod tests {
         let mut reading = binding.clone(); reading["uri"] = json!(uri);
         let read = engine.request("workspace.read", reading).unwrap();
         assert!(read["text"].as_str().unwrap().contains("Machina"));
+        let changes = engine.request("workspace.changes", binding.clone()).unwrap();
+        assert_eq!(changes["state"], "ready", "real Git inspection: {changes}");
+        assert_eq!(changes["workspaceId"], workspace["workspaceId"]);
+        let mut diff = binding.clone(); diff["path"] = json!("README.md"); diff["target"] = json!("working");
+        let reviewed = engine.request("workspace.diff", diff).unwrap();
+        assert_eq!(reviewed["path"], "README.md");
+        assert_eq!(reviewed["target"], "working");
+        assert_eq!(reviewed["binary"], false);
         engine.stop();
     }
 

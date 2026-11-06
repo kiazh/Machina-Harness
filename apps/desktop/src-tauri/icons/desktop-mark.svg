@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title>Deus Ex Machina</title>
+  <rect width="1024" height="1024" rx="224" fill="#0a2f91"/>
+  <path d="M174 234h136l116 326 116-326h136v556H564V492L468 758h-72L300 492v298H174V234Z" fill="#edf4ff"/>
+  <path d="M718 234h132v556H718z" fill="#3a83ff"/>
+  <path d="M96 512h832" stroke="#8ab8ff" stroke-width="20" stroke-linecap="round" opacity=".65"/>
+</svg>

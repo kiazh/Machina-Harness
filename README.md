@@ -1366,12 +1366,15 @@ scripts/            Operator script mount point and setup guidance
 The native desktop preview puts the agent conversation first, with an editable
 companion pane, native terminal and nine personal appearance presets.
 Custom local wallpaper, glass/opacity, typography and motion controls are included.
-It uses the existing Python/PostgreSQL engine; desktop feature parity and native
-macOS acceptance are still in progress.
+It speaks directly to the existing Python/PostgreSQL engine, not through the
+terminal UI. Desktop release packages are native Windows/macOS artifacts; the CLI
+continues to be installed with the PowerShell/curl installers above. They share
+gateway capabilities, while the desktop adds graphical-only features such as panes,
+native terminal, visual themes, workspace review, and the skills catalog.
 
 See [desktop setup and checks](apps/desktop/README.md). From a configured checkout,
 run `npm run desktop:dev`, or build with `npm run desktop:native` and launch with
-`npm run desktop:preview`.
+`npm run desktop:preview`. `npm run desktop:bundle` creates the installer package.
 
 ## License and credits
 

@@ -24,10 +24,18 @@ npm run desktop:native
 npm run desktop:preview
 ```
 
-This client explicitly uses the development Python checkout. It is not a portable
-installer or a self-contained engine distribution. Release signing, managed engine
-packaging and updates are later gates in the desktop roadmap. The terminal client
-remains available while desktop feature parity is completed.
+The desktop app starts the Machina Python gateway directly. It never launches,
+embeds, or depends on the terminal UI package. The CLI remains installed through
+the PowerShell/curl installers; desktop releases are native Windows/macOS packages.
+For now, a desktop release uses the installed Machina Python engine on PATH. A
+fully managed embedded engine is a separate distribution milestone, not a hidden
+dependency on the terminal client.
+
+Build a native installer package (not the CLI) with:
+
+```sh
+npm run desktop:bundle
+```
 
 Checks:
 

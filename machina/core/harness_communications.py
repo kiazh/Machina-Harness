@@ -161,6 +161,7 @@ class CommunicationsStore:
         self.payload_max_chars = payload_max_chars
 
     def _connect(self, *, readonly: bool = False) -> sqlite3.Connection:
+        create_store = not readonly and not self.path.exists()
         if not readonly:
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         connection = sqlite3.connect(
@@ -174,15 +175,16 @@ class CommunicationsStore:
                 return connection
             if os.name != "nt":
                 self.path.chmod(0o600)
-            connection.execute("PRAGMA auto_vacuum = FULL")
             connection.execute("PRAGMA secure_delete = ON")
-            # Bound the main DB physically as well as its retained payloads.
-            connection.execute("PRAGMA max_page_count = 1280")
-            connection.execute("""CREATE TABLE IF NOT EXISTS communications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_json TEXT NOT NULL, size_bytes INTEGER NOT NULL,
-                session_id TEXT, harness TEXT
-            )""")
+            if create_store:
+                connection.execute("PRAGMA auto_vacuum = FULL")
+                # Bound the main DB physically as well as its retained payloads.
+                connection.execute("PRAGMA max_page_count = 1280")
+                connection.execute("""CREATE TABLE IF NOT EXISTS communications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_json TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                    session_id TEXT, harness TEXT
+                )""")
             return connection
         except BaseException:
             connection.close()
@@ -225,8 +227,9 @@ class CommunicationsStore:
         size = len(encoded.encode("utf-8")) + 128
         if size > self.max_bytes:
             return
-        connection = self._connect()
+        connection: sqlite3.Connection | None = None
         try:
+            connection = self._connect()
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT INTO communications (event_json, size_bytes, session_id, harness) VALUES (?, ?, ?, ?)",
@@ -243,8 +246,16 @@ class CommunicationsStore:
                     connection.execute("DELETE FROM communications WHERE id <= ?", (row["id"],))
                     break
             connection.commit()
+        except sqlite3.OperationalError as error:
+            # This store is observational. Concurrent MCP/CLI writers must
+            # never fail their own protocol work, and a deliberately held
+            # SQLite lock must not stall the caller. Drop a contended record.
+            locked = "locked" in str(error).lower() or "busy" in str(error).lower()
+            if not locked:
+                raise
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
 
     def list(
         self,

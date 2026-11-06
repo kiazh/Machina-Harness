@@ -1,4 +1,4 @@
-import {useSyncExternalStore} from 'react';
+import {lazy,Suspense,useSyncExternalStore} from 'react';
 import type {DesktopController} from '../../state/controller.ts';
 import {FEATURE_COMMANDS,PAGE_LABELS,type DesktopPage} from '../../state/commands.ts';
 import {ConnectionControls} from './ConnectionControls.tsx';
@@ -21,10 +21,13 @@ import {StatusPage,UsagePage} from '../shared/OverviewPages.tsx';
 import {FeatureFrame} from '../shared/FeatureFrame.tsx';
 import {useEnginePage} from '../shared/useEnginePage.ts';
 
+const Changes=lazy(()=>import('../changes/ChangesPage.tsx').then(module=>({default:module.ChangesPage})));
+
 export function FeaturePage({controller,pageOverride,onDone,initialQuery}:{controller:DesktopController;pageOverride?:DesktopPage;onDone?:()=>void;initialQuery?:string}) {
  const state=useSyncExternalStore(controller.subscribe,controller.snapshot);
  const page=pageOverride??state.page;const key=state.session?.id??'none';
  switch(page){
+ case 'changes':return <Suspense fallback={<FeatureFrame controller={controller} title="Workspace changes"><p role="status">Opening review…</p></FeatureFrame>}><Changes controller={controller}/></Suspense>;
  case 'memory':return <MemoryPage controller={controller}/>;
  case 'jobs':return <JobsPage key={key} controller={controller}/>;
  case 'agents':return <AgentsPage key={key} controller={controller}/>;
@@ -45,7 +48,7 @@ export function FeaturePage({controller,pageOverride,onDone,initialQuery}:{contr
  case 'status':return <StatusPage controller={controller}/>;
  case 'usage':return <UsagePage key={key} controller={controller}/>;
  case 'providers':case 'keys':return <ConnectionsPage key={page} page={page} controller={controller}/>;
- case 'help':return <FeatureFrame controller={controller} title="Commands" description="Commands run locally in the client. Unknown commands keep your draft and never reach the model."><div className="feature-command-list">{Object.entries(FEATURE_COMMANDS).filter(([name])=>!['?','h','skill','model','providers','mem','config','persona','harnesses','effort','approvals','problems','profiles','nowplaying','compact','compress','ls'].includes(name)).map(([name,target])=><button key={name} onClick={()=>controller.navigate(target)}><code>/{name}</code><span>{PAGE_LABELS[target]}</span></button>)}</div><p>/history searches recorded messages in the current conversation. /attach adds the selected code to your draft for review. /new starts a conversation. /resume &lt;id&gt; opens one. /review asks the agent to inspect your changes. Feature pages provide the controls for their operations.</p></FeatureFrame>;
+ case 'help':return <FeatureFrame controller={controller} title="Commands" description="Commands run locally in the client. Unknown commands keep your draft and never reach the model."><div className="feature-command-list">{Object.entries(FEATURE_COMMANDS).filter(([name])=>!['?','h','skill','model','providers','mem','config','persona','harnesses','effort','approvals','problems','profiles','nowplaying','compact','compress','ls','diff'].includes(name)).map(([name,target])=><button key={name} onClick={()=>controller.navigate(target)}><code>/{name}</code><span>{PAGE_LABELS[target]}</span></button>)}</div><p>/history searches recorded messages in the current conversation. /attach adds the selected code to your draft for review. /new starts a conversation. /resume &lt;id&gt; opens one. /review asks the agent to inspect your changes. Feature pages provide the controls for their operations.</p></FeatureFrame>;
  default:return <FeatureFrame controller={controller} title={PAGE_LABELS[page]}><button onClick={()=>controller.navigate('chat')}>Return to conversation</button></FeatureFrame>;
  }
 }

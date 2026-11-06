@@ -13,5 +13,8 @@
     "windows": [{"title": "Deus Ex Machina", "width": 1440, "height": 900, "minWidth": 720, "minHeight": 480}],
     "security": {"csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost"}
   },
-  "bundle": {"active": false}
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"]
+  }
 }

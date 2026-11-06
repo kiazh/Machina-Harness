@@ -11,6 +11,27 @@ function fixture(){
  const store=new OperationStore({request} as unknown as DesktopBridge);
  return {store,request,run};
 }
+
+it('does not revive a resolved child approval from an older in-flight status read',async()=>{
+ const f=fixture();const approval={requestId:'a',sessionId:'child',operation:'shell.exec',target:'test'};
+ let oldReply!:(value:OperationSnapshot)=>void;let reads=0;
+ f.request.mockImplementation(async(method:string)=>method==='operations.start'?{...f.run,approvals:[approval]}:method==='approvals.resolve'?f.run:++reads===1?await new Promise<OperationSnapshot>(resolve=>{oldReply=resolve}):{...f.run,approvals:[]});
+ await f.store.start('agents.run',{sessionId:'session-a'});await vi.advanceTimersByTimeAsync(1000);
+ await f.store.resolveApproval('a','approved');await vi.advanceTimersByTimeAsync(0);
+ expect(f.store.snapshot().active?.approvals).toEqual([]);
+ oldReply({...f.run,approvals:[approval]});await vi.advanceTimersByTimeAsync(0);
+ expect(f.store.snapshot().active?.approvals).toEqual([]);f.store.dispose();
+});
+
+it('binds concurrent approval resolution to one child and ignores completion after stop',async()=>{
+ const f=fixture();const approval={requestId:'a',sessionId:'child',operation:'shell.exec',target:'test'};
+ let finish!:(value:OperationSnapshot)=>void;
+ f.request.mockImplementation(async(method:string)=>method==='operations.start'?{...f.run,approvals:[approval]}:method==='approvals.resolve'?await new Promise<OperationSnapshot>(resolve=>{finish=resolve}):{...f.run,status:'cancelled',approvals:[]});
+ await f.store.start('agents.run',{sessionId:'session-a'});
+ const resolving=f.store.resolveApproval('a','approved');await expect(f.store.resolveApproval('a','approved')).rejects.toThrow(/already being resolved/);
+ await f.store.cancel();finish(f.run);await resolving;
+ expect(f.store.snapshot().active).toBeUndefined();expect(f.request.mock.calls.filter(([method])=>method==='approvals.resolve')).toHaveLength(1);f.store.dispose();
+});
 it('starts once, polls independently of views, and retains settled output',async()=>{
  const f=fixture();await f.store.start('agents.run',{sessionId:'session-a',steps:[{agent:'researcher',task:'Inspect parser'}]});
  expect(f.store.snapshot().active?.id).toBe('operation-a');

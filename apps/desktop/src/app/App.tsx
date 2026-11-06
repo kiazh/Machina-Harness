@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { Code2, FilePlus2, FolderOpen, PanelLeft, Save, Settings2, Terminal, X } from "lucide-react";
+import { Code2, FilePlus2, FolderOpen, PanelLeft, Save, Settings2, Terminal, X, Search } from "lucide-react";
 import type { EditorView } from "@codemirror/view";
 import { Harness } from "../features/harness/Harness.tsx";
 import type { DesktopController } from "../state/controller.ts";
@@ -17,7 +17,10 @@ import {DocumentTabs} from './DocumentTabs.tsx';
 import {SaveAsDialog} from './SaveAsDialog.tsx';
 import {SessionTools} from './SessionTools.tsx';
 import {LayoutStore} from '../state/layout.ts';
-import {ShortcutStore,SHORTCUT_COMMANDS,matchesShortcut,formatShortcut} from '../state/shortcuts.ts';
+import {ShortcutStore,SHORTCUT_COMMANDS,matchesShortcut,formatShortcut,type ShortcutAction} from '../state/shortcuts.ts';
+import {CommandPalette} from '../features/commands/CommandPalette.tsx';
+import {paletteCommands} from '../features/commands/catalog.ts';
+import {PAGE_LABELS,type DesktopPage} from '../state/commands.ts';
 import "../design/base.css";
 import "../design/personal.css";
 import "../design/quiet.css";
@@ -59,6 +62,7 @@ export function App({ controller }: { controller: DesktopController }) {
   const closeTab=useRef<HTMLDialogElement>(null);
   const [closingTab,setClosingTab]=useState('');
   const settings = useRef<HTMLDialogElement>(null);
+  const commandPalette=useRef<HTMLDialogElement>(null);
   const sessionTools=useRef<HTMLDialogElement>(null);
   const [sessionToolsAction,setSessionToolsAction]=useState('rename'),[sessionToolsToken,setSessionToolsToken]=useState(0);
   const openSessionTools=(action='rename')=>{setSessionToolsAction(action);setSessionToolsToken(value=>value+1);sessionTools.current?.showModal()};
@@ -108,25 +112,39 @@ export function App({ controller }: { controller: DesktopController }) {
     }).catch(error => { if (mounted) controller.fail(error); });
     return () => { mounted = false; if (url) URL.revokeObjectURL(url); };
   }, [preferences.background, wallpaperRevision, controller]);
+  function runShortcut(action:ShortcutAction){
+    const current=controller.snapshot();
+    if(action==='openCommands')commandPalette.current?.showModal();
+    else if(action==='openChanges')controller.navigate('changes');
+    else if(action==='quickOpen')quickOpen.current?.showModal();
+    else if(action==='saveAs'){setEditor(true);saveAs.current?.showModal()}
+    else if(action==='save'){if(!current.documents.find(d=>d.id===current.activeId)?.uri){setEditor(true);saveAs.current?.showModal()}else if(current.dirty.has(current.activeId))void controller.save().catch(error=>controller.fail(error))}
+    else if(action==='newDocument')controller.newDocument();
+    else if(action==='requestCompletion'){controller.navigate('chat');setEditor(true);requestAnimationFrame(()=>{const view=editorView.current;if(view)void import('@codemirror/autocomplete').then(module=>{view.focus();module.startCompletion(view)})})}
+    else if(action==='newSession'){if(current.running)controller.fail('Stop the active turn before starting a new conversation.');else controller.newSession()}
+    else if(action==='attachSelection'){try{controller.requestSelectionAttachment()}catch(error){controller.fail(error)}}
+    else if(action==='openSettings')settings.current?.showModal();
+    else if(action==='toggleSidebar')toggleSidebar();
+    else if(action==='toggleEditor'){controller.navigate('chat');setEditor(value=>current.page!=='chat'||!value)}
+    else if(action==='toggleTerminal')toggleTerminal();
+    else if(action==='closeAgentTabs')controller.dismissAgent();
+    else if(action==='interrupt')void controller.interrupt().catch(error=>controller.fail(error));
+  }
+  const availableCommands=useMemo(()=>paletteCommands(state,bindings),[state.connection,state.running,state.workspace,state.backgroundOperation,state.switchingSession,state.switchingWorkspace,state.activeId,state.documents,state.agentIds.length,state.methods,state.session,bindings]);
+  function runPaletteCommand(id:string){
+    const command=paletteCommands(controller.snapshot(),bindings).find(command=>command.id===id);
+    if(!command||command.disabledReason)return;
+    if(id.startsWith('shortcut:')){const action=SHORTCUT_COMMANDS.find(command=>command.id===id.slice(9));if(action)runShortcut(action.id)}
+    else if(id.startsWith('page:')&&Object.hasOwn(PAGE_LABELS,id.slice(5)))controller.navigate(id.slice(5) as DesktopPage);
+    else if(id==='workspace:choose')workspaceDialog.current?.showModal();
+    else if(id==='conversation:history'){setHistoryMounted(true);setHistoryQuery('');setHistoryToken(value=>value+1)}
+  }
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if(event.isComposing||event.defaultPrevented||document.querySelector('dialog[open], [role=dialog], [role=alertdialog], [data-select-popup]'))return;
       for(const command of SHORTCUT_COMMANDS){if(!matchesShortcut(event,bindings[command.id]))continue;
-       if(command.id==='interrupt'){if((!controller.snapshot().running&&!controller.snapshot().backgroundOperation)||document.querySelector('.cm-tooltip'))continue;event.preventDefault();void controller.interrupt().catch(error=>controller.fail(error));return;}
-       event.preventDefault();const current=controller.snapshot();
-       if(command.id==='quickOpen')quickOpen.current?.showModal();
-       else if(command.id==='saveAs'){setEditor(true);saveAs.current?.showModal()}
-       else if(command.id==='save'){if(!current.documents.find(d=>d.id===current.activeId)?.uri){setEditor(true);saveAs.current?.showModal()}else if(current.dirty.has(current.activeId))void controller.save().catch(error=>controller.fail(error))}
-       else if(command.id==='newDocument')controller.newDocument();
-       else if(command.id==='requestCompletion'){controller.navigate('chat');setEditor(true);requestAnimationFrame(()=>{const view=editorView.current;if(view)void import('@codemirror/autocomplete').then(module=>{view.focus();module.startCompletion(view)})})}
-       else if(command.id==='newSession'){if(current.running)controller.fail('Stop the active turn before starting a new conversation.');else controller.newSession()}
-       else if(command.id==='attachSelection')controller.requestSelectionAttachment();
-       else if(command.id==='openSettings')settings.current?.showModal();
-       else if(command.id==='toggleSidebar')toggleSidebar();
-       else if(command.id==='toggleEditor'){controller.navigate('chat');setEditor(value=>!value)}
-       else if(command.id==='toggleTerminal')toggleTerminal();
-       else if(command.id==='closeAgentTabs')controller.dismissAgent();
-       return;
+       if(command.id==='interrupt'&&((!controller.snapshot().running&&!controller.snapshot().backgroundOperation)||document.querySelector('.cm-tooltip')))continue;
+       event.preventDefault();runShortcut(command.id);return;
       }
     };
     window.addEventListener("keydown", listener); return () => window.removeEventListener("keydown", listener);
@@ -142,7 +160,7 @@ export function App({ controller }: { controller: DesktopController }) {
   } as CSSProperties;
   return <AppearanceContext value={preferences}><div className="desktop-app" data-sidebar={sidebar} data-editor={editor} data-editor-side={arrangement.editorSide} data-density={arrangement.density} data-preset={preferences.preset} data-background={preferences.background} data-motion={preferences.motion} style={style}>
     <div className="wallpaper-layer" aria-hidden="true"/><div className="appearance-scrim" aria-hidden="true"/>
-    <header className="app-header"><button className="icon-button" aria-label="Toggle sidebar" aria-pressed={sidebar} onClick={toggleSidebar}><PanelLeft size={15}/></button><button className="icon-button" aria-label="Open workspace" disabled={state.connection==='connecting'} title="Choose a workspace folder" onClick={()=>workspaceDialog.current?.showModal()}><FolderOpen size={14}/></button><div className="workspace-breadcrumb"><span>{state.page==='chat'?(state.session?.title||'New session'):state.page}</span></div>{state.session&&<button className="session-tools-toggle" aria-label="Conversation tools" onClick={()=>openSessionTools()}>•••</button>}<div className="header-actions">{(state.page!=='chat'||state.backgroundOperation)&&(state.running||state.backgroundOperation||state.approvals.length>0)&&<div className="global-run-status"><button onClick={()=>controller.navigate(state.backgroundOperation?.method==='agents.run'?'agents':state.backgroundOperation?'interop':'chat')}>{state.backgroundOperation?'Background run':state.approvals.length?'Approval needed':'Agent working'}</button>{(state.running||state.backgroundOperation?.cancellable)&&<button onClick={()=>{void controller.interrupt().catch(error=>controller.fail(error))}}>Stop</button>}</div>}<button className="editor-toggle" aria-label="Toggle code editor" aria-pressed={editor} onClick={() => {controller.navigate('chat');setEditor(value => state.page!=='chat'||!value)}}><Code2 size={14}/><span>Code</span></button><button className="editor-toggle" aria-label="Toggle terminal" aria-pressed={terminalShown} onClick={toggleTerminal}><Terminal size={14}/><span>Terminal</span></button><button className="icon-button" aria-label="Open settings" onClick={() => settings.current?.showModal()}><Settings2 size={15}/></button></div></header>
+    <header className="app-header"><button className="icon-button" aria-label="Toggle sidebar" aria-pressed={sidebar} onClick={toggleSidebar}><PanelLeft size={15}/></button><button className="icon-button" aria-label="Open workspace" disabled={state.connection==='connecting'} title="Choose a workspace folder" onClick={()=>workspaceDialog.current?.showModal()}><FolderOpen size={14}/></button><div className="workspace-breadcrumb"><span>{state.page==='chat'?(state.session?.title||'New session'):PAGE_LABELS[state.page]}</span></div>{state.session&&<button className="session-tools-toggle" aria-label="Conversation tools" onClick={()=>openSessionTools()}>•••</button>}<div className="header-actions"><button className="icon-button" aria-label="Search commands" title={`Search commands · ${formatShortcut(bindings.openCommands)}`} onClick={()=>commandPalette.current?.showModal()}><Search size={15}/></button>{(state.page!=='chat'||state.backgroundOperation)&&(state.running||state.backgroundOperation||state.approvals.length>0)&&<div className="global-run-status"><button onClick={()=>controller.navigate(state.backgroundOperation?.method==='agents.run'?'agents':state.backgroundOperation?'interop':'chat')}>{state.approvals.length||state.backgroundOperation?.approvals?.length?'Approval needed':state.backgroundOperation?'Background run':'Agent working'}</button>{(state.running||state.backgroundOperation?.cancellable)&&<button onClick={()=>{void controller.interrupt().catch(error=>controller.fail(error))}}>Stop</button>}</div>}<button className="editor-toggle" aria-label="Toggle code editor" aria-pressed={editor} onClick={() => {controller.navigate('chat');setEditor(value => state.page!=='chat'||!value)}}><Code2 size={14}/><span>Code</span></button><button className="editor-toggle" aria-label="Toggle terminal" aria-pressed={terminalShown} onClick={toggleTerminal}><Terminal size={14}/><span>Terminal</span></button><button className="icon-button" aria-label="Open settings" onClick={() => settings.current?.showModal()}><Settings2 size={15}/></button></div></header>
     {state.error && <div className="error-banner" role="alert"><span>{state.error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => controller.clearError()}><X size={14}/></button></div>}
     <main className="workspace-grid">
       <aside className="sidebar-panel" aria-label="Workspace sidebar" aria-hidden={!sidebar} inert={!sidebar}><Sidebar controller={controller} onSettings={() => settings.current?.showModal()} onCode={()=>{controller.navigate('chat');setEditor(true)}} appearance={appearance}/></aside>
@@ -162,6 +180,7 @@ export function App({ controller }: { controller: DesktopController }) {
     <QuickOpen controller={controller} dialog={quickOpen}/>
     <dialog ref={reloadFile} className="settings-dialog save-as-dialog" aria-label="Reload file" onCancel={event=>{if(reloading)event.preventDefault()}}><h2>Reload from disk?</h2><p>This replaces the current buffer with the file on disk. Your local edits remain available through editor undo.</p><div className="approval-actions"><button disabled={reloading} onClick={()=>reloadFile.current?.close()}>Keep local edits</button><button disabled={reloading} onClick={()=>{setReloading(true);void controller.reloadDocument(active.id,true).then(()=>reloadFile.current?.close()).catch(reason=>controller.fail(reason)).finally(()=>setReloading(false))}}>{reloading?'Reloading…':'Replace buffer with disk'}</button></div></dialog>
     <SaveAsDialog controller={controller} dialog={saveAs}/>
+    <CommandPalette dialog={commandPalette} commands={availableCommands} onRun={runPaletteCommand}/>
     <dialog ref={closeTab} className="settings-dialog save-as-dialog" aria-label="Unsaved changes"><h2>Keep your changes?</h2><p>{state.documents.find(d=>d.id===closingTab)?.name} has unsaved edits.</p><div className="approval-actions"><button onClick={()=>closeTab.current?.close()}>Keep editing</button><button onClick={()=>{void controller.closeDocument(closingTab,true).then(()=>closeTab.current?.close()).catch(error=>controller.fail(error))}}>Discard and close</button></div></dialog>
     <SessionTools controller={controller} dialog={sessionTools} initialAction={sessionToolsAction} openToken={sessionToolsToken}/>
     {historyMounted&&<Suspense fallback={null}><ConversationHistory controller={controller} dialog={historyDialog} openToken={historyToken} initialQuery={historyQuery}/></Suspense>}

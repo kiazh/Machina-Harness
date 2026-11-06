@@ -1,0 +1,26 @@
+.operation-approvals{display:grid;gap:14px;margin:20px 0}.operation-approval{border:1px solid var(--line);border-left:2px solid var(--accent);border-radius:4px;padding:18px;background:var(--input)}.operation-approval-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.operation-approval-heading>span{font-size:10px;color:var(--accent);letter-spacing:.04em}.operation-approval-heading>strong{font:500 12px var(--code-font)}.operation-approval>p{font-size:12px;line-height:1.7;margin:12px 0;overflow-wrap:anywhere}.operation-approval-command,.operation-approval details pre{font:12px/1.7 var(--code-font);white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--canvas)}.operation-approval-cwd,.operation-approval-expiry{color:var(--muted)}.operation-approval-cwd code{font:11px var(--code-font)}.operation-approval details{font-size:11px;margin:12px 0;color:var(--muted)}.operation-approval summary{cursor:pointer}.operation-approval-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:16px}.operation-approval-actions p{flex:1;min-width:180px;color:var(--muted);font-size:11px;line-height:1.6;margin:0}.operation-approval-actions button{padding:7px 12px;border:1px solid var(--line);border-radius:4px;color:var(--ink);font:12px var(--ui-font)}.operation-approval-actions button.primary-button{background:var(--accent);color:var(--accent-ink,var(--canvas));border-color:var(--accent)}.operation-approval button:focus-visible,.operation-approval summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.operation-approval button:disabled{opacity:.55;cursor:not-allowed}
+
+.operation-approval {position:relative;border-width:1px;border-color:color-mix(in oklch,var(--accent) 22%,var(--line))}
+.operation-approval::before {content:'';position:absolute;inset:-1px 18px auto;height:1px;background:var(--accent);opacity:.65;transform-origin:left center;pointer-events:none}
+@keyframes operation-approval-arrive {
+ from {opacity:.7;transform:translateY(6px)}
+ to {opacity:1;transform:none}
+}
+@keyframes operation-approval-subtle {from {opacity:.82} to {opacity:1}}
+@keyframes operation-approval-rule {
+ from {opacity:.15;transform:scaleX(.25)}
+ to {opacity:.65;transform:scaleX(1)}
+}
+@media(prefers-reduced-motion:no-preference) {
+ .desktop-app[data-motion='full'] .operation-approval {animation:operation-approval-arrive 200ms cubic-bezier(.22,1,.36,1) backwards}
+ .desktop-app[data-motion='subtle'] .operation-approval {animation:operation-approval-subtle 120ms ease-out backwards}
+ .desktop-app[data-motion='full'] .operation-approval::before {animation:operation-approval-rule 240ms cubic-bezier(.16,1,.3,1) backwards}
+ .desktop-app[data-motion='full'] .operation-approval-actions button:not(:disabled):active {transform:translateY(1px)}
+}
+.desktop-app[data-motion='off'] .operation-approval,
+.desktop-app[data-motion='off'] .operation-approval *,
+.desktop-app[data-motion='off'] .operation-approval::before {animation:none;transition:none}
+@media(prefers-reduced-motion:reduce) {
+ .desktop-app .operation-approval,.desktop-app .operation-approval *,
+ .desktop-app .operation-approval::before {animation:none;transition:none}
+}

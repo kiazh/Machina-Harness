@@ -101,6 +101,7 @@ export class DesktopController {
     return selectionAttachment(document,state,this.value.dirty.has(document.id)||!document.uri,path);
   }
   requestSelectionAttachment():void{this.set({composerInsertion:{id:++this.next,text:this.captureSelection()}})}
+  requestDraftInsertion(text:string):void{if(!text||text.length>20000)throw new Error('Attach at most 20,000 characters to the draft.');this.set({composerInsertion:{id:++this.next,text}})}
   consumeInsertion(id:number):void{if(this.value.composerInsertion?.id===id)this.set({composerInsertion:undefined})}
 
   navigate(page:DesktopPage):void { this.set({page}); }
