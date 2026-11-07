@@ -76,6 +76,7 @@ SECRET_KEYS = frozenset(
         "xai_api_key",
         "opencode_api_key",
         "kimi_api_key",
+        "kiro_api_key",
         "custom_api_key",
         "cohere_api_key",
         "database_url",
@@ -293,6 +294,19 @@ DEFAULTS: dict[str, Any] = {
     "xai_api_key": "",
     "opencode_api_key": "",
     "kimi_api_key": "",
+    # Kiro local proxy (community interop): the gateway authenticates
+    # upstream with the Kiro account login in the local Kiro CLI database.
+    # KIRO_API_KEY is only the optional gateway loopback password (default:
+    # dummy-local-only); KIRO_BASE_URL overrides the default port.
+    "kiro_api_key": "",
+    "kiro_base_url": "",
+    # Optional lifecycle for the user-installed Kiro gateway. Auto-start is
+    # gated on a detected Kiro CLI login and a configured/detected checkout
+    # (default detection: ~/kiro-gateway). Set kiro_autostart=false to keep
+    # the process fully user-managed; /auth kiro start/stop still works.
+    "kiro_gateway_command": "",
+    "kiro_gateway_dir": "",
+    "kiro_autostart": True,
     # Generic OpenAI-compatible provider ("custom"): any base URL (LM Studio,
     # vLLM, llama.cpp, the Hermes loopback proxy, ...). The key is optional —
     # local endpoints commonly run keyless.
@@ -407,6 +421,11 @@ LEGACY_ENV_VARS: dict[str, str] = {
     "xai_api_key": "XAI_API_KEY",
     "opencode_api_key": "OPENCODE_API_KEY",
     "kimi_api_key": "KIMI_API_KEY",
+    "kiro_api_key": "KIRO_API_KEY",
+    "kiro_base_url": "KIRO_BASE_URL",
+    "kiro_gateway_command": "KIRO_GATEWAY_COMMAND",
+    "kiro_gateway_dir": "KIRO_GATEWAY_DIR",
+    "kiro_autostart": "KIRO_AUTOSTART",
     "custom_base_url": "CUSTOM_BASE_URL",
     "custom_api_key": "CUSTOM_API_KEY",
     "opencode_base_url": "OPENCODE_BASE_URL",
@@ -696,6 +715,12 @@ class Config:
     xai_api_key: str = field(default="", repr=False)
     opencode_api_key: str = field(default="", repr=False)
     kimi_api_key: str = field(default="", repr=False)
+    kiro_api_key: str = field(default="", repr=False)
+    kiro_base_url: str = ""
+    # User-installed gateway lifecycle (optional; see core/provider/kiro_gateway).
+    kiro_gateway_command: str = ""
+    kiro_gateway_dir: str = ""
+    kiro_autostart: bool = True
     # "custom" provider: any OpenAI-compatible base URL; key optional.
     custom_base_url: str = ""
     custom_api_key: str = field(default="", repr=False)

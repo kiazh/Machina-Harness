@@ -24,7 +24,7 @@ import { type Command, type FeatureHost } from "./types.ts";
 
 export interface ModelEntry {
 	model: string;
-	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "grok" | "opencode" | "custom" | "ollama" | string;
+	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "grok" | "opencode" | "kimi" | "kiro" | "custom" | "ollama" | string;
 	description: string;
 	displayName?: string;
 	contextWindow?: number | null;
@@ -44,11 +44,40 @@ const PROVIDER_LABELS: Record<string, string> = {
 	openrouter: "OpenRouter",
 	opencode: "OpenCode Zen",
 	kimi: "Kimi Code",
+	kiro: "Kiro local proxy",
 	chatgpt: "ChatGPT subscription",
 	copilot: "GitHub Copilot",
 	ollama: "Ollama (local)",
 	custom: "Custom endpoint",
 };
+
+// Offline fallback rows for the full Kiro account catalog. The live gateway
+// `/v1/models` answer plus the authenticated `kiro-cli` catalog remains
+// authoritative; these rows keep the picker complete before either answers.
+const KIRO_CURATED_MODELS: ModelEntry[] = [
+	{ model: "auto", provider: "kiro", description: "Kiro auto model selection", contextWindow: 1_000_000 },
+	{ model: "claude-opus-5.5", provider: "kiro", description: "Claude Opus 5.5 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-sonnet-5.5", provider: "kiro", description: "Claude Sonnet 5.5 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-haiku-5.5", provider: "kiro", description: "Claude Haiku 5.5 via Kiro", contextWindow: 1_000_000 },
+	{ model: "gpt-5.6-sol", provider: "kiro", description: "OpenAI GPT-5.6 Sol via Kiro", contextWindow: 986_000 },
+	{ model: "gpt-5.6-terra", provider: "kiro", description: "OpenAI GPT-5.6 Terra via Kiro", contextWindow: 986_000 },
+	{ model: "gpt-5.6-luna", provider: "kiro", description: "OpenAI GPT-5.6 Luna via Kiro", contextWindow: 986_000 },
+	{ model: "kimi-k3", provider: "kiro", description: "Kimi K3 (Kiro excluded model)", contextWindow: 1_000_000 },
+	{ model: "claude-opus-5", provider: "kiro", description: "Claude Opus 5 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-sonnet-5", provider: "kiro", description: "Claude Sonnet 5 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-opus-4.8", provider: "kiro", description: "Claude Opus 4.8 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-opus-4.7", provider: "kiro", description: "Claude Opus 4.7 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-opus-4.6", provider: "kiro", description: "Claude Opus 4.6 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-sonnet-4.6", provider: "kiro", description: "Claude Sonnet 4.6 via Kiro", contextWindow: 1_000_000 },
+	{ model: "claude-opus-4.5", provider: "kiro", description: "Claude Opus 4.5 via Kiro", contextWindow: 200_000 },
+	{ model: "claude-sonnet-4.5", provider: "kiro", description: "Claude Sonnet 4.5 via Kiro", contextWindow: 200_000 },
+	{ model: "claude-haiku-4.5", provider: "kiro", description: "Claude Haiku 4.5 via Kiro", contextWindow: 200_000 },
+	{ model: "deepseek-3.2", provider: "kiro", description: "DeepSeek V3.2 via Kiro", contextWindow: 164_000 },
+	{ model: "minimax-m2.5", provider: "kiro", description: "MiniMax M2.5 via Kiro", contextWindow: 196_000 },
+	{ model: "minimax-m2.1", provider: "kiro", description: "MiniMax M2.1 via Kiro", contextWindow: 196_000 },
+	{ model: "glm-5", provider: "kiro", description: "GLM-5 via Kiro", contextWindow: 200_000 },
+	{ model: "qwen3-coder-next", provider: "kiro", description: "Qwen3 Coder Next via Kiro", contextWindow: 256_000 },
+];
 
 // Offline fallback only: the real catalogs (OpenAI account + user-added
 // providers) are fetched at runtime; this list keeps `/models` useful when
@@ -73,6 +102,7 @@ export const CURATED_MODELS: ModelEntry[] = [
 	{ model: "grok-build-0.1", provider: "grok", description: "Grok subscription, agentic coding" },
 	{ model: "big-pickle", provider: "opencode", description: "OpenCode Zen gateway (set OPENCODE_API_KEY)" },
 	{ model: "kimi-for-coding", provider: "kimi", description: "Kimi Code membership (set KIMI_API_KEY)" },
+	...KIRO_CURATED_MODELS,
 	{ model: "llama3.1", provider: "ollama", description: "Local via Ollama" },
 	{ model: "mistral", provider: "ollama", description: "Local via Ollama" },
 	{ model: "codellama", provider: "ollama", description: "Local code model" },
@@ -362,6 +392,8 @@ export async function openGroupedModelPicker(host: FeatureHost, grouped: Grouped
 	}
 	if (applied.provider === "chatgpt" || applied.provider === "grok" || applied.provider === "copilot") {
 		hints.push(["Sign-in", `Account access is managed with /auth ${applied.provider}`]);
+	} else if (applied.provider === "kiro") {
+		hints.push(["Proxy", "Manage the Kiro local gateway with /auth kiro"]);
 	} else {
 		hints.push(["Keys", "Missing provider key? See /keys"]);
 	}

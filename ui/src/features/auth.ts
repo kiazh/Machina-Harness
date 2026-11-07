@@ -1,8 +1,10 @@
-// /auth — subscription-provider sign-in for ChatGPT, Grok, and GitHub Copilot.
+// /auth — account sign-in for ChatGPT, Grok, and GitHub Copilot, plus the
+// lifecycle of the user-installed Kiro local gateway.
 //
 // The gateway owns every browser/device flow and every token store. The UI
 // receives public metadata only (status fields, device codes, terminal events).
-// No credential value is printed or retained here.
+// No credential value is printed or retained here. Kiro sign-in itself stays
+// in the official CLI; this surface only starts/stops its loopback proxy.
 
 import type {
 	ChatGPTAuthStatus,
@@ -10,6 +12,10 @@ import type {
 	ChatGPTLoginResult,
 	ChatGPTStatusResult,
 	ConfigSetResult,
+	KiroGatewayStatus,
+	KiroStartResult,
+	KiroStatusResult,
+	KiroStopResult,
 	ModelsListResult,
 	SubscriptionLoginResult,
 	SubscriptionStatus,
@@ -18,13 +24,14 @@ import type {
 import { splitSub } from "../commands.ts";
 import type { Command, FeatureHost } from "./types.ts";
 
-type Provider = "chatgpt" | "grok" | "copilot";
+type Provider = "chatgpt" | "grok" | "copilot" | "kiro";
 
 const SUBCOMMANDS: Array<[string, string]> = [
 	["status", "Show sign-in status for all providers"],
 	["chatgpt", "OpenAI account: status, sign-in, import-codex, sign-out"],
 	["grok", "Grok subscription: status, sign-in, sign-out"],
 	["copilot", "GitHub Copilot: status, sign-in, import-gh, sign-out"],
+	["kiro", "Kiro account: status, start, stop, setup (local proxy)"],
 	["sign-in", "Alias for /auth chatgpt sign-in"],
 	["import-codex", "Alias for /auth chatgpt import-codex"],
 	["sign-out", "Alias for /auth chatgpt sign-out"],
@@ -37,6 +44,7 @@ const PROVIDER_DEFAULT_MODEL: Record<Provider, string> = {
 	chatgpt: "gpt-6.1-sol",
 	grok: "grok-4.7",
 	copilot: "gpt-6.1-sol",
+	kiro: "auto",
 };
 
 type AuthOutcome =
@@ -83,12 +91,44 @@ function renderCopilotStatus(status: SubscriptionStatus): string {
 	return `GitHub Copilot: signed in (${status.accountId ?? "GitHub account"}, ${status.tokenFamily ?? "token"}).`;
 }
 
+function kiroStateLabel(status: KiroGatewayStatus): string {
+	if (status.reachable) {
+		return status.managed ? "local proxy running (managed)" : "local proxy running (external)";
+	}
+	if (status.state === "starting") return "local proxy starting";
+	if (status.state === "error") return "local proxy error";
+	return "local proxy stopped";
+}
+
+export function renderKiroStatus(status: KiroGatewayStatus): string {
+	const cli = status.cliInstalled ? "Kiro CLI installed" : "Kiro CLI not found";
+	const login = status.loginDetected ? "login database detected" : "no login database detected";
+	const lines = [`Kiro account: ${kiroStateLabel(status)}; ${cli}; ${login}.`];
+	if (status.detail) lines.push(`  ${status.detail}`);
+	lines.push(`  Endpoint: ${status.baseUrl}`);
+	if (!status.launchConfigured && !status.reachable) {
+		lines.push("  Launcher: not configured (set MACHINA_KIRO_GATEWAY_DIR).");
+	}
+	if (status.state === "error" && status.logPath) lines.push(`  Log: ${status.logPath}`);
+	return lines.join("\n");
+}
+
+async function kiroStatus(host: FeatureHost): Promise<KiroGatewayStatus | null> {
+	try {
+		const result = await host.request<KiroStatusResult>("auth.kiro.status");
+		return result.status;
+	} catch {
+		return null;
+	}
+}
+
 async function statuses(host: FeatureHost): Promise<{
 	chatgpt: ChatGPTAuthStatus | null;
 	grok: SubscriptionStatus | null;
 	copilot: SubscriptionStatus | null;
+	kiro: KiroGatewayStatus | null;
 }> {
-	const [chatgpt, grok, copilot] = await Promise.all([
+	const [chatgpt, grok, copilot, kiro] = await Promise.all([
 		host
 			.request<ChatGPTStatusResult>("auth.chatgpt.status")
 			.then((result) => result.status)
@@ -101,8 +141,9 @@ async function statuses(host: FeatureHost): Promise<{
 			.request<SubscriptionStatusResult>("auth.copilot.status")
 			.then((result) => result.status)
 			.catch(() => null),
+		kiroStatus(host),
 	]);
-	return { chatgpt, grok, copilot };
+	return { chatgpt, grok, copilot, kiro };
 }
 
 async function showStatus(host: FeatureHost, only?: Provider): Promise<void> {
@@ -111,9 +152,10 @@ async function showStatus(host: FeatureHost, only?: Provider): Promise<void> {
 	if (!only || only === "chatgpt") lines.push(result.chatgpt ? renderAuthStatus(result.chatgpt) : "ChatGPT subscription: status unavailable.");
 	if (!only || only === "grok") lines.push(result.grok ? renderGrokStatus(result.grok) : "Grok subscription: status unavailable.");
 	if (!only || only === "copilot") lines.push(result.copilot ? renderCopilotStatus(result.copilot) : "GitHub Copilot: status unavailable.");
+	if (!only || only === "kiro") lines.push(result.kiro ? renderKiroStatus(result.kiro) : "Kiro account: status unavailable.");
 	lines.push("");
 	lines.push("Actions: /auth sign-in · /auth import-codex · /auth sign-out");
-	lines.push("More: /auth chatgpt · /auth grok · /auth copilot");
+	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth kiro");
 	host.print(lines.join("\n"), "plain");
 }
 
@@ -329,6 +371,7 @@ async function signOut(host: FeatureHost, provider: Provider): Promise<void> {
 }
 
 async function providerStatus(host: FeatureHost, provider: Provider): Promise<SubscriptionStatus | null> {
+	if (provider === "kiro") return null;
 	if (provider === "chatgpt") {
 		try {
 			const result = await host.request<ChatGPTStatusResult>("auth.chatgpt.status");
@@ -356,10 +399,128 @@ function providerLabel(provider: Provider, status: SubscriptionStatus | null): s
 	const state = status?.signedIn ? `signed in${status.accountId ? ` as ${status.accountId}` : ""}` : "signed out";
 	if (provider === "chatgpt") return `ChatGPT subscription — ${state}`;
 	if (provider === "grok") return `Grok subscription — ${state}`;
+	if (provider === "kiro") return "Kiro account — local proxy";
 	return `GitHub Copilot — ${state}`;
 }
 
+function kiroProviderLabel(status: KiroGatewayStatus | null): string {
+	if (!status) return "Kiro account — status unavailable";
+	if (status.reachable) return `Kiro account — local proxy running${status.managed ? " (managed)" : ""}`;
+	if (status.state === "starting") return "Kiro account — local proxy starting";
+	if (status.state === "error") return "Kiro account — local proxy error";
+	if (status.loginDetected) return "Kiro account — login database detected, proxy stopped";
+	if (status.cliInstalled) return "Kiro account — CLI installed, not signed in";
+	return "Kiro account — not configured";
+}
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+async function showKiroStatus(host: FeatureHost): Promise<void> {
+	const status = await kiroStatus(host);
+	if (!status) {
+		host.print("Kiro account: gateway status unavailable.", "warning");
+		return;
+	}
+	host.print(
+		[
+			renderKiroStatus(status),
+			"",
+			"Actions: /auth kiro start · /auth kiro stop · /auth kiro setup",
+			"Community interop only; see docs/KIRO_PROXY.md and review Kiro's terms.",
+		].join("\n"),
+		"plain",
+	);
+}
+
+async function startKiro(host: FeatureHost): Promise<void> {
+	host.print("Starting the local Kiro gateway…", "plain");
+	let result: KiroStartResult;
+	try {
+		result = await host.request<KiroStartResult>("auth.kiro.start", {});
+	} catch (error) {
+		host.print(`Kiro gateway did not start: ${errorText(error)}`, "error");
+		return;
+	}
+	if (result.ready) {
+		host.print(
+			result.started ? "Kiro local proxy is running." : "Kiro local proxy was already running.",
+			"success",
+		);
+		await activateProvider(host, "kiro");
+		return;
+	}
+	host.print(
+		`Kiro gateway start did not become ready.\n${renderKiroStatus(result.status)}`,
+		"warning",
+	);
+}
+
+async function stopKiro(host: FeatureHost): Promise<void> {
+	let result: KiroStopResult;
+	try {
+		result = await host.request<KiroStopResult>("auth.kiro.stop", {});
+	} catch (error) {
+		host.print(`Kiro gateway did not stop: ${errorText(error)}`, "error");
+		return;
+	}
+	if (result.stopped) {
+		host.print("Kiro local proxy stopped.", "success");
+		return;
+	}
+	host.print(
+		`Kiro local proxy was not stopped (only a process Machina started can be stopped).\n${renderKiroStatus(result.status)}`,
+		"warning",
+	);
+}
+
+function showKiroSetup(host: FeatureHost): void {
+	host.print(
+		[
+			"Kiro uses a community local gateway; Machina does not bundle or auto-install it.",
+			"1. Install the official Kiro CLI and sign in: kiro-cli login",
+			"2. Clone jwadow/kiro-gateway and install its dependencies.",
+			"3. Keep it at ~/kiro-gateway, or set MACHINA_KIRO_GATEWAY_DIR to the checkout.",
+			"   Builder ID accounts: Machina injects PROFILE_ARN from Kiro IDE's profile.json when present.",
+			"4. Start it here: /auth kiro start",
+			"5. Pick a model with /models (the full 22-alias catalog is built in).",
+			"Auto-start is on by default when a CLI login and checkout are detected; disable it with MACHINA_KIRO_AUTOSTART=false.",
+			"Docs: docs/KIRO_PROXY.md",
+			"Community interop only: Kiro's terms prohibit third-party harnesses and AWS does not support this path.",
+		].join("\n"),
+		"plain",
+	);
+}
+
+async function kiroMenu(host: FeatureHost): Promise<void> {
+	const status = await kiroStatus(host);
+	const running = status?.reachable === true;
+	const items: Array<{ value: string; label: string; description?: string }> = [];
+	if (!running) {
+		items.push({
+			value: "start",
+			label: "Start the Kiro local proxy",
+			description: status?.launchConfigured
+				? "Launch the configured gateway and use Kiro"
+				: "A configured gateway checkout is required first",
+		});
+	}
+	if (running && status?.managed) {
+		items.push({ value: "stop", label: "Stop the Kiro local proxy", description: "Stop the child Machina started" });
+	}
+	items.push({ value: "setup", label: "Show gateway setup instructions" });
+	items.push({ value: "status", label: "Show status" });
+	const choice = await host.pick(`${kiroProviderLabel(status)} — choose an action`, items);
+	if (!choice) return;
+	await dispatch(host, "kiro", String(choice.value));
+}
+
 async function providerMenu(host: FeatureHost, provider: Provider): Promise<void> {
+	if (provider === "kiro") {
+		await kiroMenu(host);
+		return;
+	}
 	const status = await providerStatus(host, provider);
 	const signedIn = status?.signedIn === true;
 	const items: Array<{ value: string; label: string; description?: string }> = [
@@ -386,9 +547,10 @@ async function openAuthMenu(host: FeatureHost): Promise<void> {
 		{ value: "chatgpt", label: providerLabel("chatgpt", result.chatgpt), description: "OpenAI account (ChatGPT subscription)" },
 		{ value: "grok", label: providerLabel("grok", result.grok), description: "xAI Grok subscription" },
 		{ value: "copilot", label: providerLabel("copilot", result.copilot), description: "GitHub Copilot seat" },
+		{ value: "kiro", label: kiroProviderLabel(result.kiro), description: "Kiro account through a local OpenAI-compatible proxy (community interop)" },
 		{ value: "status", label: "Show all sign-in statuses" },
 	];
-	const choice = await host.pick("Subscriptions — sign in or out", items);
+	const choice = await host.pick("Accounts — sign in, or manage the Kiro local proxy", items);
 	if (!choice) return;
 	if (choice.value === "status") {
 		await showStatus(host);
@@ -399,6 +561,38 @@ async function openAuthMenu(host: FeatureHost): Promise<void> {
 
 async function dispatch(host: FeatureHost, provider: Provider, sub: string): Promise<void> {
 	const command = sub || "menu";
+	if (provider === "kiro") {
+		if (command === "menu") {
+			await kiroMenu(host);
+			return;
+		}
+		if (command === "status") {
+			await showKiroStatus(host);
+			return;
+		}
+		if (command === "start") {
+			await startKiro(host);
+			return;
+		}
+		if (command === "stop") {
+			await stopKiro(host);
+			return;
+		}
+		if (command === "setup") {
+			showKiroSetup(host);
+			return;
+		}
+		if (command === "sign-in" || command === "login") {
+			host.print(
+				"Kiro sign-in is handled by the official CLI, not Machina. Run `kiro-cli login`, then /auth kiro start. See /auth kiro setup.",
+				"plain",
+			);
+			return;
+		}
+		throw new Error(
+			`Unknown /auth kiro option "${command}". Try: status, start, stop, setup.`,
+		);
+	}
 	if (command === "menu") {
 		await providerMenu(host, provider);
 		return;
@@ -430,8 +624,8 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 
 export const authCommand: Command = {
 	name: "auth",
-	description: "Sign in to ChatGPT, Grok, or GitHub Copilot subscriptions",
-	argumentHint: "[chatgpt|grok|copilot] [status|sign-in|sign-out]",
+	description: "Sign in to ChatGPT, Grok, or Copilot — or manage the Kiro local proxy",
+	argumentHint: "[chatgpt|grok|copilot|kiro] [status|sign-in|start|stop]",
 	getArgumentCompletions: (prefix: string) => {
 		const typed = prefix.trimStart().toLowerCase();
 		if (/\s/.test(typed)) return null;
@@ -459,6 +653,9 @@ export const authCommand: Command = {
 			case "copilot":
 				await dispatch(host, "copilot", rest);
 				return;
+			case "kiro":
+				await dispatch(host, "kiro", rest);
+				return;
 			case "sign-in":
 			case "login":
 				await signInChatGPT(host);
@@ -472,7 +669,7 @@ export const authCommand: Command = {
 				return;
 			default:
 				throw new Error(
-					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot.`,
+					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/kiro.`,
 				);
 		}
 	},

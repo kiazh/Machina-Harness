@@ -467,6 +467,12 @@ def window_for(slug: str | None, *, account_id: str = "", base_url: str = "") ->
     """
     entries = cached_catalog(account_id, base_url) if (account_id or base_url) else None
     model = find_model(slug, entries)
+    if model is None:
+        # ``cached_catalog`` may answer from the local Codex cache, which can
+        # be missing a slug that the bundled verified snapshot still knows.
+        # Keep the documented bundled-snapshot fallback instead of dropping
+        # to the generic family window.
+        model = find_model(slug, _fallback_models())
     return model.context_window if model is not None else None
 
 

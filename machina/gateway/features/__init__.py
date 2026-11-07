@@ -26,6 +26,11 @@ from machina.gateway.features.auth_chatgpt import (
     auth_chatgpt_logout,
     auth_chatgpt_status,
 )
+from machina.gateway.features.auth_kiro import (
+    auth_kiro_start,
+    auth_kiro_status,
+    auth_kiro_stop,
+)
 from machina.gateway.features.auth_subscriptions import (
     auth_copilot_import_gh,
     auth_copilot_login,
@@ -199,6 +204,9 @@ METHODS: dict[str, Handler] = {
     "auth.copilot.login": auth_copilot_login,
     "auth.copilot.importGh": auth_copilot_import_gh,
     "auth.copilot.logout": auth_copilot_logout,
+    "auth.kiro.status": auth_kiro_status,
+    "auth.kiro.start": auth_kiro_start,
+    "auth.kiro.stop": auth_kiro_stop,
     "mcp.catalog": mcp_catalog,
     "mcp.list": mcp_list,
     "mcp.config": mcp_config,

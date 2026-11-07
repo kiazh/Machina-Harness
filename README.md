@@ -717,6 +717,7 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
+| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start when a CLI login + checkout are detected — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full 22-alias catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog (GPT-6.1 Sol, GPT-6 Luna; no GPT-6.1 Luna exists) |
 | `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
 | `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
@@ -724,6 +725,8 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
 
 Model IDs are application defaults, not a guarantee of account access, pricing, or tool support.
+
+`kiro` is a community interoperability path, not an AWS-supported provider. Kiro authenticates upstream with your account login, but its terms prohibit third-party harnesses that route requests outside its native interfaces. Machina does not implement the login or bundle the proxy: run a reviewed local gateway such as [jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) after `kiro-cli login`, and review the risks before using it. The proxy's local password is not a Kiro API key; it defaults to the gateway's documented `dummy-local-only` value and can be overridden with `KIRO_API_KEY`.
 
 ### Usage is normalized, not guessed
 

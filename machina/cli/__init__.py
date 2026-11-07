@@ -255,8 +255,9 @@ def chat(
         "-p",
         help=(
             "LLM provider (openrouter, openai, anthropic, chatgpt, google, mistral, groq, "
-            "together, deepseek, xai, opencode, custom, ollama). "
-            "opencode = OpenCode Zen gateway (OPENCODE_API_KEY); custom = any "
+            "together, deepseek, xai, opencode, kimi, kiro, custom, ollama). "
+            "opencode = OpenCode Zen gateway (OPENCODE_API_KEY); kiro = Kiro account "
+            "through a local OpenAI-compatible proxy; custom = any "
             "OpenAI-compatible base URL (CUSTOM_BASE_URL, key optional)"
         ),
     ),
@@ -1657,7 +1658,9 @@ def setup(
             "postgresql://postgres:postgres@localhost:5432/machina",
             False,
         ),
-        *[(key, desc, "", True) for key, desc in PROVIDER_KEYS],
+        # Kiro is account-based: its local proxy uses a documented dummy
+        # loopback password by default, so setup must not ask for a Kiro key.
+        *[(key, desc, "", True) for key, desc in PROVIDER_KEYS if key != "KIRO_API_KEY"],
         ("MACHINA_API_KEY", "HTTP API key (blank = auto-generate)", "", True),
         ("MACHINA_PROVENANCE_KEY", "Memory provenance key (blank = auto-generate)", "", True),
     ]

@@ -96,6 +96,15 @@ def _opencode_spec() -> ProviderSpec:
     return spec
 
 
+def _kiro_spec() -> ProviderSpec:
+    """The local Kiro gateway preset, honoring its loopback base-url override."""
+    from machina.core.provider.kiro_proxy import base_url
+
+    spec = copy(PROVIDER_SPECS["kiro"])
+    spec.base_url = base_url()
+    return spec
+
+
 def get_provider(
     provider: str = "openrouter",
     model: str | None = None,
@@ -129,10 +138,26 @@ def get_provider(
         return OllamaProvider(model=model or "llama3.1", reasoning_effort=reasoning_effort)
     spec = PROVIDER_SPECS.get(provider)
     if spec is not None:
+        api_key = None
         if provider == "opencode":
             spec = _opencode_spec()
+        elif provider == "kiro":
+            # The upstream Kiro login lives in the local proxy's credential
+            # store. This bearer value is only the proxy's loopback password
+            # (default: the documented dummy-local-only), never an AWS key.
+            from machina.core.provider import kiro_proxy
+
+            spec = _kiro_spec()
+            api_key = kiro_proxy.api_key()
+            # Earlier builds exposed the gateway's ``auto-kiro`` spelling.
+            # Always normalize it before a saved session reaches upstream.
+            if model:
+                model = kiro_proxy.canonical_model_id(model)
         return DirectProvider(
-            spec, model=model or spec.default_model, reasoning_effort=reasoning_effort
+            spec,
+            api_key=api_key,
+            model=model or spec.default_model,
+            reasoning_effort=reasoning_effort,
         )
     named = _named_provider(provider, model, reasoning_effort)
     if named is not None:

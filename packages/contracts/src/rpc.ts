@@ -649,6 +649,42 @@ export interface CopilotImportResult {
  imported: boolean;
  status: SubscriptionStatus;
 }
+
+// ─── Kiro local-gateway lifecycle (/auth kiro) ──────────────────────────────
+
+export interface KiroGatewayStatus {
+ cliInstalled: boolean;
+ /** Cheap file-presence signal; Machina never runs kiro-cli whoami here. */
+ loginDetected: boolean;
+ reachable: boolean;
+ /** True only when this Machina process started the child. */
+ managed: boolean;
+ state: "running" | "starting" | "stopped" | "error";
+ baseUrl: string;
+ autostart: boolean;
+ launchConfigured: boolean;
+ detail: string | null;
+ logPath: string | null;
+}
+
+export interface KiroStatusResult {
+ status: KiroGatewayStatus;
+}
+
+export interface KiroStartResult {
+ /** A start was requested/spawned (false when it was already running). */
+ started: boolean;
+ /** The loopback listener answered before the bounded wait expired. */
+ ready: boolean;
+ status: KiroGatewayStatus;
+}
+
+export interface KiroStopResult {
+ /** True only when Machina stopped a child it owns. */
+ stopped: boolean;
+ status: KiroGatewayStatus;
+}
+
 /** A gateway-owned long operation; short status calls keep the transport responsive. */
 export interface OperationApproval {
  requestId:string;sessionId:string;agentId?:string;

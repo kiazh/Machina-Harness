@@ -418,6 +418,18 @@ def _detect_providers() -> dict[str, Any]:
             # ladder calls it an unknown provider (final-review P2-1).
             key_ok = bool(config.get("anthropic_api_key"))
             reason = "" if key_ok else "ANTHROPIC_API_KEY not set"
+        elif selected == "kiro":
+            # The upstream credential is the Kiro account login held by the
+            # local proxy; Machina only needs the loopback server to be up.
+            # Its local proxy password defaults to "dummy-local-only" and is
+            # not a Kiro/AWS API key, so readiness must not demand one.
+            from machina.core.provider.kiro_proxy import base_url
+
+            endpoint = base_url()
+            key_ok = True
+            if not _endpoint_reachable(endpoint):
+                key_ok = False
+                reason = f"Kiro proxy unreachable at {endpoint} (start kiro-gateway)"
         elif selected in PROVIDER_SPECS:
             env_name = PROVIDER_SPECS[selected].api_key_env
             key_ok = bool(config.get(PROVIDER_SPECS[selected].config_key))

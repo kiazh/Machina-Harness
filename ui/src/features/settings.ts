@@ -804,6 +804,7 @@ export const settingsCommands: Command[] = [
 			["xai", "xAI direct (Grok)"],
 			["opencode", "OpenCode Zen gateway (OPENCODE_API_KEY)"],
 			["kimi", "Kimi Code (KIMI_API_KEY; membership quota)"],
+			["kiro", "Kiro account via local proxy (start kiro-gateway; no Kiro API key)"],
 			["custom", "Custom OpenAI-compatible endpoint (CUSTOM_BASE_URL)"],
 			["ollama", "Ollama (local models)"],
 		]),

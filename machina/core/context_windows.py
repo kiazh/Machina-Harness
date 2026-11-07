@@ -187,6 +187,15 @@ def context_window_for(
         if window:
             return window
     provider_name = _provider_name(provider)
+    if provider_name == "kiro":
+        # Kiro's account catalog reports the exact per-model window; the
+        # gateway's OpenAI list does not, and the generic family fallback is
+        # too conservative for 1M-context and open-weight aliases.
+        from machina.core.provider import kiro_proxy
+
+        metadata = kiro_proxy.MODEL_METADATA.get(kiro_proxy.canonical_model_id(name))
+        if metadata is not None and isinstance(metadata.get("contextWindow"), int):
+            return metadata["contextWindow"]
     if provider_name and provider_name != "chatgpt":
         bundled = _bundled_windows(provider_name).get(name)
         if bundled is not None:

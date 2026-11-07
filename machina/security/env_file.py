@@ -40,6 +40,7 @@ PROVIDER_KEYS: tuple[tuple[str, str], ...] = (
     ("XAI_API_KEY", "xAI (Grok models)"),
     ("OPENCODE_API_KEY", "OpenCode Zen (free + paid models gateway)"),
     ("KIMI_API_KEY", "Kimi Code (K3 coding models)"),
+    ("KIRO_API_KEY", "Kiro local proxy password (optional; not a Kiro/AWS key)"),
     ("CUSTOM_API_KEY", "Custom OpenAI-compatible endpoint"),
     ("COHERE_API_KEY", "Cohere (reranking)"),
 )

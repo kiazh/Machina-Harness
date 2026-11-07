@@ -95,6 +95,30 @@ async def _chatgpt_models(provider: str, refresh: bool) -> dict[str, Any]:
     )
 
 
+async def _kiro_models(provider: str, refresh: bool) -> dict[str, Any]:
+    """Bounded catalog from the local Kiro proxy, with an honest fallback.
+
+    The picker path uses a 60-second cache plus a fast TCP preflight, so a
+    stopped proxy never stalls the concurrently fetched model menu. Only an
+    explicit refresh (``/models catalog``) pays for live CLI discovery.
+    """
+    from machina.core.provider import kiro_proxy
+
+    try:
+        if refresh:
+            models = await asyncio.to_thread(kiro_proxy.fetch_models, force=True)
+        else:
+            models = await asyncio.to_thread(kiro_proxy.fetch_models)
+        return _models_payload(provider, source="live", models=models)
+    except Exception as exc:  # missing key, transport, HTTP, malformed body
+        return _models_payload(
+            provider,
+            source="fallback",
+            models=kiro_proxy.fallback_models(),
+            fetch_error=str(exc) or type(exc).__name__,
+        )
+
+
 async def _named_models(provider: str, refresh: bool) -> dict[str, Any]:
     entry = store.get_provider_entry(provider)
     if entry is None:
@@ -159,6 +183,8 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     refresh = _bool(params, "refresh")
     if provider == "chatgpt":
         return await _chatgpt_models(provider, refresh)
+    if provider == "kiro":
+        return await _kiro_models(provider, refresh)
     if store.is_named_provider(provider):
         return await _named_models(provider, refresh)
     # Built-in direct families use the bundled models.dev snapshot. This is

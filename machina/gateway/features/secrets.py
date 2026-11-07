@@ -28,6 +28,7 @@ MANAGED_ENV_KEYS: tuple[tuple[str, str], ...] = (
     ("SEARXNG_URL", "Self-hosted SearXNG for web search"),
     ("MACHINA_MODEL", "Default model identifier"),
     ("CUSTOM_BASE_URL", "Custom OpenAI-compatible base URL"),
+    ("KIRO_BASE_URL", "Kiro local proxy base URL"),
 )
 
 # RF4-W6: only catalogued provider keys and documented managed keys may be

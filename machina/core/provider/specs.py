@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from machina.core.provider import kiro_proxy as kiro
+
 
 # ---------------------------------------------------------------------------
 # Direct provider specs — one entry per model family with its own API.
@@ -126,6 +128,25 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         default_model="kimi-for-coding",
         reasoning="openai",
         description="Kimi Code (K3/K2.8 coding models; membership API key)",
+    ),
+    "kiro": ProviderSpec(
+        name="kiro",
+        # A local OpenAI-compatible translator (jwadow/kiro-gateway) reads
+        # the Kiro CLI credential store and exposes this endpoint. The base
+        # URL can be overridden with KIRO_BASE_URL; KIRO_API_KEY is only
+        # needed when the proxy's local password is changed from its
+        # documented dummy default. Community interop only: Kiro's terms
+        # prohibit third-party harnesses, and AWS does not support this path.
+        base_url=kiro.DEFAULT_BASE_URL,
+        api_key_env=kiro.API_KEY_ENV,
+        default_model=kiro.DEFAULT_MODEL,
+        # The upstream credential is the Kiro account login held by the
+        # proxy. The optional local proxy password is supplied by the factory
+        # (default: the documented dummy loopback value), so this provider
+        # must remain usable without the user configuring a Kiro API key.
+        requires_key=False,
+        reasoning="none",
+        description="Kiro local proxy (OpenAI-compatible gateway)",
     ),
 }
 

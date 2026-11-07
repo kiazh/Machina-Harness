@@ -14,6 +14,11 @@ ANTHROPIC_THINKING_BUDGETS = {"low": 1024, "medium": 4096, "high": 10000}
 
 def supported_reasoning_efforts(provider: str | None = None) -> tuple[str, ...]:
     """Wire vocabulary for direct providers; ChatGPT uses its model catalog."""
+    if provider == "kiro":
+        # The local gateway exposes Chat Completions only; it has no native
+        # reasoning-effort knob (FAKE_REASONING is prompt emulation, not a
+        # provider control). Claiming support here would silently no-op.
+        return ()
     return ("low", "high", "max") if provider == "kimi" else REASONING_EFFORTS
 
 

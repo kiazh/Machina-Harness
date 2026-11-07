@@ -704,7 +704,7 @@ test("/provider name no longer changes the model route", async () => {
 test("/provider completions cover the sign-in and gateway providers without duplicate management commands", async () => {
 	const provider = SLASH_COMMANDS.find((c) => c.name === "provider")!;
 	const values = (await provider.getArgumentCompletions!(""))?.map((item) => item.value) ?? [];
-	for (const name of ["chatgpt", "opencode", "custom"]) {
+	for (const name of ["chatgpt", "opencode", "kiro", "custom"]) {
 		assert.ok(values.includes(name), `missing completion ${name}`);
 	}
 	assert.equal(provider.argumentHint, "[provider name]");
@@ -1261,8 +1261,41 @@ test("/models curated list includes the ChatGPT account and OpenCode Zen default
 	const opencode = CURATED_MODELS.find((e) => e.provider === "opencode");
 	assert.equal(opencode?.model, "big-pickle");
 	assert.match(opencode?.description ?? "", /OPENCODE_API_KEY/);
+	const kiro = CURATED_MODELS.filter((e) => e.provider === "kiro");
+	assert.deepEqual(
+		kiro.map((e) => e.model),
+		[
+			"auto",
+			"claude-opus-5.5",
+			"claude-sonnet-5.5",
+			"claude-haiku-5.5",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+			"kimi-k3",
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-opus-4.8",
+			"claude-opus-4.7",
+			"claude-opus-4.6",
+			"claude-sonnet-4.6",
+			"claude-opus-4.5",
+			"claude-sonnet-4.5",
+			"claude-haiku-4.5",
+			"deepseek-3.2",
+			"minimax-m2.5",
+			"minimax-m2.1",
+			"glm-5",
+			"qwen3-coder-next",
+		],
+	);
+	assert.match(kiro.find((e) => e.model === "auto")?.description ?? "", /auto model selection/);
+	assert.equal(kiro.find((e) => e.model === "gpt-5.6-sol")?.contextWindow, 986_000);
+	assert.equal(kiro.find((e) => e.model === "deepseek-3.2")?.contextWindow, 164_000);
+	assert.equal(kiro.find((e) => e.model === "qwen3-coder-next")?.contextWindow, 256_000);
 	assert.deepEqual(filterCuratedModels("chatgpt").map((e) => e.provider), ["chatgpt"]);
 	assert.deepEqual(filterCuratedModels("opencode").map((e) => e.provider), ["opencode"]);
+	assert.ok(filterCuratedModels("kiro").every((e) => e.provider === "kiro"));
 });
 
 test("/models catalog prints the provider catalog with per-model efforts", async () => {

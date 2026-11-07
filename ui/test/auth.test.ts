@@ -5,7 +5,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { parseCommand } from "../src/commands.ts";
-import { authCommand, formatAuthExpiry, renderAuthStatus } from "../src/features/auth.ts";
+import {
+	authCommand,
+	formatAuthExpiry,
+	renderAuthStatus,
+	renderKiroStatus,
+} from "../src/features/auth.ts";
 import {
 	type FeatureHost,
 	type NoticeKind,
@@ -13,7 +18,12 @@ import {
 	SLASH_COMMANDS,
 } from "../src/features/index.ts";
 import type { AskTextOptions, OAuthProgressHandle, OAuthProgressOptions } from "../src/features/types.ts";
-import type { ChatGPTAuthStatus, GatewayEvent, SessionInfo } from "../src/protocol.ts";
+import type {
+	ChatGPTAuthStatus,
+	GatewayEvent,
+	KiroGatewayStatus,
+	SessionInfo,
+} from "../src/protocol.ts";
 
 const SESSION: SessionInfo = {
 	id: "11111111-2222-3333-4444-555555555555",
@@ -40,6 +50,27 @@ const SIGNED_OUT: ChatGPTAuthStatus = {
 	expiresAt: null,
 	accountId: null,
 	lastRefresh: null,
+};
+
+const KIRO_STOPPED: KiroGatewayStatus = {
+	cliInstalled: true,
+	loginDetected: true,
+	reachable: false,
+	managed: false,
+	state: "stopped",
+	baseUrl: "http://127.0.0.1:8000/v1",
+	autostart: true,
+	launchConfigured: true,
+	detail: "Kiro login detected. Start the local gateway with /auth kiro start.",
+	logPath: "/x/.machina/logs/kiro-gateway.log",
+};
+
+const KIRO_RUNNING: KiroGatewayStatus = {
+	...KIRO_STOPPED,
+	reachable: true,
+	managed: true,
+	state: "running",
+	detail: "Local gateway is running (started by Machina).",
 };
 
 class AuthFakeHost implements FeatureHost {
@@ -136,17 +167,19 @@ function failedEvent(reason: string): GatewayEvent {
 test("/auth (bare) prints the signed-in status card with actions", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_IN };
+	host.responses["auth.kiro.status"] = { status: KIRO_STOPPED };
 	await run("/auth status", host);
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
 	assert.deepEqual(
 		host.calls.slice(1).map((call) => call.method),
-		["auth.grok.status", "auth.copilot.status"],
+		["auth.grok.status", "auth.copilot.status", "auth.kiro.status"],
 	);
 	const text = host.text();
 	assert.match(text, /signed in via Machina token store/);
 	assert.match(text, /acct-ui/);
 	assert.match(text, /Expires:?\s+2027-01-15T08:00:00Z/);
 	assert.match(text, /Last refresh:?\s+2026-10-14T00:00:00Z/);
+	assert.match(text, /Kiro account: local proxy stopped/);
 	assert.match(text, /Actions: \/auth sign-in · \/auth import-codex · \/auth sign-out/);
 });
 
@@ -277,7 +310,7 @@ test("unknown /auth options are rejected with the available subcommands", async 
 test("/auth offers completion-friendly subcommands", async () => {
 	const completions = (await authCommand.getArgumentCompletions!("")) ?? [];
 	const values = completions.map((item) => item.value);
-	assert.deepEqual(values, ["status", "chatgpt", "grok", "copilot", "sign-in", "import-codex", "sign-out"]);
+	assert.deepEqual(values, ["status", "chatgpt", "grok", "copilot", "kiro", "sign-in", "import-codex", "sign-out"]);
 	const signIn = (await authCommand.getArgumentCompletions!("sign-i")) ?? [];
 	assert.deepEqual(
 		signIn.map((item) => item.value),
@@ -357,4 +390,102 @@ test("/auth copilot status is shown alongside the other providers", async () => 
 	await run("/auth status", host);
 	assert.match(host.text(), /GitHub Copilot: signed in \(octocat, fine-grained\)/);
 	assert.match(host.text(), /\/auth grok/);
+});
+
+// ─── Kiro local-gateway lifecycle ───────────────────────────────────────────
+
+test("/auth kiro status is a single bounded RPC", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.kiro.status"] = { status: KIRO_STOPPED };
+	await run("/auth kiro status", host);
+	assert.deepEqual(host.calls, [{ method: "auth.kiro.status", params: {} }]);
+	const text = host.text();
+	assert.match(text, /Kiro account: local proxy stopped/);
+	assert.match(text, /Endpoint: http:\/\/127\.0\.0\.1:8000\/v1/);
+	assert.match(text, /\/auth kiro start/);
+	assert.match(text, /Community interop only/);
+});
+
+test("/auth kiro start launches the proxy and activates Kiro", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.kiro.start"] = {
+		started: true,
+		ready: true,
+		status: KIRO_RUNNING,
+	};
+	host.responses["models.list"] = {
+		provider: "kiro",
+		source: "live",
+		models: [{ id: "auto" }],
+		fetchError: null,
+	};
+	host.responses["config.set"] = { key: "provider", value: "kiro" };
+	host.responses["session.setModel"] = {
+		sessionId: SESSION.id,
+		model: "auto",
+		provider: "kiro",
+	};
+
+	await run("/auth kiro start", host);
+
+	assert.equal(host.calls[0]!.method, "auth.kiro.start");
+	assert.ok(host.calls.some((call) => call.method === "models.list"));
+	assert.match(host.text(), /Kiro local proxy is running/);
+	assert.match(host.text(), /Active provider: kiro/);
+	assert.match(host.text(), /model: auto/);
+});
+
+test("/auth kiro stop reports a managed stop", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.kiro.stop"] = { stopped: true, status: KIRO_STOPPED };
+	await run("/auth kiro stop", host);
+	assert.equal(host.calls[0]!.method, "auth.kiro.stop");
+	assert.match(host.text(), /Kiro local proxy stopped/);
+});
+
+test("/auth kiro setup and login point at the official CLI", async () => {
+	const setupHost = new AuthFakeHost();
+	await run("/auth kiro setup", setupHost);
+	assert.equal(setupHost.calls.length, 0);
+	assert.match(setupHost.text(), /does not bundle or auto-install/);
+	assert.match(setupHost.text(), /MACHINA_KIRO_GATEWAY_DIR/);
+	assert.match(setupHost.text(), /MACHINA_KIRO_AUTOSTART=false/);
+
+	const loginHost = new AuthFakeHost();
+	await run("/auth kiro login", loginHost);
+	assert.equal(loginHost.calls.length, 0);
+	assert.match(loginHost.text(), /kiro-cli login/);
+	assert.match(loginHost.text(), /\/auth kiro start/);
+});
+
+test("renderKiroStatus shows the actionable error and log path", () => {
+	const rendered = renderKiroStatus({
+		...KIRO_STOPPED,
+		state: "error",
+		detail: "Kiro gateway process exited with code 1.",
+	});
+	assert.match(rendered, /local proxy error/);
+	assert.match(rendered, /exited with code 1/);
+	assert.match(rendered, /Log: \/x\/\.machina\/logs\/kiro-gateway\.log/);
+});
+
+test("/auth menu exposes Kiro and routes to its actions", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.chatgpt.status"] = { status: SIGNED_OUT };
+	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
+	host.responses["auth.copilot.status"] = { status: { signedIn: false, source: null } };
+	host.responses["auth.kiro.status"] = { status: KIRO_STOPPED };
+	let picks = 0;
+	host.pick = async (_title: string, items: SelectItem[]) => {
+		picks += 1;
+		const value = picks === 1 ? "kiro" : "status";
+		return items.find((item) => item.value === value) ?? items[0]!;
+	};
+
+	await run("/auth", host);
+
+	assert.ok(picks >= 2);
+	assert.match(host.text(), /Kiro account: local proxy stopped/);
+	assert.match(host.text(), /\/auth kiro start/);
+	assert.ok(host.calls.some((call) => call.method === "auth.kiro.status"));
 });

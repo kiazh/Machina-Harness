@@ -202,6 +202,7 @@ class Gateway:
         self._db_ready = False
         self._job_runner = None
         self._warmers_task = None
+        self._kiro_task = None
         self._turns: dict[str, asyncio.Task[None]] = {}
         from machina.gateway.operations import Operations
 
@@ -418,6 +419,13 @@ class Gateway:
             except (asyncio.CancelledError, Exception):
                 pass
             self._warmers_task = None
+        if self._kiro_task is not None:
+            self._kiro_task.cancel()
+            try:
+                await self._kiro_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._kiro_task = None
         await drain_shadow_tasks()
         if self._job_runner is not None:
             try:
@@ -652,6 +660,12 @@ class Gateway:
             # skips itself when disabled or when tests disable the scheduler;
             # it never makes a synthetic provider call.
             self._warmers_task = schedule_startup_warmers(provider=self.provider, model=self.model)
+            # Optional Kiro local-proxy startup. This only creates a task: the
+            # TCP probe, login detection, and child spawn all run in a worker
+            # thread and never delay initialize/`/models`.
+            from machina.core.provider.kiro_gateway import schedule_autostart
+
+            self._kiro_task = schedule_autostart()
         payload = {
             "version": __version__,
             "protocolVersion": self.protocol_version,

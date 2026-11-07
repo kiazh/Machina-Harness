@@ -914,7 +914,7 @@ export class App implements FeatureHost {
 
 	async openProviderEditor(providerName = ""): Promise<void> {
 		const listed = await this.request<ProvidersListResult>("providers.list");
-		const credentialNames = new Set(["openrouter", "openai", "anthropic", "google", "mistral", "groq", "together", "deepseek", "xai", "opencode", "kimi", "custom"]);
+		const credentialNames = new Set(["openrouter", "openai", "anthropic", "google", "mistral", "groq", "together", "deepseek", "xai", "opencode", "kimi", "kiro", "custom"]);
 		const rows = listed.providers.map((provider) => ({
 			key: provider.name,
 			status: provider.selected ? "current" : provider.kind === "named" ? "custom" : "built-in",
