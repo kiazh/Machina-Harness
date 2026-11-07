@@ -33,6 +33,14 @@ test("clipboard transfer sends the complete value on stdin without shell evaluat
 	}
 });
 
+test("the Windows clipboard path decodes stdin as UTF-8", async () => {
+	const { WINDOWS_CLIPBOARD_SCRIPT } = await import("../src/clipboard.ts");
+	assert.match(WINDOWS_CLIPBOARD_SCRIPT, /OpenStandardInput/);
+	assert.match(WINDOWS_CLIPBOARD_SCRIPT, /UTF8Encoding/);
+	assert.match(WINDOWS_CLIPBOARD_SCRIPT, /Set-Clipboard/);
+	assert.doesNotMatch(WINDOWS_CLIPBOARD_SCRIPT, /\[Console\]::In/);
+});
+
 test("the copy timeout leaves headroom for a loaded-machine clipboard", async () => {
 	// The product bound is the only thing between a slow-but-working pbcopy and
 	// a false "Copy failed". A deterministic slow-copy fixture is not feasible

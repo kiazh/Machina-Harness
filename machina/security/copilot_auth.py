@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -190,34 +191,56 @@ def save_tokens(tokens: dict[str, Any], path: str | Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _probe_gh_token() -> str | None:
+_GH_PROBE_TTL_SECONDS = 15.0
+_gh_probe_cache: tuple[float, str | None] | None = None
+_gh_probe_lock = threading.Lock()
+
+
+def _probe_gh_token(*, force: bool = False) -> str | None:
     """Token from ``gh auth token``; the gh store itself is never modified.
 
     The probe runs with ``GITHUB_TOKEN``/``GH_TOKEN`` stripped (so gh cannot
     short-circuit on an env token) and with prompts disabled, bounded by a
     5 second timeout.
+
+    ``gh auth token`` costs ~100 ms on Windows. ``/auth`` opens several status
+    probes at once, so a short cache keeps repeated menus responsive without
+    turning the status into a token store. ``force=True`` bypasses that cache
+    for an explicit ``import-gh`` request.
     """
-    env = {
-        key: value for key, value in os.environ.items() if key not in {"GITHUB_TOKEN", "GH_TOKEN"}
-    }
-    env.setdefault("GH_PROMPT_DISABLED", "1")
-    env.setdefault("GH_NO_UPDATE_NOTIFIER", "1")
-    try:
-        result = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    return result.stdout.strip()
+    global _gh_probe_cache
+    with _gh_probe_lock:
+        now = time.monotonic()
+        if (
+            not force
+            and _gh_probe_cache is not None
+            and now - _gh_probe_cache[0] < _GH_PROBE_TTL_SECONDS
+        ):
+            return _gh_probe_cache[1]
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"GITHUB_TOKEN", "GH_TOKEN"}
+        }
+        env.setdefault("GH_PROMPT_DISABLED", "1")
+        env.setdefault("GH_NO_UPDATE_NOTIFIER", "1")
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                env=env,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            _gh_probe_cache = (time.monotonic(), None)
+            return None
+        token = result.stdout.strip() if result.returncode == 0 else None
+        _gh_probe_cache = (time.monotonic(), token or None)
+        return _gh_probe_cache[1]
 
 
 def fetch_account(
@@ -273,7 +296,7 @@ def import_from_gh_cli(
     target = Path(path) if path is not None else auth_path()
     generation = store_fence.credential_generation(target)
     snapshot = store_fence.store_fingerprint(target)
-    token = _probe_gh_token()
+    token = _probe_gh_token(force=True)
     if not token:
         return None
     valid, message = validate_token(token)

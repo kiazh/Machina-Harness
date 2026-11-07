@@ -13,6 +13,21 @@ import { spawn } from "node:child_process";
  */
 export const CLIPBOARD_COPY_TIMEOUT_MS = 8000;
 
+/**
+ * Decode stdin as UTF-8 before handing it to Set-Clipboard.
+ *
+ * Windows PowerShell otherwise decodes a redirected pipe with the active
+ * console code page (often CP437/CP1252). Copying a TUI glyph such as `▸`
+ * then stored the mojibake `Γû╕` on the clipboard. Reading the raw stream
+ * with an explicit UTF-8 decoder keeps selection copy byte-faithful.
+ */
+export const WINDOWS_CLIPBOARD_SCRIPT = [
+	"$stdin = [Console]::OpenStandardInput()",
+	"$reader = [System.IO.StreamReader]::new($stdin, [System.Text.UTF8Encoding]::new($false))",
+	"$text = $reader.ReadToEnd()",
+	"Set-Clipboard -Value $text",
+].join("; ");
+
 /** Constructor options for the pi-tui fullscreen clipboard hook (no hard dep). */
 export type TuiClipboardOptions = {
 	copySelection: (text: string) => Promise<boolean | string>;
@@ -36,7 +51,7 @@ export async function copyText(text: string): Promise<boolean> {
 	const commands: Array<[string, string[]]> = process.platform === "darwin"
 		? [["pbcopy", []]]
 		: process.platform === "win32"
-			? [["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[Console]::In.ReadToEnd() | Set-Clipboard"]]]
+			? [["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_CLIPBOARD_SCRIPT]]]
 			: [["wl-copy", []], ["xclip", ["-selection", "clipboard"]]];
 	for (const [command, args] of commands) {
 		const copied = await new Promise<boolean>((resolve) => {
