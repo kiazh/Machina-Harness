@@ -131,7 +131,10 @@ async def build_agent_for_session(
     from machina.core.provider import get_provider
 
     if delegated is None:
-        delegated = session.parent_session_id is not None and not session.is_fork
+        delegated = bool(
+            getattr(session, "parent_session_id", None) is not None
+            and not getattr(session, "is_fork", False)
+        )
 
     # A resumed/forked child keeps the restrictions stamped at delegation.
     # Newly supplied authority can narrow these caps but cannot replace them.

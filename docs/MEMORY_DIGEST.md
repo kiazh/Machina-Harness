@@ -19,8 +19,8 @@ forgetting intact, and it works without a GPU or an extra provider call.
    second useful fact can beat a near-duplicate of the first.
 5. Render a bounded digest with a compact category marker and explicit
    omission count.
-6. Attach source IDs, per-source scores, and the digest character count in the
-   internal chunk payload; the prompt sees only the compact text.
+6. Keep the selected memory objects and digest character count internal for
+   audit and scoring; the prompt sees only the compact text.
 7. Audit `memory_digest` with counts, never content.
 
 The selector is deterministic and has no model, database, network, or
@@ -84,8 +84,8 @@ small metadata overhead.
 - The digest is not a replacement for Memorilla's latent-token compression.
   It is the safe local baseline that a future optional encoder can be compared
   against.
-- No raw memory content is logged; only counts and the source IDs remain in the
-  internal payload.
+- No raw memory content or source IDs are logged; only counts and the
+  prompt-visible digest are retained for the request.
 
 ## Verification
 

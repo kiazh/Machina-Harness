@@ -22,7 +22,21 @@ from machina.security.env_file import find_env_file, read_env_values, set_env_va
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = Path.home() / ".machina" / "config.yaml"
+def default_config_path() -> Path:
+    """Resolve the config file, honoring ``MACHINA_HOME``.
+
+    ``MACHINA_HOME`` is the documented Machina state root. Tests and
+    multi-profile installs use it to isolate state; on Windows ``Path.home()``
+    ignores a bare ``HOME`` environment override, so the config path must
+    resolve the explicit root itself instead of relying on ``HOME``.
+    """
+    override = os.environ.get("MACHINA_HOME", "").strip()
+    if override:
+        return Path(override).expanduser() / "config.yaml"
+    return Path.home() / ".machina" / "config.yaml"
+
+
+DEFAULT_CONFIG_PATH = default_config_path()
 
 # Canonical reasoning-effort vocabulary — the single source of truth shared by
 # config validation and provider normalization (machina.core.provider.reasoning
@@ -134,17 +148,18 @@ except Exception:
 
 __all__ = [
     "Config",
-    "DEFAULT_CONFIG_PATH",
-    "SECRET_KEYS",
-    "LEGACY_ENV_VARS",
     "DEFAULTS",
+    "DEFAULT_CONFIG_PATH",
+    "LEGACY_ENV_VARS",
     "MAX_TOKENS",
-    "WORKSPACE_UI_STATE_MAX_BYTES",
-    "UI_PREFERENCES_MAX_BYTES",
     "PRICING_TABLE_MAX_BYTES",
-    "REASONING_EFFORTS",
     "REASONING_CATALOG_EFFORTS",
+    "REASONING_EFFORTS",
     "REASONING_UNSET_EFFORTS",
+    "SECRET_KEYS",
+    "UI_PREFERENCES_MAX_BYTES",
+    "WORKSPACE_UI_STATE_MAX_BYTES",
+    "default_config_path",
     "get_config",
     "persist_provider_fallback",
     "validate_value",
@@ -878,7 +893,7 @@ class Config:
 
     def save(self, path: str | Path | None = None) -> None:
         """Save config to YAML file."""
-        save_path = Path(path) if path else DEFAULT_CONFIG_PATH
+        save_path = Path(path) if path else default_config_path()
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {}
@@ -911,7 +926,7 @@ class Config:
     def load(cls, path: str | Path | None = None, *, _target: Config | None = None) -> Config:
         """Load config from YAML file, merging with env vars and defaults."""
         config = _target if _target is not None else cls()
-        load_path = Path(path) if path else DEFAULT_CONFIG_PATH
+        load_path = Path(path) if path else default_config_path()
 
         # Load from file if it exists. AH-AUDIT-042: invalid values are
         # rejected with a warning and the default kept — never activated.
@@ -920,6 +935,8 @@ class Config:
         if load_path.exists():
             file_data: dict = {}
             try:
+                if load_path.is_dir():
+                    raise IsADirectoryError(f"Is a directory: {load_path}")
                 with open(load_path) as f:
                     file_data = yaml.safe_load(f) or {}
             except Exception as e:

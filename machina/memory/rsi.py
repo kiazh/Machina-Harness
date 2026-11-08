@@ -13,6 +13,7 @@ from collections import defaultdict
 from typing import Any
 
 from machina.core.intent import conversational
+from machina.memory.experience import build_experience_brief
 
 MAX_REVISIONS = 50
 MAX_CAPABILITIES = 200
@@ -311,8 +312,6 @@ async def decision(conn, agent_id: str, query: str, episode_id) -> dict:
         domain,
         strategy,
     )
-    from machina.memory.experience import build_experience_brief
-
     experience = build_experience_brief(domain, scores)
     return {
         "revision": profile["revision"],

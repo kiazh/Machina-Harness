@@ -15,7 +15,6 @@ from pathlib import Path
 from machina import interop
 from machina.core.exceptions import ToolError
 from machina.core.meta_harness import route_prompt
-from machina.core.provider import audit_log
 from machina.tools.base import registry
 from machina.workspace.service import active_workspace_service
 
@@ -116,6 +115,8 @@ async def harness_delegate(
         cwd=cwd,
     )
     elapsed_ms = (time.perf_counter() - started) * 1000.0
+    from machina.core.provider import audit_log
+
     audit_log(
         "harness_delegate",
         platform=requested,

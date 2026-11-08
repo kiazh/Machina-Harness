@@ -788,14 +788,6 @@ class BaseReActAgent:
 
                 if digest is not None:
                     if digest.selected:
-                        sources = [
-                            {
-                                "id": str(item.memory.id),
-                                "category": item.memory.category,
-                                "score": round(item.score, 4),
-                            }
-                            for item in digest.selected
-                        ]
                         chunk = ContextChunk(
                             id=uuid.uuid4(),
                             session_id=session_id,
@@ -807,7 +799,6 @@ class BaseReActAgent:
                                     item.memory.importance for item in digest.selected
                                 ),
                                 "category": "digest",
-                                "sources": sources,
                                 "persona_interpretation": None,
                             },
                             token_count=get_token_count(digest.text),

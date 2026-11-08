@@ -356,10 +356,15 @@ class FileLoader:
                 raise _validation_error("Path escapes the allowed base directory") from e
             return self._walk_open(base, rel)
 
-        # Documented weaker fallback (e.g. Windows): same O_NOFOLLOW checks,
-        # but the open is not anchored to validated ancestor descriptors.
+        # Documented weaker fallback (e.g. Windows): re-resolve immediately
+        # before the open and refuse a target that now escapes the authorized
+        # base. This catches a final/ancestor symlink swap after validation;
+        # it is not the descriptor-anchored guarantee of dir_fd platforms.
         try:
-            return _os_open(resolved, os.O_RDONLY | _nofollow() | _nonblock())
+            real = resolved.resolve()
+            if not real.is_relative_to(base):
+                raise _validation_error("Path escapes the allowed base directory")
+            return _os_open(real, os.O_RDONLY | _nofollow() | _nonblock())
         except FileNotFoundError as e:
             raise _validation_error(f"File not found: {resolved}") from e
         except OSError as e:

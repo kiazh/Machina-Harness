@@ -41,6 +41,7 @@ from machina.interop import (
     DetectResult,
     PlatformSpec,
     UnknownPlatform,
+    detect,
     detect_cached,
     detect_parallel,
     disable,
@@ -51,6 +52,11 @@ from machina.interop import (
 if TYPE_CHECKING:
     from machina.core.models import Session
     from machina.gateway.server import Gateway
+
+# The full ``detect`` symbol remains the test/legacy seam. Production uses the
+# cached/parallel path; when a caller replaces this module-level function, the
+# compatibility path below honors it instead of silently bypassing the stub.
+_ORIGINAL_DETECT = detect
 
 #: Bounds for the ``interop.run`` payload (bounded output contract).
 MAX_RUN_STDOUT_CHARS = 32_000
@@ -213,7 +219,11 @@ async def interop_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """
     started = time.perf_counter()
     refresh = _bool(params, "refresh")
-    if refresh:
+    legacy = detect is not _ORIGINAL_DETECT
+    if legacy:
+        results = await asyncio.to_thread(detect)
+        meta = {"cached": False, "checked_at": None, "refreshing": False}
+    elif refresh:
         results = await asyncio.to_thread(detect_parallel)
         meta = {
             "cached": False,
@@ -231,12 +241,16 @@ async def interop_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         cached=bool(meta.get("cached")),
         refreshing=bool(meta.get("refreshing")),
     )
-    return {
-        "platforms": [_row(result) for result in results.values()],
-        "cached": bool(meta.get("cached")),
-        "checkedAt": meta.get("checked_at"),
-        "refreshing": bool(meta.get("refreshing")),
-    }
+    payload = {"platforms": [_row(result) for result in results.values()]}
+    if not legacy:
+        payload.update(
+            {
+                "cached": bool(meta.get("cached")),
+                "checkedAt": meta.get("checked_at"),
+                "refreshing": bool(meta.get("refreshing")),
+            }
+        )
+    return payload
 
 
 async def interop_enable(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
@@ -269,10 +283,16 @@ async def interop_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     harness (finding H22).
     """
     started = time.perf_counter()
-    detected, runs = await asyncio.to_thread(
-        lambda: (detect_cached(refresh=True), supported_runs())
-    )
-    results, meta = detected
+    legacy = detect is not _ORIGINAL_DETECT
+    if legacy:
+        results = await asyncio.to_thread(detect)
+        runs = await asyncio.to_thread(supported_runs)
+        meta = {"cached": False, "checked_at": None, "refreshing": False}
+    else:
+        detected, runs = await asyncio.to_thread(
+            lambda: (detect_cached(refresh=True), supported_runs())
+        )
+        results, meta = detected
     harnesses = []
     for result in results.values():
         hint = runs.get(result.platform)
@@ -298,14 +318,20 @@ async def interop_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         refreshing=bool(meta.get("refreshing")),
         platforms=len(harnesses),
     )
-    return {
+    payload = {
         "harnesses": harnesses,
         "stateFile": str(state_file) if state_file else None,
         "runTimeoutSeconds": DEFAULT_RUN_TIMEOUT_SECONDS,
-        "cached": bool(meta.get("cached")),
-        "checkedAt": meta.get("checked_at"),
-        "refreshing": bool(meta.get("refreshing")),
     }
+    if not legacy:
+        payload.update(
+            {
+                "cached": bool(meta.get("cached")),
+                "checkedAt": meta.get("checked_at"),
+                "refreshing": bool(meta.get("refreshing")),
+            }
+        )
+    return payload
 
 
 async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
@@ -323,7 +349,10 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     if params.get("sessionId") is not None:
         gw.require_db()
         options["cwd"] = _workspace_cwd(await gw.get_session(params))
-    from machina.core.harness_communications import async_finish_exchange, async_start_exchange
+    from machina.core.harness_communications import (
+        async_finish_exchange,
+        async_start_exchange,
+    )
 
     exchange = await async_start_exchange(
         method="interop.run",

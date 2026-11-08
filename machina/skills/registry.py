@@ -933,7 +933,7 @@ class SkillRegistry(SkillSource):
         temp_file = self._telemetry_file.with_name(f"{self._telemetry_file.name}.{os.getpid()}.tmp")
         try:
             temp_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
-            with open(temp_file, "rb") as handle:
+            with open(temp_file, "rb+") as handle:
                 os.fsync(handle.fileno())
             os.replace(temp_file, self._telemetry_file)
         except OSError:
