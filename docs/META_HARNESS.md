@@ -80,8 +80,18 @@ score = 0.38 * vector + 0.22 * keyword + 0.18 * class + 0.14 * family + 0.08 * c
 ```
 
 The route stays internal unless an installed, run-capable external harness
-clears the threshold and is separated from the next candidate. Candidate order
-is stable: score first, then harness name.
+clears the threshold. A close race is only a reason to stay internal when the
+top candidate has no task-class or task-family support; two coding harnesses
+tying on a coding task is still a valid external route, and the alternate is
+surfaced in the hint. Candidate order is stable: score first, then harness
+name.
+
+The shared intent classifier is deliberately conservative about short
+imperatives and follow-ons. The router adds a bounded cue layer for cases like
+"add pagination to the endpoint", "update the API docs", and "summarize this
+error message". Cues fill only missing descriptor facts; conversational turns
+are never changed, and an informational turn with no real code action stays
+internal.
 
 If the prompt contains separable intents (`;`, `then`, `and then`, `and also`,
 newlines), up to four clauses are routed independently. The result keeps the
@@ -154,6 +164,63 @@ UI.
 6. Add a route inspector to `/harnesses` or the desktop command palette using
    `meta.route` and `meta.harnesses`.
 
+## Harness picker performance and feedback
+
+`interop.list` no longer waits for CLI version, MCP-list, and process probes.
+It returns a spawn-free snapshot from PATH, the interop state file, and known
+config files, then starts one background live detection. On the observed
+Windows host the first picker response was ~40-60 ms instead of ~8900 ms; the
+full probe cache was available a few seconds later. A complete detection is
+also cached for five minutes, so repeated opens are effectively instantaneous.
+
+The response carries three optional fields:
+
+| Field | Meaning |
+| --- | --- |
+| `cached` | The user is seeing the spawn-free snapshot while live probes refresh |
+| `checkedAt` | ISO timestamp of the last complete detection, if one exists |
+| `refreshing` | A background detection is currently in flight |
+
+`/interop status` uses the same fast path. `/interop refresh` is the explicit
+full live check; on this host it took ~3 s because the Hermes CLI itself takes
+seconds to answer, even with the three probes parallelized. `/harnesses` shows
+a delayed progress notice only when the RPC is slow, and labels a cached
+snapshot so the UI never claims stale data is live. Delegated runs show a
+"Consulting <harness>" tool card with a "waiting for external harness" status.
+
+Background and execution logs are structured audit events, not prompt text:
+
+- `meta_harness_route`: external route class, primary, confidence, step count
+- `interop_list` / `interop_status`: elapsed ms, cached/refreshing, platform count
+- `interop_run` / `harness_delegate`: platform, routed flag, exit code, elapsed ms
+
+## Route benchmark
+
+`tools/bench_meta_harness.py` runs 44 hand-labeled prompts (33 external,
+11 internal) with all harnesses treated as installed, so the result measures
+the classifier rather than machine-specific CLI detection:
+
+```text
+prompts: 44
+correct: 44
+accuracy: 1.0
+provider calls: 0
+provider tokens: 0
+cold: ~7 ms
+p50: ~0.4 ms
+p95: ~0.8 ms
+mean top vector: 0.13
+mean top keyword: 0.85
+```
+
+The suite includes coding, research, documentation, review, conversational,
+informational, single-intent, and multi-intent prompts. It is a regression set,
+not a statistical sample; future weight changes must keep it green. The vector
+component is a supporting signal; lexical, class, and family facts carry most
+of the confidence. The local matcher never calls an LLM or a provider, so
+routing cost is zero tokens and scales with prompt length rather than harness
+count.
+
 ## Current limits
 
 - Only OpenCode, Codex, and Hermes have run adapters today.
@@ -166,10 +233,13 @@ UI.
 ## Verification
 
 ```sh
-pytest tests/test_meta_harness.py -q
+pytest tests/test_meta_harness.py tests/test_interop_fast.py -q
+python tools/bench_meta_harness.py
 ruff check machina/core/meta_harness.py machina/tools/meta_harness.py
 ```
 
-The tests cover coding, research, multi-intent, no-harness, conversational,
-determinism, registry availability, explicit and routed execution, and the
-approval effect declaration.
+The tests cover coding, research, documentation, informational abstention,
+multi-intent, no-harness, conversational, determinism, registry availability,
+explicit and routed execution, and the approval effect declaration. The
+interop-fast tests cover the spawn-free snapshot, background refresh metadata,
+and parallel probe timing.

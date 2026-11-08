@@ -16,6 +16,7 @@ import type {
 	HarnessRunResult,
 	InteropActionResult,
 } from "../protocol.ts";
+import { withDelayedNotice } from "./progress.ts";
 import { confirm, type Command, type FeatureHost } from "./types.ts";
 
 /** Positive finite run-deadline seconds, or undefined when not reported (H22). */
@@ -66,7 +67,11 @@ async function registerHarness(host: FeatureHost, row: HarnessRow): Promise<void
 		`Register Machina's MCP server with ${row.label}? ` +
 		`This writes ${row.label} config outside this repository.`;
 	if (!(await confirm(host, question, "Register"))) return;
-	const result = await host.request<InteropActionResult>("interop.enable", { platform: row.key });
+	const result = await withDelayedNotice(
+		host,
+		`Registering Machina with ${row.label}...`,
+		() => host.request<InteropActionResult>("interop.enable", { platform: row.key }),
+	);
 	printResult(host, result);
 }
 
@@ -75,7 +80,11 @@ async function unregisterHarness(host: FeatureHost, row: HarnessRow): Promise<vo
 		`Remove Machina's MCP server registration from ${row.label}? ` +
 		`This edits ${row.label} config outside this repository.`;
 	if (!(await confirm(host, question, "Remove"))) return;
-	const result = await host.request<InteropActionResult>("interop.disable", { platform: row.key });
+	const result = await withDelayedNotice(
+		host,
+		`Updating ${row.label} registration...`,
+		() => host.request<InteropActionResult>("interop.disable", { platform: row.key }),
+	);
 	printResult(host, result);
 }
 
@@ -134,13 +143,18 @@ async function runTask(
 		`Run this prompt inside ${row.label}? It executes in the external harness ` +
 		"with host access (files, network, tools).";
 	if (!(await confirm(host, warning, "Run task"))) return;
-	const result = await host.request<HarnessRunResult>("interop.run", {
-		platform: row.key,
-		prompt,
-		// The gateway applies exactly this deadline; app.ts sizes the client
-		// clock past it so a late-but-successful run is never discarded (H22).
-		timeout: runTimeoutSeconds,
-	});
+	const result = await withDelayedNotice(
+		host,
+		`Consulting ${row.label}. Waiting for its bounded run to finish...`,
+		() =>
+			host.request<HarnessRunResult>("interop.run", {
+				platform: row.key,
+				prompt,
+				// The gateway applies exactly this deadline; app.ts sizes the client
+				// clock past it so a late-but-successful run is never discarded (H22).
+				timeout: runTimeoutSeconds,
+			}),
+	);
 	renderRun(host, row, result);
 }
 
@@ -184,8 +198,25 @@ async function actOnHarness(
 	}
 }
 
+function printCachedState(host: FeatureHost, body: HarnessListResult): void {
+	if (!body.cached) return;
+	const checked = body.checkedAt ? ` Last complete check: ${body.checkedAt}.` : "";
+	host.print(
+		`Showing cached harness state; live details are refreshing in the background.${checked} ` +
+			"Run /interop status for a full live check.",
+		"plain",
+	);
+}
+
+async function listHarnesses(host: FeatureHost): Promise<HarnessListResult> {
+	return withDelayedNotice(host, "Checking local harnesses...", () =>
+		host.request<HarnessListResult>("interop.list"),
+	);
+}
+
 async function openMenu(host: FeatureHost): Promise<void> {
-	const body = await host.request<HarnessListResult>("interop.list");
+	const body = await listHarnesses(host);
+	printCachedState(host, body);
 	const rows = body.harnesses ?? [];
 	if (!rows.length) {
 		host.print("No external harnesses reported.", "warning");
@@ -214,7 +245,8 @@ export const harnessesCommand: Command = {
 			await openMenu(host);
 			return;
 		}
-		const body = await host.request<HarnessListResult>("interop.list");
+		const body = await listHarnesses(host);
+		printCachedState(host, body);
 		const row = (body.harnesses ?? []).find((entry) => entry.key === key);
 		if (!row) throw new Error(`Unknown harness "${key}". Run /harnesses to list them.`);
 		await actOnHarness(host, row, body.stateFile, runDeadlineSeconds(body));

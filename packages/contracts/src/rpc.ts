@@ -534,6 +534,12 @@ export interface InteropPlatformRow {
 
 export interface InteropStatusResult {
  platforms: InteropPlatformRow[];
+ /** True when this is the spawn-free snapshot while live probes refresh. */
+ cached?: boolean;
+ /** ISO timestamp of the last complete live detection, when one exists. */
+ checkedAt?: string | null;
+ /** True when a background live detection is in flight. */
+ refreshing?: boolean;
 }
 
 /** Full machina.interop.ActionResult passthrough from interop.enable/disable. */
@@ -572,6 +578,12 @@ export interface HarnessListResult {
  stateFile: string | null;
  /** Default interop.run deadline in seconds; the UI passes it back as `timeout`. */
  runTimeoutSeconds: number;
+ /** True when this is the spawn-free snapshot while live probes refresh. */
+ cached?: boolean;
+ /** ISO timestamp of the last complete live detection, when one exists. */
+ checkedAt?: string | null;
+ /** True when a background live detection is in flight. */
+ refreshing?: boolean;
 }
 
 /** Bounded, redacted outcome of interop.run. */

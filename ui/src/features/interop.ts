@@ -9,10 +9,12 @@
 import { table } from "../format.ts";
 import type { InteropActionResult, InteropPlatformRow, InteropStatusResult } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
+import { withDelayedNotice } from "./progress.ts";
 import { confirm, type Command, type FeatureHost } from "./types.ts";
 
 const SUBCOMMANDS: Array<[string, string]> = [
-	["status", "Show detected harnesses and registration state"],
+	["status", "Show cached harness state and start a background refresh"],
+	["refresh", "Run a full live check of versions and registrations"],
 	["enable", "Register Machina: enable <platform> [--scope global|project] [--dry-run]"],
 	["disable", "Remove the registration: disable <platform>"],
 ];
@@ -134,7 +136,24 @@ export const interopCommand: Command = {
 		switch (sub) {
 			case "":
 			case "status": {
-				const body = await host.request<InteropStatusResult>("interop.status");
+				const body = await withDelayedNotice(
+					host,
+					"Checking harness state...",
+					() => host.request<InteropStatusResult>("interop.status"),
+				);
+				const preface = body.cached
+					? "Showing cached harness state; live details are refreshing in the background. " +
+						"Run /interop refresh for a full live check."
+					: "";
+				host.print([preface, renderStatus(body)].filter(Boolean).join("\n"), "plain");
+				return;
+			}
+			case "refresh": {
+				const body = await withDelayedNotice(
+					host,
+					"Checking harness versions and registrations live. This can take a few seconds...",
+					() => host.request<InteropStatusResult>("interop.status", { refresh: true }),
+				);
 				host.print(renderStatus(body), "plain");
 				return;
 			}
@@ -145,11 +164,18 @@ export const interopCommand: Command = {
 					? `Preview the ${label} registration command? Nothing is written.`
 					: `Register Machina's MCP server with ${label}? This writes ${label} config outside this repository (scope: ${scope ?? "project"}).`;
 				if (!(await confirm(host, question, dryRun ? "Preview" : "Register"))) return;
-				const result = await host.request<InteropActionResult>("interop.enable", {
-					platform,
-					...(scope ? { scope } : {}),
-					dry_run: dryRun,
-				});
+				const result = await withDelayedNotice(
+					host,
+					dryRun
+						? `Previewing the ${label} registration command...`
+						: `Registering Machina with ${label}...`,
+					() =>
+						host.request<InteropActionResult>("interop.enable", {
+							platform,
+							...(scope ? { scope } : {}),
+							dry_run: dryRun,
+						}),
+				);
 				printResult(host, result);
 				return;
 			}
@@ -159,12 +185,18 @@ export const interopCommand: Command = {
 				const label = PLATFORM_LABELS[platform.toLowerCase()] ?? platform;
 				const question = `Remove Machina's MCP server registration from ${label}? This edits ${label} config outside this repository.`;
 				if (!(await confirm(host, question, "Remove"))) return;
-				const result = await host.request<InteropActionResult>("interop.disable", { platform });
+				const result = await withDelayedNotice(
+					host,
+					`Updating ${label} registration...`,
+					() => host.request<InteropActionResult>("interop.disable", { platform }),
+				);
 				printResult(host, result);
 				return;
 			}
 			default:
-				throw new Error(`Unknown /interop option "${sub}". Try: status, enable, disable.`);
+				throw new Error(
+					`Unknown /interop option "${sub}". Try: status, refresh, enable, disable.`,
+				);
 		}
 	},
 };

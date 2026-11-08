@@ -25,7 +25,7 @@ from typing import Any
 
 from machina import interop
 from machina.core.intent import TASK_CLASSES
-from machina.core.task_descriptor import TaskDescriptor, build_task_descriptor
+from machina.core.task_descriptor import TASK_FAMILIES, TaskDescriptor, build_task_descriptor
 
 __all__ = [
     "HarnessCard",
@@ -96,6 +96,111 @@ _STOPWORDS = frozenset(
         "your",
     }
 )
+
+
+# Bounded local cue sets for the cases where the shared intent classifier is
+# deliberately conservative (an ambiguous imperative or a short follow-on).
+# They fill only missing descriptor facts; they never override conversational
+# turns, and they never select a harness by themselves.
+_REVIEW_ACTIONS = frozenset(
+    {"audit", "checkout", "critique", "penetration", "review"}
+)
+_DOCUMENTATION_CUES = frozenset(
+    {
+        "changelog",
+        "docs",
+        "documentation",
+        "draft",
+        "guide",
+        "manual",
+        "notes",
+        "readme",
+        "release",
+        "summary",
+        "summarize",
+        "writeup",
+    }
+)
+_DOCUMENTATION_ANCHORS = frozenset(
+    {"changelog", "docs", "documentation", "guide", "manual", "readme", "writeup"}
+)
+_RESEARCH_ANCHORS = frozenset(
+    {
+        "benchmark",
+        "benchmarking",
+        "compare",
+        "comparison",
+        "embedding",
+        "embeddings",
+        "investigate",
+        "literature",
+        "paper",
+        "papers",
+        "pubmed",
+        "research",
+        "source",
+        "sources",
+        "survey",
+    }
+)
+_CODING_ACTIONS = frozenset(
+    {
+        "benchmark",
+        "build",
+        "compile",
+        "debug",
+        "fix",
+        "implement",
+        "lint",
+        "migrate",
+        "migration",
+        "optimize",
+        "patch",
+        "profile",
+        "refactor",
+        "repair",
+        "test",
+        "tests",
+        "testing",
+    }
+)
+_CODING_NOUNS = frozenset(
+    {
+        "api",
+        "backend",
+        "cache",
+        "cli",
+        "component",
+        "database",
+        "endpoint",
+        "estimator",
+        "flag",
+        "frontend",
+        "function",
+        "handler",
+        "middleware",
+        "pagination",
+        "pytest",
+        "query",
+        "react",
+        "repo",
+        "schema",
+        "shell",
+        "spawn",
+        "sql",
+        "timeout",
+        "token",
+        "typescript",
+        "javascript",
+        "python",
+        "rust",
+        "ui",
+        "accessibility",
+        "performance",
+        "latency",
+    }
+)
+_CODE_CONTEXT = _CODING_ACTIONS | _CODING_NOUNS
 
 
 @dataclass(frozen=True)
@@ -367,7 +472,12 @@ _BASE_EXTERNAL_CARDS: tuple[HarnessCard, ...] = (
             "refactor",
             "fix",
             "bug",
+            "debug",
+            "error",
+            "stack",
+            "trace",
             "test",
+            "pytest",
             "repo",
             "file",
             "typescript",
@@ -379,6 +489,27 @@ _BASE_EXTERNAL_CARDS: tuple[HarnessCard, ...] = (
             "ui",
             "terminal",
             "multi-file",
+            "shell",
+            "spawn",
+            "timeout",
+            "windows",
+            "process",
+            "performance",
+            "latency",
+            "optimize",
+            "profile",
+            "benchmark",
+            "migration",
+            "sql",
+            "endpoint",
+            "pagination",
+            "handler",
+            "schema",
+            "middleware",
+            "cli",
+            "flag",
+            "cache",
+            "query",
         ),
         installed=False,
         run_supported=True,
@@ -413,17 +544,44 @@ _BASE_EXTERNAL_CARDS: tuple[HarnessCard, ...] = (
             "code",
             "refactor",
             "test",
+            "pytest",
             "review",
             "audit",
             "bug",
             "fix",
+            "debug",
+            "error",
+            "stack",
+            "trace",
             "security",
+            "vulnerability",
             "ci",
             "build",
             "typescript",
             "rust",
             "python",
             "long-running",
+            "shell",
+            "spawn",
+            "timeout",
+            "windows",
+            "process",
+            "performance",
+            "latency",
+            "optimize",
+            "profile",
+            "benchmark",
+            "migration",
+            "sql",
+            "endpoint",
+            "pagination",
+            "handler",
+            "schema",
+            "middleware",
+            "cli",
+            "flag",
+            "cache",
+            "query",
         ),
         installed=False,
         run_supported=True,
@@ -451,15 +609,33 @@ _BASE_EXTERNAL_CARDS: tuple[HarnessCard, ...] = (
             "research",
             "investigate",
             "compare",
+            "comparison",
             "summarize",
+            "summary",
             "sources",
+            "source",
             "web",
             "documentation",
-            "write",
+            "docs",
+            "readme",
+            "changelog",
+            "release",
+            "notes",
+            "draft",
+            "guide",
+            "writeup",
+            "latest",
+            "embedding",
+            "embeddings",
+            "models",
+            "benchmark",
             "plan",
             "architecture",
             "explain",
             "literature",
+            "paper",
+            "papers",
+            "survey",
         ),
         installed=False,
         run_supported=True,
@@ -668,6 +844,107 @@ def _complexity_label(prompt: str, descriptor: TaskDescriptor) -> str:
         return "subagents" if len(prompt) > 800 or len(descriptor.task_families) > 2 else "single"
 
 
+def _merge_families(existing: Sequence[str], added: Sequence[str]) -> tuple[str, ...]:
+    combined = set(existing) | set(added)
+    return tuple(family for family in TASK_FAMILIES if family in combined)
+
+
+def _merge_capabilities(
+    existing: Sequence[str], added: Sequence[str]
+) -> tuple[str, ...]:
+    merged = list(existing)
+    for capability in added:
+        if capability not in merged:
+            merged.append(capability)
+    return tuple(merged)
+
+
+def _infer_routing_descriptor(prompt: str, descriptor: TaskDescriptor) -> TaskDescriptor:
+    """Fill descriptor gaps from bounded routing cues.
+
+    The shared intent classifier is intentionally conservative about short
+    imperatives ("optimize the token estimator") and follow-ons ("update the
+    docs"). The meta router needs enough family/class signal to compare
+    harnesses, so it adds only the missing family/class/capability facts here.
+    Conversational turns are never changed, and explicit caller task classes
+    bypass this function.
+    """
+    if descriptor.task_class == "conversational":
+        return descriptor
+    tokens = set(_tokens(prompt))
+    review_action = bool(tokens & _REVIEW_ACTIONS)
+    research = bool(tokens & _RESEARCH_ANCHORS)
+    documentation = bool(tokens & _DOCUMENTATION_ANCHORS) or len(
+        tokens & _DOCUMENTATION_CUES
+    ) >= 2
+    # A documentation request can name API endpoints, React, or a schema and
+    # still be a writing task; only an actual coding verb makes the code
+    # harness the better first route. Research anchors win even with a verb
+    # ("research how to implement ...") because the requested output is still
+    # synthesis, not an edit.
+    strong_code = bool(tokens & _CODING_ACTIONS)
+    coding_signals = len(tokens & _CODE_CONTEXT)
+
+    if review_action:
+        return replace(
+            descriptor,
+            task_class="review-readonly",
+            task_families=_merge_families(descriptor.task_families, ("coding", "review")),
+            requested_capabilities=_merge_capabilities(
+                descriptor.requested_capabilities, ("review",)
+            ),
+        )
+
+    research_explicit = bool(tokens & {"investigate", "literature", "pubmed", "research"})
+    if research_explicit or (research and not strong_code) or (
+        documentation and not strong_code
+    ):
+        capabilities: list[str] = []
+        if research:
+            capabilities.append("research")
+        if documentation:
+            capabilities.append("documentation")
+        return replace(
+            descriptor,
+            task_class="explain",
+            task_families=("research",),
+            requested_capabilities=_merge_capabilities(
+                descriptor.requested_capabilities, capabilities
+            ),
+        )
+
+    # "Summarize this error message" or "What is the capital of France?" is an
+    # explanation request, not an imperative to hand to a coding harness. Keep
+    # the descriptor informational unless a real code action/noun is present;
+    # generic error/stack words alone are not enough.
+    informational = bool(tokens & {"describe", "explain", "summarize", "summary", "what", "why"})
+    if (
+        informational
+        and not tokens & _CODING_ACTIONS
+        and not tokens & (_CODE_CONTEXT - {"error", "stack", "trace"})
+    ):
+        return replace(descriptor, task_class="explain", task_families=())
+
+    if coding_signals >= 2 or any(token in _CODING_ACTIONS for token in tokens):
+        task_class = (
+            "debug"
+            if tokens
+            & {"bug", "debug", "error", "pytest", "shell", "spawn", "stack", "timeout", "trace"}
+            else "implement"
+        )
+        capabilities = ["testing"] if tokens & {"pytest", "test", "testing", "tests"} else []
+        return replace(
+            descriptor,
+            task_class=task_class,
+            task_families=_merge_families(descriptor.task_families, ("coding",)),
+            requested_capabilities=_merge_capabilities(
+                descriptor.requested_capabilities, capabilities
+            ),
+        )
+
+    return descriptor
+
+
 def _descriptor(
     prompt: str,
     *,
@@ -682,9 +959,25 @@ def _descriptor(
         recent=recent,
         goal=goal,
     )
-    if task_class in TASK_CLASSES and descriptor.task_class != task_class:
-        descriptor = replace(descriptor, task_class=task_class)
-    return descriptor
+    if task_class in TASK_CLASSES:
+        if descriptor.task_class != task_class:
+            descriptor = replace(descriptor, task_class=task_class)
+        return descriptor
+    return _infer_routing_descriptor(prompt, descriptor)
+
+
+def _candidate_supported(
+    candidate: RouteCandidate,
+    descriptor: TaskDescriptor,
+    cards: Sequence[HarnessCard],
+) -> bool:
+    """Whether a harness card shares the descriptor's task class or family."""
+    card = next((entry for entry in cards if entry.name == candidate.name), None)
+    if card is None:
+        return False
+    return bool(set(descriptor.task_families) & set(card.task_families)) or (
+        descriptor.task_class in card.task_classes
+    )
 
 
 def _route_one(
@@ -719,9 +1012,15 @@ def _route_one(
     top = available[0]
     second_score = available[1].score if len(available) > 1 else 0.0
     margin = top.score - second_score
-    if top.score < _MIN_EXTERNAL_SCORE or (
-        top.score < 0.55 and margin < _MIN_EXTERNAL_MARGIN
-    ):
+    # A close race is only a reason to stay local when neither candidate has
+    # class/family support. Two coding harnesses tying on a coding task is
+    # still a valid external route; the alternate is surfaced in the hint.
+    close_without_support = (
+        top.score < 0.55
+        and margin < _MIN_EXTERNAL_MARGIN
+        and not _candidate_supported(top, descriptor, external)
+    )
+    if top.score < _MIN_EXTERNAL_SCORE or close_without_support:
         return (
             "machina",
             "internal",
@@ -745,7 +1044,10 @@ def _split_intents(prompt: str) -> tuple[str, ...]:
         return (prompt.strip(),)
     merged: list[str] = []
     for part in parts:
-        if merged and len(_tokens(part)) < 3:
+        # A one-token fragment ("then test") is a continuation; two content
+        # words ("update the docs") are a real second intent and must stay
+        # separate so its own route can differ.
+        if merged and len(_tokens(part)) < 2:
             merged[-1] = f"{merged[-1]} {part}"
         else:
             merged.append(part)
@@ -853,7 +1155,7 @@ def route_prompt(
             task_state=task_state,
             recent=recent,
             goal=goal,
-            task_class=None if len(_tokens(clause)) > 2 else descriptor.task_class,
+            task_class=None,
         )
         primary, mode, confidence, _reason, candidates = _route_one(
             clause, clause_descriptor, cards

@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -65,11 +66,15 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # State-file locking follows machina/connectors/store.py: an exclusive OS
 # file lock on a sibling ``.lock`` file (POSIX flock; msvcrt on Windows).
@@ -87,7 +92,10 @@ __all__ = [
     "EnableReport",
     "RunResult",
     "UnknownPlatform",
+    "clear_detection_cache",
     "detect",
+    "detect_cached",
+    "detect_parallel",
     "disable",
     "enable",
     "enable_detected",
@@ -811,8 +819,21 @@ def detect_platform(spec: PlatformSpec, state: dict[str, Any] | None = None) -> 
         state = load_state()
     binary = _which(spec)
     installed = binary is not None
-    version = _probe_version(spec, binary) if binary else None
-    probe = _probe_list(spec, binary) if binary else _ListProbe(False, False, "", "not installed")
+    if binary:
+        # The probes are independent bounded children. Running them together
+        # keeps a slow `mcp list` on one platform from serializing behind the
+        # version/running checks (Hermes is the observed worst case).
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            version_future = pool.submit(_probe_version, spec, binary)
+            list_future = pool.submit(_probe_list, spec, binary)
+            running_future = pool.submit(_is_running, spec)
+            version = version_future.result()
+            probe = list_future.result()
+            running = running_future.result()
+    else:
+        version = None
+        probe = _ListProbe(False, False, "", "not installed")
+        running = False
     file_scopes = _file_scopes(spec)
     registered = probe.found or bool(file_scopes)
     notes: list[str] = []
@@ -834,7 +855,7 @@ def detect_platform(spec: PlatformSpec, state: dict[str, Any] | None = None) -> 
         installed=installed,
         binary=binary,
         version=version,
-        running=_is_running(spec),
+        running=running,
         registered=registered,
         registered_detail=probe.detail,
         scopes=file_scopes,
@@ -852,7 +873,167 @@ def detect(platforms: list[str] | tuple[str, ...] | None = None) -> dict[str, De
     for key in keys:
         spec = resolve_platform(key)
         results[spec.key] = detect_platform(spec, state)
+    _remember_detection(results)
     return results
+
+
+def detect_parallel(
+    platforms: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, DetectResult]:
+    """Live detection with one worker per platform.
+
+    The probes themselves are still bounded child processes; this only stops
+    one platform's CLI from delaying every other platform's answer. Results
+    use the same ``DetectResult`` shape as :func:`detect`.
+    """
+    keys = list(platforms) if platforms else list(PLATFORMS)
+    state = load_state()
+    results: dict[str, DetectResult] = {}
+    if not keys:
+        return results
+    with ThreadPoolExecutor(max_workers=min(3, len(keys))) as pool:
+        futures = {
+            key: pool.submit(detect_platform, resolve_platform(key), state) for key in keys
+        }
+        for key, future in futures.items():
+            results[resolve_platform(key).key] = future.result()
+    _remember_detection(results)
+    return results
+
+
+_DETECT_CACHE_LOCK = threading.Lock()
+_DETECT_CACHE: tuple[float, str, dict[str, DetectResult]] | None = None
+_DETECT_THREAD: threading.Thread | None = None
+
+
+def _remember_detection(results: dict[str, DetectResult]) -> None:
+    """Remember the last complete live detection for the fast snapshot."""
+    global _DETECT_CACHE
+    if not results:
+        return
+    checked_at = datetime.now(UTC).isoformat(timespec="seconds")
+    with _DETECT_CACHE_LOCK:
+        _DETECT_CACHE = (time.monotonic(), checked_at, dict(results))
+
+
+def clear_detection_cache() -> None:
+    """Drop the last complete detection (tests and explicit refreshes)."""
+    global _DETECT_CACHE
+    with _DETECT_CACHE_LOCK:
+        _DETECT_CACHE = None
+
+
+def _fast_detection() -> dict[str, DetectResult]:
+    """Spawn-free snapshot: PATH + state + config files, plus cached probes.
+
+    Version and running state are reused only from a prior complete detection.
+    Registration is authoritative enough for the picker: a platform config
+    entry or Machina's verified persisted state both count. If neither has
+    ever answered, version stays ``None`` and the UI simply says installed.
+    """
+    state = load_state()
+    with _DETECT_CACHE_LOCK:
+        cached = dict(_DETECT_CACHE[2]) if _DETECT_CACHE is not None else {}
+    results: dict[str, DetectResult] = {}
+    for key, spec in PLATFORMS.items():
+        binary = _which(spec)
+        installed = binary is not None
+        entry = state.get(key)
+        entry = entry if isinstance(entry, dict) else {}
+        verify = entry.get("verify")
+        verify = verify if isinstance(verify, dict) else {}
+        enabled = bool(entry.get("enabled")) if "enabled" in entry else None
+        state_scope = str(entry.get("scope")) if entry.get("scope") else None
+        file_scopes = _file_scopes(spec)
+        registered = bool(file_scopes) or (enabled is True and bool(verify.get("ok")))
+        prior = cached.get(key)
+        version = prior.version if prior is not None else entry.get("version")
+        running = bool(prior.running) if prior is not None else False
+        notes: list[str] = []
+        if not installed:
+            notes.append(f"not installed ({spec.binaries[0]} not on PATH)")
+        if file_scopes and not (enabled is True and bool(verify.get("ok"))):
+            notes.append(f"config entry in {', '.join(file_scopes)} scope")
+        if prior is None and installed:
+            notes.append("version will refresh in the background")
+        results[key] = DetectResult(
+            platform=key,
+            label=spec.label,
+            installed=installed,
+            binary=binary,
+            version=version,
+            running=running,
+            registered=registered,
+            registered_detail=(
+                f"config entry in {', '.join(file_scopes)} scope"
+                if file_scopes
+                else "state verified"
+                if registered
+                else "not registered"
+            ),
+            scopes=file_scopes,
+            enabled=enabled,
+            state_scope=state_scope,
+            notes=notes,
+        )
+    return results
+
+
+def _start_detection_refresh() -> bool:
+    """Start one background live detection; return whether a new one started."""
+    global _DETECT_THREAD
+    with _DETECT_CACHE_LOCK:
+        if _DETECT_THREAD is not None and _DETECT_THREAD.is_alive():
+            return False
+        thread = threading.Thread(
+            target=_background_detection,
+            name="machina-interop-refresh",
+            daemon=True,
+        )
+        _DETECT_THREAD = thread
+        thread.start()
+        return True
+
+
+def _background_detection() -> None:
+    started = time.perf_counter()
+    try:
+        results = detect_parallel()
+        logger.debug(
+            "interop background detection complete platforms=%s elapsed_ms=%.1f",
+            len(results),
+            (time.perf_counter() - started) * 1000.0,
+        )
+    except Exception as error:
+        logger.warning("interop background detection failed: %s", error)
+
+
+def detect_cached(
+    *,
+    max_age_seconds: float = 300.0,
+    refresh: bool = True,
+) -> tuple[dict[str, DetectResult], dict[str, Any]]:
+    """Return a fast harness snapshot, optionally refreshing probes in the background.
+
+    ``cached`` in the metadata means the caller is seeing the spawn-free
+    snapshot because no complete detection is fresh enough. The background
+    thread updates the cache for the next call; this call never waits on it.
+    """
+    now = time.monotonic()
+    with _DETECT_CACHE_LOCK:
+        cached = _DETECT_CACHE
+        if cached is not None and now - cached[0] <= max_age_seconds:
+            return dict(cached[2]), {
+                "cached": False,
+                "checked_at": cached[1],
+                "refreshing": bool(_DETECT_THREAD and _DETECT_THREAD.is_alive()),
+            }
+    fast = _fast_detection()
+    started = _start_detection_refresh() if refresh else False
+    with _DETECT_CACHE_LOCK:
+        checked_at = _DETECT_CACHE[1] if _DETECT_CACHE is not None else None
+        refreshing = started or bool(_DETECT_THREAD and _DETECT_THREAD.is_alive())
+    return fast, {"cached": True, "checked_at": checked_at, "refreshing": refreshing}
 
 
 # ---------------------------------------------------------------------------

@@ -143,6 +143,24 @@ test("/interop renders the detection table with notes and hints", async () => {
 	assert.deepEqual(explicit.calls.map((call) => call.method), ["interop.status"]);
 });
 
+test("/interop status labels cached state and offers the live refresh path", async () => {
+	const host = new InteropFakeHost();
+	host.responses["interop.status"] = {
+		...STATUS_PAYLOAD,
+		cached: true,
+		checkedAt: "2026-11-08T06:50:17+00:00",
+		refreshing: true,
+	};
+	await run("/interop status", host);
+	assert.match(host.last().text, /cached harness state/);
+	assert.match(host.last().text, /\/interop refresh/);
+
+	const refresh = new InteropFakeHost();
+	refresh.responses["interop.status"] = STATUS_PAYLOAD;
+	await run("/interop refresh", refresh);
+	assert.deepEqual(refresh.calls, [{ method: "interop.status", params: { refresh: true } }]);
+});
+
 test("/interop enable confirms before writing and cancel sends no RPC", async () => {
 	const host = new InteropFakeHost();
 	host.picks.push("no");
@@ -253,7 +271,7 @@ test("/interop completions cover subcommands, platforms, flags and scopes", asyn
 	const { interopCommand } = await import("../src/features/interop.ts");
 	const completions = interopCommand.getArgumentCompletions!;
 	const values = async (prefix: string) => (await completions(prefix))?.map((item) => item.value) ?? null;
-	assert.deepEqual(await values(""), ["status", "enable", "disable"]);
+	assert.deepEqual(await values(""), ["status", "refresh", "enable", "disable"]);
 	assert.deepEqual(await values("en"), ["enable"]);
 	assert.deepEqual(await values("enable "), ["opencode", "codex", "hermes"]);
 	assert.deepEqual(await values("enable co"), ["codex"]);

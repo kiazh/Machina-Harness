@@ -26,19 +26,23 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+import time
 from contextvars import ContextVar
 from dataclasses import asdict
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from machina.core.provider import audit_log
 from machina.gateway.errors import INVALID_PARAMS, RpcError
 from machina.gateway.features._common import _bool, _int, _str, _uuid
 from machina.interop import (
     DetectResult,
     PlatformSpec,
     UnknownPlatform,
-    detect,
+    detect_cached,
+    detect_parallel,
     disable,
     enable,
     resolve_platform,
@@ -200,9 +204,39 @@ def _row(result: DetectResult) -> dict[str, Any]:
 
 
 async def interop_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
-    """Read-only detection of every supported harness (threaded; bounded)."""
-    results = await asyncio.to_thread(detect)
-    return {"platforms": [_row(result) for result in results.values()]}
+    """Harness state: fast cached snapshot unless ``refresh`` is explicitly true.
+
+    The live probe path is parallel and bounded, but a cold Hermes CLI probe
+    can still take seconds. The default returns the spawn-free snapshot and
+    refreshes the live cache in the background; ``refresh=true`` is the
+    explicit full live check.
+    """
+    started = time.perf_counter()
+    refresh = _bool(params, "refresh")
+    if refresh:
+        results = await asyncio.to_thread(detect_parallel)
+        meta = {
+            "cached": False,
+            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "refreshing": False,
+        }
+    else:
+        results, meta = await asyncio.to_thread(lambda: detect_cached(refresh=True))
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    audit_log(
+        "interop_status",
+        elapsed_ms=round(elapsed_ms, 1),
+        platforms=len(results),
+        refresh=refresh,
+        cached=bool(meta.get("cached")),
+        refreshing=bool(meta.get("refreshing")),
+    )
+    return {
+        "platforms": [_row(result) for result in results.values()],
+        "cached": bool(meta.get("cached")),
+        "checkedAt": meta.get("checked_at"),
+        "refreshing": bool(meta.get("refreshing")),
+    }
 
 
 async def interop_enable(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
@@ -234,7 +268,11 @@ async def interop_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     its client clock with the backend instead of timing out a still-running
     harness (finding H22).
     """
-    results, runs = await asyncio.to_thread(lambda: (detect(), supported_runs()))
+    started = time.perf_counter()
+    detected, runs = await asyncio.to_thread(
+        lambda: (detect_cached(refresh=True), supported_runs())
+    )
+    results, meta = detected
     harnesses = []
     for result in results.values():
         hint = runs.get(result.platform)
@@ -252,10 +290,21 @@ async def interop_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
             }
         )
     state_file = await asyncio.to_thread(state_path)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    audit_log(
+        "interop_list",
+        elapsed_ms=round(elapsed_ms, 1),
+        cached=bool(meta.get("cached")),
+        refreshing=bool(meta.get("refreshing")),
+        platforms=len(harnesses),
+    )
     return {
         "harnesses": harnesses,
         "stateFile": str(state_file) if state_file else None,
         "runTimeoutSeconds": DEFAULT_RUN_TIMEOUT_SECONDS,
+        "cached": bool(meta.get("cached")),
+        "checkedAt": meta.get("checked_at"),
+        "refreshing": bool(meta.get("refreshing")),
     }
 
 
@@ -326,6 +375,7 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _run_harness(platform: str, prompt: str, options: dict[str, Any]) -> dict[str, Any]:
+    started = time.perf_counter()
     cancellation = _operation_cancel.get()
     if cancellation is None:
         result = await asyncio.to_thread(run_task, platform, prompt, **options)
@@ -349,7 +399,7 @@ async def _run_harness(platform: str, prompt: str, options: dict[str, Any]) -> d
         if interrupted:
             raise asyncio.CancelledError
     unsupported = getattr(result, "unsupported_reason", None)
-    return {
+    payload = {
         "ok": bool(getattr(result, "ok", False)),
         "exitCode": _exit_code(getattr(result, "exit_code", None)),
         "command": _redact(_command_text(getattr(result, "command", None))),
@@ -357,6 +407,15 @@ async def _run_harness(platform: str, prompt: str, options: dict[str, Any]) -> d
         "stderr": _bounded(_redact(getattr(result, "stderr", "") or ""), MAX_RUN_STDERR_CHARS),
         "unsupportedReason": str(unsupported) if unsupported else None,
     }
+    audit_log(
+        "interop_run",
+        platform=platform,
+        ok=payload["ok"],
+        exit_code=payload["exitCode"],
+        unsupported=bool(unsupported),
+        elapsed_ms=round((time.perf_counter() - started) * 1000.0, 1),
+    )
+    return payload
 
 
 async def interop_communications(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:

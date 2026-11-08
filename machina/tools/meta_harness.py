@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from machina import interop
 from machina.core.exceptions import ToolError
 from machina.core.meta_harness import route_prompt
+from machina.core.provider import audit_log
 from machina.tools.base import registry
 from machina.workspace.service import active_workspace_service
 
@@ -105,12 +107,23 @@ async def harness_delegate(
     service = active_workspace_service()
     identity = service.identity if service is not None else None
     cwd = Path(identity.resolved_root) if identity is not None else None
+    started = time.perf_counter()
     result = await asyncio.to_thread(
         interop.run_task,
         requested,
         run_text,
         timeout=float(seconds),
         cwd=cwd,
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    audit_log(
+        "harness_delegate",
+        platform=requested,
+        routed=routed,
+        ok=bool(result.ok),
+        exit_code=result.exit_code,
+        elapsed_ms=round(elapsed_ms, 1),
+        timeout_s=seconds,
     )
     payload = {
         "platform": result.platform,

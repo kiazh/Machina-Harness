@@ -22,6 +22,25 @@ export type ToolOutcome =
 	| "outcome_unknown"
 	| "historical";
 
+const HARNESS_LABELS: Record<string, string> = {
+	opencode: "OpenCode",
+	codex: "Codex",
+	hermes: "Hermes",
+};
+
+/** Human label for tools whose wire name is not a useful status line. */
+function toolLabel(name: string, args: Record<string, unknown>): string {
+	if (name === "harness_delegate") {
+		const platform = typeof args.platform === "string" ? args.platform : "";
+		return `Consulting ${HARNESS_LABELS[platform] ?? (platform || "external harness")}`;
+	}
+	if (name === "delegate") {
+		const agent = typeof args.agent === "string" ? args.agent : "";
+		return agent ? `Delegating to ${agent}` : "Delegating";
+	}
+	return name;
+}
+
 export interface ToolResultView {
 	/** Sanitized, bounded retained content. */
 	text: string;
@@ -57,6 +76,7 @@ function markerFor(outcome: ToolOutcome): string {
 export class ToolTurn implements Component {
 	private readonly name: string;
 	private readonly args: string;
+	private readonly externalHarness: boolean;
 	private readonly activity: ActivitySource;
 	private readonly startedAt: number;
 	private result: ToolResultView = { text: "", backendTruncated: false, locallyTruncated: false };
@@ -65,7 +85,8 @@ export class ToolTurn implements Component {
 	private readonly cached = new Map<number, string[]>();
 
 	constructor(name: string, args: Record<string, unknown>, activity: ActivitySource) {
-		this.name = sanitizeDisplay(name);
+		this.name = sanitizeDisplay(toolLabel(name, args));
+		this.externalHarness = name === "harness_delegate";
 		this.args = sanitizeDisplay(Object.entries(args).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
@@ -109,7 +130,12 @@ export class ToolTurn implements Component {
 		if (this.outcome === "queued") {
 			lines.push(`${indent}${theme.dim("queued")}`);
 		} else if (this.outcome === "running") {
-			lines.push(`${indent}${theme.dim(this.paused ? `${this.paused === "stopping" ? "stopping" : "cleanup pending"}; outcome pending` : "running")}`);
+			const status = this.paused
+				? `${this.paused === "stopping" ? "stopping" : "cleanup pending"}; outcome pending`
+				: this.externalHarness
+					? "waiting for external harness"
+					: "running";
+			lines.push(`${indent}${theme.dim(status)}`);
 		} else if (this.outcome === "awaiting_approval") {
 			lines.push(`${indent}${theme.dim("awaiting approval")}`);
 		} else if (this.outcome === "denied") {

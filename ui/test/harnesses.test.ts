@@ -150,6 +150,33 @@ test("/harnesses opens the picker with a state summary per harness", async () =>
 	assert.match(menu.labels[1]!, /Codex — ✓ installed \(codex-cli 0\.162\.1\) · not registered · runnable/);
 });
 
+test("/harnesses labels the cached fast snapshot and points at the live check", async () => {
+	const host = hostWithRows();
+	host.responses["interop.list"] = {
+		...(host.responses["interop.list"] as Record<string, unknown>),
+		cached: true,
+		checkedAt: "2026-11-08T06:50:17+00:00",
+		refreshing: true,
+	};
+	host.answerQueue.push("codex", "status");
+	await run("/harnesses", host);
+
+	assert.match(host.text(), /cached harness state/);
+	assert.match(host.text(), /\/interop status/);
+});
+
+test("/harnesses makes a genuinely slow listing visible while it waits", async () => {
+	const host = hostWithRows();
+	const body = host.responses["interop.list"];
+	host.responses["interop.list"] = () =>
+		new Promise((resolve) => setTimeout(() => resolve(body), 300));
+	host.answerQueue.push("codex", "status");
+
+	await run("/harnesses", host);
+
+	assert.match(host.text(), /Checking local harnesses\.\.\./);
+});
+
 test("/harnesses Status shows version, registration, scope and the state file", async () => {
 	const host = hostWithRows();
 	host.answerQueue.push("opencode", "status");

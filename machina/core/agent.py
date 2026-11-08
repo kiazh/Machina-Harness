@@ -833,6 +833,15 @@ class BaseReActAgent:
                         task_class=None if triage == "ambiguous" else triage,
                     )
                     self._last_meta_route = meta_route
+                    if meta_route.mode == "external":
+                        audit_log(
+                            "meta_harness_route",
+                            session_id=str(session_id),
+                            task_class=meta_route.task_class,
+                            primary=meta_route.primary,
+                            confidence=round(meta_route.confidence, 3),
+                            steps=len(meta_route.steps),
+                        )
                     can_delegate_harness = (
                         self.allowed_tools is None
                         or "harness_delegate" in self.allowed_tools

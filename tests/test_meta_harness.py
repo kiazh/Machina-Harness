@@ -98,6 +98,46 @@ def test_conversational_prompt_stays_internal(monkeypatch) -> None:
     assert route.prompt_hint() == ""
 
 
+def test_ambiguous_coding_cues_fill_the_descriptor(monkeypatch) -> None:
+    _enable_all(monkeypatch)
+
+    route = route_prompt("Add pagination to the sessions endpoint")
+
+    assert route.mode == "external"
+    assert route.primary in {"opencode", "codex"}
+    assert route.steps[0].family == "coding"
+
+
+def test_documentation_cue_routes_to_hermes_even_with_code_nouns(monkeypatch) -> None:
+    _enable_all(monkeypatch)
+
+    route = route_prompt("Update the API docs for the new endpoint")
+
+    assert route.mode == "external"
+    assert route.primary == "hermes"
+    assert route.steps[0].family == "research"
+
+
+def test_informational_turn_does_not_hand_error_text_to_a_coder(monkeypatch) -> None:
+    _enable_all(monkeypatch)
+
+    route = route_prompt("Summarize this error message: connection refused")
+
+    assert route.mode == "internal"
+    assert route.primary == "machina"
+
+
+def test_short_second_intent_stays_separate(monkeypatch) -> None:
+    _enable_all(monkeypatch)
+
+    route = route_prompt("Review the API and then update the docs")
+
+    assert route.mode == "external"
+    assert len(route.steps) == 2
+    assert route.steps[1].family == "research"
+    assert route.steps[1].primary == "hermes"
+
+
 def test_route_is_deterministic(monkeypatch) -> None:
     _enable_all(monkeypatch)
 
