@@ -6,9 +6,11 @@ import asyncio
 import json
 import time
 
+import httpx
 import pytest
 
 from machina.core.config import DEFAULTS, LEGACY_ENV_VARS, SECRET_KEYS, config
+from machina.core.exceptions import ProviderError
 from machina.core.provider import kiro_proxy
 from machina.core.provider.direct import DirectProvider
 from machina.core.provider.factory import get_provider
@@ -374,3 +376,55 @@ def test_readiness_checks_the_proxy_not_a_kiro_api_key(monkeypatch) -> None:
     up = runtime._detect_providers()
     assert up["chat_provider"] == "ready"
     assert up["chat_provider_reason"] == ""
+
+@pytest.mark.asyncio
+async def test_kiro_402_is_a_typed_usage_limit_error(monkeypatch) -> None:
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            402,
+            json={
+                "error": {
+                    "message": "Monthly request limit exceeded. Account has reached its monthly quota."
+                }
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "machina.core.provider.direct.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    provider = get_provider("kiro", "auto")
+    try:
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(
+                [{"role": "user", "content": "hello"}],
+                max_tokens=8,
+            )
+    finally:
+        await provider.close()
+
+    assert "Kiro usage limit reached" in str(caught.value)
+
+def test_turn_usage_event_carries_kiro_context_fields() -> None:
+    from machina.core.models import StreamEvent
+    from machina.core.turn_engine import TurnEngine
+
+    engine = TurnEngine.__new__(TurnEngine)
+    engine._tokens = 0
+    translated = engine._translate(
+        StreamEvent(
+            type="token_usage",
+            tokens_used=1381,
+            context_tokens=1381,
+            context_usage_percentage=0.6909,
+            credits_used=0.1059,
+        )
+    )
+
+    assert translated is not None
+    assert translated.kind == "usage"
+    assert translated.payload["tokens"] == 1381
+    assert translated.payload["contextTokens"] == 1381
+    assert translated.payload["contextPercent"] == 0.6909
+    assert translated.payload["creditsUsed"] == 0.1059

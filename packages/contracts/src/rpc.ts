@@ -685,6 +685,33 @@ export interface KiroStopResult {
  status: KiroGatewayStatus;
 }
 
+export interface KiroUsage {
+ /** Subscription display name, e.g. "KIRO STUDENT". */
+ subscription: string;
+ /** Subscription type id, e.g. "Q_DEVELOPER_STANDALONE_STUDENT". */
+ plan: string;
+ used: number;
+ limit: number;
+ remaining: number;
+ percentUsed: number;
+ unit: string;
+ nextResetAt: string | null;
+ /** True when the gateway served the last cached value after an upstream error. */
+ stale: boolean;
+}
+
+export interface KiroUsageResult {
+ usage: KiroUsage;
+}
+
+export interface KiroFallback {
+ /** Null when no signed-in/configured fallback is available. */
+ provider: string | null;
+ model: string | null;
+ /** Actionable explanation when provider/model are null. */
+ reason: string | null;
+}
+
 /** A gateway-owned long operation; short status calls keep the transport responsive. */
 export interface OperationApproval {
  requestId:string;sessionId:string;agentId?:string;

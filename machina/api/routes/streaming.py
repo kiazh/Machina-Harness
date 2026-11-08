@@ -345,7 +345,15 @@ async def _stream_session(
                     per_call = cumulative - _usage_emitted
                     _usage_emitted = cumulative
                     yield frame(
-                        _serialize_event(StreamEvent(type="token_usage", tokens_used=per_call))
+                        _serialize_event(
+                            StreamEvent(
+                                type="token_usage",
+                                tokens_used=per_call,
+                                context_tokens=turn_event.payload.get("contextTokens") or 0,
+                                context_usage_percentage=turn_event.payload.get("contextPercent"),
+                                credits_used=turn_event.payload.get("creditsUsed"),
+                            )
+                        )
                     )
                 elif turn_event.kind == "done":
                     if engine.final is None:

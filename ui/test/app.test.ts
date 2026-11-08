@@ -205,6 +205,42 @@ test("start() enables shrink-clearing so closed menus leave no ghost rows", asyn
 	await app.exit();
 });
 
+test("a Kiro quota error switches the current chat to the fallback", async () => {
+	const { app, client } = makeApp({ ...SESSION_A, provider: "kiro", model: "auto" });
+	await app.start();
+	client.responses.set("prompt.submit", { turnId: "t1" });
+	await app.submitTurn("hello");
+	client.responses.set("auth.kiro.fallback", {
+		provider: "chatgpt",
+		model: "gpt-6.1-sol",
+		reason: null,
+	});
+	client.responses.set("session.setModel", {
+		sessionId: SESSION_A.id,
+		model: "gpt-6.1-sol",
+		provider: "chatgpt",
+	});
+
+	client.emit(
+		ev({
+			turnId: "t1",
+			type: "error",
+			message:
+				"agent turn failed: Kiro usage limit reached (HTTP 402): Monthly request limit exceeded.",
+		}),
+	);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assert.ok(
+		client.requests.some((request) => request.method === "auth.kiro.fallback"),
+		"fallback route was requested",
+	);
+	const switched = client.requests.find((request) => request.method === "session.setModel");
+	assert.equal(switched?.params.provider, "chatgpt");
+	assert.equal(switched?.params.model, "gpt-6.1-sol");
+	await app.exit();
+});
+
 test("a blank startup chat is not persisted until the first message", async () => {
 	const { app, client } = makeApp(SESSION_A);
 	await app.start();

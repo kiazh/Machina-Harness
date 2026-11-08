@@ -143,7 +143,17 @@ class DirectProvider(LLMProvider, RateLimitBinding):
 
         start = time.monotonic()
         try:
-            resp = await _post_with_retry(self.client, "/chat/completions", payload)
+            resp = await _post_with_retry(
+                self.client,
+                "/chat/completions",
+                payload,
+                retry_429=self.spec.name != "kiro",
+            )
+            if self.spec.name == "kiro" and resp.status_code in (402, 429):
+                raise ProviderError(
+                    f"Kiro usage limit reached (HTTP {resp.status_code}): "
+                    f"{resp.text[:500] or 'monthly quota exhausted'}"
+                )
             resp.raise_for_status()
             data = resp.json()
         except BaseException as e:
@@ -245,7 +255,18 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         start = time.monotonic()
         state = OpenAIStreamState(resolved_model=model)
         try:
-            async with _stream_with_retry(self.client, "/chat/completions", payload) as resp:
+            async with _stream_with_retry(
+                self.client,
+                "/chat/completions",
+                payload,
+                retry_429=self.spec.name != "kiro",
+            ) as resp:
+                if self.spec.name == "kiro" and resp.status_code in (402, 429):
+                    detail = (await resp.aread()).decode("utf-8", "replace")[:500]
+                    raise ProviderError(
+                        f"Kiro usage limit reached (HTTP {resp.status_code}): "
+                        f"{detail or 'monthly quota exhausted'}"
+                    )
                 resp.raise_for_status()
                 async for event in openai_stream_events(resp, state):
                     yield event

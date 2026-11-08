@@ -183,7 +183,7 @@ def parse_openai_usage(raw: dict[str, Any] | None, *, estimated: bool = False) -
         uncached = prompt
         cache_read = None
     cache_reported = cached is not None or hit is not None or miss is not None
-    return _finalize(
+    result = _finalize(
         uncached,
         cache_read,
         None,
@@ -192,6 +192,14 @@ def parse_openai_usage(raw: dict[str, Any] | None, *, estimated: bool = False) -
         cache_reported=cache_reported,
         estimated=estimated,
     )
+    # Kiro's gateway enriches the final usage frame with native context
+    # accounting. Keep those optional numbers for the UI; they are not part
+    # of the cost ledger's mutually-exclusive token split.
+    for extra in ("credits_used", "context_usage_percentage", "context_tokens"):
+        value = usage_in.get(extra)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            result[extra] = value
+    return result
 
 
 def parse_chatgpt_usage(raw: dict[str, Any] | None) -> dict[str, Any]:

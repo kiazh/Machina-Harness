@@ -22,6 +22,19 @@ async def auth_kiro_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any
     return {"status": await asyncio.to_thread(kiro_gateway.status)}
 
 
+async def auth_kiro_usage(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """Read Kiro credits used/remaining from the local gateway admin endpoint."""
+    try:
+        return {"usage": await asyncio.to_thread(kiro_gateway.usage)}
+    except kiro_gateway.KiroGatewayError as exc:
+        raise RpcError(OPERATION_FAILED, str(exc)) from None
+
+
+async def auth_kiro_fallback(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """Return the configured/ready fallback route (never credentials)."""
+    return await asyncio.to_thread(kiro_gateway.fallback_route)
+
+
 def _wait_seconds(params: dict[str, Any]) -> float:
     raw = params.get("wait")
     if raw is None:

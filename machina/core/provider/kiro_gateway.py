@@ -25,8 +25,10 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from http import client as http_client
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from machina.core.config import config
 from machina.core.provider import kiro_proxy
@@ -35,6 +37,7 @@ __all__ = [
     "KiroGatewayError",
     "autostart_if_ready",
     "detect_launch",
+    "fallback_route",
     "gateway_reachable",
     "login_database_path",
     "login_detected",
@@ -43,6 +46,7 @@ __all__ = [
     "start",
     "status",
     "stop",
+    "usage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -422,6 +426,179 @@ def status() -> dict[str, Any]:
         "launchConfigured": launch is not None,
         "detail": detail,
         "logPath": str(log_path()),
+    }
+
+
+def _default_model(provider: str) -> str:
+    if provider == "chatgpt":
+        from machina.core.provider.chatgpt import ChatGPTProvider
+
+        return ChatGPTProvider.DEFAULT_MODEL
+    if provider == "copilot":
+        from machina.core.provider.copilot import CopilotProvider
+
+        return CopilotProvider.DEFAULT_MODEL
+    if provider == "grok":
+        from machina.core.provider.grok import GrokProvider
+
+        return GrokProvider.DEFAULT_MODEL
+    if provider == "openrouter":
+        return "openrouter/free"
+    from machina.core.provider.specs import PROVIDER_SPECS
+
+    spec = PROVIDER_SPECS.get(provider)
+    return spec.default_model if spec is not None else ""
+
+
+def _provider_available_unchecked(provider: str) -> bool:
+    if provider == "chatgpt":
+        from machina.security import chatgpt_auth
+
+        return bool(chatgpt_auth.status().get("signed_in"))
+    if provider == "copilot":
+        from machina.security import copilot_auth
+
+        return bool(copilot_auth.status().get("signed_in"))
+    if provider == "grok":
+        from machina.security import grok_auth
+
+        return bool(grok_auth.status().get("signed_in"))
+    if provider == "openrouter":
+        return bool(str(config.get("openrouter_api_key") or "").strip())
+    if provider in {"deepseek", "xai", "groq", "together", "mistral", "google", "kimi", "openai"}:
+        key = "xai_api_key" if provider == "xai" else f"{provider}_api_key"
+        return bool(str(config.get(key) or "").strip())
+    if provider == "anthropic":
+        return bool(str(config.get("anthropic_api_key") or "").strip())
+    if provider == "custom":
+        return bool(str(config.get("custom_base_url") or "").strip())
+    return False
+
+
+def _provider_available(provider: str) -> bool:
+    try:
+        return _provider_available_unchecked(provider)
+    except Exception:
+        return False
+
+
+def fallback_route() -> dict[str, Any]:
+    """Resolve the route used when Kiro credits are exhausted.
+
+    ``MACHINA_KIRO_FALLBACK`` / ``kiro_fallback`` wins when set. Otherwise a
+    signed-in subscription or configured direct key is chosen without making
+    any network call. The result never contains credentials.
+    """
+    try:
+        raw = str(config.get("kiro_fallback") or "").strip()
+    except Exception:
+        raw = ""
+    if raw:
+        provider, _, model = raw.partition(":")
+        provider = provider.strip().lower()
+        model = model.strip()
+        if not provider or provider == "kiro" or not _provider_available(provider):
+            return {
+                "provider": None,
+                "model": None,
+                "reason": f"Kiro fallback {raw!r} is not available; use provider:model.",
+            }
+        if not model:
+            model = _default_model(provider)
+        if not model:
+            return {
+                "provider": None,
+                "model": None,
+                "reason": f"No default model is known for {provider}.",
+            }
+        return {"provider": provider, "model": model, "reason": None}
+
+    for provider in ("chatgpt", "deepseek", "openrouter", "grok", "copilot"):
+        if not _provider_available(provider):
+            continue
+        model = _default_model(provider)
+        if model:
+            return {"provider": provider, "model": model, "reason": None}
+    return {
+        "provider": None,
+        "model": None,
+        "reason": (
+            "No fallback provider is signed in or configured. "
+            "Set MACHINA_KIRO_FALLBACK=provider:model."
+        ),
+    }
+
+
+def usage() -> dict[str, Any]:
+    """Read the account's Kiro credit usage from the running gateway.
+
+    The gateway caches the upstream answer for five minutes. This call is
+    explicit (`/auth kiro usage`) and never runs on the model-picker path.
+    """
+    parsed = urlsplit(kiro_proxy.base_url())
+    try:
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise KiroGatewayError("Kiro base URL is invalid; check KIRO_BASE_URL.") from exc
+    path = "/admin/accounts/usage"
+    headers = {"Accept": "application/json"}
+    key = kiro_proxy.api_key()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    connection_cls = (
+        http_client.HTTPSConnection if parsed.scheme == "https" else http_client.HTTPConnection
+    )
+    connection = connection_cls(host, port, timeout=15.0)
+    try:
+        try:
+            connection.request("GET", path, headers=headers)
+            response = connection.getresponse()
+            status = response.status
+            body = response.read(1_048_577)
+        except (OSError, http_client.HTTPException) as exc:
+            raise KiroGatewayError(
+                f"Kiro local gateway is not reachable at {kiro_proxy.base_url()} "
+                f"({type(exc).__name__}). Start it with /auth kiro start."
+            ) from exc
+    finally:
+        connection.close()
+    if status == 403:
+        raise KiroGatewayError(
+            "Kiro gateway rejected the local proxy password. "
+            "Set KIRO_API_KEY to the gateway's PROXY_API_KEY."
+        )
+    if status == 404:
+        raise KiroGatewayError(
+            "This Kiro gateway build does not expose usage limits. "
+            "Use a gateway build with /admin/accounts/usage."
+        )
+    if status != 200:
+        raise KiroGatewayError(f"Kiro gateway usage returned HTTP {status}.")
+    if len(body) > 1_048_576:
+        raise KiroGatewayError("Kiro gateway usage response exceeded the byte limit.")
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise KiroGatewayError("Kiro gateway usage response was not JSON.") from exc
+    accounts = payload.get("accounts") if isinstance(payload, dict) else None
+    if not isinstance(accounts, list) or not accounts:
+        raise KiroGatewayError("Kiro gateway returned no accounts.")
+    first = accounts[0] if isinstance(accounts[0], dict) else {}
+    raw = first.get("usage")
+    if not isinstance(raw, dict):
+        detail = str(first.get("error") or "no usage returned").strip()
+        raise KiroGatewayError(f"Kiro usage is unavailable: {detail}")
+    return {
+        "subscription": str(raw.get("subscription_title") or "Kiro"),
+        "plan": str(raw.get("subscription_type") or ""),
+        "used": float(raw.get("current_usage") or 0.0),
+        "limit": float(raw.get("usage_limit") or 0.0),
+        "remaining": float(raw.get("remaining") or 0.0),
+        "percentUsed": float(raw.get("percent_used") or 0.0),
+        "unit": str(raw.get("unit") or "Credits"),
+        "nextResetAt": raw.get("next_reset_at"),
+        "stale": bool(first.get("stale")),
     }
 
 

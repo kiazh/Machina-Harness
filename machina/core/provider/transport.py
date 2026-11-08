@@ -118,6 +118,8 @@ async def _post_with_retry(
     client: httpx.AsyncClient,
     url: str,
     payload: dict[str, Any],
+    *,
+    retry_429: bool = True,
 ) -> httpx.Response:
     """POST with exponential backoff on 429 (rate limit) responses.
 
@@ -132,7 +134,7 @@ async def _post_with_retry(
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         resp = await client.post(url, json=payload)
-        if resp.status_code != 429:
+        if resp.status_code != 429 or not retry_429:
             return resp
         # Account-wide daily quota gone: no free model can serve this, so
         # rotating candidates or sleeping would only waste more requests.
@@ -168,6 +170,8 @@ async def _stream_with_retry(
     client: httpx.AsyncClient,
     url: str,
     payload: dict[str, Any],
+    *,
+    retry_429: bool = True,
 ) -> AsyncGenerator[httpx.Response, None]:
     """Apply the POST retry policy before exposing any streaming content."""
     model = str(payload.get("model", ""))
@@ -175,7 +179,7 @@ async def _stream_with_retry(
     max_retries = 0 if free else _MAX_RETRIES
     for attempt in range(max_retries + 1):
         async with client.stream("POST", url, json=payload) as resp:
-            if resp.status_code != 429:
+            if resp.status_code != 429 or not retry_429:
                 yield resp
                 return
             if free and _quota_exhausted(resp):

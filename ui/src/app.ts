@@ -57,6 +57,7 @@ import type {
 	ConfigResult,
 	GatewayEvent,
 	HistoryEntry,
+	KiroFallback,
 	ProvidersListResult,
 	InitializeResult,
 	ResumeResult,
@@ -381,6 +382,7 @@ export class App implements FeatureHost {
 	private readonly steeringBusy = new Set<string>();
 	private readonly steeringFlushing = new Set<string>();
 	private readonly interruptedSteering = new Set<string>();
+	private readonly kiroFallbackSessions = new Set<string>();
 	private readonly delegatedText = new Map<string, string>();
 	/** Per-session turn binding, provisional pre-RPC state and retired IDs. */
 	private readonly turns = new Map<string, SessionTurn>();
@@ -1165,6 +1167,8 @@ export class App implements FeatureHost {
 		this.transcript.addComponent(header(this.version, undefined));
 		this.footer.dispose();
 		this.footer.tokens = 0;
+		this.footer.contextTokens = 0;
+		this.footer.contextPercent = null;
 		this.setRunning(false);
 		this.syncAgentCount();
 		this.tui.requestRender();
@@ -1195,6 +1199,8 @@ export class App implements FeatureHost {
 					this.transcript.clear();
 					this.transcript.addComponent(header(this.version, this.headerInfo(session)));
 					this.footer.tokens = 0;
+					this.footer.contextTokens = 0;
+					this.footer.contextPercent = null;
 					this.family.reseed();
 					this.syncAgentCount();
 					this.refreshSessionMode(session.id);
@@ -1238,6 +1244,8 @@ export class App implements FeatureHost {
 		// Preserve the active turn's latest cumulative usage across switches
 		// without mixing turns: completed total plus this session's turn total.
 		this.footer.tokens = this.sessionTokens + (this.turns.get(session.id)?.usageLatest ?? 0);
+		this.footer.contextTokens = 0;
+		this.footer.contextPercent = null;
 		// The backend stays paused for this session's approvals; rebuild the
 		// review cards retained while it was hidden (R15).
 		this.restoreApprovals(session.id);
@@ -1877,6 +1885,42 @@ export class App implements FeatureHost {
 	onConfig(result: ConfigResult): void {
 		this.footer.model = result.model;
 		this.tui.requestRender();
+	}
+
+	private async switchKiroFallback(sessionId: string): Promise<void> {
+		if (this.kiroFallbackSessions.has(sessionId)) return;
+		this.kiroFallbackSessions.add(sessionId);
+		try {
+			const fallback = await this.request<KiroFallback>("auth.kiro.fallback", {});
+			if (!fallback.provider || !fallback.model) {
+				this.print(
+					fallback.reason ??
+						"Kiro credits are exhausted and no fallback provider is available. Set MACHINA_KIRO_FALLBACK=provider:model.",
+					"warning",
+				);
+				this.kiroFallbackSessions.delete(sessionId);
+				return;
+			}
+			await this.request("session.setModel", {
+				sessionId,
+				provider: fallback.provider,
+				model: fallback.model,
+			});
+			if (this.current?.id === sessionId) {
+				this.current.provider = fallback.provider;
+				this.current.model = fallback.model;
+				this.footer.model = fallback.model;
+			}
+			this.print(
+				`Kiro credits are exhausted. Switched this chat to ${fallback.provider} / ${fallback.model}; send your message again.`,
+				"warning",
+			);
+		} catch (error) {
+			this.kiroFallbackSessions.delete(sessionId);
+			this.print(`Could not switch the Kiro fallback: ${message(error)}`, "error");
+		} finally {
+			this.tui.requestRender();
+		}
 	}
 
 	clear(): void {
@@ -4367,7 +4411,11 @@ export class App implements FeatureHost {
 		}
 		if (event.type === "usage") {
 			record.usageLatest = event.tokens;
-			if (event.sessionId === this.current?.id) this.footer.tokens = this.sessionTokens + event.tokens;
+			if (event.sessionId === this.current?.id) {
+				this.footer.tokens = this.sessionTokens + event.tokens;
+				this.footer.contextTokens = event.contextTokens ?? 0;
+				this.footer.contextPercent = event.contextPercent ?? null;
+			}
 			this.tui.requestRender();
 			return;
 		}
@@ -4392,6 +4440,9 @@ export class App implements FeatureHost {
 			// notice is already rendered by transcript.apply(); final
 			// accounting arrives with message.complete.
 			this.setRunning(true);
+			if (this.current?.id === event.sessionId && isKiroQuotaError(event.message)) {
+				void this.switchKiroFallback(event.sessionId);
+			}
 		} else if (summary) {
 			if (event.type === "message.complete" && event.cancelled) this.interruptedSteering.add(event.sessionId);
 			this.accountCompletion(event.sessionId, summary.tokens);
@@ -4652,6 +4703,23 @@ export class App implements FeatureHost {
 
 function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+export function isKiroQuotaError(value: string): boolean {
+	const text = value.toLowerCase();
+	const kiro = text.includes("kiro");
+	const quota =
+		text.includes("usage limit") ||
+		text.includes("monthly request limit") ||
+		text.includes("monthly quota") ||
+		text.includes("quota exhausted") ||
+		text.includes("credits are exhausted") ||
+		text.includes("http 402") ||
+		(text.includes("http 429") && kiro);
+	return (
+		quota &&
+		(kiro || text.includes("monthly request limit") || text.includes("monthly quota"))
+	);
 }
 
 /**

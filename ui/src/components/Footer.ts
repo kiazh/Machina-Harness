@@ -23,6 +23,10 @@ export class Footer implements Component {
 	branch = "";
 	model = "";
 	tokens = 0;
+	/** Kiro-native current-context size; 0 hides it and keeps the session total. */
+	contextTokens = 0;
+	/** Kiro-native context percentage, when the gateway reported one. */
+	contextPercent: number | null = null;
 	mode = "ask";
 	/** Subagents in the visible session's family (0 hides the segment). */
 	subagents = 0;
@@ -132,7 +136,18 @@ export class Footer implements Component {
 			: this.status === "awaiting_approval" ? theme.warning("awaiting approval")
 			: this.status === "cleanup_pending" ? theme.warning("cleanup pending")
 			: this.status === "stopping" ? theme.warning("stopping") : theme.dim("ready");
-		const tokens = this.tokens > 0 ? theme.dim(` · ${this.tokens.toLocaleString("en-US")} tokens`) : "";
+		const displayTokens = this.contextTokens > 0 ? this.contextTokens : this.tokens;
+		const contextSuffix =
+			this.contextTokens > 0 && this.contextPercent !== null
+				? ` (${this.contextPercent.toFixed(1)}% ctx)`
+				: "";
+		const tokens = displayTokens > 0
+			? theme.dim(
+					` · ${displayTokens.toLocaleString("en-US")}${
+						this.contextTokens > 0 ? " ctx tokens" : " tokens"
+					}${contextSuffix}`,
+				)
+			: "";
 		const agents = this.subagents > 0
 			? theme.dim(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`)
 			: "";

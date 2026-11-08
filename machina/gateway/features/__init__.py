@@ -27,9 +27,11 @@ from machina.gateway.features.auth_chatgpt import (
     auth_chatgpt_status,
 )
 from machina.gateway.features.auth_kiro import (
+    auth_kiro_fallback,
     auth_kiro_start,
     auth_kiro_status,
     auth_kiro_stop,
+    auth_kiro_usage,
 )
 from machina.gateway.features.auth_subscriptions import (
     auth_copilot_import_gh,
@@ -207,6 +209,8 @@ METHODS: dict[str, Handler] = {
     "auth.kiro.status": auth_kiro_status,
     "auth.kiro.start": auth_kiro_start,
     "auth.kiro.stop": auth_kiro_stop,
+    "auth.kiro.usage": auth_kiro_usage,
+    "auth.kiro.fallback": auth_kiro_fallback,
     "mcp.catalog": mcp_catalog,
     "mcp.list": mcp_list,
     "mcp.config": mcp_config,

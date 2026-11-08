@@ -97,6 +97,12 @@ def _serialize_event(
             data["isError"] = bool(tool_is_error)
     elif event.type == "token_usage":
         data["tokens"] = event.tokens_used
+        if event.context_tokens > 0:
+            data["contextTokens"] = event.context_tokens
+        if event.context_usage_percentage is not None:
+            data["contextPercent"] = event.context_usage_percentage
+        if event.credits_used is not None:
+            data["creditsUsed"] = event.credits_used
     elif event.type == "done" and event.response is not None:
         resp = event.response
         data["content"] = redact_secrets(resp.content).text

@@ -121,6 +121,34 @@ Auto-start does **not** install or clone the gateway. To disable it:
 MACHINA_KIRO_AUTOSTART=false
 ```
 
+### Usage and fallback
+
+```text
+/auth kiro usage      # plan, credits used/limit, remaining, reset date
+```
+
+The local gateway's admin endpoint reads Kiro's `GetUsageLimits` through the
+same authenticated account session; Machina never duplicates token handling.
+A gateway build without `/admin/accounts/usage` reports usage as unavailable;
+fallback still works. (Upstream work is tracked in `jwadow/kiro-gateway`
+PR #160; the checkout used here has the equivalent read-only route.)
+When credits are exhausted, Machina can move the current chat to a fallback
+route. Set it explicitly:
+
+```dotenv
+MACHINA_KIRO_FALLBACK=chatgpt:gpt-6.1-sol
+```
+
+If unset, Machina auto-picks a signed-in subscription (ChatGPT, Grok, Copilot)
+or a configured direct key, and reports when none is available. A quota error
+switches the chat session and asks you to resend; the Kiro gateway and account
+credentials stay untouched.
+
+Kiro's footer context counter uses the gateway's native
+`contextUsagePercentage`/`contextTokens` values, so the token figure matches
+Kiro's context accounting instead of the cumulative session total. Other
+providers keep their existing cumulative counter.
+
 ## 3. Point Machina at the gateway
 
 No Kiro API key is required. Machina sends the documented

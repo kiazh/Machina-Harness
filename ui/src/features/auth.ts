@@ -12,10 +12,13 @@ import type {
 	ChatGPTLoginResult,
 	ChatGPTStatusResult,
 	ConfigSetResult,
+	KiroFallback,
 	KiroGatewayStatus,
 	KiroStartResult,
 	KiroStatusResult,
 	KiroStopResult,
+	KiroUsage,
+	KiroUsageResult,
 	ModelsListResult,
 	SubscriptionLoginResult,
 	SubscriptionStatus,
@@ -31,7 +34,7 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["chatgpt", "OpenAI account: status, sign-in, import-codex, sign-out"],
 	["grok", "Grok subscription: status, sign-in, sign-out"],
 	["copilot", "GitHub Copilot: status, sign-in, import-gh, sign-out"],
-	["kiro", "Kiro account: status, start, stop, setup (local proxy)"],
+	["kiro", "Kiro account: status, usage, start, stop, setup (local proxy)"],
 	["sign-in", "Alias for /auth chatgpt sign-in"],
 	["import-codex", "Alias for /auth chatgpt import-codex"],
 	["sign-out", "Alias for /auth chatgpt sign-out"],
@@ -427,11 +430,60 @@ async function showKiroStatus(host: FeatureHost): Promise<void> {
 		[
 			renderKiroStatus(status),
 			"",
-			"Actions: /auth kiro start · /auth kiro stop · /auth kiro setup",
+			"Actions: /auth kiro start · /auth kiro stop · /auth kiro usage · /auth kiro setup",
 			"Community interop only; see docs/KIRO_PROXY.md and review Kiro's terms.",
 		].join("\n"),
 		"plain",
 	);
+}
+
+export function renderKiroUsage(usage: KiroUsage): string {
+	const amount = (value: number) =>
+		value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+	const unit = usage.unit || "Credits";
+	const reset = usage.nextResetAt
+		? new Date(usage.nextResetAt).toLocaleDateString("en-US", {
+				year: "numeric",
+				month: "short",
+				day: "numeric",
+			})
+		: "unknown";
+	const lines = [
+		`Kiro usage: ${amount(usage.used)} / ${amount(usage.limit)} ${unit} used (${usage.percentUsed.toFixed(2)}%)`,
+		`Remaining: ${amount(usage.remaining)} ${unit} · resets ${reset}`,
+		`Plan: ${usage.subscription}${usage.plan ? ` (${usage.plan})` : ""}`,
+	];
+	if (usage.stale) lines.push("Values are cached; the last upstream refresh failed.");
+	return lines.join("\n");
+}
+
+async function showKiroUsage(host: FeatureHost): Promise<void> {
+	host.print("Reading Kiro usage…", "plain");
+	let result: KiroUsageResult;
+	try {
+		result = await host.request<KiroUsageResult>("auth.kiro.usage", {});
+	} catch (error) {
+		host.print(`Kiro usage unavailable: ${errorText(error)}`, "error");
+		return;
+	}
+	host.print(renderKiroUsage(result.usage), "plain");
+	try {
+		const fallback = await host.request<KiroFallback>("auth.kiro.fallback", {});
+		host.print(
+			fallback.provider && fallback.model
+				? `Fallback when exhausted: ${fallback.provider} / ${fallback.model}`
+				: fallback.reason ?? "No Kiro fallback provider is available.",
+			fallback.provider ? "plain" : "warning",
+		);
+	} catch (error) {
+		host.print(`Kiro fallback unavailable: ${errorText(error)}`, "warning");
+	}
+	if (result.usage.remaining <= 0) {
+		host.print(
+			"Kiro credits are exhausted. Machina will switch this chat to the fallback on the next failed Kiro turn.",
+			"warning",
+		);
+	}
 }
 
 async function startKiro(host: FeatureHost): Promise<void> {
@@ -510,6 +562,7 @@ async function kiroMenu(host: FeatureHost): Promise<void> {
 		items.push({ value: "stop", label: "Stop the Kiro local proxy", description: "Stop the child Machina started" });
 	}
 	items.push({ value: "setup", label: "Show gateway setup instructions" });
+	items.push({ value: "usage", label: "Show Kiro usage and remaining credits" });
 	items.push({ value: "status", label: "Show status" });
 	const choice = await host.pick(`${kiroProviderLabel(status)} — choose an action`, items);
 	if (!choice) return;
@@ -568,6 +621,10 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 		}
 		if (command === "status") {
 			await showKiroStatus(host);
+			return;
+		}
+		if (command === "usage") {
+			await showKiroUsage(host);
 			return;
 		}
 		if (command === "start") {

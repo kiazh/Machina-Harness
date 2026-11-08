@@ -10,6 +10,7 @@ import {
 	formatAuthExpiry,
 	renderAuthStatus,
 	renderKiroStatus,
+	renderKiroUsage,
 } from "../src/features/auth.ts";
 import {
 	type FeatureHost,
@@ -22,6 +23,7 @@ import type {
 	ChatGPTAuthStatus,
 	GatewayEvent,
 	KiroGatewayStatus,
+	KiroUsage,
 	SessionInfo,
 } from "../src/protocol.ts";
 
@@ -71,6 +73,18 @@ const KIRO_RUNNING: KiroGatewayStatus = {
 	managed: true,
 	state: "running",
 	detail: "Local gateway is running (started by Machina).",
+};
+
+const KIRO_USAGE: KiroUsage = {
+	subscription: "KIRO STUDENT",
+	plan: "Q_DEVELOPER_STANDALONE_STUDENT",
+	used: 37.5,
+	limit: 1000,
+	remaining: 962.5,
+	percentUsed: 3.75,
+	unit: "Credits",
+	nextResetAt: "2026-12-01T00:00:00+00:00",
+	stale: false,
 };
 
 class AuthFakeHost implements FeatureHost {
@@ -467,6 +481,33 @@ test("renderKiroStatus shows the actionable error and log path", () => {
 	assert.match(rendered, /local proxy error/);
 	assert.match(rendered, /exited with code 1/);
 	assert.match(rendered, /Log: \/x\/\.machina\/logs\/kiro-gateway\.log/);
+});
+
+test("/auth kiro usage is one bounded RPC and renders credits", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.kiro.usage"] = { usage: KIRO_USAGE };
+	host.responses["auth.kiro.fallback"] = {
+		provider: "chatgpt",
+		model: "gpt-6.1-sol",
+		reason: null,
+	};
+
+	await run("/auth kiro usage", host);
+
+	assert.deepEqual(
+		host.calls.map((call) => call.method),
+		["auth.kiro.usage", "auth.kiro.fallback"],
+	);
+	const text = host.text();
+	assert.match(text, /37\.5 \/ 1,000 Credits used \(3\.75%\)/);
+	assert.match(text, /Remaining: 962\.5 Credits/);
+	assert.match(text, /KIRO STUDENT/);
+	assert.match(text, /Fallback when exhausted: chatgpt \/ gpt-6\.1-sol/);
+});
+
+test("renderKiroUsage marks cached values honestly", () => {
+	const rendered = renderKiroUsage({ ...KIRO_USAGE, stale: true });
+	assert.match(rendered, /cached; the last upstream refresh failed/);
 });
 
 test("/auth menu exposes Kiro and routes to its actions", async () => {

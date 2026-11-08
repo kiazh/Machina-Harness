@@ -1334,7 +1334,17 @@ class Gateway:
                                     "iterations": 0,
                                     "toolCalls": engine.tool_count,
                                 }
-                                emit("usage", tokens=turn_event.payload["tokens"])
+                                usage_payload = {"tokens": turn_event.payload["tokens"]}
+                                context_tokens = turn_event.payload.get("contextTokens")
+                                if isinstance(context_tokens, int) and context_tokens > 0:
+                                    usage_payload["contextTokens"] = context_tokens
+                                context_percent = turn_event.payload.get("contextPercent")
+                                if isinstance(context_percent, (int, float)):
+                                    usage_payload["contextPercent"] = context_percent
+                                credits_used = turn_event.payload.get("creditsUsed")
+                                if isinstance(credits_used, (int, float)):
+                                    usage_payload["creditsUsed"] = credits_used
+                                emit("usage", **usage_payload)
                             elif turn_event.kind == "done":
                                 final_response = engine.final
                                 self._turn_progress[turn_id] = {

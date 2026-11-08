@@ -717,7 +717,7 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
-| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start when a CLI login + checkout are detected — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full 22-alias catalog |
+| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start, `/auth kiro usage` for credits, fallback via `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full 22-alias catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog (GPT-6.1 Sol, GPT-6 Luna; no GPT-6.1 Luna exists) |
 | `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
 | `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |

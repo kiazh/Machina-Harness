@@ -46,3 +46,14 @@ test("no workspace hints leaves the footer exactly as before", () => {
 	assert.ok(row.includes("? shortcuts · / commands"));
 	assert.ok(!row.includes("explorer"));
 });
+
+test("Kiro context tokens replace the cumulative session counter", () => {
+	const footer = new Footer(new AnimationCoordinator(() => {}));
+	footer.model = "auto";
+	footer.tokens = 5_000;
+	footer.contextTokens = 3_115;
+	footer.contextPercent = 3.3;
+	const row = plain(footer, 160);
+	assert.ok(row.includes("3,115 ctx tokens (3.3% ctx)"), row);
+	assert.ok(!row.includes("5,000 tokens"), row);
+});

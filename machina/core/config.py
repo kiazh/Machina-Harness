@@ -307,6 +307,9 @@ DEFAULTS: dict[str, Any] = {
     "kiro_gateway_command": "",
     "kiro_gateway_dir": "",
     "kiro_autostart": True,
+    # Optional fallback route when Kiro credits are exhausted:
+    # "provider" or "provider:model". Empty = auto-pick a signed-in provider.
+    "kiro_fallback": "",
     # Generic OpenAI-compatible provider ("custom"): any base URL (LM Studio,
     # vLLM, llama.cpp, the Hermes loopback proxy, ...). The key is optional —
     # local endpoints commonly run keyless.
@@ -426,6 +429,7 @@ LEGACY_ENV_VARS: dict[str, str] = {
     "kiro_gateway_command": "KIRO_GATEWAY_COMMAND",
     "kiro_gateway_dir": "KIRO_GATEWAY_DIR",
     "kiro_autostart": "KIRO_AUTOSTART",
+    "kiro_fallback": "KIRO_FALLBACK",
     "custom_base_url": "CUSTOM_BASE_URL",
     "custom_api_key": "CUSTOM_API_KEY",
     "opencode_base_url": "OPENCODE_BASE_URL",
@@ -468,6 +472,10 @@ def validate_value(key: str, value: Any) -> Any:
         from machina.memory.redaction import redact_secrets
 
         return redact_secrets(value.strip()).text
+    if key == "kiro_fallback":
+        if not isinstance(value, str) or len(value) > 120:
+            raise ValueError("kiro_fallback must be a provider or provider:model string")
+        return value.strip()
     choices = _ENUM_VALIDATORS.get(key)
     if choices is not None:
         normalized = str(value).strip().lower()
@@ -721,6 +729,7 @@ class Config:
     kiro_gateway_command: str = ""
     kiro_gateway_dir: str = ""
     kiro_autostart: bool = True
+    kiro_fallback: str = ""
     # "custom" provider: any OpenAI-compatible base URL; key optional.
     custom_base_url: str = ""
     custom_api_key: str = field(default="", repr=False)

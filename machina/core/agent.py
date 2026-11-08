@@ -2282,6 +2282,40 @@ class ReActAgent(BaseReActAgent):
                                     yield StreamEvent(
                                         type="token_usage",
                                         tokens_used=event.response.usage.get("total_tokens", 0),
+                                        context_tokens=int(
+                                            event.response.usage.get("context_tokens", 0) or 0
+                                        ),
+                                        context_usage_percentage=(
+                                            float(
+                                                event.response.usage[
+                                                    "context_usage_percentage"
+                                                ]
+                                            )
+                                            if isinstance(
+                                                event.response.usage.get(
+                                                    "context_usage_percentage"
+                                                ),
+                                                (int, float),
+                                            )
+                                            and not isinstance(
+                                                event.response.usage.get(
+                                                    "context_usage_percentage"
+                                                ),
+                                                bool,
+                                            )
+                                            else None
+                                        ),
+                                        credits_used=(
+                                            float(event.response.usage["credits_used"])
+                                            if isinstance(
+                                                event.response.usage.get("credits_used"),
+                                                (int, float),
+                                            )
+                                            and not isinstance(
+                                                event.response.usage.get("credits_used"), bool
+                                            )
+                                            else None
+                                        ),
                                     )
 
                         if final_response is None:

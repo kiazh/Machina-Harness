@@ -478,7 +478,15 @@ class TurnEngine:
             return TurnEvent("tool_complete", payload)
         if event_type == "token_usage":
             self._tokens += event.tokens_used
-            return TurnEvent("usage", {"tokens": self._tokens})
+            return TurnEvent(
+                "usage",
+                {
+                    "tokens": self._tokens,
+                    "contextTokens": int(getattr(event, "context_tokens", 0) or 0),
+                    "contextPercent": getattr(event, "context_usage_percentage", None),
+                    "creditsUsed": getattr(event, "credits_used", None),
+                },
+            )
         if event_type == "needs_approval":
             # Typed pause marker (AH-AUDIT-030). SSE forwards it as a typed
             # frame; the gateway surfaces pauses through its approval handler

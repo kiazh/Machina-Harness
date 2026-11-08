@@ -6,7 +6,9 @@ import asyncio
 import json
 import os
 import socket
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +16,15 @@ import pytest
 
 from machina.core.config import config
 from machina.core.provider import kiro_gateway, kiro_proxy
+from machina.core.provider.usage_map import parse_openai_usage
 from machina.gateway.errors import OPERATION_FAILED, RpcError
 from machina.gateway.features import METHODS
 from machina.gateway.features.auth_kiro import (
+    auth_kiro_fallback,
     auth_kiro_start,
     auth_kiro_status,
     auth_kiro_stop,
+    auth_kiro_usage,
 )
 
 
@@ -226,6 +231,114 @@ def test_status_is_fast_and_does_not_run_the_cli(tmp_path, monkeypatch) -> None:
     assert report["autostart"] is True
 
 
+def test_fallback_route_honors_explicit_configuration(monkeypatch) -> None:
+    _set_config(monkeypatch, "kiro_fallback", "deepseek:deepseek-v4-flash")
+    monkeypatch.setattr(kiro_gateway, "_provider_available", lambda provider: provider == "deepseek")
+
+    assert kiro_gateway.fallback_route() == {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "reason": None,
+    }
+
+
+def test_fallback_route_auto_picks_a_ready_provider(monkeypatch) -> None:
+    _set_config(monkeypatch, "kiro_fallback", "")
+    monkeypatch.setattr(kiro_gateway, "_provider_available", lambda provider: provider == "chatgpt")
+
+    route = kiro_gateway.fallback_route()
+
+    assert route["provider"] == "chatgpt"
+    assert route["model"] == "gpt-6.1-sol"
+    assert route["reason"] is None
+
+
+def test_fallback_route_is_honest_when_nothing_is_ready(monkeypatch) -> None:
+    _set_config(monkeypatch, "kiro_fallback", "")
+    monkeypatch.setattr(kiro_gateway, "_provider_available", lambda _provider: False)
+
+    route = kiro_gateway.fallback_route()
+
+    assert route["provider"] is None
+    assert route["model"] is None
+    assert "MACHINA_KIRO_FALLBACK" in (route["reason"] or "")
+
+
+def test_usage_reads_the_gateway_admin_endpoint(monkeypatch) -> None:
+    response = {
+        "object": "list",
+        "accounts": [
+            {
+                "account_id": "acct_test",
+                "usage": {
+                    "subscription_title": "KIRO STUDENT",
+                    "subscription_type": "Q_DEVELOPER_STANDALONE_STUDENT",
+                    "current_usage": 37.5,
+                    "usage_limit": 1000.0,
+                    "remaining": 962.5,
+                    "percent_used": 3.75,
+                    "unit": "Credits",
+                    "next_reset_at": "2026-12-01T00:00:00+00:00",
+                },
+                "stale": False,
+                "error": None,
+            }
+        ],
+    }
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            assert self.path == "/admin/accounts/usage"
+            assert self.headers.get("Authorization") == "Bearer dummy-local-only"
+            body = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: Any) -> None:
+            return None
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    _set_config(monkeypatch, "kiro_base_url", f"http://127.0.0.1:{port}/v1")
+    try:
+        report = kiro_gateway.usage()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert report["subscription"] == "KIRO STUDENT"
+    assert report["used"] == 37.5
+    assert report["limit"] == 1000.0
+    assert report["remaining"] == 962.5
+    assert report["percentUsed"] == 3.75
+    assert report["unit"] == "Credits"
+    assert report["nextResetAt"] == "2026-12-01T00:00:00+00:00"
+
+
+def test_kiro_context_usage_extras_survive_normalization() -> None:
+    usage = parse_openai_usage(
+        {
+            "prompt_tokens": 1362,
+            "completion_tokens": 16,
+            "total_tokens": 1378,
+            "context_usage_percentage": 0.6894,
+            "context_tokens": 1378,
+            "credits_used": 0.1059,
+        }
+    )
+
+    assert usage["total_tokens"] == 1378
+    assert usage["context_usage_percentage"] == 0.6894
+    assert usage["context_tokens"] == 1378
+    assert usage["credits_used"] == 0.1059
+
+
 def test_start_spawns_once_and_marks_ready(tmp_path, monkeypatch) -> None:
     checkout = _checkout(tmp_path)
     _set_config(monkeypatch, "kiro_gateway_dir", str(checkout))
@@ -334,6 +447,8 @@ async def test_auth_kiro_handlers_are_registered_and_bounded(monkeypatch) -> Non
     assert "auth.kiro.status" in METHODS
     assert "auth.kiro.start" in METHODS
     assert "auth.kiro.stop" in METHODS
+    assert "auth.kiro.usage" in METHODS
+    assert "auth.kiro.fallback" in METHODS
 
     monkeypatch.setattr(
         kiro_gateway,
@@ -357,6 +472,20 @@ async def test_auth_kiro_handlers_are_registered_and_bounded(monkeypatch) -> Non
         lambda: {"stopped": True, "status": {}},
     )
     assert (await auth_kiro_stop(object(), {}))["stopped"] is True
+
+    monkeypatch.setattr(
+        kiro_gateway,
+        "usage",
+        lambda: {"remaining": 962.5, "unit": "Credits"},
+    )
+    assert (await auth_kiro_usage(object(), {}))["usage"]["remaining"] == 962.5
+
+    monkeypatch.setattr(
+        kiro_gateway,
+        "fallback_route",
+        lambda: {"provider": "chatgpt", "model": "gpt-6.1-sol", "reason": None},
+    )
+    assert (await auth_kiro_fallback(object(), {}))["provider"] == "chatgpt"
 
 
 @pytest.mark.asyncio

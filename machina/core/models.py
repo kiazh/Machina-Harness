@@ -112,6 +112,10 @@ class StreamEvent:
     tool_args: dict = field(default_factory=dict)
     tool_result: str = ""
     tokens_used: int = 0
+    #: Kiro-native context accounting (0/None for other providers).
+    context_tokens: int = 0
+    context_usage_percentage: float | None = None
+    credits_used: float | None = None
     response: Any = None  # LLMResponse or AgentResponse
     # AH-020: stable call ID so UI can pair start→complete even when
     # completions arrive out of order. Provider tc["id"] when present,
