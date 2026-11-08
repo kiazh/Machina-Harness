@@ -165,7 +165,7 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | Capability | What it gives you | Deep dive |
 |---|---|---|
 | **Context management** | Long tasks stay coherent inside a finite window; large outputs remain recoverable | [Context](#deep-dive-1-context-management) |
-| **Long-term memory** | Preferences, decisions, and lessons carry across sessions without replaying history | [Memory](#deep-dive-2-memory-management) |
+| **Long-term memory** | Preferences, decisions, and lessons carry across sessions without replaying history; multi-fact queries use a bounded query-conditioned digest | [Memory](#deep-dive-2-memory-management), [digest](docs/MEMORY_DIGEST.md) |
 | **Permission kernel** | Sensitive actions are approved once, for an exact canonical action, and revalidated | [Permissions](#deep-dive-3-the-permission-kernel) |
 | **Agent orchestration** | Main agents delegate to specialists with inherited authority and separate accounting | [Agent loop](#deep-dive-4-the-agent-loop) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
@@ -1203,6 +1203,10 @@ Precedence: explicit overrides > environment variables > saved configuration > d
 | `request_projection_enabled` | `true` | Send the budgeted working view |
 | `retrieval_token_budget` | `6000` | Retrieved-evidence reading budget |
 | `memory_enabled` | `true` | Long-term memory integration |
+| `memory_digest_enabled` | `true` | Query-conditioned multi-fact memory digest |
+| `memory_digest_max_chars` | `1200` | Hard text bound for the digest |
+| `memory_digest_max_facts` | `6` | Maximum selected memory facts |
+| `memory_digest_candidates` | `16` | Candidate over-fetch before selection |
 | `memory_approval_enabled` | `false` | Hold memory writes for approval |
 | `memory_consolidation_enabled` | `true` | Extract candidates from conversations |
 | `embedding_backend` | `off` | `off`, `local`, `onnx`, `openai`, or `auto` |

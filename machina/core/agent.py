@@ -758,35 +758,98 @@ class BaseReActAgent:
                 from machina.memory.embeddings import embed_query
 
                 query_embedding = await embed_query(user_message)
-                retrieved_memories = await self.memory_retriever.retrieve(
-                    query=user_message,
-                    agent_id=self.agent_id,
-                    session_id=session_id,
-                    emotion=None if self.delegated else session.state.get("emotion"),
-                    persona_enabled=False if self.delegated else None,
-                    query_embedding=query_embedding,
-                )
-                # Convert retrieved memories to ContextChunk-like tuples for assembler
+                digest = None
+                digest_enabled = False
+                try:
+                    digest_enabled = bool(config.get("memory_digest_enabled"))
+                except Exception as _boundary_error:
+                    record_failure("agent.memory_digest.config", _boundary_error)
+                retrieve_digest = getattr(self.memory_retriever, "retrieve_digest", None)
+                if digest_enabled and callable(retrieve_digest):
+                    try:
+                        digest = await retrieve_digest(
+                            query=user_message,
+                            agent_id=self.agent_id,
+                            session_id=session_id,
+                            emotion=None if self.delegated else session.state.get("emotion"),
+                            persona_enabled=False if self.delegated else None,
+                            query_embedding=query_embedding,
+                            max_items=max(1, int(config.get("memory_digest_max_facts"))),
+                            max_chars=max(200, int(config.get("memory_digest_max_chars"))),
+                            candidate_limit=max(
+                                1, int(config.get("memory_digest_candidates"))
+                            ),
+                        )
+                    except Exception as exc:
+                        record_failure("agent.memory_digest", exc)
+                        digest = None
+
                 from machina.core.models import ContextChunk
 
-                for rm in retrieved_memories:
-                    m = rm.memory
-                    chunk = ContextChunk(
-                        id=m.id,
-                        session_id=session_id,
+                if digest is not None:
+                    if digest.selected:
+                        sources = [
+                            {
+                                "id": str(item.memory.id),
+                                "category": item.memory.category,
+                                "score": round(item.score, 4),
+                            }
+                            for item in digest.selected
+                        ]
+                        chunk = ContextChunk(
+                            id=uuid.uuid4(),
+                            session_id=session_id,
+                            agent_id=self.agent_id,
+                            chunk_type="memory",
+                            payload={
+                                "content": digest.text,
+                                "importance": max(
+                                    item.memory.importance for item in digest.selected
+                                ),
+                                "category": "digest",
+                                "sources": sources,
+                                "persona_interpretation": None,
+                            },
+                            token_count=get_token_count(digest.text),
+                        )
+                        retrieved_chunks.append(
+                            (chunk, max(item.score for item in digest.selected))
+                        )
+                        audit_log(
+                            "memory_digest",
+                            session_id=str(session_id),
+                            candidates=len(digest.selected) + digest.omitted,
+                            selected=len(digest.selected),
+                            omitted=digest.omitted,
+                            chars=digest.char_count,
+                        )
+                else:
+                    retrieved_memories = await self.memory_retriever.retrieve(
+                        query=user_message,
                         agent_id=self.agent_id,
-                        chunk_type="memory",
-                        payload={
-                            "content": m.content,
-                            "importance": m.importance,
-                            "category": m.category,
-                            "persona_interpretation": None
-                            if self.delegated
-                            else rm.persona_interpretation,
-                        },
-                        token_count=get_token_count(m.content),
+                        session_id=session_id,
+                        emotion=None if self.delegated else session.state.get("emotion"),
+                        persona_enabled=False if self.delegated else None,
+                        query_embedding=query_embedding,
                     )
-                    retrieved_chunks.append((chunk, rm.score))
+                    for rm in retrieved_memories:
+                        m = rm.memory
+                        chunk = ContextChunk(
+                            id=m.id,
+                            session_id=session_id,
+                            agent_id=self.agent_id,
+                            chunk_type="memory",
+                            payload={
+                                "content": m.content,
+                                "importance": m.importance,
+                                "category": m.category,
+                                "persona_interpretation": None
+                                if self.delegated
+                                else rm.persona_interpretation,
+                            },
+                            token_count=get_token_count(m.content),
+                        )
+                        retrieved_chunks.append((chunk, rm.score))
             except Exception as e:
                 logger.warning("Memory retrieval failed: %s", e)
 

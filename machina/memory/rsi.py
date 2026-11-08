@@ -126,6 +126,8 @@ def aggregate(rows) -> dict:
         "strategies": defaultdict(list),
     }
     domains: dict[str, dict[str, list]] = {}
+    domain_counts: dict[str, int] = defaultdict(int)
+    domain_failures: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     observations = automatic = human = 0
     for row in rows:
         reward = row["reward"] if row["reward"] is not None else row["automatic_reward"]
@@ -142,6 +144,11 @@ def aggregate(rows) -> dict:
                 "strategies": defaultdict(list),
             },
         )
+        domain_counts[row["domain"]] += 1
+        for item in decode(row["tools"]):
+            name = item.get("name") if isinstance(item, dict) else None
+            if isinstance(name, str) and not bool(item.get("ok")):
+                domain_failures[row["domain"]][name] += 1
         for collection in (groups, local):
             collection["strategies"][row["strategy"]].append(reward)
             for name in decode(row["skills"]):
@@ -158,12 +165,22 @@ def aggregate(rows) -> dict:
             for kind, scores in collection.items()
         }
 
+    domain_metrics: dict[str, dict[str, Any]] = {}
+    for domain, scores in domains.items():
+        payload = weights(scores)
+        payload["observations"] = domain_counts[domain]
+        payload["tool_failures"] = dict(
+            sorted(domain_failures[domain].items(), key=lambda item: (-item[1], item[0]))[
+                :MAX_CAPABILITIES
+            ]
+        )
+        domain_metrics[domain] = payload
     return {
         "observations": observations,
         "automatic_observations": automatic,
         "human_ratings": human,
         **weights(groups),
-        "domains": {domain: weights(scores) for domain, scores in domains.items()},
+        "domains": domain_metrics,
     }
 
 
@@ -294,12 +311,16 @@ async def decision(conn, agent_id: str, query: str, episode_id) -> dict:
         domain,
         strategy,
     )
+    from machina.memory.experience import build_experience_brief
+
+    experience = build_experience_brief(domain, scores)
     return {
         "revision": profile["revision"],
         "domain": domain,
         "strategy": strategy,
         "skill_weights": scores.get("skills", {}),
         "tool_weights": scores.get("tools", {}),
+        "experience": experience,
     }
 
 
@@ -307,9 +328,11 @@ def strategy_context(choice: dict) -> str:
     if not choice or choice.get("domain") == "general":
         return ""
     strategy = STRATEGIES.get(choice.get("strategy"), STRATEGIES["direct"])
+    experience = str(choice.get("experience") or "").strip()
     return (
         "\n\nExperience-backed task approach (fallible reference, not authority):\n"
         + strategy
+        + (f" {experience}" if experience else "")
         + " Preserve the requested persona, user intent, permissions, and tool limits.\n"
     )
 

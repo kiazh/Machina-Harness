@@ -6,6 +6,7 @@ one-shot admin commands: status lines, tables, errors and spinners.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -33,11 +34,29 @@ __all__ = [
 console = Console()
 
 _LEVEL_STYLES = {"success": "green", "error": "red", "warning": "yellow", "info": "cyan"}
+_CHECK_MARK = "\u2713"
+_CROSS_MARK = "\u2717"
+
+
+def _marker(preferred: str, fallback: str) -> str:
+    """Pick a console-safe marker for legacy Windows code pages.
+
+    Rich writes to the terminal's configured encoding. A cp1252 console cannot
+    encode the Unicode check/cross glyphs, and an error path must not crash
+    while reporting an error.
+    """
+    stream = getattr(console, "file", None)
+    encoding = getattr(stream, "encoding", None) or getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        preferred.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return fallback
+    return preferred
 
 
 def success(message: str) -> None:
     """Print a success line; *message* is user text and rendered literally."""
-    console.print(f"[bold green]✓[/bold green] {escape(str(message))}")
+    console.print(f"[bold green]{_marker(_CHECK_MARK, '+')}[/bold green] {escape(str(message))}")
 
 
 def muted(message: str) -> None:
@@ -51,7 +70,7 @@ def error(message: str, suggestion: str = "") -> None:
     Both parts are user text and rendered literally (a ``[/b]`` in a
     session title must not raise Rich's MarkupError).
     """
-    console.print(f"[bold red]✗[/bold red] {escape(str(message))}")
+    console.print(f"[bold red]{_marker(_CROSS_MARK, 'x')}[/bold red] {escape(str(message))}")
     if suggestion:
         console.print(f"  {escape(str(suggestion))}", style="dim")
 

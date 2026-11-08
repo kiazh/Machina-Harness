@@ -22,6 +22,7 @@ from machina.core.provider import LLMProvider
 from machina.core.usage import usage_store
 from machina.db.lazy import LazyDb
 from machina.memory.authority import CATALOG_DEMOTION_FACTOR, authority_tier
+from machina.memory.digest import MemoryDigest, build_memory_digest
 from machina.memory.models import MemoryEntry, RetrievedMemory
 from machina.memory.persona import EmotionTopology, PersonaMemoryStore
 from machina.memory.store import MemoryStore, memory_store
@@ -149,6 +150,7 @@ class MemoryRetriever:
         persona_id: str | None = None,
         persona_enabled: bool | None = None,
         default_emotion: str | None = None,
+        limit: int | None = None,
     ) -> list[RetrievedMemory]:
         """Retrieve relevant memories for a query.
 
@@ -174,6 +176,8 @@ class MemoryRetriever:
                 ``agent_id`` when None.
             persona_enabled: Override for ``persona_memory_enabled`` config.
             default_emotion: Override for ``persona_default_emotion`` config.
+            limit: Candidate/result limit for this call. Defaults to
+                ``self.top_k``; the digest path raises it to see more facts.
 
         Returns:
             List of RetrievedMemory objects, sorted by relevance score.
@@ -183,6 +187,7 @@ class MemoryRetriever:
                 success returns the branches that responded; a genuinely
                 empty result stays an empty list.
         """
+        wanted = max(1, int(limit if limit is not None else self.top_k))
         # Step 1 & 2: Run dense vector search and sparse keyword search concurrently
         dense_task = None
         if query_embedding:
@@ -191,13 +196,13 @@ class MemoryRetriever:
                 agent_id=agent_id,
                 category=category,
                 date_range=date_range,
-                limit=self.top_k * 2,  # Get more candidates for re-ranking
+                limit=wanted * 2,  # Get more candidates for re-ranking
             )
         sparse_task = self._keyword_search(
             query=query,
             agent_id=agent_id,
             category=category,
-            limit=self.top_k * 2,
+            limit=wanted * 2,
             date_range=date_range,
         )
 
@@ -274,10 +279,11 @@ class MemoryRetriever:
                     effective_emotion,
                     agent_id,
                     persona_id if persona_id is not None else agent_id,
+                    limit=wanted,
                 )
 
         # Update access stats for retrieved memories (batch)
-        ids_to_update = [rm.memory.id for rm in candidates[: self.top_k]]
+        ids_to_update = [rm.memory.id for rm in candidates[:wanted]]
         if ids_to_update:
             try:
                 await self.store.batch_update_access(ids_to_update)
@@ -293,11 +299,66 @@ class MemoryRetriever:
             dense_candidates=len(dense_results),
             sparse_candidates=len(sparse_results),
             merged_candidates=len(candidates),
-            returned=min(len(candidates), self.top_k),
+            returned=min(len(candidates), wanted),
             failed_branches=len(failures),
             rerank=bool(self.rerank),
         )
-        return candidates[: self.top_k]
+        return candidates[:wanted]
+
+    @instrumented("memory", "retrieve_digest")
+    async def retrieve_digest(
+        self,
+        query: str,
+        agent_id: str | None = None,
+        category: str | None = None,
+        date_range: tuple[datetime, datetime] | None = None,
+        query_embedding: list[float] | None = None,
+        session_id: uuid.UUID | None = None,
+        emotion: str | None = None,
+        persona_id: str | None = None,
+        persona_enabled: bool | None = None,
+        default_emotion: str | None = None,
+        *,
+        max_items: int = 6,
+        max_chars: int = 1200,
+        candidate_limit: int = 16,
+    ) -> MemoryDigest:
+        """Retrieve a wider candidate set, then compress it into a bounded digest.
+
+        The normal path returns top-k rows. This path deliberately over-fetches
+        so complementary facts can outrank near-duplicates during selection.
+        It is deterministic and performs no extra provider call.
+        """
+        wanted = max(max_items, self.top_k, min(64, candidate_limit))
+        candidates = await self.retrieve(
+            query=query,
+            agent_id=agent_id,
+            category=category,
+            date_range=date_range,
+            query_embedding=query_embedding,
+            session_id=session_id,
+            emotion=emotion,
+            persona_id=persona_id,
+            persona_enabled=persona_enabled,
+            default_emotion=default_emotion,
+            limit=wanted,
+        )
+        digest = build_memory_digest(
+            candidates,
+            query,
+            max_items=max_items,
+            max_chars=max_chars,
+        )
+        log_event(
+            "memory.retrieve.digest",
+            level="debug",
+            agent_id=agent_id,
+            candidates=len(candidates),
+            selected=len(digest.selected),
+            omitted=digest.omitted,
+            chars=digest.char_count,
+        )
+        return digest
 
     async def _retrieve_with_emotion(
         self,
@@ -305,6 +366,7 @@ class MemoryRetriever:
         emotion: str,
         agent_id: str | None = None,
         persona_id: str | None = None,
+        limit: int | None = None,
     ) -> list[RetrievedMemory]:
         """Retrieve persona memories weighted by emotional state.
 
@@ -339,8 +401,9 @@ class MemoryRetriever:
                 return candidates
 
             # Score persona memories by emotion
+            wanted = max(1, int(limit if limit is not None else self.top_k))
             scored_persona = self.emotion_topology.retrieve_for_emotion(
-                persona_memories, emotion, limit=self.top_k * 2
+                persona_memories, emotion, limit=wanted * 2
             )
 
             # Merge: boost factual candidates that have high-scoring persona memories

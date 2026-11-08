@@ -180,6 +180,13 @@ DEFAULTS: dict[str, Any] = {
     "usage_agent_token_limit": 0,
     "usage_agent_request_limit": 0,
     "memory_enabled": True,
+    # Query-conditioned memory digest: retrieve wider, select complementary
+    # facts, render a bounded provenance-bearing view. Disabled restores the
+    # pre-digest individual top-k memory chunks.
+    "memory_digest_enabled": True,
+    "memory_digest_max_chars": 1200,
+    "memory_digest_max_facts": 6,
+    "memory_digest_candidates": 16,
     "personality_growth_enabled": True,
     "rsi_enabled": True,
     "persona_description": "",
@@ -597,6 +604,9 @@ def _check_int_bounds(key: str, val: int) -> None:
         "artifact_max_per_session": (0, 100_000),
         "artifact_max_chars": (1000, 100_000_000),
         "retrieval_token_budget": (0, 1_000_000),
+        "memory_digest_max_chars": (200, 8000),
+        "memory_digest_max_facts": (1, 20),
+        "memory_digest_candidates": (1, 64),
         "optimization_semantic_cache_ttl_seconds": (0, 31_536_000),
         "optimization_semantic_cache_max_entries": (0, 1_000_000),
         "optimization_warmers_min_prefix_tokens": (0, 1_000_000),
@@ -661,6 +671,10 @@ class Config:
     usage_agent_token_limit: int = 0
     usage_agent_request_limit: int = 0
     memory_enabled: bool = True
+    memory_digest_enabled: bool = True
+    memory_digest_max_chars: int = 1200
+    memory_digest_max_facts: int = 6
+    memory_digest_candidates: int = 16
     personality_growth_enabled: bool = True
     rsi_enabled: bool = True
     persona_description: str = ""

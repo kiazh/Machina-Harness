@@ -46,6 +46,17 @@ Every iteration produces genuine evidence instead of synthetic fixtures.
 Failure modes to watch: skill-searching a greeting; delegating a one-liner; answering from stale
 memory instead of the brief; claiming success without verification; not capturing a pitfall I just hit.
 
+## Domain experience briefs
+
+Harness2's per-domain experience library is represented in Machina by a
+bounded, evidence-only brief built from the existing RSI aggregates. Each
+domain records observed episode count, strongest/weakest tools by reward
+weight, and tool failure counts. The strategy prompt receives that brief next
+to the selected approach; it never receives raw prompts, tool arguments, or
+model output, and permissions remain authoritative. This is an adopted lesson
+from Harness2's library, not a copy of its model-driven tree editor. See
+`RESEARCH_MEMORILLA_HARNESS2.md` for the boundary.
+
 ## The bench: 8 canonical scenarios
 
 Run against this repo, each with a pre-registered expected behavior:
