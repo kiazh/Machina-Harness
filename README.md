@@ -1346,6 +1346,7 @@ scripts/            Operator script mount point and setup guidance
 | [UI design](docs/design/TUI_DESIGN.md) / [themes](docs/design/THEME_COLORS.md) | Interface behavior, appearance, color roles |
 | [Personality and growth](docs/PERSONALITY_GROWTH.md) | Preferences, feedback, rollback, SoulSpec identities |
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
+| [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |

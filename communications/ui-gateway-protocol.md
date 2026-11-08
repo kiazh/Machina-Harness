@@ -213,6 +213,23 @@ Register and unregister edit platform config outside this repository behind an
 explicit confirmation. Streaming harness output is not in scope — one bounded
 result per invocation.
 
+## Meta-harness routing (2026-11-08)
+
+Call-free local routing over installed OpenCode, Codex, and Hermes:
+
+| Method | Params | Result |
+|---|---|---|
+| `meta.route` | `{prompt}` | `{route: {taskClass, taskFamilies, capabilities, complexity, primary, mode, confidence, localOnly, reason, candidates, steps, promptHint}}` |
+| `meta.harnesses` | `{}` | `{harnesses: [{name, label, kind, description, taskFamilies, taskClasses, capabilities, strengths, installed, runSupported, registered, available}]}` |
+
+`meta.route` uses the existing `TaskDescriptor`, local hashed vectors, and
+keyword/family/capability overlap. It never calls a provider, spawns a harness,
+or executes a tool. The same route is computed once in the turn preparation
+seam and, when enabled, appended as a bounded advisory system-prompt hint.
+Execution is the approval-gated `harness_delegate` model tool, not these RPCs.
+`meta.harnesses` availability is spawn-free (`interop.state_summary`, cached
+for 30 seconds), so it is safe for a route inspector.
+
 ## Integrated editor workspace (2026-10-15)
 
 Backend-issued workspace identity with bounded file access, revision-checked

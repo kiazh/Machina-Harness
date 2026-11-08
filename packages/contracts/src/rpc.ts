@@ -584,6 +584,70 @@ export interface HarnessRunResult {
  unsupportedReason: string | null;
 }
 
+// ─── Meta-harness routing (meta.route / meta.harnesses) ─────────────────────
+
+export interface MetaHarnessCandidate {
+ name: string;
+ label: string;
+ score: number;
+ vector: number;
+ keyword: number;
+ family: number;
+ capability: number;
+ available: boolean;
+ runSupported: boolean;
+ reason: string;
+}
+
+export interface MetaHarnessStep {
+ intent: string;
+ taskClass: string;
+ family: string;
+ primary: string;
+ mode: "external" | "internal";
+ confidence: number;
+}
+
+export interface MetaHarnessRoute {
+ query: string;
+ taskClass: string;
+ taskFamilies: string[];
+ capabilities: string[];
+ complexity: string;
+ primary: string;
+ mode: "external" | "internal";
+ confidence: number;
+ localOnly: boolean;
+ reason: string;
+ candidates: MetaHarnessCandidate[];
+ steps: MetaHarnessStep[];
+ /** Compact advisory line; empty for internal routes. */
+ promptHint: string;
+}
+
+export interface MetaHarnessRouteResult {
+ route: MetaHarnessRoute;
+}
+
+export interface MetaHarnessCard {
+ name: string;
+ label: string;
+ kind: "internal" | "external";
+ description: string;
+ taskFamilies: string[];
+ taskClasses: string[];
+ capabilities: string[];
+ strengths: string[];
+ installed: boolean;
+ runSupported: boolean;
+ registered: boolean | null;
+ available: boolean;
+}
+
+export interface MetaHarnessListResult {
+ harnesses: MetaHarnessCard[];
+}
+
 // ─── ChatGPT-account sign-in (auth.chatgpt.* control plane) ─────────────────
 
 /** Sign-in status from auth.chatgpt.status; explicit fields, never tokens. */

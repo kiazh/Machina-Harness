@@ -399,6 +399,7 @@ def build_system_prompt(
     tool_names: set[str],
     *,
     triage: str | None = None,
+    meta_route: str | None = None,
 ) -> str:
     """Full system prompt: persona + capability + skills (+ triage hint).
 
@@ -409,7 +410,8 @@ def build_system_prompt(
     ``triage`` is the advisory task class recorded by the controller wiring
     hook. A matching hint (deterministic, <= 60 tokens) is appended after the
     skill section; it is prompt text only, never enforcement and never a new
-    model call.
+    model call. ``meta_route`` is the optional local meta-harness route line;
+    it is appended last and an empty/None value leaves the prompt byte-identical.
     """
     _role, persona_text = build_persona_section(
         soul_spec, allowed_tools, growth_notes, growth_state, rsi_choice or {}
@@ -432,6 +434,8 @@ def build_system_prompt(
     hint = _TRIAGE_HINTS.get(triage) if triage else None
     if hint:
         composed = f"{composed}\n\n{hint}"
+    if meta_route:
+        composed = f"{composed}\n\n{meta_route}"
     return composed
 
 

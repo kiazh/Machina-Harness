@@ -371,6 +371,11 @@ DEFAULTS: dict[str, Any] = {
     # appends an explicit answer-first policy that preserves requirements,
     # caveats, negations, numbers, code, commands, and paths.
     "output_policy": "legacy",
+    # Deterministic per-prompt meta-harness routing. Detection and matching
+    # are local (PATH/state + hashed vectors); no provider call and no harness
+    # spawn. Execution remains the approval-gated harness_delegate tool.
+    "meta_harness_enabled": True,
+    "meta_harness_hint": True,
     # Optional JSON price overrides for cost estimates (USD per million
     # tokens), keyed by provider or "provider/model", e.g.
     # {"anthropic": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}}.
@@ -764,6 +769,8 @@ class Config:
     retrieval_selection_enabled: bool = True
     retrieval_token_budget: int = 6000
     output_policy: str = "legacy"
+    meta_harness_enabled: bool = True
+    meta_harness_hint: bool = True
     pricing_table_json: str = ""
     # Execution modes (Phase 5)
     execution_mode: str = "ask"

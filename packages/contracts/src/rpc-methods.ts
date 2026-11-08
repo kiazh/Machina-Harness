@@ -77,6 +77,8 @@ export const RPC_METHODS = [
   "memory.search",
   "memory.share",
   "memory.stats",
+  "meta.harnesses",
+  "meta.route",
   "mode.get",
   "mode.revoke",
   "mode.set",

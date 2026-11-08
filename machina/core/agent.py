@@ -376,7 +376,13 @@ class BaseReActAgent:
         # An explicit child allow-list enforces the same boundary at execution,
         # even if a model emits a tool name absent from its advertised schema.
         if delegated:
-            child_forbidden = {"learn_personality", "delegate", "delegate_status", "list_agents"}
+            child_forbidden = {
+                "learn_personality",
+                "delegate",
+                "delegate_status",
+                "list_agents",
+                "harness_delegate",
+            }
             candidate_tools = (
                 allowed_tools
                 if allowed_tools is not None
@@ -812,6 +818,29 @@ class BaseReActAgent:
         # Prompt sections assemble in machina.core.prompt (moves-only): the
         # composition order below matches the previous inline version exactly,
         # so the assembled text is byte-identical.
+        meta_route_hint: str | None = None
+        if not self.delegated:
+            try:
+                if bool(config.get("meta_harness_enabled")):
+                    from machina.core.meta_harness import route_prompt
+
+                    triage = getattr(self, "_last_triage", None)
+                    meta_route = route_prompt(
+                        user_message,
+                        task_state=session.state,
+                        recent=recent,
+                        goal=session.goal,
+                        task_class=None if triage == "ambiguous" else triage,
+                    )
+                    self._last_meta_route = meta_route
+                    can_delegate_harness = (
+                        self.allowed_tools is None
+                        or "harness_delegate" in self.allowed_tools
+                    )
+                    if bool(config.get("meta_harness_hint")) and can_delegate_harness:
+                        meta_route_hint = meta_route.prompt_hint() or None
+            except Exception as _boundary_error:
+                record_failure("agent.meta_harness.prepare", _boundary_error)
         if self.delegated:
             system_prompt = self.system_prompt
         else:
@@ -828,6 +857,7 @@ class BaseReActAgent:
                 _rsi_skills.get(),
                 {tool.name for tool in self._tool_defs()},
                 triage=getattr(self, "_last_triage", None),  # advisory; None = unchanged
+                meta_route=meta_route_hint,
             )
         messages = build_context_messages(
             system_prompt,

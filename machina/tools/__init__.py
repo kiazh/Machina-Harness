@@ -10,8 +10,9 @@ from machina.tools import (
     code_intelligence,  # read-only workspace code intelligence
     file,  # read_file, write_file, list_files
     harness,  # read-only feature/configuration/learning inspection
-    mcp,  # noqa: F401 — lazy connector catalogs and exact remote calls
+    mcp,  # noqa: F401 - lazy connector catalogs and exact remote calls
     memory,  # remember, recall
+    meta_harness,  # approval-gated external harness execution
     rag,  # index_document, search_documents
     repo,  # repo_stage, repo_activate
     repomap,  # learn_directory
@@ -32,6 +33,7 @@ __all__ = [
     "code_intelligence",
     "file",
     "harness",
+    "meta_harness",
     "terminal",
     "memory",
     "rag",

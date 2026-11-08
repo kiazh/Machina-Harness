@@ -114,6 +114,10 @@ from machina.gateway.features.memory import (
     memory_share,
     memory_stats,
 )
+from machina.gateway.features.meta_harness import (
+    meta_harnesses,
+    meta_route,
+)
 from machina.gateway.features.mode import (
     approvals_list,
     approvals_resolve,
@@ -240,6 +244,8 @@ METHODS: dict[str, Handler] = {
     "interop.list": interop_list,
     "interop.run": interop_run,
     "interop.communications": interop_communications,
+    "meta.route": meta_route,
+    "meta.harnesses": meta_harnesses,
     "session.fork": session_fork,
     "session.delete": session_delete,
     "session.rename": session_rename,
