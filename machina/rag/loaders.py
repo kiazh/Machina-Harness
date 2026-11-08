@@ -367,7 +367,13 @@ class FileLoader:
             return _os_open(real, os.O_RDONLY | _nofollow() | _nonblock())
         except FileNotFoundError as e:
             raise _validation_error(f"File not found: {resolved}") from e
-        except OSError as e:
+        except PermissionError as e:
+            # Windows reports opening a directory as PermissionError. Keep
+            # the established "Not a file" contract used by every platform.
+            if resolved.is_dir():
+                raise _validation_error(f"Not a file: {resolved}") from e
+            raise _validation_error(f"Path is not accessible: {resolved}") from e
+        except (OSError, RuntimeError) as e:
             raise _validation_error(f"Path is not accessible: {resolved}") from e
 
     def _walk_open(self, base: Path, rel: Path) -> int:

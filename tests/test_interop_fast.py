@@ -12,7 +12,9 @@ from machina.gateway.features import interop as interop_feature
 
 
 @pytest.fixture(autouse=True)
-def _clean_cache():
+def _clean_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path / "machina-home"))
+    monkeypatch.setenv(interop.STATE_ENV_OVERRIDE, str(tmp_path / "interop.json"))
     interop.clear_detection_cache()
     yield
     interop.clear_detection_cache()
@@ -120,3 +122,35 @@ def test_detect_platform_runs_independent_probes_together(monkeypatch) -> None:
 
     assert result.version == "v1"
     assert elapsed < 0.30
+
+
+@pytest.mark.asyncio
+async def test_legacy_detect_override_preserves_old_wire_shape(monkeypatch) -> None:
+    rows = {"opencode": _result("opencode", version="legacy-v1")}
+    monkeypatch.setattr(interop_feature, "detect", lambda: rows)
+    monkeypatch.setattr(interop_feature, "supported_runs", lambda: {})
+    monkeypatch.setattr(interop_feature, "state_path", lambda: "/tmp/interop-state.json")
+
+    result = await interop_feature.interop_list(object(), {})
+    status = await interop_feature.interop_status(object(), {})
+
+    assert result == {
+        "harnesses": [
+            {
+                "key": "opencode",
+                "label": "OpenCode",
+                "installed": True,
+                "version": "legacy-v1",
+                "running": False,
+                "registered": False,
+                "scope": None,
+                "runSupported": False,
+                "runHint": None,
+            }
+        ],
+        "stateFile": "/tmp/interop-state.json",
+        "runTimeoutSeconds": interop_feature.DEFAULT_RUN_TIMEOUT_SECONDS,
+    }
+    assert set(status) == {"platforms"}
+    assert status["platforms"][0]["platform"] == "opencode"
+    assert status["platforms"][0]["version"] == "legacy-v1"

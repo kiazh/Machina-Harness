@@ -137,8 +137,8 @@ def _one_line(text: str, limit: int) -> str:
 def _render_item(memory: RetrievedMemory) -> str:
     entry = memory.memory
     content = _one_line(entry.content, _CONTENT_CHAR_LIMIT)
-    # Keep the prompt-visible wrapper compact; the caller receives the selected
-    # memory objects for audit and scoring.
+    # Keep the prompt-visible wrapper compact; the caller retains the selected
+    # objects for importance and score use.
     rendered = f"- [{entry.category}] {content}"
     interpretation = memory.persona_interpretation
     if interpretation:

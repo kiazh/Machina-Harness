@@ -20,7 +20,7 @@ forgetting intact, and it works without a GPU or an extra provider call.
 5. Render a bounded digest with a compact category marker and explicit
    omission count.
 6. Keep the selected memory objects and digest character count internal for
-   audit and scoring; the prompt sees only the compact text.
+   selection and scoring; the prompt sees only the compact text.
 7. Audit `memory_digest` with counts, never content.
 
 The selector is deterministic and has no model, database, network, or
@@ -63,15 +63,15 @@ Observed on the development machine:
 overall coverage:       0.816 -> 0.915  (+9.9 points)
 hard multi-fact:        0.532 -> 0.746  (+21.4 points)
 hard multi-fact chars:  ~196 -> ~362 per scenario (bounded by 900)
-average digest cost:    ~0.24 ms
+p50 digest cost:        ~0.23-0.29 ms
 redundancy:             0.142 -> 0.126
 provider calls/tokens:  0 / 0
 ```
 
-The digest deliberately spends characters on provenance and can select more
-facts than the old top-5 path, so it is not a token-reduction claim. It is a
-coverage-under-budget claim: the output is hard-bounded, and the selected fact
-count and omissions are always visible. On ordinary cases where top-5 already
+The digest deliberately spends characters on category markers and broader
+fact coverage and can select more facts than the old top-5 path, so it is not
+a token-reduction claim. It is a coverage-under-budget claim: the output is
+hard-bounded, and the selected fact count and omissions are always visible. On ordinary cases where top-5 already
 covered every required fact, the digest still collapses duplicates and has a
 small metadata overhead.
 

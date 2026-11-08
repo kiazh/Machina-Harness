@@ -50,10 +50,12 @@ def _spill_path() -> Path:
     """
     from machina.core.config import config
 
-    try:
-        home = str(config.get("machina_home") or "").strip()
-    except Exception:
-        home = ""
+    home = os.environ.get("MACHINA_HOME", "").strip()
+    if not home:
+        try:
+            home = str(config.get("machina_home") or "").strip()
+        except Exception:
+            home = ""
     root = Path(home).expanduser() if home else Path.home() / ".machina"
     return root / "logs" / _SPILL_FILENAME
 

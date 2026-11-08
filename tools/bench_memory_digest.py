@@ -238,9 +238,10 @@ def main() -> int:
             }
         )
 
-    started = time.perf_counter()
     iterations = 500
+    timings: list[float] = []
     for _ in range(iterations):
+        started = time.perf_counter()
         build_memory_digest(
             [
                 _entry(content, score, category)
@@ -250,7 +251,8 @@ def main() -> int:
             max_items=6,
             max_chars=900,
         )
-    p50_ms = (time.perf_counter() - started) * 1000.0 / iterations
+        timings.append((time.perf_counter() - started) * 1000.0)
+    p50_ms = statistics.median(timings)
 
     hard_rows = [row for row in rows if row["hard"]]
     easy_rows = [row for row in rows if not row["hard"]]

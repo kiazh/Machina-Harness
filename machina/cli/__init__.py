@@ -2547,7 +2547,9 @@ def uninstall():
     except Exception:  # fall back to the checkout .env
         env_file = app_root / ".env"
     shim = Path.home() / ".local" / "bin" / "machina"
-    local_config = Path.home() / ".machina"
+    from machina.core.config import default_config_path
+
+    local_config = default_config_path().parent
 
     # Discover what's actually there so we only ask about real things.
     has_docker = _docker_container_exists()

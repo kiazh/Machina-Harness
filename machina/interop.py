@@ -733,9 +733,17 @@ def _state_lock() -> Iterator[None]:
     acquired = False
     try:
         if _WINDOWS:  # pragma: no cover - platform branch
-            # msvcrt locks a byte range from the current file position.
+            # msvcrt locks a byte range from the current file position. Two
+            # first writers can both observe an empty file; once one has
+            # written the sentinel and taken the lock, the other's write can
+            # raise PermissionError. That is benign as long as the byte now
+            # exists, so re-check instead of dropping the writer.
             if os.fstat(fd).st_size == 0:
-                os.write(fd, b"\0")
+                try:
+                    os.write(fd, b"\0")
+                except PermissionError:
+                    if os.fstat(fd).st_size == 0:
+                        raise
             os.lseek(fd, 0, os.SEEK_SET)
             msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
         else:

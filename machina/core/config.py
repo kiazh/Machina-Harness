@@ -36,8 +36,6 @@ def default_config_path() -> Path:
     return Path.home() / ".machina" / "config.yaml"
 
 
-DEFAULT_CONFIG_PATH = default_config_path()
-
 # Canonical reasoning-effort vocabulary — the single source of truth shared by
 # config validation and provider normalization (machina.core.provider.reasoning
 # derives its exported set from these; config never imports the provider
@@ -145,6 +143,39 @@ except Exception:
     except Exception as _boundary_error:
         # Optional fallback preserves the primary outcome; report no payload.
         record_failure("config.module", _boundary_error)
+
+# Resolve after dotenv loading so a MACHINA_HOME defined only in .env is
+# honored. The exported constant remains the explicit test/tool override seam;
+# production calls resolve the environment fresh on each load/save.
+_ORIGINAL_CONFIG_PATH = default_config_path()
+DEFAULT_CONFIG_PATH = _ORIGINAL_CONFIG_PATH
+_LEGACY_CONFIG_WARNED: set[str] = set()
+
+
+def _resolved_config_path() -> Path:
+    """Config path for this call, preserving an explicit constant override."""
+    if DEFAULT_CONFIG_PATH is not _ORIGINAL_CONFIG_PATH:
+        return DEFAULT_CONFIG_PATH
+    return default_config_path()
+
+
+def _warn_legacy_config_if_needed(load_path: Path) -> None:
+    """Disclose a newer ``MACHINA_HOME`` root hiding an existing legacy config."""
+    if DEFAULT_CONFIG_PATH is not _ORIGINAL_CONFIG_PATH:
+        return
+    if not os.environ.get("MACHINA_HOME", "").strip() or load_path.exists():
+        return
+    legacy = Path.home() / ".machina" / "config.yaml"
+    key = str(load_path)
+    if legacy.exists() and key not in _LEGACY_CONFIG_WARNED:
+        _LEGACY_CONFIG_WARNED.add(key)
+        logger.warning(
+            "MACHINA_HOME is set but %s does not exist; an older config exists "
+            "at %s. Copy or move the legacy file to keep its settings.",
+            load_path,
+            legacy,
+        )
+
 
 __all__ = [
     "Config",
@@ -893,7 +924,7 @@ class Config:
 
     def save(self, path: str | Path | None = None) -> None:
         """Save config to YAML file."""
-        save_path = Path(path) if path else default_config_path()
+        save_path = Path(path) if path else _resolved_config_path()
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {}
@@ -926,7 +957,9 @@ class Config:
     def load(cls, path: str | Path | None = None, *, _target: Config | None = None) -> Config:
         """Load config from YAML file, merging with env vars and defaults."""
         config = _target if _target is not None else cls()
-        load_path = Path(path) if path else default_config_path()
+        load_path = Path(path) if path else _resolved_config_path()
+        if path is None:
+            _warn_legacy_config_if_needed(load_path)
 
         # Load from file if it exists. AH-AUDIT-042: invalid values are
         # rejected with a warning and the default kept — never activated.
