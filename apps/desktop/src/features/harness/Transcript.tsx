@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Check, ChevronRight, Circle, OctagonAlert } from "lucide-react";
 import type { TranscriptStore } from "../../state/transcript.ts";
@@ -19,7 +19,7 @@ const MessageRow = memo(function MessageRow({ id, store }: { id: string; store: 
   </article>;
 });
 
-export function Transcript({ store }: { store: TranscriptStore }) {
+export function Transcript({ store, empty }: { store: TranscriptStore; empty: ReactNode }) {
   const ids = useSyncExternalStore(store.subscribe, store.order);
   const parent = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -36,8 +36,8 @@ export function Transcript({ store }: { store: TranscriptStore }) {
     observer.observe(inner.current); return () => {observer.disconnect();cancelAnimationFrame(frame)};
   }, [ids.length>0]);
   useLayoutEffect(() => { if (follow.current && ids.length) virtualizer.scrollToIndex(ids.length - 1, { align: "end" }); }, [ids.length]);
-  return <><div className="transcript" ref={parent} onScroll={event => { const element = event.currentTarget; const distance=element.scrollHeight-element.scrollTop-element.clientHeight;follow.current=distance<70;if(distance>200)setDetached(true);else if(distance<70)setDetached(false); }}>
-    {!ids.length ? <div className="harness-empty"><div className="hero-identity"><h2>DEUS EX<br/>MACHINA</h2></div><p>Bring an idea. Leave with something working.</p></div> :
+  return <><div className={`transcript${ids.length ? "" : " is-empty"}`} ref={parent} onScroll={event => { const element = event.currentTarget; const distance=element.scrollHeight-element.scrollTop-element.clientHeight;follow.current=distance<70;if(distance>200)setDetached(true);else if(distance<70)setDetached(false); }}>
+    {!ids.length ? empty :
       <div ref={inner} style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
         {virtualizer.getVirtualItems().map(item => <div key={item.key} data-index={item.index} ref={virtualizer.measureElement} style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}><MessageRow id={ids[item.index]!} store={store}/></div>)}
       </div>}

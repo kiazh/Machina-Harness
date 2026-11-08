@@ -15,4 +15,37 @@
   --hover: oklch(89% .015 80 / .4);
   --input: oklch(99% .004 83);
   --input-line: oklch(85% .013 75);
+
+  /* Shared type scale. Product labels stay on the UI family; mono is reserved
+     for code, commands, paths and shortcuts. */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --leading-tight: 1.16;
+  --leading-body: 1.7;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --control-sm: 28px;
+  --control: 34px;
+  --control-lg: 40px;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --tabular: tabular-nums;
 }

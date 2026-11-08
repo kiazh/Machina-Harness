@@ -14,20 +14,22 @@ export function Sidebar({ controller, onSettings, onCode, appearance }: { contro
     <div className="sidebar-top"><button className="new-session-button" disabled={state.running||!!state.backgroundOperation} onClick={() => { controller.newSession(); setSection("sessions"); }}><Plus size={16}/><span>New session</span></button></div>
     <nav className="sidebar-nav" aria-label="Workspace navigation">
       <button aria-current={section === "sessions"&&state.page==='chat' ? "page" : undefined} onClick={() => {controller.navigate('chat');setSection("sessions")}}><MessageSquare size={16}/><span>Conversations</span></button>
+      <div className="sidebar-divider" role="presentation"/>
       <button aria-current={state.page==='skills'?'page':undefined} onClick={()=>controller.navigate('skills')}><Sparkles size={16}/><span>Capabilities</span></button>
       <button onClick={onCode}><Code2 size={16}/><span>Code workspace</span></button>
       <button aria-current={section === "files"&&state.page==='chat' ? "page" : undefined} onClick={() => {controller.navigate('chat');setSection("files")}}><Files size={16}/><span>Files</span></button>
       <button aria-current={state.page==='changes'?'page':undefined} onClick={()=>controller.navigate('changes')}><GitBranch size={16}/><span>Changes</span></button>
       <button aria-current={section === "activity"&&state.page==='chat' ? "page" : undefined} onClick={() => {controller.navigate('chat');setSection("activity")}}><Activity size={16}/><span>Activity</span>{state.running && <span className="working-dot"/>}</button>
+      <div className="sidebar-divider" role="presentation"/>
       <button aria-expanded={more} onClick={()=>setMore(v=>!v)}><MoreHorizontal size={16}/><span>More</span></button>
       {more&&<div className="more-features">{(['memory','context','jobs','agents','usage','status','help'] as const).map(page=><button key={page} onClick={()=>controller.navigate(page)}>{({models:'Models',memory:'Memory',context:'Context',jobs:'Scheduled jobs',agents:'Agents',mcp:'Connectors',providers:'Providers',keys:'API keys',auth:'Accounts',usage:'Usage',status:'Status',help:'Commands'})[page]}</button>)}</div>}
     </nav>
     <div className="sidebar-body" hidden={section !== "sessions"}>
-      <div className="sidebar-section-heading">RECENT CONVERSATIONS</div>
-      {!!state.sessions.length && <label className="file-filter"><Search size={13}/><input aria-label="Search conversations" placeholder="Search…" value={query} onChange={event => setQuery(event.target.value)}/></label>}
-      <button className="sidebar-browse" onClick={()=>controller.navigate("sessions")}>Search all conversations</button><div className="session-list">{state.sessions.filter(session => session.title.toLowerCase().includes(query.toLowerCase())).map(session => <button key={session.id} className={state.session?.id === session.id ? "selected" : ""} disabled={state.running||!!state.backgroundOperation} title={session.title} onClick={() => { void controller.resume(session.id).catch(error => controller.fail(error)); }}><span>{session.title || "Untitled conversation"}</span></button>)}</div>
+      <div className="sidebar-section-heading">RECENT</div>
+      {!!state.sessions.length && <label className="file-filter"><Search size={13}/><input aria-label="Search conversations" placeholder="Search conversations" value={query} onChange={event => setQuery(event.target.value)}/></label>}
+      <div className="session-list">{state.sessions.filter(session => session.title.toLowerCase().includes(query.toLowerCase())).map(session => <button key={session.id} className={state.session?.id === session.id ? "selected" : ""} disabled={state.running||!!state.backgroundOperation} title={session.title} onClick={() => { void controller.resume(session.id).catch(error => controller.fail(error)); }}><span>{session.title || "Untitled conversation"}</span></button>)}</div>
       {!!state.sessions.length&&!state.sessions.some(session=>session.title.toLowerCase().includes(query.toLowerCase()))&&<p className="sidebar-empty">No conversations match this search.</p>}
-      {!state.sessions.length && <p className="sidebar-empty">Your conversations will appear here.</p>}
+      {!state.sessions.length && <p className="sidebar-empty">Start a conversation to keep it here.</p>}
     </div>
     <div className="sidebar-body files-body" hidden={section !== "files"}><Explorer key={`${state.workspace?.workspaceId}:${state.workspace?.epoch}`} controller={controller} ready={state.connection === "ready"}/></div>
     <div className="sidebar-body" hidden={section !== "activity"}><div className="sidebar-section-heading">LIVE WORK</div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {Code2,Paperclip,X} from 'lucide-react';
+import {ArrowUp,Code2,LoaderCircle,Paperclip,X} from 'lucide-react';
 import {matchesShortcut,formatShortcut} from '../../state/shortcuts.ts';
 import {MAX_IMAGE_TOTAL,readImage,type DraftImage,type PromptImage} from './attachments.ts';
 
@@ -36,7 +36,7 @@ export function Composer({running,disabled,onSend,onInterrupt,initialDraft='',on
    if(latest.current===text)update('');if(latestImages.current===captured)setImages([]);
   }catch(reason){setError(reason instanceof Error?reason.message:'Could not send. Your draft is retained.')}finally{if(alive.current)setSending(false)}
  }
- return <form className="composer" onSubmit={event=>{event.preventDefault();void submit()}} onDragOver={event=>{if(event.dataTransfer.types.includes('Files'))event.preventDefault()}} onDrop={event=>{if(event.dataTransfer.files.length){event.preventDefault();void attachFiles(Array.from(event.dataTransfer.files))}}}>
+ return <form className="composer" aria-busy={sending||loading} onSubmit={event=>{event.preventDefault();void submit()}} onDragOver={event=>{if(event.dataTransfer.types.includes('Files'))event.preventDefault()}} onDrop={event=>{if(event.dataTransfer.files.length){event.preventDefault();void attachFiles(Array.from(event.dataTransfer.files))}}}>
   {error&&<p role="alert" className="inline-error">{error}</p>}
   {!!images.length&&<ul className="composer-attachments" aria-label="Image attachments">{images.map((image,index)=><li key={index}><Paperclip size={12}/><span title={`${image.mediaType}, ${Math.ceil(image.bytes/1024)} KiB`}>{image.name}</span><button type="button" aria-label={`Remove image ${index+1}: ${image.name}`} disabled={sending||loading} onClick={()=>setImages(previous=>previous.filter((_,position)=>position!==index))}><X size={12}/></button></li>)}</ul>}
   {images.length>0&&running&&<p className="composer-attachment-note" role="status">Images can be sent after this turn. Remove them to queue text steering.</p>}
@@ -47,7 +47,7 @@ export function Composer({running,disabled,onSend,onInterrupt,initialDraft='',on
   <div className="composer-bottom"><div className="composer-tools"><input ref={input} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden aria-label="Choose image attachments" disabled={sending||loading} onChange={event=>{void attachFiles(Array.from(event.target.files??[]));event.target.value=''}}/>
    <button type="button" aria-label="Attach images" title="Attach images (up to 5, 4 MiB total)" disabled={sending||loading} onClick={()=>input.current?.click()}><Paperclip size={14}/></button>
    {onAttachSelection&&<button type="button" aria-label="Attach selected code" title="Attach only the selected code, including unsaved edits" disabled={sending||loading} onClick={attachSelection}><Code2 size={14}/></button>}
-   <span>{running&&images.length?'Images ready for the next turn':running?`Enter queues${interruptShortcut?` · ${formatShortcut(interruptShortcut)} interrupts`:''}`:'Enter sends · Shift+Enter for a new line'}</span></div>
-   <button className="send-button" type="submit" aria-label={running&&images.length?'Send images after current turn':running?'Queue message':'Send message'} disabled={disabled||sending||loading||!draft.trim()||!!(running&&images.length)}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button></div>
+   <span>{running&&images.length?'Images ready for the next turn':running?`Enter queues${interruptShortcut?` · ${formatShortcut(interruptShortcut)} interrupts`:''}`:'Enter to send · Shift+Enter for a new line'}</span></div>
+   <button className="send-button" type="submit" aria-label={running&&images.length?'Send images after current turn':running?'Queue message':'Send message'} aria-busy={sending} disabled={disabled||sending||loading||!draft.trim()||!!(running&&images.length)}>{sending?<LoaderCircle className="spin" size={16}/>:<ArrowUp size={17} strokeWidth={1.9}/>}</button></div>
  </form>;
 }
