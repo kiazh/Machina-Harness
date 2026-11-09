@@ -3,6 +3,10 @@
 Scope: same model, same seven hidden-test tasks, isolated temporary
 workspaces. This is a local harness comparison, not a Terminal-Bench result.
 
+> Follow-up: this easy suite hit a 7/7 ceiling. The harder SWE-bench Lite
+> subset in `SWE_BENCH_LITE_SUBSET_2026-11-08.md` is the better comparison:
+> Kiro and Hermes resolved 3/6 hidden issues, Machina 1/6.
+
 ## Setup
 
 | Item | Value |
