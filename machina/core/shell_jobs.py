@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import codecs
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -57,6 +58,20 @@ class ShellJob:
         if include_output:
             result["output"] = redact_diagnostic(self.output)
         return result
+
+
+def _resolve_windows_launch_args(
+    args: list[str], env: dict[str, str], *, windows: bool | None = None
+) -> list[str]:
+    """Resolve the first argv against the child PATH when Windows will wrap it."""
+    launch_args = list(args)
+    if not launch_args or not (os.name == "nt" if windows is None else windows):
+        return launch_args
+    path_value = next((value for key, value in env.items() if key.upper() == "PATH"), "")
+    resolved = shutil.which(launch_args[0], path=path_value)
+    if resolved:
+        launch_args[0] = resolved
+    return launch_args
 
 
 class ShellJobs:
@@ -147,14 +162,19 @@ class ShellJobs:
             else {"start_new_session": True}
         )
         self.starting += 1
-        launch_args = args
+        launch_args = _resolve_windows_launch_args(args, env)
         if os.name == "nt":
+            # Windows CreateProcess searches the launcher's directory before
+            # PATH. The launcher is Machina's interpreter, so a bare `python`
+            # or `pytest` would otherwise resolve to the host install instead
+            # of the task's virtualenv. _resolve_windows_launch_args resolves
+            # names against the child PATH before the bootstrap.
             bootstrap = (
                 "import subprocess,sys; gate=sys.stdin.buffer.read(1); "
                 "raise SystemExit(subprocess.call(sys.argv[1:], stdin=subprocess.DEVNULL) "
                 "if gate == bytes([0]) else 1)"
             )
-            launch_args = [sys.executable, "-c", bootstrap, *args]
+            launch_args = [sys.executable, "-c", bootstrap, *launch_args]
         launch = asyncio.create_task(
             asyncio.to_thread(
                 subprocess.Popen,

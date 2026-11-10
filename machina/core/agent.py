@@ -54,6 +54,7 @@ from machina.core.prompt import (
     condense_history,
     prompt_section_tokens,
     stale_tool_preview,
+    swe_repair_protocol,
     tool_message_limit,
 )
 from machina.core.provider import LLMProvider, audit_log, get_provider
@@ -921,7 +922,11 @@ class BaseReActAgent:
                 {tool.name for tool in self._tool_defs()},
                 triage=getattr(self, "_last_triage", None),  # advisory; None = unchanged
                 meta_route=meta_route_hint,
+                include_repair=False,
             )
+        # Keep the task-critical repair protocol outside the truncatable system
+        # prefix. A long persona/skill section must not silently remove it.
+        required_tail = "" if self.delegated else swe_repair_protocol(user_message)
         messages = build_context_messages(
             system_prompt,
             summary,
@@ -934,6 +939,7 @@ class BaseReActAgent:
             omitted_evidence,
             images,
             session.context_budget,
+            required_tail=required_tail,
         )
         return session, messages
 

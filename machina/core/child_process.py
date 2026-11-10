@@ -47,6 +47,12 @@ CHILD_ENV_ALLOWLIST = frozenset(
         "LC_CTYPE",
         "TERM",
         "VIRTUAL_ENV",
+        # Source-layout projects (src/ packages, editable checkouts) need
+        # their import path when the terminal tool runs the project's tests.
+        "PYTHONPATH",
+        # Test runners may disable third-party plugin autoload to keep an old
+        # project's suite runnable in an isolated environment.
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
         "SYSTEMROOT",
         "WINDIR",
         "USERPROFILE",

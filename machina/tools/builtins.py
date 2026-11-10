@@ -633,7 +633,7 @@ async def _match_files_bounded(pattern: str, files: list[dict[str, object]]) -> 
 
 @registry.register(
     name="search_files",
-    description="Search file contents with regex",
+    description="Search file contents recursively with regex",
     parameters={
         "type": "object",
         "properties": {
@@ -694,7 +694,7 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
         # search; each candidate used to re-import and re-resolve both stores.
         sensitive_root = workspace_root()
         sensitive_stores = credential_store_paths()
-        for f in dir_path.glob(glob_pattern):
+        for f in dir_path.rglob(glob_pattern):
             if len(files) >= _SEARCH_MAX_FILES:
                 break
             try:

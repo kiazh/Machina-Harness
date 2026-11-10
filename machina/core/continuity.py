@@ -13,7 +13,7 @@ import json
 import uuid
 from typing import Any
 
-from machina.core.assembler import PromptAssembler, truncate_to_tokens
+from machina.core.assembler import PromptAssembler, get_token_count, truncate_to_tokens
 from machina.core.prompt import (
     _request_context_tokens,
     assemble_turn_prompt,
@@ -148,9 +148,24 @@ def build_context_messages(
     omitted_evidence: int,
     images: list[dict[str, str]],
     context_budget: int,
+    required_tail: str = "",
 ) -> list[dict[str, Any]]:
-    """Build the native message list with a bounded dynamic tail."""
-    system_prompt = truncate_to_tokens(system_prompt, max(1024, min(8000, context_budget // 3)))
+    """Build the native message list with a bounded dynamic tail.
+
+    ``required_tail`` is task-critical instruction text (for example the
+    repository-repair protocol). It is appended *after* the normal system
+    truncation so a long persona/skill prompt cannot silently cut it off, and
+    the base prompt is shortened to reserve room for it.
+    """
+    system_cap = max(1024, min(8000, context_budget // 3))
+    tail = truncate_to_tokens(required_tail, max(256, min(2048, system_cap // 2)))
+    if tail.strip():
+        tail_tokens = get_token_count(tail)
+        base_cap = max(256, system_cap - tail_tokens)
+        base = truncate_to_tokens(system_prompt, base_cap).rstrip()
+        system_prompt = f"{base}\n\n{tail}" if base else tail
+    else:
+        system_prompt = truncate_to_tokens(system_prompt, system_cap)
     if summary:
         summary = truncate_to_tokens(summary, min(1024, max(64, context_budget // 8)))
     if (

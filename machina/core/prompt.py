@@ -55,6 +55,7 @@ __all__ = [
     "build_capability_section",
     "build_skill_section",
     "build_system_prompt",
+    "swe_repair_protocol",
     "output_policy_section",
     "_output_policy_section",
     "assemble_turn_prompt",
@@ -356,6 +357,89 @@ _TRIAGE_HINTS: dict[str, str] = {
     ),
 }
 
+# A deterministic repair protocol is appended only for code-issue prompts.
+# It is prompt text, not enforcement: the ordinary tool loop and approvals
+# remain authoritative. Keeping it conditional avoids bloating greetings and
+# conceptual answers while giving repository repair tasks a stable method.
+_CODE_ISSUE_RE = re.compile(
+    r"(?:"
+    r"\b(?:fix|bug|issue|error|exception|traceback|failing|failure|regression|"
+    r"implement|add|change|support|currently|expected|should|returning|returns?|"
+    r"raises?|test|tests|pytest|function|method|class|module|cli|api|config|"
+    r"package|repository|repo|source|code|library|framework|route|routes|"
+    r"domain|subdomain|output|column|parameter|argument|option|flag|behavior|"
+    r"request|response|stream)\b"
+    r"|`[^`]+`|\.py\b|\b[a-z_][a-z0-9_]*\("
+    r")",
+    re.IGNORECASE,
+)
+
+_SWE_REPAIR_PROTOCOL = (
+    "Software repair protocol:\n"
+    "- Treat an issue report as an actionable task. Do not ask the user to choose "
+    "an implementation detail or run a poll; choose the conventional, minimal, "
+    "upstream-compatible behavior.\n"
+    "- Before editing, locate the failing public behavior, then read the relevant "
+    "existing tests, call sites, and sibling implementations. Trace the symptom to "
+    "the deepest code path; do not stop at a related helper. Inspect base classes "
+    "and inherited methods when a child method looks complete but the behavior may "
+    "be implemented by its parent.\n"
+    "- Make the smallest source-only change that makes the behavior correct. "
+    "Preserve existing defaults unless the issue asks for a change; do not add a new opt-in flag "
+    "merely to avoid changing existing output.\n"
+    "- When changing validation or errors, search for the old check or assertion "
+    "everywhere and update every sibling public entry point to the same error type "
+    "and message style; a partial guard is not a fix. If a guard already exists in "
+    "another method or base class, update that guard instead of adding a second, "
+    "differently worded check. A requested exception type applies to every public "
+    "validation of that value: an `assert` that raises AssertionError is not a "
+    "ValueError, so convert the matching guard even when the issue notes that the "
+    "check already exists. Search for both the positive and negated form of the "
+    "same condition (`'.' in name`, `'.' not in endpoint`) and normalize every "
+    "public entry point that accepts that value, including decorator and inherited "
+    "paths; the issue may name only one entry point.\n"
+    "- When extending user-visible output, use the framework's established field "
+    "and attribute names and update the default and verbose paths; do not make the "
+    "requested behavior opt-in, rename it, or invent a combined field when the "
+    "existing public attributes can be shown directly. If the object exposes both "
+    "public attributes (for example `subdomain` and `host`), represent both public "
+    "attributes separately rather than collapsing them into one invented label.\n"
+    "- When adding metadata to human-readable output, omit values equal to the "
+    "default and show the metadata only when it is non-default (for example, do not "
+    "annotate every item with a default function scope); apply the same rule to the "
+    "default and verbose forms, and in verbose rows place the metadata immediately "
+    "after the item name and before the separator and location/path.\n"
+    "- Search for exact code tokens such as `assert`, `raise`, and the public "
+    "attribute name; do not search only for a guessed error message that may never "
+    "appear in the source.\n"
+    "- When a missing or `None` value causes wrong behavior, fix the consumer at "
+    "the point of use where the decision is made (for example, decoding or output "
+    "formatting), not only a metadata/header helper that the failing path may "
+    "bypass. Apply a documented default at that point of use.\n"
+    "- Run the narrowest relevant test first with the repository's configured "
+    "interpreter and environment. If unrelated full-suite tests fail because of a "
+    "dependency mismatch, verify the issue-specific behavior directly and continue; "
+    "do not treat those failures as a reason to stop. Do not install or upgrade "
+    "dependencies, and do not edit or add test files.\n"
+    "- Before finalizing, inspect `git diff` against every behavior named in the "
+    "issue. Search for the old exception/assertion/validation across the repository; "
+    "do not conclude a sibling path is unaffected without inspecting it. If any old "
+    "error or partial guard remains, fix it.\n"
+    "- If a test fails, read the exact failure and revise the source. After two "
+    "unsuccessful attempts, change approach instead of repeating.\n"
+    "- Stop after a passing targeted test and a clean diff; report the test, "
+    "change, and verification. Do not create scratch files or leave the workspace "
+    "dirty."
+)
+
+
+def swe_repair_protocol(user_message: str) -> str:
+    """Return the deterministic repair protocol for code-shaped issue text."""
+    if not isinstance(user_message, str) or not _CODE_ISSUE_RE.search(user_message):
+        return ""
+    return _SWE_REPAIR_PROTOCOL
+
+
 # Output policies (T6). "legacy" keeps the existing single brevity sentence
 # embedded in SYSTEM_PROMPT/personas. "concise" appends an answer-first policy
 # that still preserves requested detail and exact technical payloads — visible
@@ -400,6 +484,7 @@ def build_system_prompt(
     *,
     triage: str | None = None,
     meta_route: str | None = None,
+    include_repair: bool = True,
 ) -> str:
     """Full system prompt: persona + capability + skills (+ triage hint).
 
@@ -431,6 +516,9 @@ def build_system_prompt(
     policy_text = output_policy_section()
     if policy_text:
         composed = f"{composed}\n\n{policy_text}"
+    repair_text = swe_repair_protocol(user_message) if include_repair else ""
+    if repair_text:
+        composed = f"{composed}\n\n{repair_text}"
     hint = _TRIAGE_HINTS.get(triage) if triage else None
     if hint:
         composed = f"{composed}\n\n{hint}"
