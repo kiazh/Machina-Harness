@@ -131,16 +131,18 @@ timeout; the task still failed and had no patch at that early cutoff.
 
 ## Fresh post-change validation
 
-Two untouched pytest tasks were gold-validated and then run with the same
+Four untouched pytest tasks were gold-validated and then run with the same
 DeepSeek model across Machina, OpenCode, and Hermes:
 
 | Instance | Machina | OpenCode | Hermes |
 | --- | --- | --- | --- |
-| `pytest-dev__pytest-7490` | FAIL | FAIL | FAIL |
+| `pytest-dev__pytest-7490` | **PASS** | **PASS** | **PASS** |
 | `pytest-dev__pytest-8365` | FAIL | **PASS** | FAIL |
-| **Total** | **1/2** | **2/2** | **1/2** |
+| `pytest-dev__pytest-8906` | **PASS** | **PASS** | **PASS** |
+| `pytest-dev__pytest-9359` | **PASS** | **PASS** | **PASS** |
+| **Total** | **3/4** | **4/4** | **3/4** |
 
-Wall time: Machina 332.90 s, OpenCode 108.68 s, Hermes 306.88 s. This is a
+Wall time: Machina 964.82 s, OpenCode 189.43 s, Hermes 640.11 s. This is a
 small fresh sample, but it confirms that the shell/nudge improvements did not
 make Machina the best harness.
 
