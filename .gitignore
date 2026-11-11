@@ -68,6 +68,9 @@ verify_issues.py
 scripts/*
 !scripts/README.md
 agents/
+# Matt Pocock skill setup docs are tracked project configuration.
+!docs/agents/
+!docs/agents/**
 skills/telemetry.json
 skills/telemetry.json.lock
 .skill-hub/
