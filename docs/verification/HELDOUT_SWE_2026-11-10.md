@@ -124,6 +124,38 @@ This is a targeted probe, not a full rerun. It shows the intended effects
 (fewer no-change completions, much less time spent on shell quoting), but it
 does not turn Machina into the best harness on its own.
 
+## Fresh post-change validation
+
+Two untouched pytest tasks were gold-validated and then run with the same
+DeepSeek model across Machina, OpenCode, and Hermes:
+
+| Instance | Machina | OpenCode | Hermes |
+| --- | --- | --- | --- |
+| `pytest-dev__pytest-7490` | FAIL | FAIL | FAIL |
+| `pytest-dev__pytest-8365` | FAIL | **PASS** | FAIL |
+| **Total** | **1/2** | **2/2** | **1/2** |
+
+Wall time: Machina 332.90 s, OpenCode 108.68 s, Hermes 306.88 s. This is a
+small fresh sample, but it confirms that the shell/nudge improvements did not
+make Machina the best harness.
+
+## Harbor Terminal-Bench adapter
+
+`integrations/harbor/machina_agent.py` now provides a real Harbor adapter. It
+installs a bundled Machina wheel, PostgreSQL, and pgvector in the task
+container, initializes Machina, runs the full-mode CLI, and lets Harbor score
+the task.
+
+Verified on the Terminal-Bench `data-anonymization` task on 2026-11-10:
+
+- 1 trial completed
+- 0 infrastructure exceptions
+- reward **0.0**
+- runtime 6m 35s
+
+The adapter path is operational, but Machina did not solve that task. It is not
+yet a general Terminal-Bench score.
+
 ## Terminal-Bench attempt
 
 Terminal-Bench 2.0 was installed through Harbor (66 tasks downloaded) and an
