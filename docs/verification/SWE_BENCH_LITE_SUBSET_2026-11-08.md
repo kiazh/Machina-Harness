@@ -1,5 +1,14 @@
 # SWE-bench Lite subset - harness comparison - 2026-11-08 (updated 2026-11-10)
 
+> **Development-set warning:** these six tasks were used while developing the
+> repair protocol, so the 5/6 result is not evidence that Machina generalizes.
+> On a pre-selected held-out set, Machina scored **3/6 on Haiku** versus
+> **4/6 Kiro and 4/6 Hermes**, and **5/10 on DeepSeek** versus **9/10 OpenCode
+> and 6/10 Hermes**. See
+> `docs/verification/HELDOUT_SWE_2026-11-10.md` for the held-out methodology,
+> validation gates, and correction. Do not use this page as the primary
+> comparison.
+
 Scope: six real issue-resolution tasks from the SWE-bench Lite test split,
 run with the same model and hidden-test protocol across three harnesses.
 
