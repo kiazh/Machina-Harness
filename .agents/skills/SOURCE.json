@@ -1,0 +1,9 @@
+{
+  "source": "https://github.com/mattpocock/skills",
+  "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+  "installed_at": "2026-11-10",
+  "license": "MIT",
+  "buckets": ["engineering", "productivity"],
+  "skill_count": 27,
+  "excluded_buckets": ["misc", "in-progress", "deprecated"]
+}
