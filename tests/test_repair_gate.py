@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import subprocess
 import uuid
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from machina.core.repair_gate import (
     REPAIR_NUDGE,
+    has_verification_evidence,
     repair_deadline_exceeded,
     should_nudge_repair,
+    should_nudge_verification,
     workspace_is_clean,
 )
 
@@ -50,6 +52,31 @@ def test_non_git_workspace_fails_safe(tmp_path) -> None:
     assert should_nudge_repair("Fix the failing test in src/app.py", workspace=tmp_path) is False
 
 
+def test_verification_gate_requires_a_passing_test_command() -> None:
+    failed = {
+        "tool": "terminal",
+        "args": {"command": "python -m pytest tests/test_app.py"},
+        "result_preview": "1 failed, 3 passed",
+        "outcome": "completed",
+        "returncode": 1,
+    }
+    passed = {
+        "tool": "terminal",
+        "args": {"command": "python -m pytest tests/test_app.py"},
+        "result_preview": "....",
+        "outcome": "completed",
+        "returncode": 0,
+    }
+    read = {"tool": "read_file", "args": {}, "result_preview": "3 passed"}
+
+    assert has_verification_evidence([failed, read]) is False
+    assert has_verification_evidence([failed, passed]) is True
+    assert should_nudge_verification("Fix the failing test", [failed]) is True
+    assert should_nudge_verification("Fix the failing test", [passed]) is False
+    assert should_nudge_verification("hello", [failed]) is False
+    assert should_nudge_verification("Fix the failing test", [failed], nudges=1) is False
+
+
 def test_repair_deadline_is_opt_out_and_repair_only(monkeypatch) -> None:
     monkeypatch.setenv("MACHINA_REPAIR_DEADLINE_SECONDS", "600")
     started = 10.0
@@ -70,6 +97,9 @@ async def test_agent_guard_appends_nudge_and_persists_content(monkeypatch) -> No
         agent_id="harness",
         _append_assistant_content=append,
         _flush_pending_chunks=flush,
+    )
+    agent._append_repair_nudge = MethodType(
+        module.BaseReActAgent._append_repair_nudge, agent
     )
     messages: list[dict[str, str]] = []
 

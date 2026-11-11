@@ -25,6 +25,21 @@ REPAIR_DEADLINE_TEXT = (
     "Repair deadline reached. The turn stopped before the external task timeout; "
     "the current working-tree changes are ready for verification."
 )
+VERIFICATION_NUDGE = (
+    "The working tree changed, but there is no successful targeted verification "
+    "evidence in this turn. Run the narrowest relevant test or direct behavior "
+    "check, inspect its exact result, and only then finalize."
+)
+_VERIFICATION_COMMAND_RE = re.compile(
+    r"\b(?:pytest|py\.test|unittest|nox|tox|npm\s+(?:run\s+)?test|"
+    r"pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|ruff|mypy|tsc|eslint)\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_SUCCESS_RE = re.compile(
+    r"\b(?:[1-9]\d*\s+passed|passed|ok|success|no errors|no issues|"
+    r"all tests passed)\b",
+    re.IGNORECASE,
+)
 
 REPAIR_NUDGE = (
     "The repository is still unchanged. This is a repair task, so an explanation "
@@ -101,3 +116,47 @@ def should_nudge_repair(
 ) -> bool:
     """Return True when a repair turn should get one continuation."""
     return nudges < 1 and is_repair_task(user_message) and workspace_is_clean(workspace)
+
+
+def _tool_command(entry: dict) -> str:
+    args = entry.get("args")
+    if not isinstance(args, dict):
+        return ""
+    command = args.get("command")
+    return command if isinstance(command, str) else ""
+
+
+def has_verification_evidence(tool_calls: list[dict] | None) -> bool:
+    """Return True only for a successful test/check command in this turn."""
+    for entry in tool_calls or []:
+        if not isinstance(entry, dict) or entry.get("tool") != "terminal":
+            continue
+        if entry.get("outcome") == "failed":
+            continue
+        if not _VERIFICATION_COMMAND_RE.search(_tool_command(entry)):
+            continue
+        returncode = entry.get("returncode")
+        if isinstance(returncode, int):
+            if returncode != 0:
+                continue
+            return True
+        result = str(entry.get("result_preview") or "")
+        if re.search(r"\b(?:failed|failure|error|errors|no tests ran)\b", result, re.I):
+            continue
+        if _VERIFICATION_SUCCESS_RE.search(result):
+            return True
+    return False
+
+
+def should_nudge_verification(
+    user_message: str,
+    tool_calls: list[dict] | None,
+    *,
+    nudges: int = 0,
+) -> bool:
+    """Return True when a repaired tree has no successful verification."""
+    return (
+        nudges < 1
+        and is_repair_task(user_message)
+        and not has_verification_evidence(tool_calls)
+    )

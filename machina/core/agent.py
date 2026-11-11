@@ -61,9 +61,11 @@ from machina.core.provider import LLMProvider, audit_log, get_provider
 from machina.core.repair_gate import (
     REPAIR_DEADLINE_TEXT,
     REPAIR_NUDGE,
+    VERIFICATION_NUDGE,
     repair_deadline_exceeded,
     repair_deadline_seconds,
     should_nudge_repair,
+    should_nudge_verification,
 )
 from machina.core.request_gate import evaluate_request
 from machina.core.session import Session, session_manager
@@ -1597,6 +1599,9 @@ class BaseReActAgent:
             "result_preview": result_str[:200],
             "outcome": _tool_outcome(item),
         }
+        returncode = getattr(result_str, "returncode", None)
+        if isinstance(returncode, int):
+            entry["returncode"] = returncode
         # AH-AUDIT-022: typed pause marker travels with the entry so
         # schedulers/transports never parse prose to detect pauses.
         if item.get("_needs_approval"):
@@ -1743,6 +1748,32 @@ class BaseReActAgent:
         """Single batch insert; fail-open retention + C1 identity checks (tool_views)."""
         return await flush_pending_chunks(pending_chunks, store=context_manager, db=_context_db)
 
+    async def _append_repair_nudge(
+        self,
+        *,
+        session_id: uuid.UUID,
+        content: str,
+        text: str,
+        messages: list[dict[str, Any]],
+        pending_chunks: list[dict[str, Any]],
+        event: str,
+    ) -> None:
+        """Persist a repaired-turn continuation before exposing it to the model."""
+        await self._append_assistant_content(session_id, content, pending_chunks)
+        pending_chunks.append(
+            {
+                "id": str(uuid.uuid4()),
+                "session_id": session_id,
+                "agent_id": self.agent_id,
+                "chunk_type": "user_message",
+                "payload": {"content": text},
+                "token_count": get_token_count(text),
+            }
+        )
+        await self._flush_pending_chunks(pending_chunks)
+        messages.append({"role": "user", "content": text})
+        audit_log(event, session_id=str(session_id), agent_id=self.agent_id)
+
     async def _maybe_continue_unchanged_repair(
         self,
         *,
@@ -1767,23 +1798,42 @@ class BaseReActAgent:
             nudges=nudges,
         ):
             return False
-        await self._append_assistant_content(session_id, content, pending_chunks)
-        pending_chunks.append(
-            {
-                "id": str(uuid.uuid4()),
-                "session_id": session_id,
-                "agent_id": self.agent_id,
-                "chunk_type": "user_message",
-                "payload": {"content": REPAIR_NUDGE},
-                "token_count": get_token_count(REPAIR_NUDGE),
-            }
+        await self._append_repair_nudge(
+            session_id=session_id,
+            content=content,
+            text=REPAIR_NUDGE,
+            messages=messages,
+            pending_chunks=pending_chunks,
+            event="agent_repair_nudge",
         )
-        await self._flush_pending_chunks(pending_chunks)
-        messages.append({"role": "user", "content": REPAIR_NUDGE})
-        audit_log(
-            "agent_repair_nudge",
-            session_id=str(session_id),
-            agent_id=self.agent_id,
+        return True
+
+    async def _maybe_continue_unverified_repair(
+        self,
+        *,
+        session_id: uuid.UUID,
+        user_message: str,
+        content: str,
+        messages: list[dict[str, Any]],
+        pending_chunks: list[dict[str, Any]],
+        tool_calls_made: list[dict[str, Any]],
+        nudges: int,
+    ) -> bool:
+        """Give one continuation when a changed tree has no verification evidence."""
+        if not await asyncio.to_thread(
+            should_nudge_verification,
+            user_message,
+            tool_calls_made,
+            nudges=nudges,
+        ):
+            return False
+        await self._append_repair_nudge(
+            session_id=session_id,
+            content=content,
+            text=VERIFICATION_NUDGE,
+            messages=messages,
+            pending_chunks=pending_chunks,
+            event="agent_verification_nudge",
         )
         return True
 
@@ -2198,7 +2248,11 @@ class ReActAgent(BaseReActAgent):
 
                 iteration = 0
                 repair_nudges = 0
+                verification_nudges = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
+                repair_verify_guard = getattr(
+                    self, "_maybe_continue_unverified_repair", None
+                )
                 # S3.1(d) BEGIN progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END progress history
@@ -2300,6 +2354,18 @@ class ReActAgent(BaseReActAgent):
                             nudges=repair_nudges,
                         ):
                             repair_nudges += 1
+                            iteration += 1
+                            continue
+                        if repair_verify_guard is not None and await repair_verify_guard(
+                            session_id=session_id,
+                            user_message=user_message,
+                            content=response.content or "",
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                            tool_calls_made=tool_calls_made,
+                            nudges=verification_nudges,
+                        ):
+                            verification_nudges += 1
                             iteration += 1
                             continue
                         return await self._finish_turn_completion(
@@ -2405,7 +2471,11 @@ class ReActAgent(BaseReActAgent):
 
                 iteration = 0
                 repair_nudges = 0
+                verification_nudges = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
+                repair_verify_guard = getattr(
+                    self, "_maybe_continue_unverified_repair", None
+                )
                 # S3.1(d) BEGIN stream progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END stream progress history
@@ -2588,6 +2658,18 @@ class ReActAgent(BaseReActAgent):
                             nudges=repair_nudges,
                         ):
                             repair_nudges += 1
+                            iteration += 1
+                            continue
+                        if repair_verify_guard is not None and await repair_verify_guard(
+                            session_id=session_id,
+                            user_message=user_message,
+                            content=response.content or "",
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                            tool_calls_made=tool_calls_made,
+                            nudges=verification_nudges,
+                        ):
+                            verification_nudges += 1
                             iteration += 1
                             continue
                         completed = await self._finish_turn_completion(
