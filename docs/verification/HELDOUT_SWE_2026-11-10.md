@@ -103,6 +103,27 @@ protected repair instructions, child-environment preservation, and Windows
 task-venv resolution. They improved the development subset from 1/6 to 5/6.
 They did not produce a general advantage on the held-out sets.
 
+## Post-fix repair-loop probe
+
+After the held-out report, two general harness fixes were added:
+
+1. Windows terminal commands can opt into Git Bash (`MACHINA_TERMINAL_SHELL=bash`),
+   avoiding `cmd.exe` quote failures and giving the agent POSIX semantics.
+2. A repair turn that ends with a clean git tree gets one continuation instead
+   of being accepted as complete.
+
+Targeted DeepSeek reruns against the same hidden tests:
+
+| Instance | Before | After |
+| --- | --- | --- |
+| `pytest-dev__pytest-7373` | FAIL, 707.57 s, no source change | **PASS, 171.93 s** |
+| `pytest-dev__pytest-5413` | FAIL, 901.20 s, no source change | FAIL, 411.90 s, source changed |
+| `pytest-dev__pytest-7168` | FAIL, 287.80 s | FAIL, 192.22 s, source changed |
+
+This is a targeted probe, not a full rerun. It shows the intended effects
+(fewer no-change completions, much less time spent on shell quoting), but it
+does not turn Machina into the best harness on its own.
+
 ## Terminal-Bench attempt
 
 Terminal-Bench 2.0 was installed through Harbor (66 tasks downloaded) and an

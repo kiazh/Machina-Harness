@@ -58,6 +58,7 @@ from machina.core.prompt import (
     tool_message_limit,
 )
 from machina.core.provider import LLMProvider, audit_log, get_provider
+from machina.core.repair_gate import REPAIR_NUDGE, should_nudge_repair
 from machina.core.request_gate import evaluate_request
 from machina.core.session import Session, session_manager
 from machina.core.session_mode import turn_scope
@@ -1736,6 +1737,50 @@ class BaseReActAgent:
         """Single batch insert; fail-open retention + C1 identity checks (tool_views)."""
         return await flush_pending_chunks(pending_chunks, store=context_manager, db=_context_db)
 
+    async def _maybe_continue_unchanged_repair(
+        self,
+        *,
+        session_id: uuid.UUID,
+        user_message: str,
+        content: str,
+        messages: list[dict[str, Any]],
+        pending_chunks: list[dict[str, Any]],
+        nudges: int,
+    ) -> bool:
+        """Give one continuation when a repair task finishes with a clean tree."""
+        from machina.core.execution_context import resolve_execution_context
+
+        try:
+            workspace = (await resolve_execution_context(str(session_id), "agent")).workspace
+        except Exception:
+            workspace = None
+        if not await asyncio.to_thread(
+            should_nudge_repair,
+            user_message,
+            workspace=workspace,
+            nudges=nudges,
+        ):
+            return False
+        await self._append_assistant_content(session_id, content, pending_chunks)
+        pending_chunks.append(
+            {
+                "id": str(uuid.uuid4()),
+                "session_id": session_id,
+                "agent_id": self.agent_id,
+                "chunk_type": "user_message",
+                "payload": {"content": REPAIR_NUDGE},
+                "token_count": get_token_count(REPAIR_NUDGE),
+            }
+        )
+        await self._flush_pending_chunks(pending_chunks)
+        messages.append({"role": "user", "content": REPAIR_NUDGE})
+        audit_log(
+            "agent_repair_nudge",
+            session_id=str(session_id),
+            agent_id=self.agent_id,
+        )
+        return True
+
     async def _finish_turn_completion(
         self,
         session_id: uuid.UUID,
@@ -2144,6 +2189,8 @@ class ReActAgent(BaseReActAgent):
                 tool_calls_made = []
 
                 iteration = 0
+                repair_nudges = 0
+                repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
                 # S3.1(d) BEGIN progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END progress history
@@ -2220,6 +2267,17 @@ class ReActAgent(BaseReActAgent):
                         iteration += 1
                         continue
                     if not response.tool_calls:
+                        if repair_guard is not None and await repair_guard(
+                            session_id=session_id,
+                            user_message=user_message,
+                            content=response.content or "",
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                            nudges=repair_nudges,
+                        ):
+                            repair_nudges += 1
+                            iteration += 1
+                            continue
                         return await self._finish_turn_completion(
                             session_id,
                             user_message,
@@ -2320,6 +2378,8 @@ class ReActAgent(BaseReActAgent):
                 tool_calls_made = []
 
                 iteration = 0
+                repair_nudges = 0
+                repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
                 # S3.1(d) BEGIN stream progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END stream progress history
@@ -2473,6 +2533,17 @@ class ReActAgent(BaseReActAgent):
                         iteration += 1
                         continue
                     if not response.tool_calls:
+                        if repair_guard is not None and await repair_guard(
+                            session_id=session_id,
+                            user_message=user_message,
+                            content=response.content or "",
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                            nudges=repair_nudges,
+                        ):
+                            repair_nudges += 1
+                            iteration += 1
+                            continue
                         completed = await self._finish_turn_completion(
                             session_id,
                             user_message,

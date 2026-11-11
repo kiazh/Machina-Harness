@@ -12,6 +12,7 @@ from machina.core.config import config
 from machina.core.continuity import build_context_messages
 from machina.core.models import Session
 from machina.core.prompt import build_system_prompt, swe_repair_protocol
+from machina.permissions import shell as shell_parser
 from machina.soulspec.schema import SoulSpec
 from machina.tools import builtins
 
@@ -108,6 +109,32 @@ def test_windows_launch_args_resolve_against_child_path(monkeypatch) -> None:
     )
     assert args == [r"C:\task-venv\Scripts\python.exe", "-m", "pytest"]
     assert shell_jobs._resolve_windows_launch_args(["python"], {}, windows=False) == ["python"]
+
+
+def test_terminal_parser_can_use_posix_shell_on_windows(monkeypatch) -> None:
+    monkeypatch.setattr(shell_parser.os, "name", "nt")
+    monkeypatch.setattr(
+        shell_parser,
+        "_bash_executable",
+        lambda: r"C:\Program Files\Git\bin\bash.exe",
+    )
+    monkeypatch.setenv("MACHINA_TERMINAL_SHELL", "bash")
+    parsed = shell_parser.parse_terminal_command("python -m pytest; echo done")
+    assert parsed.argv == [
+        r"C:\Program Files\Git\bin\bash.exe",
+        "-c",
+        "python -m pytest; echo done",
+    ]
+    assert parsed.shell == "bash"
+
+
+def test_terminal_parser_keeps_cmd_when_posix_shell_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(shell_parser.os, "name", "nt")
+    monkeypatch.setattr(shell_parser, "_bash_executable", lambda: None)
+    monkeypatch.setenv("MACHINA_TERMINAL_SHELL", "bash")
+    parsed = shell_parser.parse_terminal_command("python -m pytest; echo done")
+    assert parsed.argv[:4] == ["cmd.exe", "/d", "/s", "/c"]
+    assert parsed.shell == "cmd"
 
 
 def test_search_files_is_recursive(monkeypatch, tmp_path) -> None:

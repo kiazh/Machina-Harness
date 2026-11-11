@@ -75,6 +75,20 @@ def _scan(command: str) -> tuple[bool, list[str] | None]:
     return shell, None if opaque else stages
 
 
+def _bash_executable() -> str | None:
+    """Find Git Bash before Windows' WSL launcher, which cannot use the task venv."""
+    explicit = os.environ.get("MACHINA_GIT_BASH") or os.environ.get("HERMES_GIT_BASH_PATH")
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    for candidate in (
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def parse_terminal_command(command: str) -> TerminalCommand:
     if not isinstance(command, str) or not command.strip():
         raise ValidationError("Empty command")
@@ -86,6 +100,11 @@ def parse_terminal_command(command: str) -> TerminalCommand:
         shell = True
     if shell:
         if os.name == "nt":
+            preference = os.environ.get("MACHINA_TERMINAL_SHELL", "").strip().lower()
+            if preference in {"bash", "sh", "posix"}:
+                bash = _bash_executable()
+                if bash:
+                    return TerminalCommand([bash, "-c", command], command, "bash")
             return TerminalCommand(["cmd.exe", "/d", "/s", "/c", command], command, "cmd")
         return TerminalCommand(["/bin/sh", "-c", command], command, "sh")
     try:
