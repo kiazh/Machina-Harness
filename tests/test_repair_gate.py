@@ -11,6 +11,7 @@ import pytest
 
 from machina.core.repair_gate import (
     REPAIR_NUDGE,
+    repair_deadline_exceeded,
     should_nudge_repair,
     workspace_is_clean,
 )
@@ -47,6 +48,15 @@ def test_non_repair_prompt_and_second_nudge_do_not_loop(tmp_path) -> None:
 def test_non_git_workspace_fails_safe(tmp_path) -> None:
     assert workspace_is_clean(tmp_path) is False
     assert should_nudge_repair("Fix the failing test in src/app.py", workspace=tmp_path) is False
+
+
+def test_repair_deadline_is_opt_out_and_repair_only(monkeypatch) -> None:
+    monkeypatch.setenv("MACHINA_REPAIR_DEADLINE_SECONDS", "600")
+    started = 10.0
+    assert repair_deadline_exceeded(started, "Fix the failing test", now=610.1) is True
+    assert repair_deadline_exceeded(started, "hello", now=610.1) is False
+    monkeypatch.setenv("MACHINA_REPAIR_DEADLINE_SECONDS", "0")
+    assert repair_deadline_exceeded(started, "Fix the failing test", now=99999) is False
 
 
 @pytest.mark.asyncio

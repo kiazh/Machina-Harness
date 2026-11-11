@@ -8,8 +8,10 @@ instead of silently grading an unchanged repository as finished.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from machina.core.config import config
@@ -17,6 +19,11 @@ from machina.core.config import config
 _REPAIR_INTENT_RE = re.compile(
     r"\b(?:fix|bug|failing|failure|regression|implement|patch|repair|broken|issue)\b",
     re.IGNORECASE,
+)
+DEFAULT_REPAIR_DEADLINE_SECONDS = 600.0
+REPAIR_DEADLINE_TEXT = (
+    "Repair deadline reached. The turn stopped before the external task timeout; "
+    "the current working-tree changes are ready for verification."
 )
 
 REPAIR_NUDGE = (
@@ -56,6 +63,36 @@ def workspace_is_clean(workspace: str | Path | None = None) -> bool:
     return not result.stdout.strip()
 
 
+def is_repair_task(user_message: str) -> bool:
+    """Return True when the prompt carries explicit repair intent."""
+    return bool(_REPAIR_INTENT_RE.search(user_message))
+
+
+def repair_deadline_seconds() -> float:
+    """Wall-clock ceiling for repair turns; 0 disables the deadline."""
+    raw = os.environ.get("MACHINA_REPAIR_DEADLINE_SECONDS")
+    if raw is None or not str(raw).strip():
+        return DEFAULT_REPAIR_DEADLINE_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REPAIR_DEADLINE_SECONDS
+    return max(0.0, min(value, 86400.0))
+
+
+def repair_deadline_exceeded(
+    started: float,
+    user_message: str,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Return True when a repair turn has exceeded its configured deadline."""
+    deadline = repair_deadline_seconds()
+    if deadline <= 0 or not is_repair_task(user_message):
+        return False
+    return (time.monotonic() if now is None else now) - started >= deadline
+
+
 def should_nudge_repair(
     user_message: str,
     *,
@@ -63,8 +100,4 @@ def should_nudge_repair(
     nudges: int = 0,
 ) -> bool:
     """Return True when a repair turn should get one continuation."""
-    return (
-        nudges < 1
-        and bool(_REPAIR_INTENT_RE.search(user_message))
-        and workspace_is_clean(workspace)
-    )
+    return nudges < 1 and is_repair_task(user_message) and workspace_is_clean(workspace)

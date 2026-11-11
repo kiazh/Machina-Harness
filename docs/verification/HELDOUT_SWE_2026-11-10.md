@@ -124,6 +124,11 @@ This is a targeted probe, not a full rerun. It shows the intended effects
 (fewer no-change completions, much less time spent on shell quoting), but it
 does not turn Machina into the best harness on its own.
 
+A repair deadline now defaults to 600 seconds and can be disabled with
+`MACHINA_REPAIR_DEADLINE_SECONDS=0`. A 60-second override on `pytest-7220`
+stopped the turn at 71 seconds instead of the previous 900-second external
+timeout; the task still failed and had no patch at that early cutoff.
+
 ## Fresh post-change validation
 
 Two untouched pytest tasks were gold-validated and then run with the same

@@ -58,7 +58,13 @@ from machina.core.prompt import (
     tool_message_limit,
 )
 from machina.core.provider import LLMProvider, audit_log, get_provider
-from machina.core.repair_gate import REPAIR_NUDGE, should_nudge_repair
+from machina.core.repair_gate import (
+    REPAIR_DEADLINE_TEXT,
+    REPAIR_NUDGE,
+    repair_deadline_exceeded,
+    repair_deadline_seconds,
+    should_nudge_repair,
+)
 from machina.core.request_gate import evaluate_request
 from machina.core.session import Session, session_manager
 from machina.core.session_mode import turn_scope
@@ -2166,6 +2172,8 @@ class ReActAgent(BaseReActAgent):
             pass
         # S3.1(c)+S3.2 END turn-start advisory
         pending_chunks: list[dict[str, Any]] = []
+        repair_started = time.monotonic()
+        repair_deadline = repair_deadline_seconds()
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2200,6 +2208,22 @@ class ReActAgent(BaseReActAgent):
 
                     apply_job_updates(session_id, messages)
                     await apply_steering(session_id, self.agent_id, messages)
+                    if repair_deadline > 0 and repair_deadline_exceeded(
+                        repair_started, user_message
+                    ):
+                        audit_log(
+                            "agent_repair_deadline",
+                            session_id=str(session_id),
+                            deadline_seconds=repair_deadline,
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        return stopped_response(
+                            REPAIR_DEADLINE_TEXT,
+                            tool_calls_made,
+                            total_tokens,
+                            iteration + 1,
+                        )
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
@@ -2355,6 +2379,8 @@ class ReActAgent(BaseReActAgent):
             pass
         # S3.1(c)+S3.2 END stream turn-start advisory
         pending_chunks: list[dict[str, Any]] = []
+        repair_started = time.monotonic()
+        repair_deadline = repair_deadline_seconds()
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2389,6 +2415,26 @@ class ReActAgent(BaseReActAgent):
 
                     apply_job_updates(session_id, messages)
                     await apply_steering(session_id, self.agent_id, messages)
+                    if repair_deadline > 0 and repair_deadline_exceeded(
+                        repair_started, user_message
+                    ):
+                        audit_log(
+                            "agent_repair_deadline",
+                            session_id=str(session_id),
+                            deadline_seconds=repair_deadline,
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        yield StreamEvent(
+                            type="done",
+                            response=stopped_response(
+                                REPAIR_DEADLINE_TEXT,
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                            ),
+                        )
+                        return
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
