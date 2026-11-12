@@ -9,6 +9,7 @@
 - Fixed Git Bash child `PATH`/preflight so Git's `grep`/`sed` tools are available, rejected local paths in `web_extract`, and skipped generated/dependency directories in content search.
 - Forced LF checkout for ECC skill/agent resources so their manifest SHA-256 hashes verify on Windows as well as Linux.
 - Added canonical benchmark ledger/lockbox support, clean-history benchmark isolation, and the 2026-11-12 held-out verification record.
+- Rebuilt the desktop client as a native Rust Rune application using OpenCode's design language, replacing the React/Tauri shell with a session sidebar, chat timeline, tool activity, composer, and workspace inspector.
 
 ## 1.2.14 — 2026-10-25
 

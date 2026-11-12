@@ -1,7 +1,0 @@
-// @vitest-environment jsdom
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
-import {afterEach,expect,it} from 'vitest';
-import {ConnectionControls} from '../../src/features/catalog/ConnectionControls.tsx';
-import {DesktopController} from '../../src/state/controller.ts';
-afterEach(cleanup);
-it('collects credentials in a password field, sends only to secrets.set, then clears the field',async()=>{const calls:{method:string;params:unknown}[]=[];const controller=new DesktopController({async start(){},subscribe(){return()=>{}},async request<T>(method:string,params:Record<string,unknown>={}){calls.push({method,params});return {message:'Saved'} as T}});render(<ConnectionControls controller={controller} page="keys" data={{secrets:[{key:'OPENAI_API_KEY',description:'OpenAI',set:false}]}} onChanged={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:/OPENAI_API_KEY/}));const input=screen.getByLabelText('New credential value');expect(input.getAttribute('type')).toBe('password');fireEvent.change(input,{target:{value:'private-test-value'}});fireEvent.click(screen.getByRole('button',{name:'Save key'}));await waitFor(()=>expect((input as HTMLInputElement).value).toBe(''));expect(calls).toEqual([{method:'secrets.set',params:{key:'OPENAI_API_KEY',value:'private-test-value',persist:true}}]);expect(document.body.textContent).not.toContain('private-test-value')});

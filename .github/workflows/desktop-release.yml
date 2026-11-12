@@ -1,4 +1,4 @@
-name: Desktop release
+name: Rune desktop release
 
 on:
   push:
@@ -8,50 +8,56 @@ permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: rune-desktop-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  prepare:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "24"
-      - name: Install desktop dependencies
-        run: npm ci --ignore-scripts
-      - name: Build native desktop installers
-        run: npm run desktop:bundle
-      - name: Publish Windows desktop package
-        shell: pwsh
+      - name: Create the release once
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $assets = @(Get-ChildItem 'apps/desktop/src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.msi', '.exe' } | Select-Object -ExpandProperty FullName)
-          if ($assets.Count -eq 0) { throw 'Desktop bundling produced no Windows installer.' }
-          gh release create $env:GITHUB_REF_NAME $assets --title "Deus Ex Machina $env:GITHUB_REF_NAME" --generate-notes
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Deus Ex Machina $GITHUB_REF_NAME" \
+              --generate-notes
 
-  macos:
-    needs: windows
-    runs-on: macos-latest
+  build:
+    needs: prepare
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "24"
-      - name: Install desktop dependencies
-        run: npm ci --ignore-scripts
-      - name: Build native desktop installer
-        run: npm run desktop:bundle
-      - name: Attach macOS desktop package
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Build the native executable
+        run: cargo build --release --locked --manifest-path apps/desktop/Cargo.toml
+      - name: Package the Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = "machina-desktop-$env:GITHUB_REF_NAME-windows.zip"
+          Compress-Archive -Path apps/desktop/target/release/machina-desktop.exe -DestinationPath $asset
+          gh release upload "$env:GITHUB_REF_NAME" $asset --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Package the macOS executable
+        if: runner.os == 'macOS'
         run: |
-          assets=(apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg)
-          test -e "${assets[0]}" || { echo "Desktop bundling produced no macOS disk image." >&2; exit 1; }
-          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          asset="machina-desktop-${GITHUB_REF_NAME}-macos.tar.gz"
+          tar -czf "$asset" -C apps/desktop/target/release machina-desktop
+          gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

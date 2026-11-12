@@ -8,7 +8,7 @@ What changed, and why?
 - [ ] `python -m ruff check machina tests tools integrations`
 - [ ] `python -m compileall -q machina tests tools integrations`
 - [ ] `git diff --check`
-- [ ] Relevant Machina-DevTools tests or UI checks, if applicable
+- [ ] Relevant Machina-DevTools tests, terminal UI checks, or Rune desktop checks
 
 Commands and pass/fail counts:
 

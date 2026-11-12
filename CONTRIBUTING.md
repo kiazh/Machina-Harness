@@ -28,11 +28,20 @@ python -m compileall -q machina tests tools integrations
 git diff --check
 ```
 
-For UI changes, also run:
+For terminal UI changes, also run:
 
 ```bash
 npm ci --ignore-scripts --prefix ui
 npm run check --prefix ui
+```
+
+For desktop changes, run from `apps/desktop` (so the pinned toolchain file is
+picked up):
+
+```bash
+cargo test --locked
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
 For changes touching the agent loop, tools, context, permissions, providers,

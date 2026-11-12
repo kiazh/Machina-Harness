@@ -1,0 +1,15 @@
+[package]
+name = "machina-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Machina's native desktop workspace, built on Rune with OpenCode's design language."
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "7dfaa8fb1fa8281e6e2ccc92568d95262e9c6f3c" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "7dfaa8fb1fa8281e6e2ccc92568d95262e9c6f3c", features = ["markdown"] }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "7dfaa8fb1fa8281e6e2ccc92568d95262e9c6f3c" }
+
+[profile.release]
+codegen-units = 16
+incremental = true

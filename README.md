@@ -1370,20 +1370,27 @@ scripts/            Operator script mount point and setup guidance
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
 | The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
 
-## Desktop engineering preview
+## Desktop — native Rune shell
 
-The native desktop preview puts the agent conversation first, with an editable
-companion pane, native terminal and nine personal appearance presets.
-Custom local wallpaper, glass/opacity, typography and motion controls are included.
-It speaks directly to the existing Python/PostgreSQL engine, not through the
-terminal UI. Desktop release packages are native Windows/macOS artifacts; the CLI
-continues to be installed with the PowerShell/curl installers above. They share
-gateway capabilities, while the desktop adds graphical-only features such as panes,
-native terminal, visual themes, workspace review, and the skills catalog.
+![Machina's Rune desktop shell in dark mode](apps/desktop/docs/rune-shell-dark.png)
 
-See [desktop setup and checks](apps/desktop/README.md). From a configured checkout,
-run `npm run desktop:dev`, or build with `npm run desktop:native` and launch with
-`npm run desktop:preview`. `npm run desktop:bundle` creates the installer package.
+The desktop client is being rebuilt as a native Rust application with
+[Rune](https://github.com/anomalyco/rune), OpenCode's GPU-rendered UI framework.
+It uses OpenCode's design language and fonts, with a resizable session sidebar,
+chat timeline, tool activity, composer, and workspace inspector.
+
+The first milestone is the visual shell and chat/workspace surfaces. The React
+and Tauri implementation has been removed; its history remains in Git. Gateway
+sessions, approvals, jobs, memory, and settings are the next port.
+
+See [desktop setup and checks](apps/desktop/README.md) and the
+[Rune migration evidence](docs/verification/RUNE_DESKTOP_2026-11-12.md). From a
+checkout with the Rust toolchain:
+
+```bash
+cargo run --manifest-path apps/desktop/Cargo.toml
+cargo test --locked --manifest-path apps/desktop/Cargo.toml
+```
 
 ## License and credits
 

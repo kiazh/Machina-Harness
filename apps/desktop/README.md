@@ -1,50 +1,54 @@
-# Machina Desktop engineering preview
+# Machina Desktop
 
-Agent conversation is the main workspace. Files open in an editable companion
-pane; hiding that pane retains buffers and undo history. Nine appearance presets include Porcelain, Ink, Volt, Afterimage and Chrome. Appearance settings
-control custom wallpaper, glass, opacity, accent, fonts and motion. Wallpaper stays
-in the local WebView database; it is not uploaded to a provider.
+Machina's native desktop workspace. It is a Rust application built with
+[Rune](https://github.com/anomalyco/rune), rendered by Rune's GPU shell and
+styled with OpenCode's `@opencode/ui` design language.
 
-From the repository root, after creating the normal Python `.venv`:
+The old React/Tauri implementation was removed during the Rune migration. Its
+history remains available in Git. The backend gateway is not wired into this
+shell yet; the first milestone is the visual workspace below.
 
-```sh
-npm ci --ignore-scripts
-npm run desktop:dev
+![The Rune shell in dark mode](docs/rune-shell-dark.png)
+
+## Run
+
+From the repository root:
+
+```bash
+cargo run --manifest-path apps/desktop/Cargo.toml
 ```
 
-Native compilation needs Rust and the platform build tools (Microsoft C++ tools
-on Windows, Xcode command line tools on macOS). The launcher finds `.venv` and
-Rust without changing your global PATH. Override `MACHINA_PYTHON` if needed.
-The existing PostgreSQL engine profile remains required.
+The app is pinned to Rune `dev` revision
+`7dfaa8fb1fa8281e6e2ccc92568d95262e9c6f3c` and Rust `1.99.1`.
 
-To build and run the optimized development-engine client:
+## Check
 
-```sh
-npm run desktop:native
-npm run desktop:preview
+From `apps/desktop` (so the pinned toolchain file is picked up):
+
+```bash
+cargo test --locked
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
-The desktop app starts the Machina Python gateway directly. It never launches,
-embeds, or depends on the terminal UI package. The CLI remains installed through
-the PowerShell/curl installers; desktop releases are native Windows/macOS packages.
-For now, a desktop release uses the installed Machina Python engine on PATH. A
-fully managed embedded engine is a separate distribution milestone, not a hidden
-dependency on the terminal client.
+Headless snapshots are part of Rune. They need no window:
 
-Build a native installer package (not the CLI) with:
-
-```sh
-npm run desktop:bundle
+```bash
+cargo run --manifest-path apps/desktop/Cargo.toml -- \
+  --snap apps/desktop/docs/rune-shell-dark.png
+cargo run --manifest-path apps/desktop/Cargo.toml -- \
+  --scene light --snap apps/desktop/docs/rune-shell-light.png
 ```
 
-Checks:
+## Current milestone
 
-```sh
-npm run desktop:check
-npx playwright test --config apps/desktop/playwright.config.ts
-```
+- OpenCode-themed Rune application shell.
+- Resizable session sidebar and workspace inspector.
+- Chat timeline with Markdown assistant replies and tool-activity rows.
+- Multiline composer with draft clearing, send button, and keyboard submit.
+- Dark and light appearances with a headless scene for each.
+- Seeded shell state behind an explicit boundary for the gateway port.
 
-The browser fixtures are synthetic and excluded from the production entry.
-Windows native engine initialization, file reading and Pyright completion have
-been exercised. Native macOS acceptance remains outstanding; browser checks do
-not establish macOS behavior.
+Next: connect the composer and transcripts to Machina's JSON-RPC gateway,
+then port sessions, approvals, jobs, memory, and settings into native Rune
+surfaces.

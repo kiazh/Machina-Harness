@@ -1,6 +1,0 @@
-import {useState,type RefObject} from 'react';
-import type {DesktopController} from '../state/controller.ts';
-export function SaveAsDialog({controller,dialog}:{controller:DesktopController;dialog:RefObject<HTMLDialogElement|null>}){
- const [path,setPath]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- return <dialog ref={dialog} className="settings-dialog save-as-dialog" aria-label="Save file as" onCancel={e=>{if(busy)e.preventDefault()}}><h2>Save in your workspace</h2><p>Choose a new file path relative to your project. Existing files will not be overwritten.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setError('');try{await controller.saveAs(path);setPath('');dialog.current?.close()}catch(reason){setError(reason instanceof Error?reason.message:String(reason))}finally{setBusy(false)}}}><label htmlFor="save-path">File path</label><input id="save-path" autoFocus placeholder="src/new_file.py" value={path} onChange={e=>setPath(e.target.value)} disabled={busy}/>{error&&<p role="alert">{error}</p>}<div><button type="button" disabled={busy} onClick={()=>dialog.current?.close()}>Cancel</button><button className="primary-button" disabled={busy||!path.trim()}>{busy?'Saving…':'Save file'}</button></div></form></dialog>;
-}

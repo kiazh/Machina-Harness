@@ -108,11 +108,8 @@ coverage.xml
 # Installed Node dependencies are restored from the lockfile
 node_modules/
 
-# Native desktop build caches and generated Tauri schemas
-apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/gen/
-apps/desktop/src-tauri/icons/android/
-apps/desktop/src-tauri/icons/ios/
+# Native desktop build caches
+apps/desktop/target/
 test-results/
 playwright-report/
 .local-acceptance/
