@@ -87,9 +87,6 @@ jobs:
         # the old command excluded machina/cli/ and skipped tools/ entirely.
         run: bandit -r machina/ tools/ -ll
 
-      - name: Run repository smoke suite
-        run: python -m pytest tests -q -p no:cacheprovider
-
       - name: Build distributable artifacts
         run: python -m hatchling build
 
@@ -112,6 +109,13 @@ jobs:
         run: |
           bash .ci-devtools/bootstrap-links.sh "$MACHINA_REPO"
           bash .ci-devtools/run-tests.sh tests/ -q -p no:cacheprovider -m "not ui_integration and not workflow_trial"
+
+      # Run after the external suite: the smoke suite shares the gateway's
+      # in-process state and must not contaminate the authoritative run.
+      - name: Run repository smoke suite
+        env:
+          MACHINA_REPO: ${{ github.workspace }}
+        run: python -m pytest tests -q -p no:cacheprovider
 
       - name: Upload distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
