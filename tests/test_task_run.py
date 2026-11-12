@@ -9,7 +9,10 @@ from uuid import uuid4
 import pytest
 
 from machina.core.task_run import (
+    TASK_RUN_ARTIFACT_NUDGE,
     TASK_RUN_EDIT_NUDGE,
+    TASK_RUN_FINALIZE_NUDGE,
+    TASK_RUN_JOB_NUDGE,
     TASK_RUN_REPEAT_TEXT,
     TASK_RUN_TOOL_LIMIT_TEXT,
     TASK_RUN_TURN_LIMIT_TEXT,
@@ -105,6 +108,59 @@ def test_no_edit_nudge_is_emitted_once() -> None:
     assert policy.take_nudge() is None
 
 
+def test_successful_verification_gets_one_finalize_nudge() -> None:
+    policy = TaskRunPolicy(REPAIR)
+    policy.observe(
+        [
+            {
+                "tool": "write_file",
+                "args": {"path": "a.py"},
+                "outcome": "completed",
+            },
+            {
+                "tool": "terminal",
+                "args": {"command": "pytest -q testing/test_a.py::test_a"},
+                "outcome": "completed",
+                "returncode": 0,
+                "result_preview": "1 passed",
+            },
+        ]
+    )
+
+    assert policy.take_nudge() == TASK_RUN_FINALIZE_NUDGE
+    assert policy.take_nudge() is None
+
+
+def test_artifact_paging_and_job_polling_get_one_nudge() -> None:
+    policy = TaskRunPolicy(REPAIR)
+    for offset in range(6):
+        policy.observe(
+            [
+                {
+                    "tool": "artifact_read",
+                    "args": {"artifact_id": "artifact-1", "offset": offset},
+                    "outcome": "completed",
+                }
+            ]
+        )
+    assert policy.take_nudge() == TASK_RUN_ARTIFACT_NUDGE
+    assert policy.take_nudge() is None
+
+    jobs = TaskRunPolicy(REPAIR)
+    for _ in range(6):
+        jobs.observe(
+            [
+                {
+                    "tool": "terminal_job",
+                    "args": {"action": "wait"},
+                    "outcome": "completed",
+                }
+            ]
+        )
+    assert jobs.take_nudge() == TASK_RUN_JOB_NUDGE
+    assert jobs.take_nudge() is None
+
+
 def test_edit_suppresses_the_no_edit_nudge() -> None:
     policy = TaskRunPolicy(REPAIR, edit_nudge_turns=2)
     policy.observe([{"tool": "write_file", "args": {"path": "a.py"}, "outcome": "completed"}])
@@ -112,6 +168,21 @@ def test_edit_suppresses_the_no_edit_nudge() -> None:
 
     assert policy.take_nudge() is None
     assert policy.summary()["edited"] is True
+
+
+def test_repair_toolset_is_lean_and_fails_open() -> None:
+    def tool(name: str) -> SimpleNamespace:
+        return SimpleNamespace(name=name)
+
+    tools = [tool("read_file"), tool("write_file"), tool("web_search"), tool("recall")]
+    selected = TaskRunPolicy(REPAIR).filter_tool_defs(tools)
+    assert [item.name for item in selected] == ["read_file", "write_file"]
+
+    chat = TaskRunPolicy(CHAT)
+    assert chat.filter_tool_defs(tools) == tools
+
+    only_unknown = [tool("custom_tool")]
+    assert TaskRunPolicy(REPAIR).filter_tool_defs(only_unknown) == only_unknown
 
 
 def test_environment_limits_are_configurable(monkeypatch) -> None:

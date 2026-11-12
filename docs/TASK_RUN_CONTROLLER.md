@@ -15,6 +15,9 @@ The controller tracks:
 - whether verification succeeded
 - repeated failed actions by tool, arguments, exit code, and result preview
 - a one-shot no-edit nudge
+- a lean repair tool schema: file, terminal, code-intelligence, and artifact
+  tools only; web research, memory management, delegation, and skill
+  installation are not advertised on every repair request
 
 Phase is derived from evidence, not from model prose:
 
@@ -47,6 +50,26 @@ short continuation:
 
 The nudge is emitted at most once per turn. An observed edit suppresses it.
 
+## Process-loop nudges
+
+The controller also emits one bounded nudge for three other observed loops:
+
+- the same retained artifact is paged six times;
+- a background job is polled six times;
+- a source edit and successful targeted verification are already present.
+
+The finalize nudge is important for token and latency efficiency: it stops the
+model from expanding into unrelated tests or cleanup after the repair is
+already verified. A successful direct behavior check (`python` with
+`assert`/`callequal` and no failure) counts as verification evidence.
+
+## Shell availability
+
+On Windows, POSIX shell mode adds Git's `usr/bin` directory to the child
+`PATH`, and the terminal preflight checks that child path rather than the
+host process path. Without this, Git Bash launches but `grep`, `sed`, and
+`awk` are rejected even though they are installed.
+
 ## Relationship to other gates
 
 The controller is one layer:
@@ -64,5 +87,7 @@ grading an incomplete repair.
 ## Tests
 
 `tests/test_task_run.py` covers inactive chat turns, phase transitions, repeated
-failures, independent caps, the one-shot nudge, environment configuration, and
-the integrated agent stop path.
+failures, independent caps, the no-edit/artifact/job/finalize nudges, the lean
+repair tool schema, environment configuration, and the integrated agent stop
+path. `tests/test_repair_gate.py` covers direct behavior-check evidence, and
+`tests/test_swe_repair_protocol.py` covers the Git Bash child path.

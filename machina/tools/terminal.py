@@ -91,7 +91,29 @@ def _validate_workdir(workdir: str) -> None:
 # passthrough variable name lives here.
 def _sanitized_env() -> dict[str, str]:
     """Minimal child environment without secrets (AH-AUDIT-010)."""
-    return child_process.sanitized_env("MACHINA_TERMINAL_EXTRA_ENV")
+    env = child_process.sanitized_env("MACHINA_TERMINAL_EXTRA_ENV")
+    if os.name != "nt":
+        return env
+    # Git Bash launched with ``-c`` inherits PATH; it does not add Git's Unix
+    # tools (grep/sed/awk) on its own. Add them explicitly so POSIX shell mode
+    # does not turn every text command into a failed turn.
+    roots = [
+        os.environ.get("MACHINA_GIT_BASH"),
+        os.environ.get("HERMES_GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in roots:
+        if not candidate:
+            continue
+        usr_bin = Path(candidate).resolve().parent.parent / "usr" / "bin"
+        if not usr_bin.is_dir():
+            continue
+        entries = env.get("PATH", "").split(os.pathsep)
+        if str(usr_bin) not in entries:
+            env["PATH"] = str(usr_bin) + os.pathsep + env.get("PATH", "")
+        break
+    return env
 
 
 def _approved_snapshot() -> dict | None:
@@ -352,7 +374,11 @@ async def terminal(
     if _mode == "full" or authorized:
         import shutil as _shutil
 
-        if _shutil.which(args[0]) is None and _shutil.which(base_cmd) is None:
+        child_path = _sanitized_env().get("PATH", "")
+        if (
+            _shutil.which(args[0], path=child_path) is None
+            and _shutil.which(base_cmd, path=child_path) is None
+        ):
             raise ValidationError(f"Command '{base_cmd}' not found on PATH")
     elif base_cmd not in ALLOWED_COMMANDS:
         raise ValidationError(f"Command '{base_cmd}' is not in the allowlist")

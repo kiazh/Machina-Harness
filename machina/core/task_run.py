@@ -24,8 +24,29 @@ DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_EDIT_NUDGE_TURNS = 10
+DEFAULT_ARTIFACT_NUDGE_READS = 6
+DEFAULT_JOB_NUDGE_POLLS = 6
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"
 MAX_TOOL_CALLS_ENV = "MACHINA_TASK_RUN_MAX_TOOL_CALLS"
+
+# A repair turn should not spend context on web research, memory management,
+# delegation, or skill installation unless the task explicitly needs them.
+# Keeping this list small also keeps the tool schema out of every request.
+REPAIR_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "list_files",
+        "search_files",
+        "terminal",
+        "terminal_job",
+        "code_intelligence",
+        "learn_directory",
+        "artifact_read",
+        "artifact_search",
+        "artifact_describe",
+    }
+)
 
 TASK_RUN_TURN_LIMIT_TEXT = (
     "Task-run turn limit reached. The turn stopped to prevent a runaway loop; "
@@ -43,6 +64,18 @@ TASK_RUN_EDIT_NUDGE = (
     "No source edit has been made after a substantial investigation. Stop widening "
     "the search: use the failure evidence you already have, make the smallest "
     "source-only change, and then run the narrowest relevant verification."
+)
+TASK_RUN_ARTIFACT_NUDGE = (
+    "You are spending turns paging the same retained artifact. Stop paging: use "
+    "the excerpt already visible, make the source change, and verify the behavior."
+)
+TASK_RUN_JOB_NUDGE = (
+    "You are polling background jobs repeatedly. Wait for the relevant job once, "
+    "then act on its result; do not busy-poll while other work remains."
+)
+TASK_RUN_FINALIZE_NUDGE = (
+    "A source edit and a successful targeted verification are already present. "
+    "Stop adding scope: report the final diff and the exact verification result now."
 )
 
 _EDIT_COMMAND_RE = re.compile(
@@ -145,8 +178,25 @@ class TaskRunPolicy:
         self.verified = False
         self.turns_without_edit = 0
         self.repeated_failure = False
+        self.artifact_reads = 0
+        self.job_polls = 0
+        self._artifact_counts: dict[str, int] = {}
         self._failure_counts: dict[str, int] = {}
         self._edit_nudged = False
+        self._artifact_nudged = False
+        self._job_nudged = False
+        self._finalize_nudged = False
+
+    def filter_tool_defs(self, tool_defs: list[Any]) -> list[Any]:
+        """Return the lean repair toolset; fail open if nothing matches."""
+        if not self.active:
+            return tool_defs
+        selected = [
+            tool
+            for tool in tool_defs
+            if getattr(tool, "name", None) in REPAIR_TOOL_NAMES
+        ]
+        return selected or tool_defs
 
     @property
     def phase(self) -> str:
@@ -174,6 +224,16 @@ class TaskRunPolicy:
                 self.reproduced = True
                 if has_verification_evidence([entry]):
                     self.verified = True
+            if entry.get("tool") == "artifact_read":
+                self.artifact_reads += 1
+                args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
+                handle = str(args.get("artifact_id") or "")
+                if handle:
+                    self._artifact_counts[handle] = (
+                        self._artifact_counts.get(handle, 0) + 1
+                    )
+            elif entry.get("tool") == "terminal_job":
+                self.job_polls += 1
             if _failed(entry):
                 digest = _fingerprint(entry)
                 count = self._failure_counts.get(digest, 0) + 1
@@ -207,8 +267,27 @@ class TaskRunPolicy:
         return None
 
     def take_nudge(self) -> str | None:
-        """Return the one bounded no-edit nudge, if it is due."""
-        if not self.active or self._edit_nudged:
+        """Return one bounded process nudge, if a loop is becoming wasteful."""
+        if not self.active:
+            return None
+        if (
+            not self._artifact_nudged
+            and max(self._artifact_counts.values(), default=0)
+            >= DEFAULT_ARTIFACT_NUDGE_READS
+        ):
+            self._artifact_nudged = True
+            return TASK_RUN_ARTIFACT_NUDGE
+        if not self._job_nudged and self.job_polls >= DEFAULT_JOB_NUDGE_POLLS:
+            self._job_nudged = True
+            return TASK_RUN_JOB_NUDGE
+        if (
+            not self._finalize_nudged
+            and self.edited
+            and self.verified
+        ):
+            self._finalize_nudged = True
+            return TASK_RUN_FINALIZE_NUDGE
+        if self._edit_nudged:
             return None
         if self.edited or self.turns_without_edit < self.edit_nudge_turns:
             return None
@@ -226,4 +305,6 @@ class TaskRunPolicy:
             "verified": self.verified,
             "turns_without_edit": self.turns_without_edit,
             "repeated_failure": self.repeated_failure,
+            "artifact_reads": self.artifact_reads,
+            "job_polls": self.job_polls,
         }

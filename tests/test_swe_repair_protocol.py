@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
+
+import pytest
 
 from machina.core import shell_jobs
 from machina.core.assembler import PromptAssembler
@@ -56,6 +59,10 @@ def test_repair_protocol_is_selected_for_a_code_issue() -> None:
     assert "negated form" in protocol
     assert "point of use" in protocol
     assert "both public attributes" in protocol
+    assert "read_file" in protocol
+    assert "web_extract" in protocol
+    assert "Batch independent reads" in protocol
+    assert "focused diff" in protocol
 
 
 def test_repair_protocol_is_not_added_to_a_greeting() -> None:
@@ -96,6 +103,23 @@ def test_sanitized_env_preserves_project_pythonpath(monkeypatch) -> None:
     assert env["PYTHONPATH"] == "src"
     assert env["VIRTUAL_ENV"] == "venv"
     assert env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash PATH is Windows-specific")
+def test_git_bash_adds_unix_tool_directory_to_child_path(tmp_path, monkeypatch) -> None:
+    git = tmp_path / "Git"
+    bin_dir = git / "bin"
+    usr_bin = git / "usr" / "bin"
+    bin_dir.mkdir(parents=True)
+    usr_bin.mkdir(parents=True)
+    (bin_dir / "bash.exe").write_text("", encoding="utf-8")
+    monkeypatch.setenv("MACHINA_GIT_BASH", str(bin_dir / "bash.exe"))
+    monkeypatch.setenv("PATH", r"C:\Windows\system32")
+
+    from machina.tools.terminal import _sanitized_env
+
+    env = _sanitized_env()
+    assert str(usr_bin) in env["PATH"].split(os.pathsep)
 
 
 def test_windows_launch_args_resolve_against_child_path(monkeypatch) -> None:

@@ -2367,7 +2367,7 @@ class ReActAgent(BaseReActAgent):
                         self._condense_history(messages)
                     else:
                         self._condense_history(messages, stale_chars=stale_chars)
-                    tool_defs = self._tool_defs()
+                    tool_defs = task_run.filter_tool_defs(self._tool_defs())
                     gate = await evaluate_request(
                         messages,
                         session=session,
@@ -2662,7 +2662,7 @@ class ReActAgent(BaseReActAgent):
                         self._condense_history(messages)
                     else:
                         self._condense_history(messages, stale_chars=stale_chars)
-                    tool_defs = self._tool_defs()
+                    tool_defs = task_run.filter_tool_defs(self._tool_defs())
                     gate = await evaluate_request(
                         messages,
                         session=session,

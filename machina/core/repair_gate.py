@@ -40,6 +40,10 @@ _VERIFICATION_SUCCESS_RE = re.compile(
     r"all tests passed)\b",
     re.IGNORECASE,
 )
+_DIRECT_CHECK_RE = re.compile(
+    r"\bpython(?:3)?\b[\s\S]*(?:\bassert\b|\bcallequal\b|\bcheck\w*\b)",
+    re.IGNORECASE,
+)
 
 REPAIR_NUDGE = (
     "The repository is still unchanged. This is a repair task, so an explanation "
@@ -133,7 +137,10 @@ def has_verification_evidence(tool_calls: list[dict] | None) -> bool:
             continue
         if entry.get("outcome") == "failed":
             continue
-        if not _VERIFICATION_COMMAND_RE.search(_tool_command(entry)):
+        command = _tool_command(entry)
+        is_test = bool(_VERIFICATION_COMMAND_RE.search(command))
+        is_direct_check = bool(_DIRECT_CHECK_RE.search(command))
+        if not is_test and not is_direct_check:
             continue
         returncode = entry.get("returncode")
         if isinstance(returncode, int):

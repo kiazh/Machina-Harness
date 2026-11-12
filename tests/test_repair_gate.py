@@ -77,6 +77,27 @@ def test_verification_gate_requires_a_passing_test_command() -> None:
     assert should_nudge_verification("Fix the failing test", [failed], nudges=1) is False
 
 
+def test_direct_behavior_check_counts_as_verification() -> None:
+    direct = {
+        "tool": "terminal",
+        "args": {
+            "command": (
+                "python - <<'EOF'\n"
+                "from app import callequal\n"
+                "assert callequal(1, 1) == []\n"
+                "EOF"
+            )
+        },
+        "result_preview": "",
+        "outcome": "completed",
+        "returncode": 0,
+    }
+    failed = {**direct, "result_preview": "AssertionError", "returncode": 1}
+
+    assert has_verification_evidence([direct]) is True
+    assert has_verification_evidence([failed]) is False
+
+
 def test_repair_deadline_is_opt_out_and_repair_only(monkeypatch) -> None:
     monkeypatch.setenv("MACHINA_REPAIR_DEADLINE_SECONDS", "600")
     started = 10.0

@@ -405,6 +405,12 @@ async def web_extract(url: str) -> str:
     """
     if not url or not url.strip():
         raise ValidationError("Empty URL")
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValidationError(
+            "web_extract only accepts public HTTP(S) URLs; use read_file or "
+            "search_files for local paths"
+        )
     content = await extract_url_text(url)
     notice = static_fetch_notice(content)
     if notice:
