@@ -1379,6 +1379,11 @@ The desktop client is being rebuilt as a native Rust application with
 It uses OpenCode's design language and fonts, with a resizable session sidebar,
 chat timeline, tool activity, composer, and workspace inspector.
 
+The layout follows Nous Research's Hermes Desktop philosophy: chat is the home
+surface, panels stay flat instead of boxed, tool activity is compact, and a
+quiet status bar carries model, context, and approval state. Machina keeps its
+own ember mark and voice.
+
 The first milestone is the visual shell and chat/workspace surfaces. The React
 and Tauri implementation has been removed; its history remains in Git. Gateway
 sessions, approvals, jobs, memory, and settings are the next port.

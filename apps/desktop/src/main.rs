@@ -1,11 +1,13 @@
-//! Machina Desktop, rebuilt on Rune with OpenCode's design language.
+//! Machina Desktop: a Rune shell with OpenCode's design language and Nous
+//! Hermes' chat-first, flat product philosophy.
 
 use rune::{
-    AppSpec, Color, Cx, El, Icon, ScrollSpec, TextEdit, TextStyle, Tx, col, el, icon, row, text,
+    AppSpec, Color, Cx, El, Icon, ScrollSpec, TextEdit, TextStyle, Tx, auto_grow, col, el, icon,
+    row, text, text_input,
 };
 use rune_kit::{
-    IconButton, Kit, Markdown, PaneState, Sidebar, SidebarRow, SidebarSection, SplitView, TextArea,
-    Toolbar, shell::SidebarToggle,
+    IconButton, Kit, Markdown, PaneState, Sidebar, SidebarRow, SidebarSection, SplitView, Toolbar,
+    shell::SidebarToggle,
 };
 use rune_theme_opencode::{self as oc, icons};
 
@@ -37,58 +39,73 @@ const SESSIONS: [(&str, &str, &str); 6] = [
     ("Clean benchmark ledger", "Same model, same policy", "1h"),
     ("Tool search latency", "Skip dependency trees", "3h"),
     ("Repair controller", "Caps, phases, evidence", "yesterday"),
-    ("Hermes token accounting", "Usage capture", "yesterday"),
+    ("Hermes token usage", "Usage capture", "yesterday"),
 ];
+
+fn seed_messages() -> Vec<Message> {
+    vec![
+        Message {
+            role: Role::User,
+            body: "Rebuild the desktop shell on Rune. I want the real workspace, not a mockup: sessions, chat, composer, and the file/changes inspector.".to_owned(),
+            time: "10:42",
+        },
+        Message {
+            role: Role::Assistant,
+            body: "I’m replacing the React/Tauri shell with Rune’s native renderer and OpenCode’s design language.\n\nThe first pass keeps the interaction model intact:\n\n- resizable session sidebar and workspace inspector\n- a focused chat timeline with tool activity\n- a real multiline composer with submit-on-send\n- light and dark appearance\n\nI’m keeping the backend boundary explicit so the gateway can be wired in after the shell is stable."
+                .to_owned(),
+            time: "10:43",
+        },
+    ]
+}
+
+fn new_chat(s: &mut State) {
+    s.selected_session = 0;
+    s.draft.clear();
+    s.messages = seed_messages();
+}
 
 fn init() -> State {
     State {
-        sidebar: PaneState::new(270.0).range(236.0, 360.0),
-        inspector: PaneState::new(318.0).range(270.0, 430.0),
+        sidebar: PaneState::new(252.0).range(228.0, 340.0),
+        inspector: PaneState::new(300.0).range(260.0, 420.0),
         selected_session: 0,
         dark: true,
         inspector_tab: 0,
         draft: TextEdit::new(""),
-        messages: vec![
-            Message {
-                role: Role::User,
-                body: "Rebuild the desktop shell on Rune. I want the real workspace, not a mockup: sessions, chat, composer, and the file/changes inspector.".to_owned(),
-                time: "10:42",
-            },
-            Message {
-                role: Role::Assistant,
-                body: "I’m replacing the React/Tauri shell with Rune’s native renderer and OpenCode’s design language.\n\nThe first pass keeps the interaction model intact:\n\n- resizable session sidebar and workspace inspector\n- a focused chat timeline with tool activity\n- a real multiline composer with submit-on-send\n- light and dark appearance\n\nI’m keeping the backend boundary explicit so the gateway can be wired in after the shell is stable."
-                    .to_owned(),
-                time: "10:43",
-            },
-        ],
+        messages: seed_messages(),
     }
 }
 
 fn avatar(label: &str, color: Color, ink: Color) -> El {
-    el().size(26.0, 26.0)
-        .radius(8.0)
+    el().size(24.0, 24.0)
+        .radius(6.0)
         .fill(color)
         .center()
-        .child(text(label).font(TextStyle::new(12.0, 650.0)).color(ink))
+        .child(text(label).font(TextStyle::new(11.0, 650.0)).color(ink))
 }
 
-fn pill(k: &Kit, label: &str, accent: bool) -> El {
-    let c = &k.c;
-    text(label)
-        .font(k.ty.small_medium)
-        .color(if accent { c.text_inverse } else { c.text_muted })
-        .px(8.0)
-        .py(4.0)
-        .radius(999.0)
-        .fill(if accent { c.bg_accent } else { c.layer_02 })
-        .border(
-            1.0,
-            if accent {
-                Color::TRANSPARENT
-            } else {
-                c.border_muted
-            },
+fn assistant_mark(dark: bool) -> El {
+    el().size(20.0, 20.0)
+        .radius(6.0)
+        .fill(oc::brand(dark))
+        .center()
+        .child(
+            text("M")
+                .font(TextStyle::new(9.0, 750.0))
+                .color(Color::WHITE),
         )
+}
+
+fn status_dot(k: &Kit, label: &str, color: Color) -> El {
+    row()
+        .gap(5.0)
+        .center_y()
+        .child(el().size(6.0, 6.0).radius(3.0).fill(color))
+        .child(text(label).font(k.ty.small).color(k.c.text_muted))
+}
+
+fn section_label(k: &Kit, label: &str) -> El {
+    text(label).font(k.ty.small_medium).color(k.c.text_faint)
 }
 
 fn header_icon(k: &Kit, icon: &'static Icon, label: &str) -> El {
@@ -103,21 +120,20 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
 
     let brand = row()
         .key("brand")
-        .h(58.0)
+        .h(52.0)
         .w_full()
-        .px(14.0)
-        .gap(10.0)
+        .px(12.0)
+        .gap(9.0)
         .center_y()
         .child(
             el().key("brand-mark")
-                .size(27.0, 27.0)
-                .radius(8.0)
+                .size(24.0, 24.0)
+                .radius(6.0)
                 .fill(oc::brand(dark))
                 .center()
-                .shadow(1.0, 5.0, Color::BLACK.alpha(0.2))
                 .child(
                     text("M")
-                        .font(TextStyle::new(13.0, 750.0))
+                        .font(TextStyle::new(12.0, 750.0))
                         .color(Color::WHITE),
                 ),
         )
@@ -127,17 +143,23 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .gap(1.0)
                 .child(
                     text("MACHINA")
-                        .font(TextStyle::new(12.0, 700.0).tracking(1.1))
+                        .font(TextStyle::new(11.5, 700.0).tracking(0.9))
                         .color(c.text_base),
                 )
                 .child(
                     text("local harness")
-                        .font(TextStyle::new(10.5, 450.0))
+                        .font(TextStyle::new(10.0, 450.0))
                         .color(c.text_faint),
                 ),
-        )
-        .child(el().grow(1.0).a11y_hidden())
-        .child(header_icon(k, &icons::PLUS, "New session"));
+        );
+
+    let new_chat_row = SidebarRow::new("New chat")
+        .icon(&icons::PLUS)
+        .height(34.0)
+        .detail("Ctrl N")
+        .on_select(|s: &mut State, _| new_chat(s))
+        .build(k)
+        .key("new-chat");
 
     let sessions = SESSIONS
         .iter()
@@ -145,7 +167,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         .map(|(i, (title, subtitle, age))| {
             SidebarRow::new(*title)
                 .subtitle(*subtitle)
-                .height(47.0)
+                .height(46.0)
                 .detail(*age)
                 .selected(i == s.selected_session)
                 .on_select(move |s: &mut State, _| s.selected_session = i)
@@ -156,10 +178,11 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
 
     let sidebar = Sidebar::new()
         .header(brand)
-        .header_gap(12.0)
-        .header_padding(0.0, 8.0)
+        .header(new_chat_row)
+        .header_gap(8.0)
+        .header_padding(0.0, 6.0)
         .section(
-            SidebarSection::new("Sessions")
+            SidebarSection::new("Recent")
                 .count(SESSIONS.len())
                 .rows(sessions),
         )
@@ -267,86 +290,55 @@ fn chat(s: &State, k: &Kit, hair: f32) -> El {
         .h_full()
         .fill(c.page)
         .child(
-            row()
-                .key("session-head")
-                .w_full()
-                .h(56.0)
-                .px(26.0)
-                .gap(10.0)
-                .center_y()
-                .child(
-                    col()
-                        .gap(2.0)
-                        .child(
-                            row()
-                                .gap(8.0)
-                                .center_y()
-                                .child(
-                                    text(SESSIONS[s.selected_session].0)
-                                        .font(k.ty.ui_medium)
-                                        .color(c.text_base),
-                                )
-                                .child(pill(k, "LOCAL", true)),
-                        )
-                        .child(
-                            text("Rune rebuild · visual shell + chat/workspace")
-                                .font(k.ty.small)
-                                .color(c.text_faint),
-                        ),
-                )
-                .child(el().grow(1.0).a11y_hidden())
-                .child(
-                    text("Ctrl K")
-                        .font(k.ty.small)
-                        .color(c.text_faint)
-                        .px(8.0)
-                        .py(4.0)
-                        .radius(k.radius.sm)
-                        .fill(c.layer_02)
-                        .border(hair, c.border_muted),
-                ),
-        )
-        .child(el().h(hair).w_full().fill(c.border_muted).a11y_hidden())
-        .child(
             col()
                 .key("chat-scroll")
                 .grow(1.0)
                 .min_h(0.0)
                 .w_full()
-                .scroll(ScrollSpec { stick_bottom: false })
-                .scroll_edge_fade(18.0)
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .scroll_edge_fade(16.0)
                 .child(
                     col()
                         .key("timeline")
                         .w_full()
-                        .px(36.0)
-                        .pt(32.0)
-                        .pb(20.0)
-                        .gap(24.0)
+                        .px(32.0)
+                        .pt(20.0)
+                        .pb(16.0)
+                        .gap(22.0)
                         .child(
                             col()
-                                .key("welcome")
+                                .key("session-context")
                                 .w_full()
-                                .gap(7.0)
+                                .gap(4.0)
                                 .child(
-                                    text("A native cockpit for your agent.")
-                                        .font(TextStyle::new(24.0, 650.0).lh(30.0))
-                                        .color(c.text_base),
+                                    row()
+                                        .gap(9.0)
+                                        .center_y()
+                                        .child(
+                                            text(SESSIONS[s.selected_session].0)
+                                                .font(TextStyle::new(20.0, 650.0).lh(26.0))
+                                                .color(c.text_base),
+                                        )
+                                        .child(status_dot(k, "Local", c.success.fg)),
                                 )
                                 .child(
-                                    text("One workspace for sessions, tools, diffs, and the truth about what ran.")
-                                        .font(TextStyle::new(13.0, 400.0).lh(20.0))
+                                    text("Rune rebuild · visual shell + chat/workspace")
+                                        .font(TextStyle::new(12.5, 400.0).lh(18.0))
                                         .color(c.text_muted),
                                 ),
                         )
                         .child(el().h(hair).w_full().fill(c.border_muted).a11y_hidden())
                         .children(timeline)
                         .child(tool_activity(k))
-                        .child(el().h(12.0).a11y_hidden()),
+                        .child(el().h(10.0).a11y_hidden()),
                 ),
         )
         .child(el().h(hair).w_full().fill(c.border_muted).a11y_hidden())
         .child(composer(s, k, hair))
+        .child(el().h(hair).w_full().fill(c.border_muted).a11y_hidden())
+        .child(status_bar(k))
 }
 
 fn user_message(k: &Kit, m: &Message, i: usize) -> El {
@@ -354,26 +346,28 @@ fn user_message(k: &Kit, m: &Message, i: usize) -> El {
     row()
         .key(format!("message-{i}"))
         .w_full()
-        .gap(12.0)
-        .child(avatar("KJ", c.bg_inverse, c.text_inverse))
+        .justify_end()
         .child(
             col()
                 .key("body")
-                .grow(1.0)
-                .min_w(0.0)
-                .gap(6.0)
+                .max_w(620.0)
+                .gap(5.0)
                 .child(
                     row()
+                        .justify_end()
                         .gap(8.0)
                         .center_y()
-                        .child(text("You").font(k.ty.ui_medium).color(c.text_base))
-                        .child(text(m.time).font(k.ty.small).color(c.text_faint)),
+                        .child(text(m.time).font(k.ty.small).color(c.text_faint))
+                        .child(text("You").font(k.ty.ui_medium).color(c.text_base)),
                 )
                 .child(
                     text(m.body.clone())
                         .key("copy")
                         .w_full()
                         .wrap()
+                        .padding(10.0)
+                        .radius(10.0)
+                        .fill(c.layer_02)
                         .font(TextStyle::new(13.5, 400.0).lh(21.0))
                         .color(c.text_base),
                 ),
@@ -385,21 +379,19 @@ fn assistant_message(k: &Kit, m: &Message, i: usize) -> El {
     row()
         .key(format!("message-{i}"))
         .w_full()
-        .gap(12.0)
-        .child(avatar("M", oc::brand(k.dark), Color::WHITE))
+        .gap(10.0)
+        .child(assistant_mark(k.dark))
         .child(
             col()
                 .key("body")
                 .grow(1.0)
                 .min_w(0.0)
-                .gap(8.0)
+                .gap(7.0)
                 .child(
                     row()
                         .gap(8.0)
                         .center_y()
                         .child(text("Machina").font(k.ty.ui_medium).color(c.text_base))
-                        .child(text("assistant").font(k.ty.small).color(c.text_faint))
-                        .child(pill(k, "PLAN", false))
                         .child(text(m.time).font(k.ty.small).color(c.text_faint)),
                 )
                 .child(
@@ -416,119 +408,142 @@ fn tool_activity(k: &Kit) -> El {
     col()
         .key("activity")
         .w_full()
-        .ml(38.0)
-        .gap(8.0)
+        .ml(30.0)
+        .gap(0.0)
         .child(
             row()
                 .key("activity-title")
+                .w_full()
+                .h(30.0)
                 .gap(7.0)
                 .center_y()
                 .child(icon(&icons::TERMINAL, 13.0).color(c.icon_muted))
                 .child(text("Activity").font(k.ty.small_medium).color(c.text_muted))
-                .child(text("2 checks").font(k.ty.small).color(c.text_faint)),
+                .child(text("2 tools · 1.4s").font(k.ty.small).color(c.text_faint)),
+        )
+        .child(el().h(1.0).w_full().fill(c.border_muted).a11y_hidden())
+        .child(
+            row()
+                .key("activity-read")
+                .w_full()
+                .h(34.0)
+                .px(2.0)
+                .gap(8.0)
+                .center_y()
+                .child(icon(&icons::FILE_DOCUMENT, 13.0).color(c.icon_muted))
+                .child(
+                    text("Read apps/desktop/src/app/App.tsx")
+                        .font(k.ty.small)
+                        .color(c.text_muted),
+                )
+                .child(el().grow(1.0).a11y_hidden())
+                .child(icon(&icons::CHECK, 12.0).color(c.success.fg))
+                .child(text("0.2s").font(k.ty.small).color(c.text_faint)),
         )
         .child(
-            col()
-                .key("activity-card")
+            row()
+                .key("activity-check")
                 .w_full()
-                .radius(k.radius.lg)
-                .border(1.0, c.border_muted)
-                .fill(c.layer_01)
+                .h(34.0)
+                .px(2.0)
+                .gap(8.0)
+                .center_y()
+                .child(icon(&icons::TERMINAL, 13.0).color(c.icon_muted))
                 .child(
-                    row()
-                        .key("activity-read")
-                        .w_full()
-                        .h(42.0)
-                        .px(12.0)
-                        .gap(9.0)
-                        .center_y()
-                        .child(icon(&icons::FILE_DOCUMENT, 14.0).color(c.icon_muted))
-                        .child(
-                            text("Read apps/desktop/src/app/App.tsx")
-                                .font(k.ty.small)
-                                .color(c.text_muted),
-                        )
-                        .child(el().grow(1.0).a11y_hidden())
-                        .child(icon(&icons::CHECK, 13.0).color(c.success.fg)),
+                    text("cargo check -p machina-desktop")
+                        .font(TextStyle::new(12.0, 450.0).mono())
+                        .color(c.text_muted),
                 )
-                .child(
-                    row()
-                        .key("activity-check")
-                        .w_full()
-                        .h(42.0)
-                        .px(12.0)
-                        .gap(9.0)
-                        .center_y()
-                        .fill(c.layer_02)
-                        .child(icon(&icons::TERMINAL, 14.0).color(c.icon_muted))
-                        .child(
-                            text("cargo check -p machina-desktop")
-                                .font(TextStyle::new(12.0, 450.0).mono())
-                                .color(c.text_muted),
-                        )
-                        .child(el().grow(1.0).a11y_hidden())
-                        .child(pill(k, "READY", false)),
-                ),
+                .child(el().grow(1.0).a11y_hidden())
+                .child(text("passed").font(k.ty.small).color(c.success.fg))
+                .child(text("0.8s").font(k.ty.small).color(c.text_faint)),
         )
 }
 
 fn composer(s: &State, k: &Kit, hair: f32) -> El {
     let c = &k.c;
-    let input = TextArea::new(&s.draft)
-        .width(None)
-        .placeholder("Ask Machina to build, fix, or explain…")
-        .auto_grow(2, 7)
+    let style = TextStyle {
+        line_height: 21.0,
+        ..k.ty.ui
+    };
+    let field = text_input(&s.draft, style)
+        .w_full()
+        .color(c.text_base)
+        .placeholder("Message Machina…", c.text_faint)
+        .caret(c.text_base, k.selection())
         .on_edit(|s: &mut State| &mut s.draft)
-        .on_submit(submit)
-        .build(k)
+        .on_submit(submit);
+    let input = col()
         .key("composer-input")
-        .w_full();
+        .w_full()
+        .min_h(50.0)
+        .padding(10.0)
+        .child(auto_grow(field, 2, 6));
 
     col()
         .key("composer-wrap")
         .w_full()
-        .px(28.0)
-        .pb(22.0)
-        .pt(12.0)
+        .px(32.0)
+        .pb(10.0)
+        .pt(10.0)
         .child(
             col()
                 .key("composer")
                 .w_full()
-                .padding(10.0)
-                .gap(8.0)
-                .radius(18.0)
+                .radius(12.0)
                 .fill(c.layer_01)
-                .border(hair, c.border_base)
-                .shadow(8.0, 30.0, Color::BLACK.alpha(0.10))
+                .border(hair, c.border_muted)
                 .child(input)
                 .child(
                     row()
                         .key("composer-controls")
                         .w_full()
-                        .h(28.0)
-                        .px(2.0)
-                        .gap(7.0)
+                        .h(32.0)
+                        .px(10.0)
+                        .pb(4.0)
+                        .gap(8.0)
                         .center_y()
-                        .child(pill(k, "Machina", true))
-                        .child(pill(k, "deepseek-flash", false))
+                        .child(text("Machina").font(k.ty.small).color(c.text_muted))
+                        .child(text("deepseek-flash").font(k.ty.small).color(c.text_faint))
+                        .child(text("Med").font(k.ty.small).color(c.text_faint))
                         .child(el().grow(1.0).a11y_hidden())
-                        .child(
-                            text("Ctrl+Enter to send")
-                                .font(k.ty.small)
-                                .color(c.text_faint),
-                        )
+                        .child(text("Enter to send").font(k.ty.small).color(c.text_faint))
                         .child(
                             el().key("send")
-                                .size(29.0, 29.0)
-                                .radius(15.0)
+                                .size(26.0, 26.0)
+                                .radius(6.0)
                                 .fill(c.bg_contrast)
                                 .center()
                                 .hover(c.contrast_hover)
                                 .on_press_tx(submit)
-                                .child(icon(&icons::ARROW_UP, 14.0).color(c.icon_contrast)),
+                                .child(icon(&icons::ARROW_UP, 13.0).color(c.icon_contrast)),
                         ),
                 ),
         )
+}
+
+fn status_bar(k: &Kit) -> El {
+    let c = &k.c;
+    row()
+        .key("status-bar")
+        .w_full()
+        .h(28.0)
+        .px(32.0)
+        .gap(14.0)
+        .center_y()
+        .child(status_dot(k, "Local", c.success.fg))
+        .child(text("main").font(k.ty.small).color(c.text_faint))
+        .child(text("deepseek-flash").font(k.ty.small).color(c.text_faint))
+        .child(text("Context 12%").font(k.ty.small).color(c.text_faint))
+        .child(
+            el().size(36.0, 3.0)
+                .radius(1.5)
+                .fill(c.border_muted)
+                .child(el().w(4.5).h(3.0).radius(1.5).fill(oc::brand(k.dark))),
+        )
+        .child(text("Approvals · Ask").font(k.ty.small).color(c.text_faint))
+        .child(el().grow(1.0).a11y_hidden())
+        .child(text("Rune 0.1").font(k.ty.small).color(c.text_faint))
 }
 
 fn submit(s: &mut State, tx: &mut Tx) {
@@ -549,19 +564,26 @@ fn inspector(s: &State, k: &Kit) -> El {
     let c = &k.c;
     let tab = |label: &'static str, index: usize| {
         let selected = s.inspector_tab == index;
-        text(label)
-            .font(k.ty.small_medium)
-            .color(if selected { c.text_base } else { c.text_faint })
-            .px(9.0)
-            .py(6.0)
-            .radius(k.radius.sm)
-            .fill(if selected {
-                c.layer_02
-            } else {
-                Color::TRANSPARENT
-            })
+        col()
+            .key(label)
+            .gap(5.0)
             .hover(c.hover)
             .on_press(move |s: &mut State| s.inspector_tab = index)
+            .child(text(label).font(k.ty.small_medium).color(if selected {
+                c.text_base
+            } else {
+                c.text_faint
+            }))
+            .child(
+                el().h(1.0)
+                    .w_full()
+                    .fill(if selected {
+                        c.text_base
+                    } else {
+                        Color::TRANSPARENT
+                    })
+                    .a11y_hidden(),
+            )
     };
 
     col()
@@ -570,14 +592,14 @@ fn inspector(s: &State, k: &Kit) -> El {
         .h_full()
         .fill(c.page)
         .px(14.0)
-        .pt(14.0)
-        .pb(14.0)
+        .pt(12.0)
+        .pb(12.0)
         .gap(12.0)
         .child(
             row()
                 .key("inspector-head")
                 .w_full()
-                .h(26.0)
+                .h(24.0)
                 .center_y()
                 .gap(8.0)
                 .child(text("Workspace").font(k.ty.ui_medium).color(c.text_base))
@@ -588,92 +610,78 @@ fn inspector(s: &State, k: &Kit) -> El {
             row()
                 .key("tabs")
                 .w_full()
-                .gap(2.0)
+                .gap(14.0)
                 .child(tab("Changes", 0))
                 .child(tab("Files", 1))
                 .child(el().grow(1.0).a11y_hidden())
-                .child(pill(k, "3", false)),
+                .child(text("3").font(k.ty.small).color(c.text_faint)),
         )
-        .child(el().h(1.0).w_full().fill(c.border_muted).a11y_hidden())
         .child(
             col()
                 .key("changed-files")
                 .w_full()
-                .gap(1.0)
-                .child(file_row(
-                    k,
-                    "M",
-                    "src/app/App.tsx",
-                    "upserted",
-                    c.success.fg,
-                    true,
-                ))
-                .child(file_row(
-                    k,
-                    "A",
-                    "apps/desktop/Cargo.toml",
-                    "new",
-                    c.success.fg,
-                    false,
-                ))
-                .child(file_row(
-                    k,
-                    "M",
-                    "ui/package.json",
-                    "override",
-                    c.warning.fg,
-                    false,
-                )),
+                .gap(8.0)
+                .child(section_label(k, "Changed files"))
+                .child(
+                    col()
+                        .gap(0.0)
+                        .child(file_row(
+                            k,
+                            "M",
+                            "src/app/App.tsx",
+                            "+12  -4",
+                            c.success.fg,
+                            true,
+                        ))
+                        .child(file_row(
+                            k,
+                            "A",
+                            "apps/desktop/Cargo.toml",
+                            "+8",
+                            c.success.fg,
+                            false,
+                        ))
+                        .child(file_row(
+                            k,
+                            "M",
+                            "ui/package.json",
+                            "+2  -2",
+                            c.warning.fg,
+                            false,
+                        )),
+                ),
         )
         .child(
             col()
-                .key("run-card")
+                .key("checks")
                 .w_full()
-                .gap(6.0)
-                .padding(10.0)
-                .radius(k.radius.md)
-                .fill(c.layer_01)
-                .border(1.0, c.border_muted)
+                .gap(8.0)
+                .child(section_label(k, "Checks"))
                 .child(
                     row()
-                        .gap(6.0)
+                        .w_full()
+                        .h(28.0)
+                        .gap(7.0)
                         .center_y()
                         .child(icon(&icons::CHECK, 12.0).color(c.success.fg))
-                        .child(
-                            text("cargo check")
-                                .font(k.ty.small_medium)
-                                .color(c.text_base),
-                        )
+                        .child(text("cargo check").font(k.ty.small).color(c.text_muted))
                         .child(el().grow(1.0).a11y_hidden())
-                        .child(text("0.8s").font(k.ty.small).color(c.text_faint)),
-                )
-                .child(
-                    text("Rune app compiles")
-                        .font(k.ty.small)
-                        .color(c.text_muted),
+                        .child(text("passed · 0.8s").font(k.ty.small).color(c.text_faint)),
                 ),
         )
         .child(el().grow(1.0).a11y_hidden())
         .child(
-            col()
+            row()
                 .key("inspector-footer")
                 .w_full()
-                .gap(5.0)
+                .gap(6.0)
+                .center_y()
+                .child(icon(&icons::FOLDER, 12.0).color(c.icon_muted))
                 .child(
-                    text("WORKSPACE")
-                        .font(TextStyle::new(10.0, 650.0).tracking(1.0))
-                        .color(c.text_faint),
-                )
-                .child(
-                    row()
-                        .gap(6.0)
-                        .center_y()
-                        .child(icon(&icons::FOLDER, 12.0).color(c.icon_muted))
-                        .child(
-                            text("C:\\Users\\kiash\\machina")
-                                .font(k.ty.small)
-                                .color(c.text_muted),
-                        ),
+                    text("C:\\Users\\kiash\\machina")
+                        .font(k.ty.small)
+                        .color(c.text_muted)
+                        .truncate(),
                 ),
         )
 }

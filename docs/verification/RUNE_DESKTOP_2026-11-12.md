@@ -12,9 +12,16 @@ The first milestone is the visual shell and chat/workspace surfaces:
 - session sidebar with workspace metadata and selectable sessions;
 - chat timeline with Markdown assistant replies and tool activity;
 - multiline composer with draft clearing and keyboard/button submit;
-- resizable workspace inspector with changed files and run status;
+- resizable workspace inspector with changed files and check status;
 - dark and light appearances;
 - headless scene rendering for both appearances.
+
+The layout follows Nous Research's Hermes Desktop design philosophy, documented
+in `apps/desktop/DESIGN.md` upstream: chat is the home surface, content is flat
+rather than nested in cards, tool activity stays compact and secondary, and the
+bottom status bar carries local state, branch, model, context use, and approval
+mode. Machina keeps its ember brand and OpenCode typography instead of copying
+Hermes' blue theme.
 
 The gateway is intentionally not wired into this shell yet. Session loading,
 prompts, approvals, jobs, memory, and settings are the next port.

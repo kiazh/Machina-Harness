@@ -4,6 +4,11 @@ Machina's native desktop workspace. It is a Rust application built with
 [Rune](https://github.com/anomalyco/rune), rendered by Rune's GPU shell and
 styled with OpenCode's `@opencode/ui` design language.
 
+The layout follows Nous Research's Hermes Desktop philosophy: chat is the home
+surface, panels are flat rather than boxed, tool activity is compact, and a
+quiet status bar carries model, context, and approval state. Machina keeps its
+own ember mark and voice.
+
 The old React/Tauri implementation was removed during the Rune migration. Its
 history remains available in Git. The backend gateway is not wired into this
 shell yet; the first milestone is the visual workspace below.
@@ -42,9 +47,9 @@ cargo run --manifest-path apps/desktop/Cargo.toml -- \
 
 ## Current milestone
 
-- OpenCode-themed Rune application shell.
-- Resizable session sidebar and workspace inspector.
-- Chat timeline with Markdown assistant replies and tool-activity rows.
+- OpenCode-themed Rune application shell with Machina's ember identity.
+- Chat-first layout, resizable session sidebar, and workspace inspector.
+- Flat activity rows, user-message surface, and a compact lower status bar.
 - Multiline composer with draft clearing, send button, and keyboard submit.
 - Dark and light appearances with a headless scene for each.
 - Seeded shell state behind an explicit boundary for the gateway port.
