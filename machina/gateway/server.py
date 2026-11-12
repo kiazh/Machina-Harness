@@ -98,11 +98,7 @@ def _setup_gateway_logging() -> None:
             home = str(config.get("machina_home") or "").strip()
         except Exception:
             home = ""
-    root = (
-        os.path.expanduser(home)
-        if home
-        else os.path.join(os.path.expanduser("~"), ".machina")
-    )
+    root = os.path.expanduser(home) if home else os.path.join(os.path.expanduser("~"), ".machina")
     log_dir = os.path.join(root, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "gateway.log")

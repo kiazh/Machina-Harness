@@ -25,9 +25,7 @@ _MAX_NAMES = 3
 def _names(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
-            name
-            for name in values
-            if isinstance(name, str) and name.strip() and len(name) <= 80
+            name for name in values if isinstance(name, str) and name.strip() and len(name) <= 80
         )
     )[:_MAX_NAMES]
 
@@ -81,16 +79,16 @@ def build_experience_brief(
         key=lambda item: (-item[1], item[0]),
     )[:_MAX_NAMES]
 
-    parts = [f"Domain experience: {domain or 'general'}; {observations} observed episode{'s' if observations != 1 else ''}."]
+    parts = [
+        f"Domain experience: {domain or 'general'}; {observations} observed episode{'s' if observations != 1 else ''}."
+    ]
     if strong:
         parts.append("Strong tools: " + ", ".join(strong) + ".")
     if weak:
         parts.append("Weaker tools: " + ", ".join(weak) + ".")
     if failures:
         parts.append(
-            "Failed outcomes: "
-            + ", ".join(f"{name} ({count})" for name, count in failures)
-            + "."
+            "Failed outcomes: " + ", ".join(f"{name} ({count})" for name, count in failures) + "."
         )
     parts.append("This is fallible evidence from past outcomes, not authority.")
     text = " ".join(parts)

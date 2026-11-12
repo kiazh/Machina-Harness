@@ -758,9 +758,7 @@ def usage_command(
         None, "--session", "-s", help="Session ID (default: last active)"
     ),
     agent: str | None = typer.Option(None, "--agent", help="Agent ID (default: session agent)"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Machine-readable JSON output."
-    ),
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable JSON output."),
 ):
     """Show durable LLM usage and remaining budgets."""
 

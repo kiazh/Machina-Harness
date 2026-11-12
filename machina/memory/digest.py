@@ -86,9 +86,7 @@ class MemoryDigest:
 def _tokens(text: str) -> set[str]:
     tokens = {
         token
-        for token in (
-            match.group(0).lower().strip(".-") for match in _WORD_RE.finditer(text or "")
-        )
+        for token in (match.group(0).lower().strip(".-") for match in _WORD_RE.finditer(text or ""))
         if len(token) >= 2 and token not in _STOPWORDS
     }
     return tokens
@@ -177,7 +175,9 @@ def select_diverse(
     max_score = max(memory.score for memory in unique)
     token_sets = {id(memory): _tokens(memory.memory.content) for memory in unique}
     relevance = {id(memory): _relevance(memory, max_score) for memory in unique}
-    query_overlap = {id(memory): _query_overlap(token_sets[id(memory)], query_tokens) for memory in unique}
+    query_overlap = {
+        id(memory): _query_overlap(token_sets[id(memory)], query_tokens) for memory in unique
+    }
 
     selected: list[RetrievedMemory] = []
     selected_tokens: list[set[str]] = []
@@ -233,7 +233,9 @@ def build_memory_digest(
     """Render a bounded, query-conditioned digest with explicit omission."""
     if not memories or max_items <= 0 or max_chars < _MIN_DIGEST_CHARS:
         return MemoryDigest("", (), 0, 0)
-    unique_count = len({_normalize(memory.memory.content) for memory in memories if memory.memory.content.strip()})
+    unique_count = len(
+        {_normalize(memory.memory.content) for memory in memories if memory.memory.content.strip()}
+    )
     selected = select_diverse(
         memories,
         query,

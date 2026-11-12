@@ -61,7 +61,12 @@ _EXPANDED_SUITE: tuple[tuple[str, str, str | None, int], ...] = (
     ("Draft a release note for the harness router", "external", "hermes", 1),
     ("Update the API docs for the new endpoint", "external", "hermes", 1),
     ("Implement a CLI flag and update the README", "external", None, 1),
-    ("Research the best local embedding model and then write a comparison", "external", "hermes", 2),
+    (
+        "Research the best local embedding model and then write a comparison",
+        "external",
+        "hermes",
+        2,
+    ),
     ("Find the cause of the timeout in the test suite", "external", None, 1),
     ("Debug this stack trace", "external", None, 1),
     ("Write a poem about autumn", "internal", "machina", 1),
@@ -141,12 +146,8 @@ def main() -> int:
         "p95_ms": round(_p95(latencies), 2),
         "provider_calls": 0,
         "provider_tokens": 0,
-        "mean_top_vector": round(
-            statistics.mean(row["vector"] for row in external_rows), 3
-        ),
-        "mean_top_keyword": round(
-            statistics.mean(row["keyword"] for row in external_rows), 3
-        ),
+        "mean_top_vector": round(statistics.mean(row["vector"] for row in external_rows), 3),
+        "mean_top_keyword": round(statistics.mean(row["keyword"] for row in external_rows), 3),
         "failures": [row for row in rows if not row["ok"]],
     }
     print(json.dumps(output, indent=2))

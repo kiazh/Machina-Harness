@@ -117,7 +117,15 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="hard-constraints",
         query="Summarize the database, API, deployment, testing, security, documentation, and frontend constraints.",
-        required=("postgresql", "fastapi", "docker", "pytest", "security", "documentation", "react"),
+        required=(
+            "postgresql",
+            "fastapi",
+            "docker",
+            "pytest",
+            "security",
+            "documentation",
+            "react",
+        ),
         memories=(
             ("The project uses PostgreSQL for persistence.", 0.95, "decision"),
             ("PostgreSQL is the primary database.", 0.94, "fact"),
@@ -201,8 +209,7 @@ def main() -> int:
     rows: list[dict] = []
     for scenario in SCENARIOS:
         candidates = [
-            _entry(content, score, category)
-            for content, score, category in scenario.memories
+            _entry(content, score, category) for content, score, category in scenario.memories
         ]
         naive = sorted(candidates, key=lambda memory: (-memory.score, memory.memory.content))[:5]
         digest = build_memory_digest(
@@ -227,9 +234,7 @@ def main() -> int:
                     3,
                 ),
                 "digest_coverage_per_1k": round(
-                    _coverage(selected, scenario.required)
-                    / max(1, digest.char_count)
-                    * 1000,
+                    _coverage(selected, scenario.required) / max(1, digest.char_count) * 1000,
                     3,
                 ),
                 "naive_redundancy": round(_redundancy(naive), 3),

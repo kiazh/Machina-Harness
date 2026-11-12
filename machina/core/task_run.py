@@ -170,13 +170,9 @@ class TaskRunPolicy:
     ) -> None:
         self.active = is_repair_task(user_message)
         self.lean_tools = lean_tools_enabled()
-        self.max_turns = (
-            configured_max_turns() if max_turns is None else max(0, max_turns)
-        )
+        self.max_turns = configured_max_turns() if max_turns is None else max(0, max_turns)
         self.max_tool_calls = (
-            configured_max_tool_calls()
-            if max_tool_calls is None
-            else max(0, max_tool_calls)
+            configured_max_tool_calls() if max_tool_calls is None else max(0, max_tool_calls)
         )
         self.max_repeats = max(1, max_repeats)
         self.edit_nudge_turns = max(1, edit_nudge_turns)
@@ -200,11 +196,7 @@ class TaskRunPolicy:
         """Return the lean repair toolset; fail open if nothing matches."""
         if not self.active or not self.lean_tools:
             return tool_defs
-        selected = [
-            tool
-            for tool in tool_defs
-            if getattr(tool, "name", None) in REPAIR_TOOL_NAMES
-        ]
+        selected = [tool for tool in tool_defs if getattr(tool, "name", None) in REPAIR_TOOL_NAMES]
         return selected or tool_defs
 
     @property
@@ -238,9 +230,7 @@ class TaskRunPolicy:
                 args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
                 handle = str(args.get("artifact_id") or "")
                 if handle:
-                    self._artifact_counts[handle] = (
-                        self._artifact_counts.get(handle, 0) + 1
-                    )
+                    self._artifact_counts[handle] = self._artifact_counts.get(handle, 0) + 1
             elif entry.get("tool") == "terminal_job":
                 self.job_polls += 1
             if _failed(entry):
@@ -281,8 +271,7 @@ class TaskRunPolicy:
             return None
         if (
             not self._artifact_nudged
-            and max(self._artifact_counts.values(), default=0)
-            >= DEFAULT_ARTIFACT_NUDGE_READS
+            and max(self._artifact_counts.values(), default=0) >= DEFAULT_ARTIFACT_NUDGE_READS
         ):
             self._artifact_nudged = True
             return TASK_RUN_ARTIFACT_NUDGE

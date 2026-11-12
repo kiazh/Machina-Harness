@@ -60,10 +60,7 @@ def workspace_is_clean(workspace: str | Path | None = None) -> bool:
     not a working git checkout or git cannot be inspected.
     """
     root = Path(
-        workspace
-        or config.get("workspace_root")
-        or config.get("machina_home")
-        or Path.cwd()
+        workspace or config.get("workspace_root") or config.get("machina_home") or Path.cwd()
     )
     try:
         result = subprocess.run(
@@ -162,8 +159,4 @@ def should_nudge_verification(
     nudges: int = 0,
 ) -> bool:
     """Return True when a repaired tree has no successful verification."""
-    return (
-        nudges < 1
-        and is_repair_task(user_message)
-        and not has_verification_evidence(tool_calls)
-    )
+    return nudges < 1 and is_repair_task(user_message) and not has_verification_evidence(tool_calls)

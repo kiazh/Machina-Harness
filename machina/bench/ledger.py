@@ -178,8 +178,7 @@ class Ledger:
                 by_task.setdefault(record.task_id, []).append(record)
             solved_trials = sum(record.resolved for record in group)
             all_attempts_solved = sum(
-                all(item.resolved for item in task_records)
-                for task_records in by_task.values()
+                all(item.resolved for item in task_records) for task_records in by_task.values()
             )
             tokens_in = sum(record.tokens_in or 0 for record in group)
             tokens_out = sum(record.tokens_out or 0 for record in group)
@@ -209,15 +208,9 @@ class Ledger:
                         total_tokens / solved_trials if solved_trials else None
                     ),
                     "cache_read_tokens": cache_read,
-                    "cache_write_tokens": sum(
-                        record.cache_write_tokens or 0 for record in group
-                    ),
-                    "cache_read_ratio": (
-                        cache_read / tokens_in if tokens_in else None
-                    ),
-                    "tool_result_tokens": sum(
-                        record.tool_result_tokens or 0 for record in group
-                    ),
+                    "cache_write_tokens": sum(record.cache_write_tokens or 0 for record in group),
+                    "cache_read_ratio": (cache_read / tokens_in if tokens_in else None),
+                    "tool_result_tokens": sum(record.tool_result_tokens or 0 for record in group),
                     "turns": turns,
                     "tokens_per_turn": total_tokens / turns if turns else None,
                     "context_tokens_p95": percentile(context_values, 0.95),

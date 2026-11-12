@@ -166,15 +166,19 @@ def _split_command(command: str) -> list[str]:
     """
     if command.lstrip().startswith("["):
         parsed = json.loads(command)
-        if not isinstance(parsed, list) or not parsed or not all(
-            isinstance(part, str) and part for part in parsed
+        if (
+            not isinstance(parsed, list)
+            or not parsed
+            or not all(isinstance(part, str) and part for part in parsed)
         ):
             raise ValueError("gateway command JSON must be a non-empty string array")
         return list(parsed)
     tokens = shlex.split(command, posix=os.name != "nt")
     if os.name == "nt":
         tokens = [
-            token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'" else token
+            token[1:-1]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+            else token
             for token in tokens
         ]
     return tokens
@@ -342,9 +346,7 @@ def _prune_exited() -> tuple[subprocess.Popen[Any] | None, str | None]:
             if code is not None:
                 _process = None
                 if _last_error is None:
-                    _last_error = (
-                        f"Kiro gateway process exited with code {code}. See {log_path()}."
-                    )
+                    _last_error = f"Kiro gateway process exited with code {code}. See {log_path()}."
         return _process, _last_error
 
 
@@ -634,9 +636,8 @@ def _spawn(spec: LaunchSpec) -> subprocess.Popen[Any]:
         if spec.cwd is not None:
             kwargs["cwd"] = str(spec.cwd)
         if os.name == "nt":
-            kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
             )
         else:
             kwargs["start_new_session"] = True
@@ -722,9 +723,7 @@ def start(*, wait: float = START_TIMEOUT_SECONDS) -> dict[str, Any]:
                 return {"started": True, "ready": True, "status": status()}
             code = proc.poll()
             if code is not None:
-                message = (
-                    f"Kiro gateway process exited with code {code}. See {log_path()}."
-                )
+                message = f"Kiro gateway process exited with code {code}. See {log_path()}."
                 with _SAFE_STATE_LOCK:
                     if _process is proc:
                         _process = None

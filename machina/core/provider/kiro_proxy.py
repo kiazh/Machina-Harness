@@ -256,9 +256,7 @@ def _is_loopback_url(url: str) -> bool:
     return host in {"localhost", "::1"} or host.startswith("127.")
 
 
-def gateway_reachable(
-    url: str | None = None, *, timeout: float = PROBE_TIMEOUT_SECONDS
-) -> bool:
+def gateway_reachable(url: str | None = None, *, timeout: float = PROBE_TIMEOUT_SECONDS) -> bool:
     """Bounded TCP preflight for the local OpenAI-compatible gateway.
 
     This is deliberately a socket connect, not an HTTP request: a dead
@@ -278,9 +276,7 @@ def gateway_reachable(
         return False
 
 
-def _fetch_loopback_models(
-    url: str, *, api_key: str, timeout: float
-) -> list[dict[str, Any]]:
+def _fetch_loopback_models(url: str, *, api_key: str, timeout: float) -> list[dict[str, Any]]:
     """Fetch ``/models`` from the local proxy without constructing HTTPX.
 
     ``httpx.Client`` costs ~300 ms per construction on Windows (system
@@ -319,9 +315,7 @@ def _fetch_loopback_models(
             "Set KIRO_API_KEY to the gateway's PROXY_API_KEY."
         )
     if status != 200:
-        raise KiroGatewayUnavailable(
-            f"Kiro local gateway returned HTTP {status} from {url}."
-        )
+        raise KiroGatewayUnavailable(f"Kiro local gateway returned HTTP {status} from {url}.")
     if len(body) > MAX_LOCAL_MODELS_BYTES:
         raise KiroGatewayUnavailable("Kiro model-list response exceeded the byte limit.")
     try:
@@ -334,9 +328,7 @@ def _fetch_loopback_models(
     return [item if isinstance(item, dict) else {"id": str(item)} for item in rows]
 
 
-def _fetch_catalog_rows(
-    url: str, *, api_key: str, timeout: float
-) -> list[dict[str, Any]]:
+def _fetch_catalog_rows(url: str, *, api_key: str, timeout: float) -> list[dict[str, Any]]:
     """Route loopback to the lean client; non-loopback stays on the store."""
     if _is_loopback_url(url):
         return _fetch_loopback_models(url, api_key=api_key, timeout=timeout)

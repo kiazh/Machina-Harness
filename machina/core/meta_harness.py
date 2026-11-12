@@ -102,9 +102,7 @@ _STOPWORDS = frozenset(
 # deliberately conservative (an ambiguous imperative or a short follow-on).
 # They fill only missing descriptor facts; they never override conversational
 # turns, and they never select a harness by themselves.
-_REVIEW_ACTIONS = frozenset(
-    {"audit", "checkout", "critique", "penetration", "review"}
-)
+_REVIEW_ACTIONS = frozenset({"audit", "checkout", "critique", "penetration", "review"})
 _DOCUMENTATION_CUES = frozenset(
     {
         "changelog",
@@ -350,8 +348,7 @@ class MetaRoute:
         route_text = f"{self.task_class} -> {label} ({self.confidence:.2f})"
         if len(self.steps) > 1:
             route_text = "; ".join(
-                f"{step.family or step.task_class} -> {step.primary} "
-                f"({step.confidence:.2f})"
+                f"{step.family or step.task_class} -> {step.primary} ({step.confidence:.2f})"
                 for step in self.steps[:2]
             )
         elif alternate is not None and primary.score - alternate.score < 0.08:
@@ -359,7 +356,7 @@ class MetaRoute:
         return (
             "Meta-harness route (local, advisory): "
             f"{route_text}. For a bounded second implementation or review, "
-            f"call harness_delegate(platform=\"{self.primary}\", task=\"<task>\"). "
+            f'call harness_delegate(platform="{self.primary}", task="<task>"). '
             "Approval and tool permissions still apply."
         )
 
@@ -803,13 +800,7 @@ def _score_card(
         else 0.0
     )
     class_match = 1.0 if descriptor.task_class in card.task_classes else 0.0
-    score = (
-        0.38 * vector
-        + 0.22 * keyword
-        + 0.18 * class_match
-        + 0.14 * family
-        + 0.08 * capability
-    )
+    score = 0.38 * vector + 0.22 * keyword + 0.18 * class_match + 0.14 * family + 0.08 * capability
     reasons = []
     if class_match:
         reasons.append(f"class={descriptor.task_class}")
@@ -849,9 +840,7 @@ def _merge_families(existing: Sequence[str], added: Sequence[str]) -> tuple[str,
     return tuple(family for family in TASK_FAMILIES if family in combined)
 
 
-def _merge_capabilities(
-    existing: Sequence[str], added: Sequence[str]
-) -> tuple[str, ...]:
+def _merge_capabilities(existing: Sequence[str], added: Sequence[str]) -> tuple[str, ...]:
     merged = list(existing)
     for capability in added:
         if capability not in merged:
@@ -874,9 +863,7 @@ def _infer_routing_descriptor(prompt: str, descriptor: TaskDescriptor) -> TaskDe
     tokens = set(_tokens(prompt))
     review_action = bool(tokens & _REVIEW_ACTIONS)
     research = bool(tokens & _RESEARCH_ANCHORS)
-    documentation = bool(tokens & _DOCUMENTATION_ANCHORS) or len(
-        tokens & _DOCUMENTATION_CUES
-    ) >= 2
+    documentation = bool(tokens & _DOCUMENTATION_ANCHORS) or len(tokens & _DOCUMENTATION_CUES) >= 2
     # A documentation request can name API endpoints, React, or a schema and
     # still be a writing task; only an actual coding verb makes the code
     # harness the better first route. Research anchors win even with a verb
@@ -896,9 +883,7 @@ def _infer_routing_descriptor(prompt: str, descriptor: TaskDescriptor) -> TaskDe
         )
 
     research_explicit = bool(tokens & {"investigate", "literature", "pubmed", "research"})
-    if research_explicit or (research and not strong_code) or (
-        documentation and not strong_code
-    ):
+    if research_explicit or (research and not strong_code) or (documentation and not strong_code):
         capabilities: list[str] = []
         if research:
             capabilities.append("research")
@@ -1103,7 +1088,7 @@ def route_prompt(
     clean = str(prompt or "").strip()
     if not clean or len(clean) > _MAX_PROMPT_CHARS:
         descriptor = _descriptor(
-            clean[: _MAX_PROMPT_CHARS],
+            clean[:_MAX_PROMPT_CHARS],
             task_state=task_state,
             recent=recent,
             goal=goal,
@@ -1120,9 +1105,7 @@ def route_prompt(
         task_class=task_class,
     )
     if len(clauses) <= 1:
-        primary, mode, confidence, reason, candidates = _route_one(
-            clean, descriptor, cards
-        )
+        primary, mode, confidence, reason, candidates = _route_one(clean, descriptor, cards)
         if mode != "external":
             return _internal_route(clean, descriptor, candidates)
         step = RouteStep(
@@ -1169,9 +1152,7 @@ def route_prompt(
                 intent=clause,
                 task_class=clause_descriptor.task_class,
                 family=(
-                    clause_descriptor.task_families[0]
-                    if clause_descriptor.task_families
-                    else ""
+                    clause_descriptor.task_families[0] if clause_descriptor.task_families else ""
                 ),
                 primary=primary,
                 mode=mode,

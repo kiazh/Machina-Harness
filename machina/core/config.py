@@ -22,6 +22,7 @@ from machina.security.env_file import find_env_file, read_env_values, set_env_va
 
 logger = logging.getLogger(__name__)
 
+
 def default_config_path() -> Path:
     """Resolve the config file, honoring ``MACHINA_HOME``.
 

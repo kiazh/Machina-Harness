@@ -723,9 +723,7 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
         sensitive_root = workspace_root()
         sensitive_stores = credential_store_paths()
         for root, dirs, names in os.walk(dir_path):
-            dirs[:] = sorted(
-                name for name in dirs if name not in _SEARCH_SKIP_DIRS
-            )
+            dirs[:] = sorted(name for name in dirs if name not in _SEARCH_SKIP_DIRS)
             for name in sorted(names):
                 if not fnmatch.fnmatch(name, glob_pattern):
                     continue
@@ -741,9 +739,7 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
                 # R01: every file a search opens is checked against the shared
                 # sensitive-path definition — the tool's narrower private list
                 # alone let `credentials`/`production.env` leak into results.
-                if sensitive_path(
-                    str(resolved), sensitive_root, stores=sensitive_stores
-                ):
+                if sensitive_path(str(resolved), sensitive_root, stores=sensitive_stores):
                     continue
                 # H18: capture the validated file's identity through the same
                 # protected descriptor traversal the ordinary file tools use
@@ -761,9 +757,7 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
                     os.close(fd)
                 if info.st_size > _SEARCH_MAX_FILE_BYTES:
                     continue
-                files.append(
-                    {"path": str(f), "dev": info.st_dev, "ino": info.st_ino}
-                )
+                files.append({"path": str(f), "dev": info.st_dev, "ino": info.st_ino})
         return files
 
     try:

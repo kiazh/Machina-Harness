@@ -793,9 +793,7 @@ class BaseReActAgent:
                             query_embedding=query_embedding,
                             max_items=max(1, int(config.get("memory_digest_max_facts"))),
                             max_chars=max(200, int(config.get("memory_digest_max_chars"))),
-                            candidate_limit=max(
-                                1, int(config.get("memory_digest_candidates"))
-                            ),
+                            candidate_limit=max(1, int(config.get("memory_digest_candidates"))),
                         )
                     except Exception as exc:
                         record_failure("agent.memory_digest", exc)
@@ -914,8 +912,7 @@ class BaseReActAgent:
                             steps=len(meta_route.steps),
                         )
                     can_delegate_harness = (
-                        self.allowed_tools is None
-                        or "harness_delegate" in self.allowed_tools
+                        self.allowed_tools is None or "harness_delegate" in self.allowed_tools
                     )
                     if bool(config.get("meta_harness_hint")) and can_delegate_harness:
                         meta_route_hint = meta_route.prompt_hint() or None
@@ -2287,9 +2284,7 @@ class ReActAgent(BaseReActAgent):
                 repair_nudges = 0
                 verification_nudges = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
-                repair_verify_guard = getattr(
-                    self, "_maybe_continue_unverified_repair", None
-                )
+                repair_verify_guard = getattr(self, "_maybe_continue_unverified_repair", None)
                 # S3.1(d) BEGIN progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END progress history
@@ -2570,9 +2565,7 @@ class ReActAgent(BaseReActAgent):
                 repair_nudges = 0
                 verification_nudges = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
-                repair_verify_guard = getattr(
-                    self, "_maybe_continue_unverified_repair", None
-                )
+                repair_verify_guard = getattr(self, "_maybe_continue_unverified_repair", None)
                 # S3.1(d) BEGIN stream progress history (revert: delete 2 lines; unbounded loop unchanged)
                 _s3_progress_history: list = []
                 # S3.1(d) END stream progress history
@@ -2713,11 +2706,7 @@ class ReActAgent(BaseReActAgent):
                                             event.response.usage.get("context_tokens", 0) or 0
                                         ),
                                         context_usage_percentage=(
-                                            float(
-                                                event.response.usage[
-                                                    "context_usage_percentage"
-                                                ]
-                                            )
+                                            float(event.response.usage["context_usage_percentage"])
                                             if isinstance(
                                                 event.response.usage.get(
                                                     "context_usage_percentage"

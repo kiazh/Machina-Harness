@@ -900,9 +900,7 @@ def detect_parallel(
     if not keys:
         return results
     with ThreadPoolExecutor(max_workers=min(3, len(keys))) as pool:
-        futures = {
-            key: pool.submit(detect_platform, resolve_platform(key), state) for key in keys
-        }
+        futures = {key: pool.submit(detect_platform, resolve_platform(key), state) for key in keys}
         for key, future in futures.items():
             results[resolve_platform(key).key] = future.result()
     _remember_detection(results)

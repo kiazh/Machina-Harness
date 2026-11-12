@@ -18,6 +18,9 @@
   "dependencies": {
     "@earendil-works/pi-tui": "1.0.0"
   },
+  "overrides": {
+    "minimatch": "^11.0.8"
+  },
   "devDependencies": {
     "@types/node": "24.19.1",
     "@typescript-eslint/eslint-plugin": "^8.71.2",
