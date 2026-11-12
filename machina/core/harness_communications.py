@@ -282,8 +282,9 @@ class CommunicationsStore:
         if self.path.exists():
             connection = self._connect(readonly=True)
             try:
+                # clause and order are fixed literals; values are bound.
                 rows = connection.execute(
-                    f"SELECT id, event_json FROM communications{clause} ORDER BY id {order} LIMIT ?",
+                    f"SELECT id, event_json FROM communications{clause} ORDER BY id {order} LIMIT ?",  # nosec B608
                     (*values, limit + 1),
                 ).fetchall()
             finally:
