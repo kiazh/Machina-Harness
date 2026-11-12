@@ -136,14 +136,14 @@ Both systems share the same discipline: **store the original, project a bounded 
 
 | Metric | This checkout |
 |---|---|
-| Python backend | ~105,000 lines across 282 files |
-| Backend tests | 6,514 passed, 8 skipped (DevTools suite, real PostgreSQL) |
-| Providers | 15 built-in connection types, plus custom OpenAI-compatible endpoints |
+| Python backend | ~106,000 lines across 319 files |
+| Backend tests | 6,514 passed, 8 skipped (DevTools CI snapshot, real PostgreSQL) |
+| Providers | 17 built-in connection types, including custom OpenAI-compatible endpoints |
 | Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
-| CLI cold start | `machina version` measured at ~0.6 seconds on the development machine |
+| CLI cold start | `machina version` measured at ~0.6–1.5 seconds depending on platform and process cache |
 
-Counts are snapshots, not promises. The release gates live in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
+Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](CHANGELOG.md); historical release-gate evidence is in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
 
 ## One session, end to end
 
@@ -168,6 +168,7 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Long-term memory** | Preferences, decisions, and lessons carry across sessions without replaying history; multi-fact queries use a bounded query-conditioned digest | [Memory](#deep-dive-2-memory-management), [digest](docs/MEMORY_DIGEST.md) |
 | **Permission kernel** | Sensitive actions are approved once, for an exact canonical action, and revalidated | [Permissions](#deep-dive-3-the-permission-kernel) |
 | **Agent orchestration** | Main agents delegate to specialists with inherited authority and separate accounting | [Agent loop](#deep-dive-4-the-agent-loop) |
+| **Repair controller** | Narrow tool catalog, phase/evidence tracking, turn and token caps, repeated-loop stops, and a final verification gate | [Controller](docs/TASK_RUN_CONTROLLER.md) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
 | **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
@@ -848,7 +849,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The current checkout passes **6,514 tests with 8 skipped**. The terminal UI has its own TypeScript checks and Node tests.
+The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The latest recorded CI run passes **6,514 tests with 8 skipped**; this is a release snapshot, not a promise that every local platform collects the same set. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 

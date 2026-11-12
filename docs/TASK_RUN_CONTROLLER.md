@@ -17,7 +17,9 @@ The controller tracks:
 - a one-shot no-edit nudge
 - a lean repair tool schema: file, terminal, code-intelligence, and artifact
   tools only; web research, memory management, delegation, and skill
-  installation are not advertised on every repair request
+  installation are not advertised on every repair request. Set
+  `MACHINA_REPAIR_LEAN_TOOLS=0` to restore the full tool catalog when a repair
+  task genuinely needs those tools.
 
 Phase is derived from evidence, not from model prose:
 

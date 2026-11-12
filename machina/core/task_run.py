@@ -28,6 +28,7 @@ DEFAULT_ARTIFACT_NUDGE_READS = 6
 DEFAULT_JOB_NUDGE_POLLS = 6
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"
 MAX_TOOL_CALLS_ENV = "MACHINA_TASK_RUN_MAX_TOOL_CALLS"
+LEAN_TOOLS_ENV = "MACHINA_REPAIR_LEAN_TOOLS"
 
 # A repair turn should not spend context on web research, memory management,
 # delegation, or skill installation unless the task explicitly needs them.
@@ -112,6 +113,13 @@ def configured_max_tool_calls() -> int:
     return _bounded_env_int(MAX_TOOL_CALLS_ENV, DEFAULT_MAX_TOOL_CALLS)
 
 
+def lean_tools_enabled() -> bool:
+    raw = os.environ.get(LEAN_TOOLS_ENV)
+    if raw is None or not str(raw).strip():
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _command(entry: dict[str, Any]) -> str:
     args = entry.get("args")
     if not isinstance(args, dict):
@@ -161,6 +169,7 @@ class TaskRunPolicy:
         edit_nudge_turns: int = DEFAULT_EDIT_NUDGE_TURNS,
     ) -> None:
         self.active = is_repair_task(user_message)
+        self.lean_tools = lean_tools_enabled()
         self.max_turns = (
             configured_max_turns() if max_turns is None else max(0, max_turns)
         )
@@ -189,7 +198,7 @@ class TaskRunPolicy:
 
     def filter_tool_defs(self, tool_defs: list[Any]) -> list[Any]:
         """Return the lean repair toolset; fail open if nothing matches."""
-        if not self.active:
+        if not self.active or not self.lean_tools:
             return tool_defs
         selected = [
             tool

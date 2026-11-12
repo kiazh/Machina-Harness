@@ -67,7 +67,8 @@ verify_issues.py
 # itself present for the compose bind mount, ignore its contents.
 scripts/*
 !scripts/README.md
-agents/
+/agents/
+.agents/skills/*/agents/
 # Matt Pocock skill setup docs are tracked project configuration.
 !docs/agents/
 !docs/agents/**

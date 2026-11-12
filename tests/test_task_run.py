@@ -185,6 +185,12 @@ def test_repair_toolset_is_lean_and_fails_open() -> None:
     assert TaskRunPolicy(REPAIR).filter_tool_defs(only_unknown) == only_unknown
 
 
+def test_lean_repair_tools_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("MACHINA_REPAIR_LEAN_TOOLS", "0")
+    tools = [SimpleNamespace(name="read_file"), SimpleNamespace(name="web_search")]
+    assert TaskRunPolicy(REPAIR).filter_tool_defs(tools) == tools
+
+
 def test_environment_limits_are_configurable(monkeypatch) -> None:
     monkeypatch.setenv("MACHINA_TASK_RUN_MAX_TURNS", "3")
     monkeypatch.setenv("MACHINA_TASK_RUN_MAX_TOOL_CALLS", "7")

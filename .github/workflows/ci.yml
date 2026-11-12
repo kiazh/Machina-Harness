@@ -77,7 +77,7 @@ jobs:
         run: uv lock --check
 
       - name: Run ruff check
-        run: python -m ruff check machina/ tools/
+        run: python -m ruff check machina/ tools/ tests/ integrations/
 
       - name: Run ruff format check
         run: python -m ruff format --check machina/ tools/
@@ -86,6 +86,9 @@ jobs:
         # F-16: CLI process-spawning/token code and build tooling are in scope;
         # the old command excluded machina/cli/ and skipped tools/ entirely.
         run: bandit -r machina/ tools/ -ll
+
+      - name: Run repository smoke suite
+        run: python -m pytest tests -q -p no:cacheprovider
 
       - name: Build distributable artifacts
         run: python -m hatchling build

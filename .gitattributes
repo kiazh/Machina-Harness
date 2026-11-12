@@ -1,3 +1,8 @@
 # Keep shell installers LF-only so `curl | bash` works on every OS.
 install.sh text eol=lf
 *.sh text eol=lf
+
+# These distributions record SHA-256 hashes of LF bytes. A CRLF checkout on
+# Windows makes the packaged hashes disagree with the manifests.
+skills/ecc/** text=auto eol=lf
+machina/bundled_agents/ecc/** text=auto eol=lf

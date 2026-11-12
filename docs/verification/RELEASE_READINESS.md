@@ -1,4 +1,8 @@
-# 0.2.0 release-candidate review
+# Historical release-candidate review
+
+> This is a dated 0.2.0 review, retained as evidence. Current release status,
+> test counts, and known limitations live in [README.md](../../README.md),
+> [CHANGELOG.md](../../CHANGELOG.md), and the latest verification record.
 
 Date: 2026-10-12. Starting checkout: `main`, HEAD `54d79d5`. This document describes local preparation, not a published GitHub release or production deployment.
 

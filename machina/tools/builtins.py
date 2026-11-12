@@ -657,7 +657,11 @@ async def _match_files_bounded(pattern: str, files: list[dict[str, object]]) -> 
 
 @registry.register(
     name="search_files",
-    description="Search file contents recursively with regex",
+    description=(
+        "Search file contents recursively with regex. VCS, cache, build, and "
+        "dependency directories are skipped; pass one explicitly as path to "
+        "search inside it."
+    ),
     parameters={
         "type": "object",
         "properties": {

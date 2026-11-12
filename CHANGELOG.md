@@ -1,5 +1,15 @@
 # Release notes
 
+## Unreleased
+
+- Added a deterministic TaskRun controller for repair turns: phase tracking, turn/tool caps, repeated-failure stops, and one-shot no-edit, artifact-paging, job-polling, and finalize nudges.
+- Added a cumulative repair token budget (`MACHINA_REPAIR_TOKEN_BUDGET`, default 1,000,000; `0` disables) and pressure-based stale-result condensation.
+- Added a lean repair toolset (`MACHINA_REPAIR_LEAN_TOOLS`, default on) so web, memory, delegation, and skill-install tools do not bloat every repair request; set `0` to restore the full catalog.
+- Counted successful direct behavior checks as verification evidence, added `machina usage --json`, and copied Harbor usage into `AgentContext`.
+- Fixed Git Bash child `PATH`/preflight so Git's `grep`/`sed` tools are available, rejected local paths in `web_extract`, and skipped generated/dependency directories in content search.
+- Forced LF checkout for ECC skill/agent resources so their manifest SHA-256 hashes verify on Windows as well as Linux.
+- Added canonical benchmark ledger/lockbox support, clean-history benchmark isolation, and the 2026-11-12 held-out verification record.
+
 ## 1.2.14 — 2026-10-25
 
 - Composer paste sanitization also covers non-bracketed paste paths (for example right-click paste in Windows Terminal), not only bracketed paste and Ctrl+V. Extended-colour SGR forms such as `[38:2::r:g:b m` are stripped as well.
