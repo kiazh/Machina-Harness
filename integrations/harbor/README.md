@@ -8,8 +8,11 @@
 2. Uploads and installs a locally built Machina wheel.
 3. Starts a task-local PostgreSQL instance and runs `machina init`.
 4. Runs Machina's headless full-mode CLI in `/app`.
-5. Leaves the agent log at `/logs/agent/machina.txt` and always lets Harbor run
+5. Leaves the agent log at `/logs/agent/machina.txt`, writes durable token/cost
+   accounting to `/logs/agent/machina-usage.json`, and always lets Harbor run
    the task verifier, even when Machina exits nonzero.
+6. Copies prompt, cache, completion, and cost totals into Harbor's
+   `AgentContext` for benchmark comparison.
 
 ## Build and run
 

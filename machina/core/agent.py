@@ -70,6 +70,12 @@ from machina.core.repair_gate import (
 from machina.core.request_gate import evaluate_request
 from machina.core.session import Session, session_manager
 from machina.core.session_mode import turn_scope
+from machina.core.token_budget import (
+    REPAIR_TOKEN_BUDGET_TEXT,
+    repair_token_budget,
+    repair_token_budget_exceeded,
+    stale_tool_result_chars,
+)
 from machina.core.tool_views import (
     ensure_item_artifact_view,
     flush_pending_chunks,
@@ -967,14 +973,18 @@ class BaseReActAgent:
         append_tool_messages(messages, response, tc, content)
 
     @staticmethod
-    def _condense_history(messages: list[dict[str, Any]]) -> None:
+    def _condense_history(
+        messages: list[dict[str, Any]],
+        *,
+        stale_chars: int | None = None,
+    ) -> None:
         """Shrink stale tool results in place before the next LLM call.
 
         Thin wrapper over :func:`machina.core.prompt.condense_history`
         (the moved implementation) so the method seam stays on the agent.
         See prompt.py for the full contract.
         """
-        condense_history(messages)
+        condense_history(messages, stale_chars=stale_chars)
 
     async def _execute_tool_calls(
         self,
@@ -2224,6 +2234,7 @@ class ReActAgent(BaseReActAgent):
         pending_chunks: list[dict[str, Any]] = []
         repair_started = time.monotonic()
         repair_deadline = repair_deadline_seconds()
+        token_budget = repair_token_budget()
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2278,11 +2289,38 @@ class ReActAgent(BaseReActAgent):
                             total_tokens,
                             iteration + 1,
                         )
+                    if token_budget > 0 and repair_token_budget_exceeded(
+                        total_tokens,
+                        user_message,
+                        budget=token_budget,
+                    ):
+                        audit_log(
+                            "agent_repair_token_budget",
+                            session_id=str(session_id),
+                            token_budget=token_budget,
+                            total_tokens=total_tokens,
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        return stopped_response(
+                            REPAIR_TOKEN_BUDGET_TEXT,
+                            tool_calls_made,
+                            total_tokens,
+                            iteration + 1,
+                        )
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
                     # Capacity applies to this request, never cumulative billed usage.
-                    self._condense_history(messages)
+                    stale_chars = stale_tool_result_chars(
+                        total_tokens,
+                        user_message,
+                        budget=token_budget,
+                    )
+                    if stale_chars is None:
+                        self._condense_history(messages)
+                    else:
+                        self._condense_history(messages, stale_chars=stale_chars)
                     tool_defs = self._tool_defs()
                     gate = await evaluate_request(
                         messages,
@@ -2447,6 +2485,7 @@ class ReActAgent(BaseReActAgent):
         pending_chunks: list[dict[str, Any]] = []
         repair_started = time.monotonic()
         repair_deadline = repair_deadline_seconds()
+        token_budget = repair_token_budget()
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2505,11 +2544,42 @@ class ReActAgent(BaseReActAgent):
                             ),
                         )
                         return
+                    if token_budget > 0 and repair_token_budget_exceeded(
+                        total_tokens,
+                        user_message,
+                        budget=token_budget,
+                    ):
+                        audit_log(
+                            "agent_repair_token_budget",
+                            session_id=str(session_id),
+                            token_budget=token_budget,
+                            total_tokens=total_tokens,
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        yield StreamEvent(
+                            type="done",
+                            response=stopped_response(
+                                REPAIR_TOKEN_BUDGET_TEXT,
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                            ),
+                        )
+                        return
                     if verbose:
                         console.print(f"[dim]Iteration {iteration + 1}[/dim]")
 
                     # Capacity applies to this request, never cumulative billed usage.
-                    self._condense_history(messages)
+                    stale_chars = stale_tool_result_chars(
+                        total_tokens,
+                        user_message,
+                        budget=token_budget,
+                    )
+                    if stale_chars is None:
+                        self._condense_history(messages)
+                    else:
+                        self._condense_history(messages, stale_chars=stale_chars)
                     tool_defs = self._tool_defs()
                     gate = await evaluate_request(
                         messages,

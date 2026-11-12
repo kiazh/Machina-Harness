@@ -148,6 +148,28 @@ units, exact code, commands, paths, and errors, and defers to the user's
 requested detail. Visible brevity is never a substitute for requested depth;
 reasoning budgets are untouched.
 
+### T7 — Repair token budget and pressure masking
+
+`machina/core/token_budget.py` adds a cumulative token ceiling to repair turns:
+
+- `MACHINA_REPAIR_TOKEN_BUDGET` defaults to **1,000,000** tokens per turn;
+  `0` disables the rail. It applies only to prompts with explicit repair
+  intent, so ordinary chat is unchanged.
+- Before each continuation the controller checks cumulative billed tokens and
+  stops with a typed, auditable `agent_repair_token_budget` event. The working
+  tree is preserved, exactly like the wall-clock deadline path.
+- At 75% pressure, stale tool observations shrink to a 500-character preview
+  and duplicate stale observations are replaced with an omission marker.
+- At 90% pressure, previews shrink to 300 characters. The latest tool batch is
+  never condensed, and skill pages, reducer views, artifact handles, and final
+  verification tails remain recoverable.
+- No model is called merely to summarize the conversation under pressure.
+  Masking is deterministic.
+
+This is a guard against runaway spend, not a claim that fewer tokens are
+always better. Accuracy and token cost are reported together on the
+pass/cost Pareto frontier.
+
 ## Configuration
 
 | Key | Default | Meaning |
@@ -165,6 +187,10 @@ reasoning budgets are untouched.
 
 All keys are validated (`machina/core/config.py`) and settable through the
 normal config surface.
+
+`MACHINA_REPAIR_TOKEN_BUDGET` is an environment rail rather than a config key:
+its default is **1,000,000** cumulative tokens per repair turn, `0` disables
+it, and values are clamped to `[0, 100,000,000]`.
 
 ## Resume continuity
 

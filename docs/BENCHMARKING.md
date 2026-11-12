@@ -18,11 +18,15 @@ lockbox. The manifest contains hashes and identity metadata only.
 
 - task, suite, harness, model, commit, reasoning effort, trial, seed;
 - pass/fail and failure class;
-- wall time, input/output tokens, known cost, tool calls;
+- wall time, input/output tokens, cache-read/cache-write tokens, request and
+  tool-result tokens, turns, peak context tokens, known cost, tool calls;
 - verifier-integrity status and artifact paths.
 
 The ledger reports per-suite/harness/model `pass_at_1`, `pass_pow_k`, known cost,
-and wall time. Do not report a single trial as a benchmark result.
+wall time, total tokens, **tokens per resolved task**, cache-read ratio, tokens
+per turn, and p95 context tokens. Do not report a single trial as a benchmark
+result, and do not report accuracy without the corresponding token/cost
+numbers.
 
 ## Evaluation policy
 
@@ -32,6 +36,9 @@ and wall time. Do not report a single trial as a benchmark result.
 - Keep a frozen development split and a locked test split.
 - Do not tune prompts, controller logic, or skills on the locked split.
 - Record verifier-integrity failures instead of dropping them.
+- Report accuracy and cost as a Pareto frontier. A pass-rate gain that costs
+  more than 1.5x the best same-model harness's tokens per resolved task is not
+  a competitive gain.
 - Raw trajectories and task manifests remain available with each headline
   result.
 

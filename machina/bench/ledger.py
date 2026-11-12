@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import uuid
@@ -24,6 +25,21 @@ def canonical_hash(value: Any) -> str:
         default=str,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def percentile(values: list[float], fraction: float) -> float | None:
+    """Nearest-rank percentile for small benchmark samples.
+
+    Benchmark ledgers usually hold a handful of trials per group, so an
+    interpolating percentile would imply precision the sample does not have.
+    The nearest-rank definition is deliberately conservative and stable.
+    """
+    if not values:
+        return None
+    bounded = min(1.0, max(0.0, fraction))
+    ordered = sorted(values)
+    rank = max(1, math.ceil(bounded * len(ordered)))
+    return ordered[rank - 1]
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -97,11 +113,21 @@ class RunRecord:
     seed: int | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    request_tokens: int | None = None
+    tool_result_tokens: int | None = None
+    context_tokens_max: int | None = None
+    turns: int | None = None
     cost_usd: float | None = None
     tool_calls: int | None = None
     failure_class: str = ""
     verifier_integrity: bool = True
     artifacts: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def total_tokens(self) -> int:
+        return (self.tokens_in or 0) + (self.tokens_out or 0)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> RunRecord:
@@ -141,35 +167,63 @@ class Ledger:
         return result
 
     def summary(self) -> dict[str, Any]:
+        records = self.records()
         groups: dict[tuple[str, str, str], list[RunRecord]] = {}
-        for record in self.records():
+        for record in records:
             groups.setdefault((record.suite, record.harness, record.model), []).append(record)
         summaries = []
-        for (suite, harness, model), records in sorted(groups.items()):
+        for (suite, harness, model), group in sorted(groups.items()):
             by_task: dict[str, list[RunRecord]] = {}
-            for record in records:
+            for record in group:
                 by_task.setdefault(record.task_id, []).append(record)
-            solved_trials = sum(record.resolved for record in records)
+            solved_trials = sum(record.resolved for record in group)
             all_attempts_solved = sum(
                 all(item.resolved for item in task_records)
                 for task_records in by_task.values()
             )
+            tokens_in = sum(record.tokens_in or 0 for record in group)
+            tokens_out = sum(record.tokens_out or 0 for record in group)
+            total_tokens = tokens_in + tokens_out
+            cache_read = sum(record.cache_read_tokens or 0 for record in group)
+            turns = sum(record.turns or 0 for record in group)
+            context_values = [
+                float(record.context_tokens_max)
+                for record in group
+                if record.context_tokens_max is not None
+            ]
             summaries.append(
                 {
                     "suite": suite,
                     "harness": harness,
                     "model": model,
-                    "trials": len(records),
+                    "trials": len(group),
                     "tasks": len(by_task),
-                    "pass_at_1": solved_trials / len(records) if records else 0.0,
+                    "pass_at_1": solved_trials / len(group) if group else 0.0,
                     "pass_pow_k": all_attempts_solved / len(by_task) if by_task else 0.0,
-                    "known_cost_usd": sum(
-                        record.cost_usd or 0.0 for record in records
+                    "known_cost_usd": sum(record.cost_usd or 0.0 for record in group),
+                    "duration_s": sum(record.duration_s for record in group),
+                    "tokens_in": tokens_in,
+                    "tokens_out": tokens_out,
+                    "total_tokens": total_tokens,
+                    "tokens_per_resolved_task": (
+                        total_tokens / solved_trials if solved_trials else None
                     ),
-                    "duration_s": sum(record.duration_s for record in records),
+                    "cache_read_tokens": cache_read,
+                    "cache_write_tokens": sum(
+                        record.cache_write_tokens or 0 for record in group
+                    ),
+                    "cache_read_ratio": (
+                        cache_read / tokens_in if tokens_in else None
+                    ),
+                    "tool_result_tokens": sum(
+                        record.tool_result_tokens or 0 for record in group
+                    ),
+                    "turns": turns,
+                    "tokens_per_turn": total_tokens / turns if turns else None,
+                    "context_tokens_p95": percentile(context_values, 0.95),
                 }
             )
-        return {"groups": summaries, "records": len(self.records())}
+        return {"groups": summaries, "records": len(records)}
 
 
 class TaskLockbox:

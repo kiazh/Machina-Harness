@@ -25,6 +25,7 @@ assembled text byte-identical (pinned by ``tests/test_v2_triage_hints.py``).
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import uuid
@@ -107,13 +108,24 @@ def _ensure_tool_call_id(tool_call: dict[str, Any]) -> str:
     return call_id
 
 
-def stale_tool_preview(content: str) -> str:
-    """Head+tail preview of a stale-round tool result (verdicts live in tails)."""
+def stale_tool_preview(
+    content: str,
+    *,
+    head: int = TOOL_RESULT_STALE_HEAD,
+    tail: int = TOOL_RESULT_STALE_TAIL,
+) -> str:
+    """Head+tail preview of a stale-round tool result (verdicts live in tails).
+
+    ``head``/``tail`` may be tightened under token pressure while preserving
+    the same omission marker and recovery instruction.
+    """
+    head = max(1, head)
+    tail = max(1, tail)
     return (
-        f"{content[:TOOL_RESULT_STALE_HEAD]}"
-        f"\n…[earlier output condensed to {TOOL_RESULT_STALE_HEAD}+{TOOL_RESULT_STALE_TAIL} chars"
+        f"{content[:head]}"
+        f"\n…[earlier output condensed to {head}+{tail} chars"
         f" of {len(content)}; re-run the tool for the full output]…\n"
-        f"{content[-TOOL_RESULT_STALE_TAIL:]}"
+        f"{content[-tail:]}"
     )
 
 
@@ -218,7 +230,11 @@ def append_tool_messages(
     )
 
 
-def condense_history(messages: list[dict[str, Any]]) -> None:
+def condense_history(
+    messages: list[dict[str, Any]],
+    *,
+    stale_chars: int | None = None,
+) -> None:
     """Shrink stale tool results in place before the next LLM call.
 
     Tool messages from earlier rounds keep a head+tail preview; the
@@ -232,7 +248,21 @@ def condense_history(messages: list[dict[str, Any]]) -> None:
     already bounded and carry their own omission/recovery disclosure.
     Context storage keeps a separate 500-character result preview, not
     the full output. Re-run the tool when more output is needed.
+
+    ``stale_chars`` optionally tightens the total preview size (split
+    evenly between head and tail) and enables duplicate-result masking
+    when a repair turn is under token pressure. ``None`` keeps the
+    historical size and byte-identical behavior for callers that do not
+    opt in.
     """
+    head = TOOL_RESULT_STALE_HEAD
+    tail = TOOL_RESULT_STALE_TAIL
+    if stale_chars is not None:
+        bounded = max(2, stale_chars)
+        head = max(1, bounded // 2)
+        tail = max(1, bounded - head)
+    cap = head + tail
+    seen: set[str] = set()
     last_assistant = -1
     for i, message in enumerate(messages):
         if message.get("role") == "assistant" and message.get("tool_calls"):
@@ -242,13 +272,23 @@ def condense_history(messages: list[dict[str, Any]]) -> None:
             continue
         content = message.get("content", "")
         if (
-            isinstance(content, str)
-            and len(content) > TOOL_RESULT_STALE_CAP
-            and not SKILL_PAGE_RE.match(content)
-            and not _REDUCED_VIEW_TAIL_RE.search(content)
-            and "\n…[earlier output condensed to " not in content
+            not isinstance(content, str)
+            or SKILL_PAGE_RE.match(content)
+            or _REDUCED_VIEW_TAIL_RE.search(content)
+            or "\n…[earlier output condensed to " in content
         ):
-            message["content"] = stale_tool_preview(content)
+            continue
+        if stale_chars is not None and len(content) >= 200:
+            digest = hashlib.sha256(content.encode("utf-8", "replace")).hexdigest()
+            if digest in seen:
+                message["content"] = (
+                    "[duplicate tool result omitted under token pressure; "
+                    "the same output appeared earlier in this turn]"
+                )
+                continue
+            seen.add(digest)
+        if len(content) > cap:
+            message["content"] = stale_tool_preview(content, head=head, tail=tail)
 
 
 def build_persona_section(

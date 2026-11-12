@@ -11,6 +11,7 @@ from machina.bench.ledger import (
     TaskLockbox,
     TaskSpec,
     canonical_hash,
+    percentile,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "TaskSpec",
     "TaskLockbox",
     "canonical_hash",
+    "percentile",
 ]

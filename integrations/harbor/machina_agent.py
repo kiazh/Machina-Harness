@@ -13,6 +13,7 @@ track.
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from pathlib import Path
@@ -143,10 +144,28 @@ class Machina(BaseInstalledAgent):
             "mkdir -p /logs/agent /tmp/machina-home && "
             f"cd /app && python3 -m machina chat --provider deepseek --model "
             f"{shlex.quote(model)} --mode full --quiet {shlex.quote(instruction)} "
-            "2>&1 | tee /logs/agent/machina.txt || true"
+            "2>&1 | tee /logs/agent/machina.txt || true; "
+            "python3 -m machina usage --json "
+            "> /logs/agent/machina-usage.json "
+            "2> /logs/agent/machina-usage.err || true"
         )
         await self.exec_as_root(environment, command=command, env=env)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
-        """Harbor reads token accounting from the agent output when available."""
-        return None
+        """Expose durable Machina usage to Harbor's benchmark ledger."""
+        usage_path = self.logs_dir / "machina-usage.json"
+        if not usage_path.is_file():
+            return
+        try:
+            payload = json.loads(usage_path.read_text(encoding="utf-8"))
+            session = payload.get("session") or {}
+            context.n_input_tokens = int(session.get("knownPromptTokens") or 0)
+            context.n_cache_tokens = int(session.get("cacheReadTokens") or 0)
+            context.n_output_tokens = int(session.get("knownCompletionTokens") or 0)
+            context.cost_usd = float(session.get("knownCostUsd") or 0.0)
+            context.metadata = {
+                **(context.metadata or {}),
+                "machina_usage": payload,
+            }
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return

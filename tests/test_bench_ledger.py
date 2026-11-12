@@ -6,7 +6,14 @@ import json
 
 import pytest
 
-from machina.bench import Ledger, RunRecord, TaskLockbox, TaskSpec, canonical_hash
+from machina.bench import (
+    Ledger,
+    RunRecord,
+    TaskLockbox,
+    TaskSpec,
+    canonical_hash,
+    percentile,
+)
 
 
 def _task(task_id: str = "task-1") -> TaskSpec:
@@ -33,6 +40,13 @@ def _record(task_id: str = "task-1", *, trial: int = 0, resolved: bool = True) -
         cost_usd=0.01,
         tokens_in=100,
         tokens_out=20,
+        cache_read_tokens=40,
+        cache_write_tokens=10,
+        request_tokens=90,
+        tool_result_tokens=15,
+        context_tokens_max=900,
+        turns=2,
+        tool_calls=3,
         failure_class="" if resolved else "wrong_patch",
     )
 
@@ -61,6 +75,47 @@ def test_ledger_summary_reports_pass_at_1_and_pass_pow_k(tmp_path) -> None:
     assert summary["pass_at_1"] == 0.75
     assert summary["pass_pow_k"] == 0.5
     assert summary["known_cost_usd"] == pytest.approx(0.04)
+    assert summary["tokens_in"] == 400
+    assert summary["tokens_out"] == 80
+    assert summary["total_tokens"] == 480
+    assert summary["tokens_per_resolved_task"] == 160
+    assert summary["cache_read_tokens"] == 160
+    assert summary["cache_read_ratio"] == 0.4
+    assert summary["tool_result_tokens"] == 60
+    assert summary["turns"] == 8
+    assert summary["tokens_per_turn"] == 60
+    assert summary["context_tokens_p95"] == 900
+
+
+def test_ledger_summary_leaves_efficiency_unknown_without_usage(tmp_path) -> None:
+    ledger = Ledger(tmp_path / "runs.jsonl")
+    ledger.append(
+        RunRecord(
+            task_id="task-1",
+            suite="swe-bench-pro",
+            harness="machina",
+            model="deepseek/deepseek-flash",
+            trial=0,
+            resolved=False,
+            duration_s=5.0,
+            started_at="2026-11-12T00:00:00+00:00",
+        )
+    )
+
+    summary = ledger.summary()["groups"][0]
+    assert summary["total_tokens"] == 0
+    assert summary["tokens_per_resolved_task"] is None
+    assert summary["cache_read_ratio"] is None
+    assert summary["tokens_per_turn"] is None
+    assert summary["context_tokens_p95"] is None
+
+
+def test_percentile_uses_nearest_rank_and_bounds_input() -> None:
+    assert percentile([], 0.95) is None
+    assert percentile([10, 20, 30, 40], 0.95) == 40
+    assert percentile([10, 20, 30, 40], 0.5) == 20
+    assert percentile([10, 20, 30, 40], -1) == 10
+    assert percentile([10, 20, 30, 40], 2) == 40
 
 
 def test_lockbox_freezes_identity_and_detects_changes(tmp_path) -> None:

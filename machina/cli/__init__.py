@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import shutil
@@ -757,6 +758,9 @@ def usage_command(
         None, "--session", "-s", help="Session ID (default: last active)"
     ),
     agent: str | None = typer.Option(None, "--agent", help="Agent ID (default: session agent)"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Machine-readable JSON output."
+    ),
 ):
     """Show durable LLM usage and remaining budgets."""
 
@@ -766,6 +770,9 @@ def usage_command(
         async with _db_connected():
             session = await _resolve_session(session_id)
             result = await usage_store.summary(session.id, agent or session.agent_id)
+            if json_output:
+                typer.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
+                return
             table = Table(title=f"Usage for {session.id}")
             table.add_column("Scope")
             table.add_column("Calls", justify="right")
