@@ -16,7 +16,7 @@
     "check": "npm run typecheck && npm test && npm run lint"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "1.0.0"
+    "@earendil-works/pi-tui": "1.5.0"
   },
   "overrides": {
     "minimatch": "^11.0.8"
