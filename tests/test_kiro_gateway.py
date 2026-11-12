@@ -382,6 +382,11 @@ def test_stop_only_stops_a_managed_child(tmp_path, monkeypatch) -> None:
     # Seed a managed child directly; stop must terminate exactly that process.
     kiro_gateway._process = process
     monkeypatch.setattr(kiro_gateway, "gateway_reachable", lambda *_a, **_k: False)
+    if os.name != "nt":
+        monkeypatch.setattr(kiro_gateway.os, "getpgid", lambda pid: pid)
+        monkeypatch.setattr(
+            kiro_gateway.os, "killpg", lambda _pid, _signal: process.terminate()
+        )
     stopped = kiro_gateway.stop()
 
     assert stopped["stopped"] is True

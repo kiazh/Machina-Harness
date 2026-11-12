@@ -420,7 +420,10 @@ async def test_parallel_review_budget_counts_escaped_wire_bytes_and_rejects_only
     workflow.settings["review_text"] = "界" * 2000
     operation = await start(workflow, agents=("second-a", "second-b"), mode="parallel")
     waiting = await snapshot_until(
-        workflow, operation, lambda _value: len(store._mem.approvals) == 2
+        workflow,
+        operation,
+        lambda value: len(store._mem.approvals) == 2
+        and len(value.get("approvals", [])) == 1,
     )
     assert len(waiting.get("approvals", [])) == 1
     assert (
