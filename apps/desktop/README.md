@@ -7,7 +7,8 @@ styled with OpenCode's `@opencode/ui` design language.
 The layout follows Nous Research's Hermes Desktop philosophy: chat is the home
 surface, panels are flat rather than boxed, tool activity is compact, and a
 quiet status bar carries model, context, and approval state. Machina keeps its
-own ember mark and voice.
+own ember mark and voice. The maintained visual contract is
+[DESIGN.md](DESIGN.md).
 
 The old React/Tauri implementation was removed during the Rune migration. Its
 history remains available in Git. The backend gateway is not wired into this
