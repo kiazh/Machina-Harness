@@ -280,11 +280,7 @@ class TaskRunPolicy:
         if not self._job_nudged and self.job_polls >= DEFAULT_JOB_NUDGE_POLLS:
             self._job_nudged = True
             return TASK_RUN_JOB_NUDGE
-        if (
-            not self._finalize_nudged
-            and self.edited
-            and self.verified
-        ):
+        if not self._finalize_nudged and self.edited and self.verified:
             self._finalize_nudged = True
             return TASK_RUN_FINALIZE_NUDGE
         if self._edit_nudged:
