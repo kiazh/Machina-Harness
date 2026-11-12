@@ -20,8 +20,8 @@ from typing import Any
 
 from machina.core.repair_gate import has_verification_evidence, is_repair_task
 
-DEFAULT_MAX_TURNS = 40
-DEFAULT_MAX_TOOL_CALLS = 120
+DEFAULT_MAX_TURNS = 60
+DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_EDIT_NUDGE_TURNS = 10
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"

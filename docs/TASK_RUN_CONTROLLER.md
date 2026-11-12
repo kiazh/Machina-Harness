@@ -27,8 +27,8 @@ Phase is derived from evidence, not from model prose:
 
 | Control | Default | Effect |
 |---|---:|---|
-| `MACHINA_TASK_RUN_MAX_TURNS` | `40` | Stop before another model request |
-| `MACHINA_TASK_RUN_MAX_TOOL_CALLS` | `120` | Stop before another model request |
+| `MACHINA_TASK_RUN_MAX_TURNS` | `60` | Stop before another model request |
+| `MACHINA_TASK_RUN_MAX_TOOL_CALLS` | `150` | Stop before another model request |
 | Repeated failed action | 3 times | Stop and require a changed approach |
 
 `0` disables the corresponding turn/tool limit. The controller only applies to
