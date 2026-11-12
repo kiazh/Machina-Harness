@@ -70,6 +70,7 @@ from machina.core.repair_gate import (
 from machina.core.request_gate import evaluate_request
 from machina.core.session import Session, session_manager
 from machina.core.session_mode import turn_scope
+from machina.core.task_run import TaskRunPolicy
 from machina.core.token_budget import (
     REPAIR_TOKEN_BUDGET_TEXT,
     repair_token_budget,
@@ -1784,6 +1785,30 @@ class BaseReActAgent:
         messages.append({"role": "user", "content": text})
         audit_log(event, session_id=str(session_id), agent_id=self.agent_id)
 
+    async def _append_task_run_nudge(
+        self,
+        *,
+        session_id: uuid.UUID,
+        text: str,
+        messages: list[dict[str, Any]],
+        pending_chunks: list[dict[str, Any]],
+        event: str = "agent_task_run_nudge",
+    ) -> None:
+        """Persist one controller nudge before the next model call."""
+        pending_chunks.append(
+            {
+                "id": str(uuid.uuid4()),
+                "session_id": session_id,
+                "agent_id": self.agent_id,
+                "chunk_type": "user_message",
+                "payload": {"content": text},
+                "token_count": get_token_count(text),
+            }
+        )
+        await self._flush_pending_chunks(pending_chunks)
+        messages.append({"role": "user", "content": text})
+        audit_log(event, session_id=str(session_id), agent_id=self.agent_id)
+
     async def _maybe_continue_unchanged_repair(
         self,
         *,
@@ -2235,6 +2260,7 @@ class ReActAgent(BaseReActAgent):
         repair_started = time.monotonic()
         repair_deadline = repair_deadline_seconds()
         token_budget = repair_token_budget()
+        task_run = TaskRunPolicy(user_message)
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2304,6 +2330,26 @@ class ReActAgent(BaseReActAgent):
                         self._schedule_memory_consolidation(session_id)
                         return stopped_response(
                             REPAIR_TOKEN_BUDGET_TEXT,
+                            tool_calls_made,
+                            total_tokens,
+                            iteration + 1,
+                        )
+                    task_stop = task_run.stop_reason(
+                        turns=iteration,
+                        tool_calls=len(tool_calls_made),
+                    )
+                    if task_stop is not None:
+                        audit_log(
+                            "agent_task_run_stop",
+                            session_id=str(session_id),
+                            phase=task_run.phase,
+                            turns=iteration,
+                            tool_calls=len(tool_calls_made),
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        return stopped_response(
+                            task_stop,
                             tool_calls_made,
                             total_tokens,
                             iteration + 1,
@@ -2448,6 +2494,17 @@ class ReActAgent(BaseReActAgent):
                         return stopped_response(
                             _s3_text, tool_calls_made, total_tokens, iteration + 1
                         )
+                    task_run.observe(batch)
+                    task_nudge = task_run.take_nudge()
+                    if task_nudge is not None:
+                        await self._append_task_run_nudge(
+                            session_id=session_id,
+                            text=task_nudge,
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                        )
+                        iteration += 1
+                        continue
                     iteration += 1
             except BaseException:
                 if pending_chunks:
@@ -2486,6 +2543,7 @@ class ReActAgent(BaseReActAgent):
         repair_started = time.monotonic()
         repair_deadline = repair_deadline_seconds()
         token_budget = repair_token_budget()
+        task_run = TaskRunPolicy(user_message)
         async with joined_teardown(cleanup=lambda: self._flush_pending_chunks(pending_chunks)):
             try:
                 session, messages = await self._prepare_context(
@@ -2561,6 +2619,30 @@ class ReActAgent(BaseReActAgent):
                             type="done",
                             response=stopped_response(
                                 REPAIR_TOKEN_BUDGET_TEXT,
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                            ),
+                        )
+                        return
+                    task_stop = task_run.stop_reason(
+                        turns=iteration,
+                        tool_calls=len(tool_calls_made),
+                    )
+                    if task_stop is not None:
+                        audit_log(
+                            "agent_task_run_stop",
+                            session_id=str(session_id),
+                            phase=task_run.phase,
+                            turns=iteration,
+                            tool_calls=len(tool_calls_made),
+                        )
+                        await self._flush_pending_chunks(pending_chunks)
+                        self._schedule_memory_consolidation(session_id)
+                        yield StreamEvent(
+                            type="done",
+                            response=stopped_response(
+                                task_stop,
                                 tool_calls_made,
                                 total_tokens,
                                 iteration + 1,
@@ -2813,6 +2895,17 @@ class ReActAgent(BaseReActAgent):
                             ),
                         )
                         return
+                    task_run.observe(batch)
+                    task_nudge = task_run.take_nudge()
+                    if task_nudge is not None:
+                        await self._append_task_run_nudge(
+                            session_id=session_id,
+                            text=task_nudge,
+                            messages=messages,
+                            pending_chunks=pending_chunks,
+                        )
+                        iteration += 1
+                        continue
                     iteration += 1
             except BaseException:
                 if pending_chunks:
