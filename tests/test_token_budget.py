@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
 from machina.core.token_budget import (
     DEFAULT_REPAIR_TOKEN_BUDGET,
     HIGH_STALE_CHARS,
@@ -54,3 +60,53 @@ def test_pressure_tightens_stale_tool_results() -> None:
 def test_pressure_is_clamped() -> None:
     assert repair_token_pressure(-10, REPAIR, budget=1_000_000) == 0.0
     assert repair_token_pressure(10_000_000, REPAIR, budget=1_000_000) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_agent_stops_before_a_continuation_after_budget(monkeypatch) -> None:
+    from machina.core import agent as module
+    from machina.core.models import LLMResponse, Session
+
+    monkeypatch.setenv("MACHINA_REPAIR_TOKEN_BUDGET", "100")
+    session = Session(id=uuid4(), agent_id="harness")
+    messages = [{"role": "user", "content": REPAIR}]
+
+    async def gate(msgs, **kwargs):
+        return SimpleNamespace(messages=msgs, failure=None)
+
+    async def model(**kwargs):
+        return LLMResponse(
+            model="test",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "function": {"name": "terminal", "arguments": "{}"},
+                }
+            ],
+            usage={"total_tokens": 100},
+        )
+
+    monkeypatch.setattr(module, "evaluate_request", gate)
+    agent = SimpleNamespace(
+        agent_id="harness",
+        provider=object(),
+        _prepare_context=AsyncMock(return_value=(session, messages)),
+        _flush_pending_chunks=AsyncMock(),
+        _append_assistant_content=AsyncMock(),
+        _condense_history=lambda _: None,
+        _tool_defs=lambda: [],
+        _call_llm_with_retry=model,
+        _execute_tool_calls=AsyncMock(),
+        _finish_turn_completion=AsyncMock(),
+        _schedule_memory_consolidation=lambda *args: None,
+    )
+
+    response = await module.ReActAgent.run.__wrapped__(
+        agent, session.id, REPAIR, False
+    )
+
+    assert response.outcome == "failed"
+    assert "token budget" in response.content.lower()
+    assert response.tokens_used == 100
+    agent._finish_turn_completion.assert_not_awaited()
