@@ -21,13 +21,6 @@ _CHECK_INTERVAL_SECONDS = 15 * 60.0
 _CHECK_MARKER = "machina-auto-update-check"
 
 
-def _version_tuple(value: str) -> tuple[int, ...]:
-    parts = []
-    for piece in re.findall(r"\d+", value)[:4]:
-        parts.append(int(piece))
-    return tuple(parts)
-
-
 def _run(args: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
@@ -113,34 +106,61 @@ def auto_update() -> None:
     if fetched is None or fetched.returncode != 0:
         return
     remote = _run(["git", "show", "origin/main:pyproject.toml"], cwd=root, timeout=5)
-    if remote is None or remote.returncode != 0:
+    remote_version = None
+    if remote is not None and remote.returncode == 0:
+        match = _VERSION_RE.search(remote.stdout)
+        if match is not None:
+            remote_version = match.group(1)
+
+    # Compare history, not version strings: commits merged to main between
+    # releases must still reach a source checkout. `--left-right` reports
+    # `HEAD...origin/main` as "<ahead>\t<behind>".
+    counts = _run(
+        ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"],
+        cwd=root,
+        timeout=5,
+    )
+    if counts is None or counts.returncode != 0:
         return
-    match = _VERSION_RE.search(remote.stdout)
-    if match is None:
+    try:
+        ahead, behind = (int(part) for part in counts.stdout.split())
+    except ValueError:
         return
+    if behind == 0:
+        return
+    if ahead > 0:
+        # Local commits are not on origin/main, so a fast-forward would
+        # discard them. Leave that decision to the operator.
+        return
+
     from machina import __version__
 
-    if _version_tuple(match.group(1)) <= _version_tuple(__version__):
-        return
-
+    noun = "commit" if behind == 1 else "commits"
     dirty = _run(["git", "status", "--porcelain"], cwd=root, timeout=5)
     if dirty is None or dirty.returncode != 0 or dirty.stdout.strip():
         print(
-            f"[update] {match.group(1)} is available, but this checkout has local changes; "
-            "not pulling automatically.",
+            f"[update] origin/main has {behind} new {noun}, but this checkout has local "
+            "changes; not pulling automatically.",
             file=sys.stderr,
         )
         return
 
-    pulled = _run(["git", "pull", "--ff-only", "--quiet"], cwd=root, timeout=45)
+    pulled = _run(
+        ["git", "pull", "--ff-only", "--quiet", "origin", "main"],
+        cwd=root,
+        timeout=45,
+    )
     if pulled is None or pulled.returncode != 0:
         print(
             "[update] could not fast-forward the checkout; continuing on the local version.",
             file=sys.stderr,
         )
         return
+    version_note = (
+        "" if remote_version in (None, __version__) else f" {__version__} -> {remote_version}"
+    )
     print(
-        f"[update] updated Machina {__version__} -> {match.group(1)}; restarting...",
+        f"[update] fast-forwarded Machina{version_note} ({behind} new {noun}); restarting...",
         file=sys.stderr,
     )
     # Editable installs see source changes immediately; refresh dependency

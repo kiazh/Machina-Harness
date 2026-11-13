@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Auto-update now compares `origin/main` history instead of release version numbers, so commits merged between releases fast-forward a clean checkout.
+
 - Added a deterministic TaskRun controller for repair turns: phase tracking, turn/tool caps, repeated-failure stops, and one-shot no-edit, artifact-paging, job-polling, and finalize nudges.
 - Added a cumulative repair token budget (`MACHINA_REPAIR_TOKEN_BUDGET`, default 1,000,000; `0` disables) and pressure-based stale-result condensation.
 - Added a lean repair toolset (`MACHINA_REPAIR_LEAN_TOOLS`, default on) so web, memory, delegation, and skill-install tools do not bloat every repair request; set `0` to restore the full catalog.
