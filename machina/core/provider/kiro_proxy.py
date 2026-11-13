@@ -244,6 +244,11 @@ def _cache_put(url: str, rows: list[dict[str, Any]]) -> None:
         _CATALOG_CACHE = (url, time.monotonic(), _copy_rows(rows))
 
 
+def cached_models() -> list[dict[str, Any]] | None:
+    """Current TTL-cached rows, or ``None`` without any network I/O."""
+    return _cache_get(base_url())
+
+
 def clear_catalog_cache() -> None:
     """Drop the TTL cache after the gateway starts, stops, or reconfigures."""
     global _CATALOG_CACHE

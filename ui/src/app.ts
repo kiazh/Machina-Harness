@@ -613,6 +613,7 @@ export class App implements FeatureHost {
 		// Automation prompt); it is joined at the end of start() but MUST NOT
 		// delay session creation (finding 8).
 		let nowPlayingReady: Promise<void> | undefined;
+		let profileReady: Promise<void> | undefined;
 		try {
 			const init = await this.client.request<InitializeResult>(
 				"initialize",
@@ -651,12 +652,15 @@ export class App implements FeatureHost {
 			} catch {
 				// Saved skin is best-effort; the default applies otherwise.
 			}
-			try {
-				// Guarantee the default profile exists (first-touch RL/growth/memory identity).
-				await this.client.request("profile.get", { userId: this.defaultProfile }, 30_000);
-			} catch {
-				// Profiles stay best-effort; commands surface real errors.
-			}
+			// Guarantee the default profile exists (first-touch RL/growth/memory
+			// identity), but do it alongside the first chat render rather than
+			// blocking it on a DB round-trip.
+			profileReady = this.client
+				.request("profile.get", { userId: this.defaultProfile }, 30_000)
+				.then(() => {})
+				.catch(() => {
+					// Profiles stay best-effort; commands surface real errors.
+				});
 			if (this.options.sessionId) {
 				const { session, history } = await this.client.request<ResumeResult>("session.resume", {
 					sessionId: this.options.sessionId,
@@ -700,9 +704,9 @@ export class App implements FeatureHost {
 			const root = initializedCwdFull ?? (initializedCwd !== undefined && isAbsolute(initializedCwd) ? initializedCwd : undefined);
 			if (root !== undefined) this.startWorkspace(root);
 		}
-		// Join the music-detection chain now that the session exists: the bar
-		// belongs to the first frame, but must never block session creation.
-		await nowPlayingReady;
+		// Join the background first-touch work now that the session is visible.
+		// Neither the profile row nor the music bar may block session creation.
+		await Promise.all([profileReady, nowPlayingReady]);
 		this.tui.requestRender();
 	}
 

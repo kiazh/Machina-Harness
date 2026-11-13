@@ -58,7 +58,7 @@ dev = [
 ]
 
 [project.scripts]
-machina = "machina.cli:app"
+machina = "machina.entrypoint:main"
 
 [tool.hatch.build]
 exclude = [

@@ -74,7 +74,18 @@ def _models_payload(
     }
 
 
-async def _chatgpt_models(provider: str, refresh: bool) -> dict[str, Any]:
+async def _chatgpt_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
+    if fast:
+        # Picker path: answer from the in-process/CLI/bundled cache without
+        # touching the network. `/models catalog` remains the explicit live
+        # refresh, so opening a menu never waits on account discovery.
+        cached = catalog.cached_catalog()
+        models = catalog.visible_models(cached)
+        return _models_payload(
+            provider,
+            source=cached[0].source if cached else "none",
+            models=_catalog_model_view(models),
+        )
     fetch_error: str | None = None
     source = "cache"
     models = []
@@ -95,15 +106,25 @@ async def _chatgpt_models(provider: str, refresh: bool) -> dict[str, Any]:
     )
 
 
-async def _kiro_models(provider: str, refresh: bool) -> dict[str, Any]:
+async def _kiro_models(
+    provider: str, refresh: bool, *, fast: bool = False
+) -> dict[str, Any]:
     """Bounded catalog from the local Kiro proxy, with an honest fallback.
 
     The picker path uses a 60-second cache plus a fast TCP preflight, so a
-    stopped proxy never stalls the concurrently fetched model menu. Only an
-    explicit refresh (``/models catalog``) pays for live CLI discovery.
+    stopped proxy never stalls the concurrently fetched model menu. ``fast``
+    skips even that probe and serves the warm cache or curated fallback; only
+    an explicit refresh (``/models catalog``) pays for live CLI discovery.
     """
     from machina.core.provider import kiro_proxy
 
+    if fast and not refresh:
+        cached = kiro_proxy.cached_models()
+        if cached is not None:
+            return _models_payload(provider, source="cache", models=cached)
+        return _models_payload(
+            provider, source="fallback", models=kiro_proxy.fallback_models()
+        )
     try:
         if refresh:
             models = await asyncio.to_thread(kiro_proxy.fetch_models, force=True)
@@ -119,7 +140,7 @@ async def _kiro_models(provider: str, refresh: bool) -> dict[str, Any]:
         )
 
 
-async def _named_models(provider: str, refresh: bool) -> dict[str, Any]:
+async def _named_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
     entry = store.get_provider_entry(provider)
     if entry is None:
         raise RpcError(INVALID_PARAMS, f"unknown provider: {provider}")
@@ -129,6 +150,16 @@ async def _named_models(provider: str, refresh: bool) -> dict[str, Any]:
     fresh_enough = age is not None and age < 3600
     fetch_error: str | None = None
     source = "cache"
+    if fast:
+        # Picker path: cached rows only. A stale/empty cache keeps the
+        # provider's curated fallback rows; an explicit catalog refresh or
+        # `/provider add` pulls the live list.
+        return _models_payload(
+            provider,
+            source="cache" if models else "none",
+            models=list(models),
+            fetched_at=str(entry.get("models_fetched_at") or "") or None,
+        )
     if refresh or not models or not fresh_enough:
         key = store.resolve_provider_key(entry)
         try:
@@ -181,12 +212,15 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     if not provider:
         raise RpcError(INVALID_PARAMS, "provider is required")
     refresh = _bool(params, "refresh")
+    # ``fast`` is the picker contract: return the warm cache and never block
+    # on live discovery. An explicit refresh wins if a caller sends both.
+    fast = _bool(params, "fast") and not refresh
     if provider == "chatgpt":
-        return await _chatgpt_models(provider, refresh)
+        return await _chatgpt_models(provider, refresh, fast=fast)
     if provider == "kiro":
-        return await _kiro_models(provider, refresh)
+        return await _kiro_models(provider, refresh, fast=fast)
     if store.is_named_provider(provider):
-        return await _named_models(provider, refresh)
+        return await _named_models(provider, refresh, fast=fast)
     # Built-in direct families use the bundled models.dev snapshot. This is
     # the same source the UI fallback was hand-written from, so the picker
     # shows current metadata without a provider-specific discovery endpoint.

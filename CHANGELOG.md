@@ -9,6 +9,8 @@
 - Fixed Git Bash child `PATH`/preflight so Git's `grep`/`sed` tools are available, rejected local paths in `web_extract`, and skipped generated/dependency directories in content search.
 - Forced LF checkout for ECC skill/agent resources so their manifest SHA-256 hashes verify on Windows as well as Linux.
 - Added canonical benchmark ledger/lockbox support, clean-history benchmark isolation, and the 2026-11-12 held-out verification record.
+- Reduced interactive startup latency: the no-subcommand CLI now avoids importing the full command surface, auto-update checks are reused for 15 minutes, gateway startup reads `.git/HEAD` directly instead of spawning `git`, and Python gateway boot overlaps the Node UI module load.
+- Made `/models` open from warm catalogs: the picker asks for cache-only catalog rows (no live ChatGPT/named-provider discovery), warms the grouped result for repeated opens, and leaves live discovery to `/models catalog`.
 
 ## 1.2.14 — 2026-10-25
 

@@ -11,9 +11,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+#: Network checks are best-effort and must not tax every launch. Reuse the
+#: result of a recent fetch/check for this long before asking origin again.
+_CHECK_INTERVAL_SECONDS = 15 * 60.0
+_CHECK_MARKER = "machina-auto-update-check"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -45,6 +50,30 @@ def _repo_root() -> Path | None:
     return None
 
 
+def _mark_checked(root: Path) -> None:
+    """Record an update attempt so the next launch can skip the network."""
+    try:
+        (root / ".git" / _CHECK_MARKER).touch()
+    except OSError:
+        pass
+
+
+def _check_is_fresh(root: Path) -> bool:
+    """True when a recent fetch/check already answered the update question.
+
+    ``FETCH_HEAD`` is written by the normal auto-update fetch. The dedicated
+    marker also covers failed/offline attempts and identical-version checks.
+    """
+    now = time.time()
+    for candidate in (root / ".git" / "FETCH_HEAD", root / ".git" / _CHECK_MARKER):
+        try:
+            if now - candidate.stat().st_mtime < _CHECK_INTERVAL_SECONDS:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def auto_update() -> None:
     """Fast-forward a clean checkout to origin/main and re-exec once."""
     if os.environ.get("MACHINA_AUTO_UPDATE", "1").strip().lower() in {"0", "false", "no", "off"}:
@@ -54,8 +83,11 @@ def auto_update() -> None:
     root = _repo_root()
     if root is None:
         return
+    if _check_is_fresh(root):
+        return
 
-    fetched = _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root, timeout=8)
+    fetched = _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root, timeout=3)
+    _mark_checked(root)
     if fetched is None or fetched.returncode != 0:
         return
     remote = _run(["git", "show", "origin/main:pyproject.toml"], cwd=root, timeout=5)

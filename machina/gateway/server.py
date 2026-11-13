@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import secrets
-import subprocess
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -23,12 +22,9 @@ from contextlib import aclosing
 from typing import Any, Protocol
 
 from machina import __version__
-from machina.core.background_tasks import drain_background_tasks
 from machina.core.config import config
-from machina.core.context import context_manager
 from machina.core.execution_context import begin_turn_scope, end_turn_scope
 from machina.core.models import Session
-from machina.core.optimization.shadow import drain_shadow_tasks
 from machina.core.optimization.warmers.startup import schedule_startup_warmers
 from machina.core.provider import PROVIDERS
 from machina.core.runtime import RuntimeServices, runtime_services
@@ -150,17 +146,43 @@ class StreamingAgent(Protocol):
 
 
 def _git_branch() -> str:
+    """Current branch name read directly from ``.git/HEAD``.
+
+    This runs during every gateway handshake. Spawning ``git`` for it cost
+    roughly 450 ms on Windows, so read the tiny ref file instead and walk up
+    to the repository root. Worktrees use a ``.git`` file containing
+    ``gitdir: ...``; both layouts are handled without a subprocess.
+    """
+    from pathlib import Path
+
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
+        directory = Path.cwd()
+    except OSError:
         return ""
-    return out.stdout.strip() if out.returncode == 0 else ""
+    for candidate in (directory, *directory.parents):
+        dotgit = candidate / ".git"
+        try:
+            if dotgit.is_file():
+                marker = dotgit.read_text(encoding="utf-8", errors="replace").strip()
+                if not marker.startswith("gitdir:"):
+                    continue
+                git_dir = (candidate / marker.partition(":")[2].strip()).resolve()
+            elif dotgit.is_dir():
+                git_dir = dotgit
+            else:
+                continue
+            head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return ""
+        if not head:
+            return ""
+        # Detached HEAD: git rev-parse --abbrev-ref HEAD prints "HEAD".
+        if not head.startswith("ref:"):
+            return "HEAD"
+        ref = head.partition(":")[2].strip()
+        prefix = "refs/heads/"
+        return ref[len(prefix) :] if ref.startswith(prefix) else ref.rsplit("/", 1)[-1]
+    return ""
 
 
 def _default_agent_factory(model: str, provider: str) -> StreamingAgent:
@@ -433,6 +455,8 @@ class Gateway:
             except (asyncio.CancelledError, Exception):
                 pass
             self._kiro_task = None
+        from machina.core.optimization.shadow import drain_shadow_tasks
+
         await drain_shadow_tasks()
         if self._job_runner is not None:
             try:
@@ -492,6 +516,8 @@ class Gateway:
             # Agent background work (consolidation/learning reviews) must
             # finish before the pool closes; bounded, never raises.
             try:
+                from machina.core.background_tasks import drain_background_tasks
+
                 await drain_background_tasks()
             except asyncio.CancelledError:
                 raise
@@ -794,6 +820,8 @@ class Gateway:
         self.require_db()
         session = await self.get_session(params)
         self._opened_session_id = session.id
+        from machina.core.context import context_manager
+
         with instrument("session", "resume", session_id=str(session.id)) as span:
             chunks = await context_manager.get_transcript_chunks(
                 session.id,

@@ -11,8 +11,6 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-import httpx
-
 _SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,64}$")
 
 _CACHE_SECONDS = 60
@@ -79,6 +77,10 @@ def _external_secret(name: str, backend: str) -> str:
             raise ValueError("Vault address, path, and token must be configured")
         if not address.startswith("https://"):
             raise ValueError("Vault address must use HTTPS")
+        # Keep Vault's HTTP dependency out of every process import; startup
+        # only pays for it when this backend is actually selected.
+        import httpx
+
         with httpx.Client(timeout=5.0) as client:
             response = client.get(f"{address}/v1/{path}", headers={"X-Vault-Token": token})
             response.raise_for_status()

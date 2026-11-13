@@ -5,10 +5,6 @@ import { parseArgs } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
-import { TuiAltScreen } from "@earendil-works/pi-tui";
-import { ThemedTerminal } from "./design/terminal.ts";
-import { tuiClipboardOptions } from "./clipboard.ts";
-import { App } from "./app.ts";
 import { GatewayClient } from "./gateway.ts";
 
 const USAGE = `Usage: machina [--model MODEL] [--provider PROVIDER] [--session ID] [--mode MODE] [--no-clear]
@@ -50,6 +46,21 @@ function detectPython(): string {
 }
 const python = detectPython();
 const gatewayToken = crypto.randomBytes(32).toString("hex");
+// Start the Python gateway before loading the UI modules. Python imports and
+// the Node module graph then boot in parallel instead of serially, which cuts
+// roughly half a second from the first interactive frame's readiness.
+const client = new GatewayClient({ python, token: gatewayToken, env: { MACHINA_GATEWAY_TOKEN: gatewayToken } });
+client.start();
+const uiModules = await Promise.all([
+	import("@earendil-works/pi-tui"),
+	import("./design/terminal.ts"),
+	import("./clipboard.ts"),
+	import("./app.ts"),
+]).catch(async (error: unknown) => {
+	await client.stop();
+	throw error;
+});
+const [{ TuiAltScreen }, { ThemedTerminal }, { tuiClipboardOptions }, { App }] = uiModules;
 // Fullscreen alternate buffer, Codex style: the app owns the display and the
 // composer docks to the bottom (see App's layout root). Restored on exit.
 // Selection copy must hit the real clipboard (pbcopy/wl-copy/Set-Clipboard);
@@ -58,7 +69,6 @@ const tui = new TuiAltScreen(new ThemedTerminal(), undefined, undefined, {
 	...tuiClipboardOptions(),
 	wheelScrollLines: 3,
 });
-const client = new GatewayClient({ python, token: gatewayToken, env: { MACHINA_GATEWAY_TOKEN: gatewayToken } });
 const app = new App(tui, client, { model: values.model, provider: values.provider, sessionId: values.session, mode: values.mode });
 
 // `machina stop` targets the UI child, not the Python launcher. Shut the UI

@@ -1,6 +1,6 @@
 """Entry point for `python -m machina`."""
 
-from machina.cli import app
+from machina.entrypoint import main
 
 if __name__ == "__main__":
-    app()
+    main()

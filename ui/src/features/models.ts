@@ -109,6 +109,27 @@ export const CURATED_MODELS: ModelEntry[] = [
 	{ model: "phi3", provider: "ollama", description: "Local, small and fast" },
 ];
 
+/** Warm-cache window for the provider-grouped picker. `/models catalog` is
+ *  the explicit live refresh; an ordinary reopen should paint instantly. */
+const MODEL_GROUPS_TTL_MS = 60_000;
+
+interface CachedModelGroups {
+	key: string;
+	at: number;
+	grouped: GroupedModels;
+}
+
+const modelGroupsCache = new WeakMap<FeatureHost, CachedModelGroups>();
+
+function modelGroupsCacheKey(host: FeatureHost): string {
+	const session = host.session();
+	return session ? `${session.id}::${session.provider ?? ""}` : "new";
+}
+
+function invalidateModelGroups(host: FeatureHost): void {
+	modelGroupsCache.delete(host);
+}
+
 export async function applyModel(host: FeatureHost, entry: ModelEntry, persist = false): Promise<void> {
 	// Only send `persist` when saving the default, so the session-scoped
 	// `/models` request shape is unchanged.
@@ -124,6 +145,7 @@ export async function applyModel(host: FeatureHost, entry: ModelEntry, persist =
 		await host.request("session.setModel", { sessionId: session.id, model: entry.model, provider: entry.provider });
 	}
 	host.print(`Model: ${entry.model} (${entry.provider})${persist ? " (saved as default)" : ""}`, "success");
+	invalidateModelGroups(host);
 }
 
 /** Compact token count for table display ("500K", "1.05M"). */
@@ -216,16 +238,25 @@ function toSelectItem(e: ModelEntry): SelectItem {
  *
  * One `providers.list` decides the provider order (the session's selected
  * provider first, then the gateway's order — user-added named entries
- * included). Every provider is then asked for its catalog in parallel:
- * built-ins without a discovery endpoint answer instantly with an empty
- * list, user-added providers answer from their TTL cache (pulling only when
- * stale), and chatgpt answers from its TTL-cached Codex catalog. Providers
- * the gateway cannot answer for keep their curated fallback rows.
+ * included). Every provider is then asked for its catalog in parallel.
+ *
+ * `fast: true` asks the gateway to answer from warm caches only (no live
+ * discovery). The model picker uses it so opening the menu never waits on a
+ * ChatGPT account round-trip or a named provider's stale-cache refresh;
+ * `/models catalog` remains the explicit live refresh. Providers the gateway
+ * cannot answer for keep their curated fallback rows.
  *
  * Older gateways without `providers.list` keep the legacy single-provider
  * catalog call; the groups then come from the curated list order.
  */
-export async function fetchModelGroups(host: FeatureHost): Promise<GroupedModels> {
+export async function fetchModelGroups(host: FeatureHost, fast = false): Promise<GroupedModels> {
+	const cacheKey = modelGroupsCacheKey(host);
+	if (fast) {
+		const cached = modelGroupsCache.get(host);
+		if (cached && cached.key === cacheKey && Date.now() - cached.at < MODEL_GROUPS_TTL_MS) {
+			return cached.grouped;
+		}
+	}
 	const sessionProvider = (host.session()?.provider ?? "").trim().toLowerCase();
 	let listed: ProvidersListResult | undefined;
 	try {
@@ -257,6 +288,7 @@ export async function fetchModelGroups(host: FeatureHost): Promise<GroupedModels
 			names.map(async (name) => {
 				const params: Record<string, unknown> = { provider: name };
 				if (sessionId) params.sessionId = sessionId;
+				if (fast) params.fast = true;
 				const result = await host.request<ModelsListResult>("models.list", params);
 				return { name, result };
 			}),
@@ -285,7 +317,9 @@ export async function fetchModelGroups(host: FeatureHost): Promise<GroupedModels
 			fetchError: catalog?.fetchError ?? null,
 		};
 	});
-	return { current, groups };
+	const grouped = { current, groups };
+	modelGroupsCache.set(host, { key: cacheKey, at: Date.now(), grouped });
+	return grouped;
 }
 
 /** Picker rows: each non-empty group gets a dim section header, then its
@@ -405,6 +439,9 @@ async function printCatalog(host: FeatureHost): Promise<void> {
 	if (!result) {
 		throw new Error("This gateway cannot list provider catalogs. Update Machina or use /models with a curated id.");
 	}
+	// A live catalog read supersedes the picker snapshot; the next menu open
+	// should see it rather than the previous warm cache.
+	invalidateModelGroups(host);
 	if (!result.models.length) {
 		host.print(
 			`No live catalog for provider "${result.provider}"${result.fetchError ? `: ${result.fetchError}` : ""}. Built-in direct providers do not expose a catalog here; use /models to pick a curated id.`,
@@ -442,7 +479,9 @@ export const modelsCommand: Command = {
 			await printCatalog(host);
 			return;
 		}
-		const grouped = await fetchModelGroups(host);
+		// The picker is a cache-only view: paint it immediately, and leave
+		// live discovery to the explicit `/models catalog` action.
+		const grouped = await fetchModelGroups(host, true);
 		if (!sub) {
 			await openGroupedModelPicker(host, grouped);
 			return;

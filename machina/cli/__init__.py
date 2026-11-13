@@ -28,7 +28,6 @@ from machina.cli import output
 from machina.cli.auth import app as auth_app
 from machina.cli.growth import app as growth_app
 from machina.cli.interop import app as harnesses_app
-from machina.cli.launcher import launch_ui
 from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
 from machina.cli.providers import app as providers_app
@@ -43,6 +42,7 @@ from machina.observability.diagnostics import record_failure
 from machina.observability.tracing import span
 from machina.skills import enrich
 from machina.skills.registry import log_skill_metadata_event
+from machina.ui_launcher import launch_ui
 
 logger = logging.getLogger(__name__)
 

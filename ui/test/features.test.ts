@@ -1193,6 +1193,25 @@ test("/models picker applies the provider carried by the chosen model row", asyn
 	assert.match(host.last().text, /\/keys/);
 });
 
+test("/models reuses the warm provider groups without another RPC", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+	};
+	host.responses["models.list"] = {
+		provider: "deepseek",
+		source: "models.dev",
+		fetchError: null,
+		models: [{ id: "deepseek-v4-flash" }],
+	};
+	const first = await fetchModelGroups(host, true);
+	const calls = host.calls.length;
+	const second = await fetchModelGroups(host, true);
+	assert.equal(second, first);
+	assert.equal(host.calls.length, calls, "warm picker opens without another RPC");
+});
+
 test("/models does not ask to switch when a model row names its provider", async () => {
 	const host = new FakeHost();
 	host.current = { ...SESSION, provider: "chatgpt" };
@@ -1400,7 +1419,7 @@ test("/models groups catalogs per provider with the selected provider first", as
 	// so the gateway resolves the pinned route rather than gw defaults.
 	const pulls = host.calls.filter((call) => call.method === "models.list");
 	assert.equal(pulls.length, 5);
-	assert.ok(pulls.every((call) => call.params.sessionId === SESSION.id));
+	assert.ok(pulls.every((call) => call.params.sessionId === SESSION.id && call.params.fast === true));
 	assert.deepEqual(
 		pulls.map((call) => call.params.provider).sort(),
 		["acme", "chatgpt", "deepseek", "openai", "openrouter"],

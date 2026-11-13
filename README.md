@@ -58,10 +58,10 @@ writes both `DATABASE_URL` and `MACHINA_DB_PORT` accordingly.
 On Windows, Docker Desktop is the simplest database option. The installer can
 also use an existing local PostgreSQL with pgvector.
 
-Interactive launches check `origin/main` and fast-forward a clean source
-checkout before opening the UI; set `MACHINA_AUTO_UPDATE=0` to opt out. The
-`/auth` page manages ChatGPT, Grok, and GitHub Copilot subscription sign-in
-in one place.
+Interactive launches check `origin/main` at most once every 15 minutes and
+fast-forward a clean source checkout before opening the UI; set
+`MACHINA_AUTO_UPDATE=0` to opt out. The `/auth` page manages ChatGPT, Grok,
+and GitHub Copilot subscription sign-in in one place.
 
 See [Get started](#get-started) for manual setup, options, and Docker.
 
