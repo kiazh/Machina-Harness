@@ -86,8 +86,12 @@ const sessionsCommand: Command = {
 	description: "Resume a session (menu when empty)",
 	async run(_args, host) {
 		const { sessions } = await host.request<SessionListResult>("session.list", { limit: 50 });
-		if (!sessions.length) host.print("No sessions yet.", "plain");
-		else await pickAndOpen(host, "Resume a session", sessions);
+		if (!sessions.length) {
+			host.print(
+				"No sessions yet. Send a message to create the first one; /sessions will then list it here.",
+				"plain",
+			);
+		} else await pickAndOpen(host, "Resume a session", sessions);
 	},
 };
 

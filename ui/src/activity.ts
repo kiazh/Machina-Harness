@@ -6,6 +6,27 @@ export interface SteeringItem { id: string; text: string }
 export interface ShellJob { id: string; command: string; status: string; returncode?: number | null; output?: string; truncated?: boolean; foreground?: boolean; deadline?: number | null }
 export interface ActivityAction { label: string; run: () => void }
 
+/**
+ * What to show when `/activity` has nothing to inspect. Activity is created
+ * by ordinary work, so the empty state has to teach the next action instead
+ * of looking broken.
+ */
+export function activityEmptyGuidance(hasSession: boolean): string {
+	const intro = hasSession
+		? "Activity is empty. No queued prompts or background commands, and no delegated agents."
+		: "No active session. Send a message first.";
+	return [
+		intro,
+		"",
+		hasSession ? "To create activity:" : "Then activity will appear here:",
+		"  1. Press Enter while a reply is running to queue steering.",
+		"  2. Ask for a long-running command; it appears here as a shell job.",
+		"  3. Use /delegate <task> to start a subagent.",
+		"",
+		"Open this view anytime with /activity or Ctrl+N then A.",
+	].join("\n");
+}
+
 export class ActivityStore {
 	readonly queues = new Map<string, SteeringItem[]>();
 	private readonly queueVersions = new Map<string, number>();

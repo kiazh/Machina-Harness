@@ -28,7 +28,7 @@ import { HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
-import { ActivityBar, ActivityStore, type SteeringItem, type ShellJob } from "./activity.ts";
+import { ActivityBar, ActivityStore, activityEmptyGuidance, type SteeringItem, type ShellJob } from "./activity.ts";
 import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { ProblemsPane } from "./components/ProblemsPane.ts";
@@ -1430,7 +1430,10 @@ export class App implements FeatureHost {
 
 	async inspectActivity(): Promise<void> {
 		const session = this.current;
-		if (!session) return;
+		if (!session) {
+			this.print(activityEmptyGuidance(false), "plain");
+			return;
+		}
 		const queueVersion = this.activity.queueVersion(session.id);
 		try {
 			const [queued, jobs] = await Promise.all([
@@ -1446,7 +1449,7 @@ export class App implements FeatureHost {
 				...this.familyRows().filter((row) => !row.main).map((row) => ({ label: `Agent ${row.running ? "working" : "idle"} · ${row.session.title}`, value: `a:${row.session.id}` })),
 			];
 			if (this.nextSteering.get(session.id)?.length) items.unshift({ label: "Retry retained steering", value: "retry" });
-			if (!items.length) { this.print("No queued prompts or background commands. Enter queues while working; Escape interrupts."); return; }
+			if (!items.length) { this.print(activityEmptyGuidance(true), "plain"); return; }
 			const selected = await this.pickCentered("Activity", items);
 			if (!selected || this.current?.id !== session.id) return;
 			if (selected.value === "retry") { this.interruptedSteering.delete(session.id); await this.flushSteering(session.id); return; }
@@ -1764,7 +1767,10 @@ export class App implements FeatureHost {
 	async inspectOutput(toolId?: string): Promise<void> {
 		const session = this.current;
 		if (!session) {
-			this.transcript.addNotice("No active session.", "warning");
+			this.transcript.addNotice(
+				"No active session. Send a message first; /output will then list retained tool results.",
+				"info",
+			);
 			return;
 		}
 		if (toolId) {
@@ -1777,7 +1783,10 @@ export class App implements FeatureHost {
 		}
 		const recent = this.outputStore.list(session.id);
 		if (recent.length === 0) {
-			this.transcript.addNotice("No retained tool output for this session.", "info");
+			this.transcript.addNotice(
+				"No retained tool output for this session. Run a task that uses a tool, then try /output again.",
+				"info",
+			);
 			return;
 		}
 		const choice = await this.pick(

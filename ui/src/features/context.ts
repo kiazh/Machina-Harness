@@ -16,7 +16,12 @@ export const contextCommands: Command[] = [
 				["Goal", ctx.goal],
 			]);
 			const rows = ctx.chunks.map((c) => [c.type, String(c.tokens), when(c.createdAt), c.preview]);
-			host.print(rows.length ? `${header}\n\n${table(["Type", "Tokens", "When", "Preview"], rows, 60)}` : `${header}\n\nNo context yet.`, "plain");
+			host.print(
+				rows.length
+					? `${header}\n\n${table(["Type", "Tokens", "When", "Preview"], rows, 60)}`
+					: `${header}\n\nNo context yet. Send a message; /context will then show what the agent remembers.`,
+				"plain",
+			);
 		},
 	},
 	{

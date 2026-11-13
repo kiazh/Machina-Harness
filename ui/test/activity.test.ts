@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
-import { ActivityBar, ActivityStore } from "../src/activity.ts";
+import { ActivityBar, ActivityStore, activityEmptyGuidance } from "../src/activity.ts";
 
 test("command action controls wrap and each mouse target invokes its own action", () => {
  const clicked: string[] = [];
@@ -17,6 +17,20 @@ test("command action controls wrap and each mouse target invokes its own action"
   bar.handleMouse({ type: "click", button: "left", x, y, width: 22 } as Parameters<ActivityBar["handleMouse"]>[0]);
  }
  assert.deepEqual(clicked, ["Background", "Output", "Stop"]);
+});
+
+test("activity empty guidance explains how to create activity", () => {
+	const empty = activityEmptyGuidance(true);
+	assert.match(empty, /Activity is empty/);
+	assert.match(empty, /Press Enter while a reply is running/);
+	assert.match(empty, /long-running command/);
+	assert.match(empty, /\/delegate <task>/);
+	assert.match(empty, /Ctrl\+N then A/);
+
+	const noSession = activityEmptyGuidance(false);
+	assert.match(noSession, /No active session/);
+	assert.match(noSession, /Send a message first/);
+	assert.doesNotMatch(noSession, /Activity is empty/);
 });
 
 test("activity stores queued prompts and command status by session", () => {
