@@ -50,10 +50,28 @@ def _repo_root() -> Path | None:
     return None
 
 
+def _git_dir(root: Path) -> Path | None:
+    """Resolve the repository metadata directory, including worktrees."""
+    dotgit = root / ".git"
+    try:
+        if dotgit.is_dir():
+            return dotgit
+        if dotgit.is_file():
+            marker = dotgit.read_text(encoding="utf-8", errors="replace").strip()
+            if marker.startswith("gitdir:"):
+                return (root / marker.partition(":")[2].strip()).resolve()
+    except OSError:
+        pass
+    return None
+
+
 def _mark_checked(root: Path) -> None:
     """Record an update attempt so the next launch can skip the network."""
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return
     try:
-        (root / ".git" / _CHECK_MARKER).touch()
+        (git_dir / _CHECK_MARKER).touch()
     except OSError:
         pass
 
@@ -63,9 +81,13 @@ def _check_is_fresh(root: Path) -> bool:
 
     ``FETCH_HEAD`` is written by the normal auto-update fetch. The dedicated
     marker also covers failed/offline attempts and identical-version checks.
+    Worktrees store both under their resolved gitdir, not the ``.git`` file.
     """
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return False
     now = time.time()
-    for candidate in (root / ".git" / "FETCH_HEAD", root / ".git" / _CHECK_MARKER):
+    for candidate in (git_dir / "FETCH_HEAD", git_dir / _CHECK_MARKER):
         try:
             if now - candidate.stat().st_mtime < _CHECK_INTERVAL_SECONDS:
                 return True

@@ -221,10 +221,44 @@ jobs:
           node-version: "24"
       - name: Install UI dependencies
         run: npm ci --ignore-scripts
-      - name: Check keyboard bindings
+      - name: Check keyboard bindings and guidance panels
         run: |
           npm run typecheck
-          node --test test/keybindings.test.ts test/family.test.ts test/help-menu.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts
+          node --test test/keybindings.test.ts test/family.test.ts test/help-menu.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts test/activity.test.ts test/ui.test.ts test/features.test.ts
+
+  cross-platform-python:
+    # Python startup/update paths are platform-sensitive (signals, paths,
+    # gitdir files, console-script entry points). Ubuntu coverage already runs
+    # the full suite; this smoke job proves the entry point and update tests
+    # on the other supported desktop platforms.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip "uv==0.11.7"
+          uv export --frozen --extra dev --extra connectors --group build --no-hashes --no-emit-project -o requirements.txt
+          pip install -r requirements.txt
+          pip install --no-deps --no-build-isolation -e .
+      - name: Verify console-script entry point
+        shell: bash
+        run: |
+          python -c "import importlib.metadata as m; ep = next(e for e in m.entry_points(group='console_scripts') if e.name == 'machina'); assert ep.value == 'machina.entrypoint:main', ep.value"
+      - name: Run platform-sensitive startup and update tests
+        shell: bash
+        run: python -m pytest tests/test_entrypoint.py tests/test_gateway_branch.py tests/test_provider_catalog_fast.py tests/test_update.py -q -p no:cacheprovider
 
   docker:
     runs-on: ubuntu-latest
