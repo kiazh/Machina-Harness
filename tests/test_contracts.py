@@ -1,4 +1,4 @@
-from tools.desktop.export_contracts import ROOT, generated_contracts
+from tools.contracts.export_contracts import ROOT, generated_contracts
 
 
 def test_native_and_frontend_allowlists_match_the_actual_gateway_registry():

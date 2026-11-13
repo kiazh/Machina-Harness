@@ -1370,33 +1370,6 @@ scripts/            Operator script mount point and setup guidance
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
 | The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
 
-## Desktop — native Rune shell
-
-![Machina's Rune desktop shell in dark mode](apps/desktop/docs/rune-shell-dark.png)
-
-The desktop client is being rebuilt as a native Rust application with
-[Rune](https://github.com/anomalyco/rune), OpenCode's GPU-rendered UI framework.
-It uses OpenCode's design language and fonts, with a resizable session sidebar,
-chat timeline, tool activity, composer, and workspace inspector.
-
-The layout follows Nous Research's Hermes Desktop philosophy: chat is the home
-surface, panels stay flat instead of boxed, tool activity is compact, and a
-quiet status bar carries model, context, and approval state. Machina keeps its
-own ember mark and voice.
-
-The first milestone is the visual shell and chat/workspace surfaces. The React
-and Tauri implementation has been removed; its history remains in Git. Gateway
-sessions, approvals, jobs, memory, and settings are the next port.
-
-See [desktop setup and checks](apps/desktop/README.md) and the
-[Rune migration evidence](docs/verification/RUNE_DESKTOP_2026-11-12.md). From a
-checkout with the Rust toolchain:
-
-```bash
-cargo run --manifest-path apps/desktop/Cargo.toml
-cargo test --locked --manifest-path apps/desktop/Cargo.toml
-```
-
 ## License and credits
 
 Machina is [MIT licensed](LICENSE). The bundled ECC skills and agents retain their upstream attribution and licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

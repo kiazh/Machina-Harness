@@ -108,8 +108,6 @@ coverage.xml
 # Installed Node dependencies are restored from the lockfile
 node_modules/
 
-# Native desktop build caches
-apps/desktop/target/
 test-results/
 playwright-report/
 .local-acceptance/

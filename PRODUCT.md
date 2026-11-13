@@ -2,18 +2,17 @@
 
 ## Register
 Product: a local agent workspace with an editable code workspace, available as
-a terminal client and a native desktop application.
+a terminal client.
 
 ## Users and purpose
 The primary user gives the agent tasks, inspects progress, steers its work, and
-opens code to inspect or edit alongside it on Windows and macOS. The desktop is
-agent-centric: conversation and execution occupy the main area by default.
-The user clarified this with a Hermes desktop reference on 2026-10-29.
+opens code to inspect or edit alongside it on Windows and macOS. Conversation
+and execution occupy the main workspace by default.
 
 ## Character and references
-Calm, direct, capable. Familiar editor layouts and the readable execution state
-of Codex, OpenCode, and Hermes are anchors from the user's stated preferences.
-Keep the existing selectable themes and semantic color roles.
+Calm, direct, capable. Familiar editor layouts and readable execution state are
+anchors from the user's stated preferences. Keep the existing selectable themes
+and semantic color roles.
 
 ## Principles
 - Give agent conversation the main workspace; open the editor alongside it on demand.

@@ -8,11 +8,6 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "desktop:dev": "cargo run --manifest-path apps/desktop/Cargo.toml",
-    "desktop:check": "cargo test --locked --manifest-path apps/desktop/Cargo.toml",
-    "desktop:build": "cargo build --release --locked --manifest-path apps/desktop/Cargo.toml",
-    "desktop:run": "cargo run --release --locked --manifest-path apps/desktop/Cargo.toml",
-    "desktop:scenes": "cargo run --manifest-path apps/desktop/Cargo.toml -- --scene light --snap apps/desktop/docs/rune-shell-light.png",
     "contracts:test": "npm run test --workspace @machina/contracts"
   }
 }

@@ -35,15 +35,6 @@ npm ci --ignore-scripts --prefix ui
 npm run check --prefix ui
 ```
 
-For desktop changes, run from `apps/desktop` (so the pinned toolchain file is
-picked up):
-
-```bash
-cargo test --locked
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-```
-
 For changes touching the agent loop, tools, context, permissions, providers,
 or database behavior, run the relevant DevTools tests as well. State which
 tests were run and paste the exact pass/fail counts in the PR.

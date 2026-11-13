@@ -1,2 +1,2 @@
-// Compatibility facade: data contracts shared by terminal and desktop clients.
+// Compatibility facade for the shared gateway contracts.
 export * from "../../packages/contracts/src/rpc.ts";

@@ -37,7 +37,7 @@ def generated_contracts() -> dict[str, str]:
     serialized = json.dumps(methods, indent=2)
     return {
         "rpc-methods.json": serialized + "\n",
-        "rpc-methods.ts": "// Generated from the Python gateway registries by tools/desktop/export_contracts.py.\n"
+        "rpc-methods.ts": "// Generated from the Python gateway registries by tools/contracts/export_contracts.py.\n"
         + "export const RPC_METHODS = "
         + serialized
         + " as const;\n"
@@ -60,7 +60,7 @@ def main() -> None:
             if not target.exists() or target.read_text(encoding="utf-8") != content:
                 parser.exit(
                     1,
-                    f"Generated RPC contract is stale: {name}. Run tools/desktop/export_contracts.py.\n",
+                    f"Generated RPC contract is stale: {name}. Run tools/contracts/export_contracts.py.\n",
                 )
         else:
             destination.mkdir(parents=True, exist_ok=True)

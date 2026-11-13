@@ -26,11 +26,6 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-  - package-ecosystem: cargo
-    directory: "/apps/desktop"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
   - package-ecosystem: docker
     directory: "/"
     schedule:

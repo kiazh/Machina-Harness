@@ -1,4 +1,4 @@
-// Generated from the Python gateway registries by tools/desktop/export_contracts.py.
+// Generated from the Python gateway registries by tools/contracts/export_contracts.py.
 export const RPC_METHODS = [
   "agents.delete",
   "agents.history",

@@ -226,32 +226,6 @@ jobs:
           npm run typecheck
           node --test test/keybindings.test.ts test/family.test.ts test/help-menu.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts
 
-  desktop:
-    name: Rune desktop (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    env:
-      RUSTUP_TOOLCHAIN: "1.99.1"
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - name: Install the pinned Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      - name: Test the Rune shell
-        run: cargo test --locked --manifest-path apps/desktop/Cargo.toml
-      - name: Check formatting
-        run: cargo fmt --manifest-path apps/desktop/Cargo.toml --check
-      - name: Lint the Rune shell
-        run: cargo clippy --locked --manifest-path apps/desktop/Cargo.toml --all-targets -- -D warnings
-      - name: Build the native executable
-        run: cargo build --release --locked --manifest-path apps/desktop/Cargo.toml
-
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
