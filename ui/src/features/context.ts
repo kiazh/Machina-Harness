@@ -20,7 +20,7 @@ export const contextCommands: Command[] = [
 				rows.length
 					? `${header}\n\n${table(["Type", "Tokens", "When", "Preview"], rows, 60)}`
 					: `${header}\n\nNo context yet. Send a message; /context will then show what the agent remembers.`,
-				"plain",
+				"guidance",
 			);
 		},
 	},

@@ -7,7 +7,7 @@ import type { WorkspaceController } from "../workspace/controller.ts";
 import type { UiPreferences } from "../workspace/preferences.ts";
 import type { ChatSide, WorkspaceMode } from "../workspace/state.ts";
 
-export type NoticeKind = "info" | "plain" | "success" | "warning" | "error";
+export type NoticeKind = "info" | "plain" | "success" | "warning" | "error" | "guidance";
 
 /** Options for a single free-form text prompt shown as an overlay form. */
 export interface AskTextOptions {

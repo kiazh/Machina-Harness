@@ -89,7 +89,7 @@ const sessionsCommand: Command = {
 		if (!sessions.length) {
 			host.print(
 				"No sessions yet. Send a message to create the first one; /sessions will then list it here.",
-				"plain",
+				"guidance",
 			);
 		} else await pickAndOpen(host, "Resume a session", sessions);
 	},

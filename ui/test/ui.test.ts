@@ -594,6 +594,22 @@ test("transcript restyle keeps every block", async () => {
 	assert.equal(container.children.length, count, "restyle drops nothing");
 });
 
+test("guidance notices render as a framed next-steps panel", () => {
+	const notice = new Notice("No activity yet.\n\n1. Send a message.\n2. Try /activity again.", "guidance");
+	const rendered = notice.render(80);
+	const text = rendered.map((line) => stripTerminalSequences(line)).join("\n");
+	assert.match(text, /┌─ next steps/);
+	assert.match(text, /No activity yet/);
+	assert.match(text, /Try \/activity again/);
+	assert.match(text, /└/);
+	for (const width of [20, 40, 80, 160]) {
+		assert.ok(
+			notice.render(width).every((line) => visibleWidth(line) <= width),
+			`the panel stays inside a ${width}-column pane`,
+		);
+	}
+});
+
 test("every skin keeps its accent roles distinct", async () => {
 	const { SKIN_NAMES, skinBase } = await import("../src/theme.ts");
 	for (const name of SKIN_NAMES) {

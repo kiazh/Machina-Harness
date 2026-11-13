@@ -12,6 +12,7 @@
 - Reduced interactive startup latency: the no-subcommand CLI now avoids importing the full command surface, auto-update checks are reused for 15 minutes, gateway startup reads `.git/HEAD` directly instead of spawning `git`, and Python gateway boot overlaps the Node UI module load.
 - Made `/models` open from warm catalogs: the picker asks for cache-only catalog rows (no live ChatGPT/named-provider discovery), warms the grouped result for repeated opens, and leaves live discovery to `/models catalog`.
 - Added guided empty states for `/activity`, `/output`, `/sessions`, and `/context` so a first-run or unused view explains how to create activity instead of showing a blank or terse result.
+- Rendered those guidance responses as a framed “next steps” panel, using the same adaptive width and wrapping rules as assistant responses.
 
 ## 1.2.14 — 2026-10-25
 

@@ -1734,12 +1734,12 @@ test("/theme switches skin and persists it", async () => {
 	}
 });
 
-test("read-only reports use the plain kind", async () => {
+test("read-only reports use non-error kinds", async () => {
 	const host = new FakeHost();
 	host.responses["session.list"] = { sessions: [] };
 	await run("/sessions", host);
 	assert.match(host.last().text, /No sessions yet/);
-	assert.equal(host.last().kind, "plain");
+	assert.equal(host.last().kind, "guidance");
 	host.responses["session.search"] = { sessions: [] };
 	await run("/search nothing-here", host);
 	assert.equal(host.last().kind, "plain");

@@ -230,6 +230,7 @@ export function renderAssistantFrame(
 		fill(line: string): string;
 		dim(text: string): string;
 	},
+	options: { label?: string } = {},
 ): string[] {
 	const { indent, span, framed, contentWidth } = geometry;
 	if (span <= 0 || geometry.paneWidth <= 0) return [];
@@ -242,7 +243,8 @@ export function renderAssistantFrame(
 			),
 		);
 	}
-	const heading = `${styles.border("┌─ ")}${styles.accentBold("assistant")} ${marker}`;
+	const label = options.label?.trim() || "assistant";
+	const heading = `${styles.border("┌─ ")}${styles.accentBold(label)} ${marker}`;
 	const rule = "─".repeat(Math.max(0, span - visibleWidth(heading) - 1));
 	const body = rows.map((line) => {
 		const clipped = truncateToWidth(line, contentWidth);
