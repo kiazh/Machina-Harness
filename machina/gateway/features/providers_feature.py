@@ -106,9 +106,7 @@ async def _chatgpt_models(provider: str, refresh: bool, *, fast: bool = False) -
     )
 
 
-async def _kiro_models(
-    provider: str, refresh: bool, *, fast: bool = False
-) -> dict[str, Any]:
+async def _kiro_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
     """Bounded catalog from the local Kiro proxy, with an honest fallback.
 
     The picker path uses a 60-second cache plus a fast TCP preflight, so a
@@ -122,9 +120,7 @@ async def _kiro_models(
         cached = kiro_proxy.cached_models()
         if cached is not None:
             return _models_payload(provider, source="cache", models=cached)
-        return _models_payload(
-            provider, source="fallback", models=kiro_proxy.fallback_models()
-        )
+        return _models_payload(provider, source="fallback", models=kiro_proxy.fallback_models())
     try:
         if refresh:
             models = await asyncio.to_thread(kiro_proxy.fetch_models, force=True)
