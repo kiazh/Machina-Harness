@@ -948,7 +948,7 @@ export const settingsCommands: Command[] = [
 	},
 	{
 		name: "routing",
-		description: "Show the connected-model planner/worker/supervisor route for a prompt",
+		description: "Explain the Multi Auto planner/supervisor/worker route for a prompt",
 		async run(args, host) {
 			const prompt = args.trim();
 			if (!prompt) throw new Error("Usage: /routing <prompt>");

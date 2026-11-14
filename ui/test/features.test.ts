@@ -1193,6 +1193,51 @@ test("/models picker applies the provider carried by the chosen model row", asyn
 	assert.match(host.last().text, /\/keys/);
 });
 
+test("/models exposes Multi Auto and applies it without changing the session model", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+		routing: {
+			mode: "single",
+			modelSelection: "auto",
+			autoParallel: true,
+			singleModelAutoParallel: false,
+		},
+	};
+	host.responses["models.list"] = {
+		provider: "deepseek",
+		source: "none",
+		models: [{ id: "deepseek-v4-flash" }],
+		fetchError: null,
+	};
+	host.responses["config.set"] = (p: Record<string, unknown>) => ({
+		model: "deepseek-v4-flash",
+		provider: "deepseek",
+		key: p.key,
+		value: p.value,
+	});
+	host.picks = ["__mode__::multi_auto"];
+
+	await run("/models", host);
+
+	const rows = host.pickItems[0]!;
+	assert.equal(rows.at(-1)!.value, "__mode__::single");
+	assert.equal(rows.at(-2)!.value, "__mode__::multi_auto");
+	assert.deepEqual(
+		host.calls
+			.filter((call) => call.method === "config.set")
+			.map((call) => [call.params.key, call.params.value, call.params.persist]),
+		[
+			["orchestration_mode", "multi_model", true],
+			["model_selection", "auto", true],
+			["auto_parallel_delegation", true, true],
+		],
+	);
+	assert.ok(!host.calls.some((call) => call.method === "session.setModel"));
+	assert.match(host.last().text, /Routing: Multi Auto/);
+});
+
 test("/models reuses the warm provider groups without another RPC", async () => {
 	const host = new FakeHost();
 	host.responses["providers.list"] = {

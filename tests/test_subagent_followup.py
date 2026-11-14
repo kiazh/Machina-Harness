@@ -131,6 +131,9 @@ async def test_fresh_child_inherits_the_parent_provider_route(monkeypatch):
 
     monkeypatch.setitem(config._session_overrides, "provider", "openrouter")
     monkeypatch.setitem(config._session_overrides, "model", "openrouter/free")
+    # Route inheritance is the single-model contract. Multi Auto intentionally
+    # reroutes workers from the connected inventory.
+    monkeypatch.setitem(config._session_overrides, "orchestration_mode", "single_model")
     monkeypatch.setattr(agent_registry, "get", get_agent)
     monkeypatch.setattr(session_manager, "get_fresh", get_session)
     monkeypatch.setattr(session_manager, "create", create)

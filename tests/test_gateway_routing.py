@@ -49,6 +49,39 @@ async def test_model_route_rejects_bad_mode_and_worker_count() -> None:
 
 
 @pytest.mark.asyncio
+async def test_providers_list_reports_multi_auto_mode(monkeypatch) -> None:
+    from machina.gateway.features import providers_feature
+
+    values = {
+        "orchestration_mode": "multi_model",
+        "model_selection": "auto",
+        "auto_parallel_delegation": True,
+        "single_model_auto_parallel": False,
+    }
+    monkeypatch.setattr(providers_feature.config, "get", values.get)
+    monkeypatch.setattr(providers_feature.store, "provider_names", lambda: ())
+
+    class Gateway:
+        provider = "deepseek"
+
+        def require_db(self):
+            return None
+
+    payload = await providers_feature.providers_list(Gateway(), {})
+
+    assert payload["routing"] == {
+        "mode": "multi_auto",
+        "modelSelection": "auto",
+        "autoParallel": True,
+        "singleModelAutoParallel": False,
+    }
+
+    values["orchestration_mode"] = "single_model"
+    payload = await providers_feature.providers_list(Gateway(), {})
+    assert payload["routing"]["mode"] == "single"
+
+
+@pytest.mark.asyncio
 async def test_opencode_session_models_use_entitlement_list(monkeypatch) -> None:
     from machina.core.provider import opencode_session
     from machina.gateway.features import providers_feature

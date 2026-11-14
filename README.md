@@ -732,7 +732,7 @@ Model IDs are application defaults, not a guarantee of account access, pricing, 
 
 Machina can route work across every model you have actually connected rather than assuming one global ranking. `machina routes` lists the live inventory and its planner/supervisor/worker/utility fit. `machina route "<prompt>" --mode multi_model` explains the deterministic choice for a task, including fallbacks, estimated cost, and warnings. No model call is made to choose a route.
 
-- `orchestration_mode=single_model` copies the effective session route to every role. `multi_model` selects planner, supervisor, and a bounded worker pool.
+- **Multi Auto is the default** and is a first-class choice in `/models`/`/model`, listed alongside the concrete model rows. It sets `multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
 - `model_selection=auto|pinned` controls whether the router may choose or must honor an explicit route. A definition-level provider/model pin always wins.
 - `worker_count=0` auto-sizes; values up to 64 are accepted. Concurrency is capped by `max_delegate_concurrency` (default 8), and at most `max_worker_routes` distinct worker routes are reused per plan.
 - `worker_transport=native|proxy|mcp` selects in-process delegation, the OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.

@@ -366,7 +366,24 @@ async def providers_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
                 "modelsFetchedAt": entry.get("models_fetched_at"),
             }
         )
-    return {"selected": selected, "providers": rows}
+    routing_mode = str(config.get("orchestration_mode") or "multi_model").lower()
+    model_selection = str(config.get("model_selection") or "auto").lower()
+    if routing_mode == "single_model":
+        mode = "single"
+    elif model_selection == "pinned":
+        mode = "multi_pinned"
+    else:
+        mode = "multi_auto"
+    return {
+        "selected": selected,
+        "providers": rows,
+        "routing": {
+            "mode": mode,
+            "modelSelection": model_selection,
+            "autoParallel": bool(config.get("auto_parallel_delegation")),
+            "singleModelAutoParallel": bool(config.get("single_model_auto_parallel")),
+        },
+    }
 
 
 async def providers_add(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:

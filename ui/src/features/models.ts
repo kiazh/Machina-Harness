@@ -148,6 +148,34 @@ export async function applyModel(host: FeatureHost, entry: ModelEntry, persist =
 	invalidateModelGroups(host);
 }
 
+/** Switch the first-class routing mode from the model picker. */
+export async function applyRoutingMode(host: FeatureHost, mode: "multi_auto" | "single"): Promise<void> {
+	const values: Array<[string, unknown]> =
+		mode === "multi_auto"
+			? [
+					["orchestration_mode", "multi_model"],
+					["model_selection", "auto"],
+					["auto_parallel_delegation", true],
+				]
+			: [
+					["orchestration_mode", "single_model"],
+					["model_selection", "auto"],
+				];
+	for (const [key, value] of values) {
+		const result = await host.request<ConfigSetResult>("config.set", { key, value, persist: true });
+		host.onConfig(result);
+	}
+	if (mode === "multi_auto") {
+		host.print(
+			"Routing: Multi Auto - planner/supervisor/worker routes are chosen from connected models. The current model stays the session/planner anchor; explicit parallel requests are harness-planned.",
+			"success",
+		);
+	} else {
+		host.print("Routing: Single Model - every role uses the current session route.", "success");
+	}
+	invalidateModelGroups(host);
+}
+
 /** Compact token count for table display ("500K", "1.05M"). */
 export function formatContextWindow(tokens: number | null | undefined): string {
 	if (!tokens || tokens <= 0) return "—";
@@ -211,9 +239,13 @@ export interface ModelGroup {
 	fetchError: string | null;
 }
 
+export type RoutingMode = "multi_auto" | "multi_pinned" | "single";
+
 export interface GroupedModels {
 	current: string;
 	groups: ModelGroup[];
+	/** Current orchestration choice, when the gateway reports it. */
+	routingMode?: RoutingMode;
 }
 
 /** A picker row: a model entry, or a non-selectable provider section header. */
@@ -317,7 +349,13 @@ export async function fetchModelGroups(host: FeatureHost, fast = false): Promise
 			fetchError: catalog?.fetchError ?? null,
 		};
 	});
-	const grouped = { current, groups };
+	const routingMode: RoutingMode =
+		listed?.routing?.mode === "single"
+			? "single"
+			: listed?.routing?.mode === "multi_pinned"
+				? "multi_pinned"
+				: "multi_auto";
+	const grouped: GroupedModels = { current, groups, routingMode };
 	modelGroupsCache.set(host, { key: cacheKey, at: Date.now(), grouped });
 	return grouped;
 }
@@ -325,7 +363,11 @@ export async function fetchModelGroups(host: FeatureHost, fast = false): Promise
 /** Picker rows: each non-empty group gets a dim section header, then its
  *  rows. Header values can never collide with a model value (provider names
  *  cannot start with "_"). */
-export function buildModelPickerRows(groups: ModelGroup[]): ModelPickerRow[] {
+export function buildModelPickerRows(
+	groups: ModelGroup[],
+	routingMode: RoutingMode = "multi_auto",
+	includeModes = true,
+): ModelPickerRow[] {
 	const rows: ModelPickerRow[] = [];
 	for (const group of groups) {
 		if (!group.entries.length) continue;
@@ -336,6 +378,24 @@ export function buildModelPickerRows(groups: ModelGroup[]): ModelPickerRow[] {
 			section: true,
 		});
 		for (const entry of group.entries) rows.push(toSelectItem(entry));
+	}
+	if (includeModes) {
+		rows.push({
+			value: "__section__::routing",
+			label: "Routing mode",
+			section: true,
+		});
+		rows.push({
+			value: "__mode__::multi_auto",
+			label: `Multi Auto${routingMode === "multi_auto" ? " - current" : ""}`,
+			description:
+				"Planner, supervisor, and worker routes chosen from connected models. Explicit parallel requests are harness-planned.",
+		});
+		rows.push({
+			value: "__mode__::single",
+			label: `Single Model${routingMode === "single" ? " - current" : ""}`,
+			description: "One session route for every role. Choose a concrete model above to change it.",
+		});
 	}
 	return rows;
 }
@@ -383,6 +443,13 @@ export function filterCuratedModels(query: string): ModelEntry[] {
  * Apply the exact picked model row, including its provider route.
  */
 export async function applyGroupedPick(host: FeatureHost, grouped: GroupedModels, value: string): Promise<ModelEntry | undefined> {
+	if (value.startsWith("__mode__::")) {
+		const mode = value.slice("__mode__::".length);
+		if (mode === "multi_auto" || mode === "single") {
+			await applyRoutingMode(host, mode);
+		}
+		return undefined;
+	}
 	const separator = value.indexOf("::");
 	if (separator <= 0) return undefined;
 	const provider = value.slice(0, separator);
@@ -402,7 +469,12 @@ export async function applyGroupedPick(host: FeatureHost, grouped: GroupedModels
 }
 
 /** Open the grouped picker; applies the selection through applyGroupedPick. */
-export async function openGroupedModelPicker(host: FeatureHost, grouped: GroupedModels, warnMissingCurrent = true): Promise<void> {
+export async function openGroupedModelPicker(
+	host: FeatureHost,
+	grouped: GroupedModels,
+	warnMissingCurrent = true,
+	includeModes = true,
+): Promise<void> {
 	const currentGroup = grouped.groups.find((group) => group.provider === grouped.current);
 	if (warnMissingCurrent && (!currentGroup || !currentGroup.entries.length)) {
 		const reason = currentGroup?.fetchError ? `: ${currentGroup.fetchError}` : "";
@@ -411,7 +483,7 @@ export async function openGroupedModelPicker(host: FeatureHost, grouped: Grouped
 			"warning",
 		);
 	}
-	const rows = buildModelPickerRows(grouped.groups);
+	const rows = buildModelPickerRows(grouped.groups, grouped.routingMode ?? "multi_auto", includeModes);
 	if (!rows.length) {
 		host.print("No models available from any provider right now.", "warning");
 		return;
@@ -463,7 +535,7 @@ async function printCatalog(host: FeatureHost): Promise<void> {
 
 export const modelsCommand: Command = {
 	name: "models",
-	description: "Pick a model by provider group (catalog first, curated fallback)",
+	description: "Pick Multi Auto, Single Model, or a concrete model by provider",
 	argumentHint: "[search|catalog]",
 	getArgumentCompletions: (prefix: string) => {
 		const typed = prefix.trimStart().toLowerCase();
@@ -486,11 +558,17 @@ export const modelsCommand: Command = {
 			await openGroupedModelPicker(host, grouped);
 			return;
 		}
+		const modeQuery = /(?:^|\s)(multi|single|auto|routing|mode)(?:\s|$)/i.test(args);
 		const matches = filterModelGroups(grouped.groups, args);
-		if (!matches.length) {
+		if (!matches.length && !modeQuery) {
 			host.print(`No model matches "${args.trim()}" across providers.`, "warning");
 			return;
 		}
-		await openGroupedModelPicker(host, { current: grouped.current, groups: matches }, false);
+		await openGroupedModelPicker(
+			host,
+			{ current: grouped.current, groups: matches, routingMode: grouped.routingMode },
+			false,
+			modeQuery,
+		);
 	},
 };

@@ -225,7 +225,7 @@ DEFAULTS: dict[str, Any] = {
     # Model orchestration. single_model copies the effective session route to
     # every role; multi_model selects planner/supervisor/worker routes from the
     # connected inventory. "auto" model selection may be overridden by a pin.
-    "orchestration_mode": "single_model",
+    "orchestration_mode": "multi_model",
     "model_selection": "auto",
     "worker_transport": "native",
     "cost_tier": "balanced",
@@ -746,7 +746,7 @@ class Config:
     worker_count: int = 0
     max_worker_routes: int = 4
     delegate_inline_wait_seconds: int = 120
-    orchestration_mode: str = "single_model"
+    orchestration_mode: str = "multi_model"
     model_selection: str = "auto"
     worker_transport: str = "native"
     cost_tier: str = "balanced"

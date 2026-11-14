@@ -185,9 +185,17 @@ export interface ProviderInfo {
 	modelsFetchedAt?: string | null;
 }
 
+export interface RoutingInfo {
+	mode: "multi_auto" | "multi_pinned" | "single";
+	modelSelection: "auto" | "pinned";
+	autoParallel: boolean;
+	singleModelAutoParallel: boolean;
+}
+
 export interface ProvidersListResult {
 	selected: string;
 	providers: ProviderInfo[];
+	routing?: RoutingInfo;
 }
 
 export interface ProviderAddResult {

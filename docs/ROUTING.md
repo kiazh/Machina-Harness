@@ -18,13 +18,19 @@ connected catalog. The terminal UI also exposes `/routing <prompt>`.
 
 ## Modes
 
-- `single_model` copies the effective session route to every role. It is the
-  safe default and preserves explicit provider/model choices. Set
-  `single_model_auto_parallel=true` to let explicit parallel prompts fan out
-  with that same route.
+`Multi Auto` is the default and is now a first-class choice in `/models`
+(alias `/model`), listed after the concrete model rows. Selecting it sets
+`multi_model` + `model_selection=auto` + automatic explicit-parallel planning.
+The currently selected model remains the session/planner anchor; delegated and
+parallel work is routed automatically. `/routing <prompt>` is only the
+explanation surface, not the switch.
+
 - `multi_model` selects a planner, a supervisor, and a bounded worker pool.
   On high-risk work, the supervisor prefers a different model family from the
   planner.
+- `single_model` copies the effective session route to every role and preserves
+  explicit provider/model choices. Set `single_model_auto_parallel=true` to let
+  explicit parallel prompts fan out with that same route.
 
 Set them with the normal config path:
 

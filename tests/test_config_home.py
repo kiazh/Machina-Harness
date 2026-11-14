@@ -12,6 +12,12 @@ def test_default_completion_budget_leaves_room_for_reasoning() -> None:
     assert DEFAULTS["max_tokens"] == 16384
 
 
+def test_multi_auto_is_the_default_routing_mode() -> None:
+    assert DEFAULTS["orchestration_mode"] == "multi_model"
+    assert DEFAULTS["model_selection"] == "auto"
+    assert DEFAULTS["single_model_auto_parallel"] is False
+
+
 def test_machina_home_selects_config_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MACHINA_HOME", str(tmp_path / "state"))
 
