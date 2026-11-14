@@ -2,7 +2,9 @@
 
 ## Unreleased
 
+- Extended the direct-provider HTTP timeout to five minutes so reasoning models are not aborted mid-thought, and made `harness_status` distinguish its read-only inspection effect from the session's write permission.
 - Fixed the end-to-end Kiro workflow: explicit CLI provider/model choices now pin to the session, delegated children inherit the parent route when the specialist does not override it, and empty post-tool model responses retry with a fresh tool-free summary or a tool-enabled continuation instead of ending with no answer.
+- When a request explicitly asks for parallel independent tracks, the default delegation policy now prefers two disjoint workers rather than collapsing the work into a serial plan; subagents are told to use workspace-relative paths.
 - Raised the default completion budget to 16,384 tokens so reasoning models can finish after a tool result, and made verbose CLI output UTF-8-safe on legacy Windows consoles.
 - Fixed normal build prompts being treated as read-only or entering the lean repair loop: explicit parent mutations release worker no-edit instructions, build+review requests stay coding tasks, and repair prompts that request skills/delegation keep those tools.
 - Made `list_agents` search space-separated specialty terms instead of requiring one exact substring.

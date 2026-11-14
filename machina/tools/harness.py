@@ -41,11 +41,15 @@ async def harness_status() -> str:
         installed = _installed_inventory()
         persona = await _persona_summary(agent_id, growth["notes"])
         return {
-            "read_only": True,
+            # This is a property of the status inspection tool, not a
+            # restriction on the session. Keep the name explicit so a model
+            # does not read it as "the whole turn is read-only".
+            "tool_effect": "read-only inspection",
             "session": {
                 "agent_id": agent_id,
                 "session_id": str(session_id),
                 "mode": session.execution_mode,
+                "writes_allowed": session.execution_mode in {"workspace", "sandbox", "full"},
             },
             "configuration": configuration(session),
             "persona_description": config.get("persona_description"),

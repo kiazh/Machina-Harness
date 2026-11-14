@@ -45,6 +45,16 @@ def test_kiro_spec_targets_the_local_gateway_without_an_api_key(monkeypatch) -> 
     assert "kiro" in store.RESERVED_NAMES
 
 
+@pytest.mark.asyncio
+async def test_direct_provider_allows_long_reasoning_turns(monkeypatch) -> None:
+    _override(monkeypatch, "kiro_api_key", "")
+    provider = get_provider(provider="kiro", model="claude-opus-4.7")
+    try:
+        assert provider.client.timeout.read == 300.0
+    finally:
+        await provider.close()
+
+
 def test_fallback_catalog_is_not_sonnet_only() -> None:
     ids = [row["id"] for row in kiro_proxy.fallback_models()]
 

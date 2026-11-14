@@ -74,7 +74,10 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         self.client = httpx.AsyncClient(
             base_url=spec.base_url,
             headers=headers,
-            timeout=120.0,
+            # Reasoning models can legitimately spend more than two minutes
+            # deciding after a tool result. A 120s client timeout aborted those
+            # turns before they could emit a first token.
+            timeout=httpx.Timeout(300.0, connect=15.0),
         )
 
     def _effort_payload(self, reasoning_effort: str | None) -> dict[str, Any]:
