@@ -6,6 +6,7 @@ one-shot admin commands: status lines, tables, errors and spinners.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,6 +31,35 @@ __all__ = [
     "config_table",
     "memory_table",
 ]
+
+
+def _ensure_utf8_stream(stream: Any, *, is_windows: bool | None = None) -> None:
+    """Keep verbose CLI glyphs (→, ✓, ✗) from crashing on legacy Windows.
+
+    Rich writes through the stream's configured encoding. PowerShell redirection
+    often leaves stdout as cp1252 even though the tool output is UTF-8, which
+    turned a normal tool event into a UnicodeEncodeError. Modern Windows
+    terminals and redirected files both accept UTF-8; only touch non-UTF
+    streams and never let a stream that cannot be reconfigured fail loudly.
+    """
+    if is_windows is None:
+        is_windows = os.name == "nt"
+    if not is_windows:
+        return
+    encoding = str(getattr(stream, "encoding", "") or "").lower()
+    if encoding in {"utf-8", "utf8", "cp65001"}:
+        return
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        pass
+
+
+_ensure_utf8_stream(sys.stdout)
+_ensure_utf8_stream(sys.stderr)
 
 console = Console()
 

@@ -474,7 +474,7 @@ async def _estimate_next_request(session_id) -> int:
             return (
                 get_token_count(json.dumps(messages, ensure_ascii=False))
                 + get_token_count(json.dumps(_tools_payload(tools), ensure_ascii=False))
-                + int(config.get("max_tokens") or 4096)
+                + int(config.get("max_tokens") or 16384)
             )
         except Exception:
             return 0

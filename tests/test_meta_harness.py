@@ -108,6 +108,16 @@ def test_ambiguous_coding_cues_fill_the_descriptor(monkeypatch) -> None:
     assert route.steps[0].family == "coding"
 
 
+def test_build_with_review_wording_stays_a_coding_task(monkeypatch) -> None:
+    _enable_all(monkeypatch)
+
+    route = route_prompt("Build a portfolio website and review the visual hierarchy")
+
+    assert route.task_class == "implement"
+    assert route.steps[0].family == "coding"
+    assert route.primary in {"opencode", "codex"}
+
+
 def test_documentation_cue_routes_to_hermes_even_with_code_nouns(monkeypatch) -> None:
     _enable_all(monkeypatch)
 

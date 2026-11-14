@@ -12,6 +12,7 @@ import pytest
 from machina.core.repair_gate import (
     REPAIR_NUDGE,
     has_verification_evidence,
+    is_repair_task,
     repair_deadline_exceeded,
     should_nudge_repair,
     should_nudge_verification,
@@ -22,6 +23,12 @@ from machina.core.repair_gate import (
 def _git_workspace(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     return tmp_path
+
+
+def test_implement_is_a_build_verb_not_repair_intent() -> None:
+    assert is_repair_task("Implement a small portfolio website") is False
+    assert is_repair_task("Resolve issue 42") is False
+    assert is_repair_task("Fix the failing test and repair the regression") is True
 
 
 def test_unchanged_repair_task_gets_one_continuation(tmp_path) -> None:

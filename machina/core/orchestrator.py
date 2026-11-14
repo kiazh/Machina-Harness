@@ -369,7 +369,23 @@ class Orchestrator:
                 raise ValueError("follow-up session is not this parent's delegated agent")
             child_authority = merge_authority(child.delegation_authority, child_authority)
         else:
-            child_provider, child_model = resolve_provider_model(definition=definition)
+            # A delegated worker must inherit the parent turn's explicit route
+            # when the specialist does not pin one itself. Falling back only to
+            # global config made a Kiro parent launch an OpenRouter child (and
+            # fail without OPENROUTER_API_KEY). Definition-level model/provider
+            # still wins over this inherited default.
+            parent_provider = None
+            parent_model = None
+            if parent_session_id is not None:
+                parent_route = await session_manager.get_fresh(parent_session_id)
+                if parent_route is not None:
+                    parent_provider = getattr(parent_route, "provider", None)
+                    parent_model = getattr(parent_route, "model", None)
+            child_provider, child_model = resolve_provider_model(
+                definition=definition,
+                default_provider=parent_provider,
+                default_model=parent_model,
+            )
             child = await session_manager.create(
                 title=f"{agent_name}: {task[:50]}",
                 agent_id=agent_name,

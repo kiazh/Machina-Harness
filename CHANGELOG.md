@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fixed the end-to-end Kiro workflow: explicit CLI provider/model choices now pin to the session, delegated children inherit the parent route when the specialist does not override it, and empty post-tool model responses retry with a fresh tool-free summary or a tool-enabled continuation instead of ending with no answer.
+- Raised the default completion budget to 16,384 tokens so reasoning models can finish after a tool result, and made verbose CLI output UTF-8-safe on legacy Windows consoles.
+- Fixed normal build prompts being treated as read-only or entering the lean repair loop: explicit parent mutations release worker no-edit instructions, build+review requests stay coding tasks, and repair prompts that request skills/delegation keep those tools.
+- Made `list_agents` search space-separated specialty terms instead of requiring one exact substring.
+
 - Auto-update now compares `origin/main` history instead of release version numbers, so commits merged between releases fast-forward a clean checkout.
 
 - Added a deterministic TaskRun controller for repair turns: phase tracking, turn/tool caps, repeated-failure stops, and one-shot no-edit, artifact-paging, job-polling, and finalize nudges.

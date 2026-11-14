@@ -235,6 +235,17 @@ _CONSTRAINT_RELEASE = re.compile(
     re.I,
 )
 
+# A worker's "do not edit files" must not turn the parent's explicit build
+# instruction into a read-only task. Only an explicit parent-executor phrase
+# releases the constraint; pure review prompts keep the read-only scope.
+_PARENT_MUTATION = re.compile(
+    r"(?:\b(?:implement|build|create|write|edit|make)\b[^.\n]{0,120}"
+    r"\b(?:yourself|the\s+parent|parent\s+agent)\b"
+    r"|\b(?:the\s+)?parent(?:\s+agent)?\b[^.\n]{0,120}"
+    r"\b(?:writes|edits|implements|builds|creates|owns)\b)",
+    re.I,
+)
+
 #: Constraint tokens cleared by an explicit release phrase (spec §8.3).
 _RELEASABLE_CONSTRAINTS = frozenset({"read-only", "no-edit"})
 
@@ -277,7 +288,7 @@ def detect_constraints(query: str) -> tuple[str, ...]:
 
 def released_constraints(query: str) -> frozenset[str]:
     """Constraint tokens explicitly released by *query* (sticky otherwise)."""
-    if not _CONSTRAINT_RELEASE.search(query):
+    if not (_CONSTRAINT_RELEASE.search(query) or _PARENT_MUTATION.search(query)):
         return frozenset()
     return _RELEASABLE_CONSTRAINTS
 
@@ -310,11 +321,12 @@ def classify_task(query: str) -> str:
     """
     if _AMBIGUOUS_FOLLOW_ON.fullmatch(query):
         return "ambiguous"
-    if _READONLY_MARKERS.search(query):
+    parent_mutation = bool(_PARENT_MUTATION.search(query))
+    if _READONLY_MARKERS.search(query) and not parent_mutation:
         return "review-readonly"
     if _DEBUG_SIGNALS.search(query):
         return "debug"
-    if _REVIEW_VERBS.search(query):
+    if _REVIEW_VERBS.search(query) and not parent_mutation:
         return "review-readonly"
     if _LEARN_DIRECTORY.search(query):
         return "learn-directory"

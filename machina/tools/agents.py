@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import logging
+import re
 import uuid
 from contextvars import ContextVar
 
@@ -399,13 +400,20 @@ async def list_agents(query: str = "") -> str:
         return "No agents are available."
     needle = query.strip().casefold()
     if needle:
-        agents = [
-            agent
-            for agent in agents
-            if needle in agent.name.casefold() or needle in agent.description.casefold()
-        ]
-        if not agents:
+        # Models naturally send space-separated specialties ("accessibility
+        # a11y frontend"). Treat those as alternative search terms instead of
+        # requiring the entire phrase to be a substring of one description.
+        terms = [term for term in re.split(r"[\s,]+", needle) if term]
+        scored = []
+        for agent in agents:
+            haystack = f"{agent.name} {agent.description}".casefold()
+            score = sum(1 for term in terms if term in haystack)
+            if score:
+                scored.append((score, agent))
+        if not scored:
             return f"No agents match {query.strip()!r}."
+        scored.sort(key=lambda item: (-item[0], item[1].name.casefold()))
+        agents = [agent for _score, agent in scored]
     else:
         # The bounded default roster must still show the standard roles even
         # when an alphabetically sorted specialist catalog is much larger.

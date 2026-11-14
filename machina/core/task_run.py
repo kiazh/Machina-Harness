@@ -49,6 +49,21 @@ REPAIR_TOOL_NAMES = frozenset(
     }
 )
 
+# Keep the lean toolset lean for pure repair work, but preserve tools the user
+# explicitly asks for. A repair prompt that also asks for a skill or a
+# delegated specialist must not silently lose those capabilities.
+REPAIR_COLLABORATION_TOOLS = frozenset(
+    {
+        "delegate",
+        "delegate_status",
+        "list_agents",
+        "skill_list",
+        "skill_read",
+        "skill_resource",
+    }
+)
+_COLLABORATION_CUES = ("delegat", "subagent", "multi-agent", "skill")
+
 TASK_RUN_TURN_LIMIT_TEXT = (
     "Task-run turn limit reached. The turn stopped to prevent a runaway loop; "
     "the current working-tree changes are preserved for verification."
@@ -170,6 +185,7 @@ class TaskRunPolicy:
     ) -> None:
         self.active = is_repair_task(user_message)
         self.lean_tools = lean_tools_enabled()
+        self._prompt = user_message.casefold()
         self.max_turns = configured_max_turns() if max_turns is None else max(0, max_turns)
         self.max_tool_calls = (
             configured_max_tool_calls() if max_tool_calls is None else max(0, max_tool_calls)
@@ -196,7 +212,11 @@ class TaskRunPolicy:
         """Return the lean repair toolset; fail open if nothing matches."""
         if not self.active or not self.lean_tools:
             return tool_defs
-        selected = [tool for tool in tool_defs if getattr(tool, "name", None) in REPAIR_TOOL_NAMES]
+        wants_collaboration = any(cue in self._prompt for cue in _COLLABORATION_CUES)
+        allowed = REPAIR_TOOL_NAMES
+        if wants_collaboration:
+            allowed = allowed | REPAIR_COLLABORATION_TOOLS
+        selected = [tool for tool in tool_defs if getattr(tool, "name", None) in allowed]
         return selected or tool_defs
 
     @property

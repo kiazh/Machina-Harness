@@ -206,7 +206,10 @@ DEFAULTS: dict[str, Any] = {
     "turn_timeout": 0,
     "agent_id": "harness",
     "temperature": 0.7,
-    "max_tokens": 4096,
+    # Modern reasoning models can spend a full small completion budget on
+    # hidden reasoning after a tool result and return no visible content.
+    # 16k leaves room for the final answer without approaching the 32k ceiling.
+    "max_tokens": 16384,
     # Maximum active delegated workers per event loop. Excess work is queued.
     "max_delegate_concurrency": 4,
     # Wait this long for a delegated result in the current turn. 0 disables
@@ -708,7 +711,7 @@ class Config:
     turn_timeout: int = 0
     agent_id: str = "harness"
     temperature: float = 0.7
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     max_delegate_concurrency: int = 4
     delegate_inline_wait_seconds: int = 120
     reasoning_effort: str = ""

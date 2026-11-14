@@ -39,6 +39,26 @@ async def test_agent_discovery_is_bounded_and_searchable(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_agent_discovery_accepts_multiple_space_separated_terms(monkeypatch):
+    from machina.core.agent_def import agent_registry
+
+    async def agents():
+        return [
+            SimpleNamespace(
+                name="a11y-architect",
+                description="Accessibility Architect specializing in WCAG compliance.",
+            ),
+            SimpleNamespace(name="coder", description="Reads, edits and runs code."),
+        ]
+
+    monkeypatch.setattr(agent_registry, "list", agents)
+    found = await list_agents(query="accessibility a11y frontend")
+
+    assert "- a11y-architect:" in found
+    assert "- coder:" not in found
+
+
+@pytest.mark.asyncio
 async def test_default_roster_keeps_core_roles_visible_with_many_specialists(monkeypatch):
     from machina.core.agent_def import agent_registry
 

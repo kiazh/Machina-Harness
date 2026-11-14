@@ -17,7 +17,10 @@ from pathlib import Path
 from machina.core.config import config
 
 _REPAIR_INTENT_RE = re.compile(
-    r"\b(?:fix|bug|failing|failure|regression|implement|patch|repair|broken|issue)\b",
+    # "implement" and "issue" are ordinary product/build words; treating them
+    # as repair intent made normal implementation prompts enter the lean repair
+    # loop (and lose delegation/skills). Require an actual repair symptom.
+    r"\b(?:fix|bug|failing|failure|regression|patch|repair|broken)\b",
     re.IGNORECASE,
 )
 DEFAULT_REPAIR_DEADLINE_SECONDS = 600.0

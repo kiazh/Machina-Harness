@@ -872,7 +872,9 @@ def _infer_routing_descriptor(prompt: str, descriptor: TaskDescriptor) -> TaskDe
     strong_code = bool(tokens & _CODING_ACTIONS)
     coding_signals = len(tokens & _CODE_CONTEXT)
 
-    if review_action:
+    # A build request that also says "review" is still a build. Only a review
+    # without an actual coding/edit action is read-only.
+    if review_action and not strong_code:
         return replace(
             descriptor,
             task_class="review-readonly",

@@ -451,6 +451,19 @@ def chat(
                     )
                     llm = agent.provider
                     _provider_name = provider or session.provider or config.get("provider")
+                    # An explicit CLI route is a session pin, not just a
+                    # one-turn override. Delegated children and later resume
+                    # turns resolve the durable session route; leaving it null
+                    # made a Kiro parent launch an OpenRouter child.
+                    if provider is not None or model is not None:
+                        try:
+                            await session_manager.set_model(
+                                session.id, model=llm.model, provider=str(_provider_name)
+                            )
+                            session.model = llm.model
+                            session.provider = str(_provider_name)
+                        except Exception as route_error:
+                            record_failure("cli.chat.pin_route", route_error)
                 except ValueError as e:
                     output.error(
                         f"Provider error: {e}",

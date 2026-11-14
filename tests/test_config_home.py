@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from machina.core.config import Config, default_config_path
+from machina.core.config import DEFAULTS, Config, default_config_path
+
+
+def test_default_completion_budget_leaves_room_for_reasoning() -> None:
+    assert DEFAULTS["max_tokens"] == 16384
 
 
 def test_machina_home_selects_config_path(monkeypatch, tmp_path: Path) -> None:

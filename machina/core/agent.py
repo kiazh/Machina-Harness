@@ -192,7 +192,7 @@ You are a general-purpose agent first: answer greetings and self-contained conce
 
 For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 
-Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
+Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Treat a worker report as evidence to check, not as final truth: inspect the cited files or results before relaying a finding. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
 For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan.
 
@@ -209,6 +209,9 @@ Be concise. Don't over-explain. Get things done."""
 SUBAGENT_SYSTEM_PROMPT = (
     "You are a delegated worker. Complete only the assigned task using the tools available. "
     "Do not address the user, adopt a persona, or narrate routine steps. "
+    "Read each current file at most once unless it changes, avoid repeating the same "
+    "inspection, and do not report a finding you have not verified against the current "
+    "file lines or tool output. "
     "Return a concise report to the main agent with findings, evidence, changes, "
     "verification, and any remaining blocker. If work remains within your task, "
     "continue it before reporting."
@@ -1869,6 +1872,135 @@ class BaseReActAgent:
         )
         return True
 
+    @staticmethod
+    def _fallback_final_content(tool_calls_made: list[dict[str, Any]]) -> str:
+        names = []
+        for entry in tool_calls_made:
+            name = str(entry.get("tool") or "")
+            if name and name not in names:
+                names.append(name)
+        label = ", ".join(names[:6]) or "tool"
+        return (
+            f"Completed {len(tool_calls_made)} tool call(s) using {label}. "
+            "Review the tool results above for the exact output."
+        )
+
+    async def _continue_after_empty_tool_turn(
+        self,
+        session_id: uuid.UUID,
+        user_message: str,
+        tool_calls_made: list[dict[str, Any]],
+        tools: list[Any],
+    ) -> tuple[LLMResponse | None, list[dict[str, Any]], int]:
+        """Restart a provider's empty post-tool turn with a fresh continuation.
+
+        The model can often continue from a compact task + tool-result summary
+        even when replaying the full tool transcript produces an empty message.
+        Keep the tool schema available so the model can make the next call;
+        the caller decides whether to execute it or accept final content.
+        """
+        result_lines = []
+        for entry in tool_calls_made[-8:]:
+            tool = str(entry.get("tool") or "tool")
+            args = entry.get("args") or {}
+            try:
+                args_text = json.dumps(args, ensure_ascii=False, default=str)[:240]
+            except Exception:
+                args_text = "{}"
+            preview = " ".join(str(entry.get("result_preview") or "").split())[:400]
+            result_lines.append(f"- {tool}({args_text}): {preview or '(completed)'}")
+        recovery_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Continue the task after completed tool work. Use the provided "
+                    "tools if more work remains; otherwise write the final response. "
+                    "Do not repeat a tool action that already succeeded."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"The task was:\n{user_message[:4000]}\n\n"
+                    "Tool results so far:\n"
+                    + "\n".join(result_lines)
+                    + "\n\nContinue the task."
+                ),
+            },
+        ]
+        try:
+            response = await self._call_llm_with_retry(
+                recovery_messages, tools=tools, session_id=session_id
+            )
+            tokens = int((response.usage or {}).get("total_tokens", 0) or 0)
+            return response, recovery_messages, tokens
+        except Exception as exc:
+            logger.warning("Empty-tool continuation recovery failed: %s", exc)
+            return None, recovery_messages, 0
+
+    async def _recover_empty_final(
+        self,
+        session_id: uuid.UUID,
+        user_message: str,
+        tool_calls_made: list[dict[str, Any]],
+    ) -> tuple[str, int]:
+        """Recover a provider's empty post-tool completion with a fresh summary.
+
+        Some OpenAI-compatible model routes return an empty assistant message
+        after a tool result even when the tool ran successfully. Replaying the
+        full tool transcript can reproduce the empty response, so ask for one
+        bounded, tool-free summary from a fresh context and fall back to a
+        deterministic report if the route still returns nothing.
+        """
+        if not tool_calls_made:
+            return "", 0
+        result_lines = []
+        for entry in tool_calls_made[-8:]:
+            tool = str(entry.get("tool") or "tool")
+            preview = " ".join(str(entry.get("result_preview") or "").split())[:300]
+            result_lines.append(f"- {tool}: {preview or '(completed)'}")
+        recovery_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Write the final response after completed tool work. "
+                    "Do not call tools. Be concise and factual."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"The task was:\n{user_message[:4000]}\n\n"
+                    "The tool results were:\n"
+                    + "\n".join(result_lines)
+                    + "\n\nWrite a concise final response summarizing what was "
+                    "completed, any files changed, and verification. "
+                    "Do not call tools."
+                ),
+            },
+        ]
+        recovered = ""
+        tokens = 0
+        try:
+            response = await self._call_llm_with_retry(
+                recovery_messages, tools=[], session_id=session_id
+            )
+            recovered = (response.content or "").strip()
+            tokens = int((response.usage or {}).get("total_tokens", 0) or 0)
+        except Exception as exc:
+            logger.warning("Empty-final summary recovery failed: %s", exc)
+        used_fallback = not recovered
+        if used_fallback:
+            recovered = self._fallback_final_content(tool_calls_made)
+        audit_log(
+            "agent_empty_final_recovery",
+            session_id=str(session_id),
+            recovered=bool(recovered and not used_fallback),
+            fallback=used_fallback,
+            tokens=tokens,
+        )
+        return recovered, tokens
+
     async def _finish_turn_completion(
         self,
         session_id: uuid.UUID,
@@ -2283,6 +2415,7 @@ class ReActAgent(BaseReActAgent):
                 iteration = 0
                 repair_nudges = 0
                 verification_nudges = 0
+                empty_recoveries = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
                 repair_verify_guard = getattr(self, "_maybe_continue_unverified_repair", None)
                 # S3.1(d) BEGIN progress history (revert: delete 2 lines; unbounded loop unchanged)
@@ -2424,38 +2557,63 @@ class ReActAgent(BaseReActAgent):
                         iteration += 1
                         continue
                     if not response.tool_calls:
-                        if repair_guard is not None and await repair_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=response.content or "",
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            nudges=repair_nudges,
-                        ):
-                            repair_nudges += 1
-                            iteration += 1
-                            continue
-                        if repair_verify_guard is not None and await repair_verify_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=response.content or "",
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            tool_calls_made=tool_calls_made,
-                            nudges=verification_nudges,
-                        ):
-                            verification_nudges += 1
-                            iteration += 1
-                            continue
-                        return await self._finish_turn_completion(
-                            session_id,
-                            user_message,
-                            response.content or "",
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                            pending_chunks,
-                        )
+                        content = response.content or ""
+                        if not content and tool_calls_made and empty_recoveries < 8:
+                            recovery, recovery_messages, recovery_tokens = (
+                                await self._continue_after_empty_tool_turn(
+                                    session_id, user_message, tool_calls_made, tool_defs
+                                )
+                            )
+                            empty_recoveries += 1
+                            total_tokens += recovery_tokens
+                            if recovery is not None:
+                                response = recovery
+                                content = response.content or ""
+                                if response.tool_calls:
+                                    messages = recovery_messages
+                                    audit_log(
+                                        "agent_empty_tool_recovery",
+                                        session_id=str(session_id),
+                                        tool_calls=len(response.tool_calls),
+                                    )
+                        if not response.tool_calls:
+                            if repair_guard is not None and await repair_guard(
+                                session_id=session_id,
+                                user_message=user_message,
+                                content=content,
+                                messages=messages,
+                                pending_chunks=pending_chunks,
+                                nudges=repair_nudges,
+                            ):
+                                repair_nudges += 1
+                                iteration += 1
+                                continue
+                            if repair_verify_guard is not None and await repair_verify_guard(
+                                session_id=session_id,
+                                user_message=user_message,
+                                content=content,
+                                messages=messages,
+                                pending_chunks=pending_chunks,
+                                tool_calls_made=tool_calls_made,
+                                nudges=verification_nudges,
+                            ):
+                                verification_nudges += 1
+                                iteration += 1
+                                continue
+                            if not content:
+                                content, recovery_tokens = await self._recover_empty_final(
+                                    session_id, user_message, tool_calls_made
+                                )
+                                total_tokens += recovery_tokens
+                            return await self._finish_turn_completion(
+                                session_id,
+                                user_message,
+                                content,
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                                pending_chunks,
+                            )
                     await self._append_assistant_content(
                         session_id, response.content, pending_chunks
                     )
@@ -2564,6 +2722,7 @@ class ReActAgent(BaseReActAgent):
                 iteration = 0
                 repair_nudges = 0
                 verification_nudges = 0
+                empty_recoveries = 0
                 repair_guard = getattr(self, "_maybe_continue_unchanged_repair", None)
                 repair_verify_guard = getattr(self, "_maybe_continue_unverified_repair", None)
                 # S3.1(d) BEGIN stream progress history (revert: delete 2 lines; unbounded loop unchanged)
@@ -2790,40 +2949,65 @@ class ReActAgent(BaseReActAgent):
                         iteration += 1
                         continue
                     if not response.tool_calls:
-                        if repair_guard is not None and await repair_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=response.content or "",
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            nudges=repair_nudges,
-                        ):
-                            repair_nudges += 1
-                            iteration += 1
-                            continue
-                        if repair_verify_guard is not None and await repair_verify_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=response.content or "",
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            tool_calls_made=tool_calls_made,
-                            nudges=verification_nudges,
-                        ):
-                            verification_nudges += 1
-                            iteration += 1
-                            continue
-                        completed = await self._finish_turn_completion(
-                            session_id,
-                            user_message,
-                            response.content or "",
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                            pending_chunks,
-                        )
-                        yield StreamEvent(type="done", response=completed)
-                        return
+                        content = response.content or ""
+                        if not content and tool_calls_made and empty_recoveries < 8:
+                            recovery, recovery_messages, recovery_tokens = (
+                                await self._continue_after_empty_tool_turn(
+                                    session_id, user_message, tool_calls_made, tool_defs
+                                )
+                            )
+                            empty_recoveries += 1
+                            total_tokens += recovery_tokens
+                            if recovery is not None:
+                                response = recovery
+                                content = response.content or ""
+                                if response.tool_calls:
+                                    messages = recovery_messages
+                                    audit_log(
+                                        "agent_empty_tool_recovery",
+                                        session_id=str(session_id),
+                                        tool_calls=len(response.tool_calls),
+                                    )
+                        if not response.tool_calls:
+                            if repair_guard is not None and await repair_guard(
+                                session_id=session_id,
+                                user_message=user_message,
+                                content=content,
+                                messages=messages,
+                                pending_chunks=pending_chunks,
+                                nudges=repair_nudges,
+                            ):
+                                repair_nudges += 1
+                                iteration += 1
+                                continue
+                            if repair_verify_guard is not None and await repair_verify_guard(
+                                session_id=session_id,
+                                user_message=user_message,
+                                content=content,
+                                messages=messages,
+                                pending_chunks=pending_chunks,
+                                tool_calls_made=tool_calls_made,
+                                nudges=verification_nudges,
+                            ):
+                                verification_nudges += 1
+                                iteration += 1
+                                continue
+                            if not content:
+                                content, recovery_tokens = await self._recover_empty_final(
+                                    session_id, user_message, tool_calls_made
+                                )
+                                total_tokens += recovery_tokens
+                            completed = await self._finish_turn_completion(
+                                session_id,
+                                user_message,
+                                content,
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                                pending_chunks,
+                            )
+                            yield StreamEvent(type="done", response=completed)
+                            return
 
                     # Execute tool calls with streaming events.
                     await self._append_assistant_content(

@@ -185,6 +185,22 @@ def test_repair_toolset_is_lean_and_fails_open() -> None:
     assert TaskRunPolicy(REPAIR).filter_tool_defs(only_unknown) == only_unknown
 
 
+def test_lean_repair_toolset_keeps_explicit_collaboration_tools() -> None:
+    tools = [
+        SimpleNamespace(name="read_file"),
+        SimpleNamespace(name="write_file"),
+        SimpleNamespace(name="skill_read"),
+        SimpleNamespace(name="delegate"),
+        SimpleNamespace(name="web_search"),
+    ]
+
+    selected = TaskRunPolicy(
+        "Fix the failing build and use skill_read plus delegate for a specialist."
+    ).filter_tool_defs(tools)
+
+    assert [item.name for item in selected] == ["read_file", "write_file", "skill_read", "delegate"]
+
+
 def test_lean_repair_tools_can_be_disabled(monkeypatch) -> None:
     monkeypatch.setenv("MACHINA_REPAIR_LEAN_TOOLS", "0")
     tools = [SimpleNamespace(name="read_file"), SimpleNamespace(name="web_search")]
