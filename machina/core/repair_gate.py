@@ -31,7 +31,8 @@ REPAIR_DEADLINE_TEXT = (
 VERIFICATION_NUDGE = (
     "The working tree changed, but there is no successful targeted verification "
     "evidence in this turn. Run the narrowest relevant test or direct behavior "
-    "check, inspect its exact result, and only then finalize."
+    "check; for HTML/CSS/JS output use web_verify (or browser_verify) and inspect "
+    "its exact result. Only then finalize."
 )
 _VERIFICATION_COMMAND_RE = re.compile(
     r"\b(?:pytest|py\.test|unittest|nox|tox|npm\s+(?:run\s+)?test|"
@@ -131,9 +132,19 @@ def _tool_command(entry: dict) -> str:
 
 
 def has_verification_evidence(tool_calls: list[dict] | None) -> bool:
-    """Return True only for a successful test/check command in this turn."""
+    """Return True only for a successful test, browser, or direct check."""
     for entry in tool_calls or []:
-        if not isinstance(entry, dict) or entry.get("tool") != "terminal":
+        if not isinstance(entry, dict):
+            continue
+        tool_name = entry.get("tool")
+        if tool_name in {"browser_verify", "web_verify"}:
+            if entry.get("outcome") == "failed":
+                continue
+            result = str(entry.get("result_preview") or entry.get("result") or "")
+            if re.search(r'"ok"\s*:\s*true', result, re.I):
+                return True
+            continue
+        if tool_name != "terminal":
             continue
         if entry.get("outcome") == "failed":
             continue
@@ -161,5 +172,16 @@ def should_nudge_verification(
     *,
     nudges: int = 0,
 ) -> bool:
-    """Return True when a repaired tree has no successful verification."""
-    return nudges < 1 and is_repair_task(user_message) and not has_verification_evidence(tool_calls)
+    """Return True when a repair or web build lacks successful verification."""
+    if nudges >= 1 or has_verification_evidence(tool_calls):
+        return False
+    if is_repair_task(user_message):
+        return True
+    try:
+        if str(config.get("browser_verification") or "auto").lower() == "off":
+            return False
+        from machina.core.intent import web_build_request
+
+        return bool(web_build_request(user_message))
+    except Exception:
+        return False

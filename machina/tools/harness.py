@@ -77,6 +77,9 @@ async def harness_status() -> str:
             # Spawn-free (state file + PATH lookup only): lets the agent answer
             # "are you connected to opencode?" truthfully without a live probe.
             "harnesses": interop_mod.state_summary(),
+            # Cached feature inventory (models/agents/MCP) from the last
+            # explicit probe. No subprocess is spawned on this status path.
+            "harness_features": _harness_features_summary(),
             "workspace": _workspace_section(),
         }
 
@@ -140,6 +143,54 @@ async def harness_status() -> str:
         # truncated JSON. Refuse safely instead of implying omitted data is empty.
         raise ToolError("Harness status exceeds the response limit; inspect /persona and /growth")
     return serialized
+
+
+@registry.register(
+    name="harness_features",
+    description=(
+        "Inspect the live capability inventory of installed external harnesses: "
+        "available models, agents, MCP servers, auth providers, and plugins. "
+        "Read-only. Use refresh=true for a fresh bounded probe; otherwise returns "
+        "the cached inventory with its age and staleness."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "refresh": {
+                "type": "boolean",
+                "description": "Run a fresh bounded probe instead of reading the cache",
+            }
+        },
+        "additionalProperties": False,
+    },
+)
+async def harness_features(refresh: bool = False) -> str:
+    """Return cached or freshly probed harness capabilities."""
+    from machina.core import harness_inventory
+
+    try:
+        if refresh:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(harness_inventory.cached, refresh=True),
+                timeout=40,
+            )
+        else:
+            payload = harness_inventory.cached(refresh=False)
+    except TimeoutError:
+        raise ToolError("harness feature probe timed out") from None
+    except Exception:
+        raise ToolError("harness feature inventory unavailable") from None
+    return json.dumps(redact_value(payload), ensure_ascii=False, separators=(",", ":"))
+
+
+def _harness_features_summary() -> dict:
+    try:
+        from machina.core import harness_inventory
+
+        return harness_inventory.summary()
+    except Exception as error:
+        record_failure("tools.harness.harness_features", error)
+        return {"available": False}
 
 
 def _installed_inventory() -> dict:

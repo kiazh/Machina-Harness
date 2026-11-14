@@ -257,8 +257,9 @@ def chat(
         help=(
             "LLM provider (openrouter, openai, anthropic, chatgpt, google, mistral, groq, "
             "together, deepseek, xai, opencode, kimi, kiro, custom, ollama). "
-            "opencode = OpenCode Zen gateway (OPENCODE_API_KEY); kiro = Kiro account "
-            "through a local OpenAI-compatible proxy; custom = any "
+            "opencode = OpenCode Zen gateway (OPENCODE_API_KEY); "
+            "opencode_session = text-only local OpenCode session bridge; "
+            "kiro = Kiro account through a local OpenAI-compatible proxy; custom = any "
             "OpenAI-compatible base URL (CUSTOM_BASE_URL, key optional)"
         ),
     ),
@@ -806,8 +807,72 @@ def usage_command(
                     else "unlimited",
                 )
             console.print(table)
+            cache = result.get("cache")
+            if isinstance(cache, dict):
+                state = "supported" if cache.get("supported") else "unsupported"
+                console.print(
+                    f"[dim]Prompt cache: {escape(str(cache.get('label') or state))} "
+                    f"({escape(str(cache.get('provider') or ''))}"
+                    f"{'/' + escape(str(cache.get('model'))) if cache.get('model') else ''})[/dim]"
+                )
+                note = str(cache.get("note") or "").strip()
+                if note and not cache.get("supported"):
+                    console.print(f"[yellow]{escape(note)}[/yellow]")
 
     _run(_usage())
+
+
+@app.command(name="route")
+def route_command(
+    prompt: str = typer.Argument(..., help="Prompt to route"),
+    mode: str | None = typer.Option(
+        None, "--mode", help="single_model or multi_model (default: config)"
+    ),
+    workers: int = typer.Option(0, "--workers", "-w", help="Planned worker count; 0=auto"),
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable decision JSON"),
+):
+    """Explain the connected-model route for a prompt without calling a model."""
+    from machina.core.routing import RouteDecision, RoutingError, route_task
+
+    try:
+        decision: RouteDecision = route_task(
+            prompt,
+            config=config,
+            mode=mode,
+            worker_count=workers or None,
+        )
+    except RoutingError as error:
+        console.print(f"[red]{escape(str(error))}[/red]")
+        raise typer.Exit(1) from None
+    if json_output:
+        typer.echo(json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True))
+    else:
+        console.print(decision.explain(), markup=False, highlight=False)
+
+
+@app.command(name="routes")
+def routes_command(
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable inventory JSON"),
+):
+    """List connected models and their role-fit scores."""
+    from machina.core.routing import build_inventory
+
+    inventory = build_inventory(config)
+    if json_output:
+        typer.echo(json.dumps(inventory.to_dict(), ensure_ascii=False, sort_keys=True))
+        return
+    for route in sorted(inventory.routes, key=lambda item: item.profile.key):
+        profile = route.profile
+        roles = " ".join(
+            f"{role}={profile.role_scores.get(role, 0):.2f}"
+            for role in ("planner", "supervisor", "worker", "utility")
+        )
+        console.print(
+            f"{escape(profile.provider)}/{escape(profile.model)} "
+            f"[{escape(route.transport)}] {roles}",
+            markup=True,
+            highlight=False,
+        )
 
 
 @app.command()
@@ -1834,6 +1899,22 @@ def setup(
 def version():
     """Show Machina version."""
     console.print(f"[bold cyan]Machina[/bold cyan] v{__version__}")
+
+
+@app.command(name="opencode-proxy")
+def opencode_proxy_command(
+    host: str = typer.Option("127.0.0.1", "--host", help="Loopback bind host"),
+    port: int = typer.Option(8765, "--port", "-p", help="Loopback bind port"),
+):
+    """Run the text-only OpenAI-compatible OpenCode session proxy."""
+    import uvicorn
+
+    from machina.core.provider.opencode_proxy import create_app
+
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        console.print("[red]opencode-proxy is loopback-only[/red]")
+        raise typer.Exit(1)
+    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
 
 
 @app.command()

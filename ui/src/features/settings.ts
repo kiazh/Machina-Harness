@@ -947,6 +947,20 @@ export const settingsCommands: Command[] = [
 		},
 	},
 	{
+		name: "routing",
+		description: "Show the connected-model planner/worker/supervisor route for a prompt",
+		async run(args, host) {
+			const prompt = args.trim();
+			if (!prompt) throw new Error("Usage: /routing <prompt>");
+			const session = host.session();
+			const result = await host.request<{ explanation: string }>("model.route", {
+				prompt,
+				sessionId: session?.id,
+			});
+			host.print(result.explanation, "plain");
+		},
+	},
+	{
 		name: "usage",
 		description: "Token and request usage for this session",
 		async run(_args, host) {
@@ -962,7 +976,10 @@ export const settingsCommands: Command[] = [
 					["Agent requests", u.agent.requests],
 					["Agent tokens", u.agent.accountedTokens],
 					["Unknown calls", u.session.unknownCalls],
-					["Request limit", u.session.requestLimit ?? "—"],
+					["Prompt cache", u.session.cacheCapability?.label ?? "unknown"],
+					["Cache read tokens", u.session.cacheReadTokens],
+					["Cache write tokens", u.session.cacheWriteTokens],
+					["Request limit", u.session.requestLimit ?? "-"],
 					["Token limit", u.session.tokenLimit ?? "—"],
 					["Requests remaining", u.session.requestsRemaining ?? "—"],
 					["Tokens remaining", u.session.tokensRemaining ?? "—"],

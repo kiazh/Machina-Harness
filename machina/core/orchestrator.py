@@ -80,9 +80,9 @@ class _DelegateCapacity:
 
         def current_limit() -> int:
             try:
-                return max(1, min(int(config.get("max_delegate_concurrency") or 4), 64))
+                return max(1, min(int(config.get("max_delegate_concurrency") or 8), 64))
             except (TypeError, ValueError):
-                return 4
+                return 8
 
         async with condition:
             while active[0] >= current_limit():
@@ -250,6 +250,8 @@ class Orchestrator:
         expected_artifact_path: str | None = None,
         resume_session_id: uuid.UUID | None = None,
         on_started: Callable[[uuid.UUID], None] | None = None,
+        provider_override: str | None = None,
+        model_override: str | None = None,
     ) -> DelegationResult:
         """Run *task* on *agent_name* in a fresh or owned child session.
 
@@ -268,6 +270,10 @@ class Orchestrator:
                 produce; verified present and non-empty after a non-paused
                 child completes. ``None`` disables verification (unchanged).
             resume_session_id: Existing child session for a follow-up task.
+            provider_override: Optional route chosen by the model router. A
+                definition-level pin still wins; this only replaces the
+                inherited parent/global default for a fresh child.
+            model_override: Optional model paired with ``provider_override``.
 
         Raises:
             ValueError: If hop count exceeds MAX_HOP_COUNT (deadlock guard).
@@ -381,8 +387,42 @@ class Orchestrator:
                 if parent_route is not None:
                     parent_provider = getattr(parent_route, "provider", None)
                     parent_model = getattr(parent_route, "model", None)
+            routed_provider = provider_override
+            routed_model = model_override
+            if (
+                not routed_provider
+                and not routed_model
+                and not getattr(definition, "provider", None)
+                and not getattr(definition, "model", None)
+                and str(config.get("model_selection") or "auto").lower() == "auto"
+                and str(config.get("orchestration_mode") or "single_model").lower()
+                == "multi_model"
+            ):
+                # Let the connected-model router choose the worker route for a
+                # multi-model delegation. A definition pin still wins. MCP
+                # workers are not yet executed by this in-process path, so keep
+                # the inherited route if the router selects MCP.
+                try:
+                    from machina.core.routing import route_task
+
+                    decision = route_task(
+                        task,
+                        config=config,
+                        mode="multi_model",
+                        session_provider=parent_provider,
+                        session_model=parent_model,
+                        worker_count=1,
+                    )
+                    worker_route = decision.route_for("worker")
+                    if worker_route.transport == "native":
+                        routed_provider = worker_route.profile.provider
+                        routed_model = worker_route.profile.model
+                except Exception as _route_error:
+                    record_failure("orchestrator.model_route", _route_error)
             child_provider, child_model = resolve_provider_model(
                 definition=definition,
+                provider_override=routed_provider,
+                model_override=routed_model,
                 default_provider=parent_provider,
                 default_model=parent_model,
             )
@@ -824,9 +864,9 @@ class Orchestrator:
             return []
         if max_concurrency is None:
             try:
-                max_concurrency = int(config.get("max_delegate_concurrency") or 4)
+                max_concurrency = int(config.get("max_delegate_concurrency") or 8)
             except Exception:
-                max_concurrency = 4
+                max_concurrency = 8
         try:
             limit = int(max_concurrency)
         except (TypeError, ValueError):

@@ -105,6 +105,26 @@ def test_direct_behavior_check_counts_as_verification() -> None:
     assert has_verification_evidence([failed]) is False
 
 
+def test_browser_verification_counts_as_evidence() -> None:
+    passed = {
+        "tool": "web_verify",
+        "args": {"path": "."},
+        "outcome": "completed",
+        "result_preview": '{"ok": true, "status": "passed"}',
+    }
+    failed = {
+        "tool": "browser_verify",
+        "args": {"url": "http://127.0.0.1:8000"},
+        "outcome": "failed",
+        "result_preview": '{"ok": false, "status": "failed"}',
+    }
+
+    assert has_verification_evidence([passed]) is True
+    assert has_verification_evidence([failed]) is False
+    assert should_nudge_verification("Build a portfolio website", [passed]) is False
+    assert should_nudge_verification("Build a portfolio website", [failed]) is True
+
+
 def test_repair_deadline_is_opt_out_and_repair_only(monkeypatch) -> None:
     monkeypatch.setenv("MACHINA_REPAIR_DEADLINE_SECONDS", "600")
     started = 10.0

@@ -354,6 +354,17 @@ export interface ProfileListResult {
 	profiles: ProfileInfo[];
 }
 
+export interface CacheCapability {
+	provider: string;
+	model: string;
+	mode: "explicit" | "implicit" | "none";
+	supported: boolean;
+	label: string;
+	usageFields: string[];
+	verifiedAt: string;
+	note: string;
+}
+
 export interface UsageView {
 	requests: number;
 	accountedTokens: number;
@@ -361,7 +372,16 @@ export interface UsageView {
 	chargedTokens: number;
 	knownPromptTokens: number;
 	knownCompletionTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	cacheCapability: CacheCapability | null;
+	exactCacheHits: number;
 	unknownCalls: number;
+	estimatedCalls: number;
+	acceptedCompletions: number;
+	knownCostUsd: number;
+	unknownCostCalls: number;
+	costPerAcceptedCompletionUsd: number | null;
 	requestLimit: number | null;
 	tokenLimit: number | null;
 	requestsRemaining: number | null;
@@ -371,6 +391,7 @@ export interface UsageView {
 export interface UsageResult {
 	sessionId: string;
 	agentId: string;
+	cache: CacheCapability | null;
 	session: UsageView;
 	agent: UsageView;
 }

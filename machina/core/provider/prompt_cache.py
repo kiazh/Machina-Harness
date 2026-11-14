@@ -24,7 +24,7 @@ from machina.core.optimization.policy import (
     prompt_cache_warming_enabled,
 )
 
-__all__ = ["CacheProfile", "cache_profile", "CACHE_NONE"]
+__all__ = ["CacheProfile", "cache_profile", "cache_status", "CACHE_NONE"]
 
 logger = logging.getLogger("machina.core.provider")
 
@@ -83,6 +83,18 @@ _OPENAI_IMPLICIT = CacheProfile(
     notes="automatic prefix caching; cached input reported as a prompt_tokens subset",
 )
 
+_OPENCODE_SESSION_IMPLICIT = CacheProfile(
+    mode="implicit",
+    min_prefix_tokens=0,
+    max_breakpoints=0,
+    usage_fields=("cache_read_tokens", "cache_write_tokens"),
+    verified_at="2026-11-14",
+    notes=(
+        "OpenCode session tokens report cache read/write categories; "
+        "cache policy and hit behavior are owned by OpenCode"
+    ),
+)
+
 _DEEPSEEK_IMPLICIT = CacheProfile(
     mode="implicit",
     min_prefix_tokens=64,
@@ -121,6 +133,8 @@ def _direct_profile(name: str) -> CacheProfile:
         return _DEEPSEEK_IMPLICIT
     if name == "google":
         return _GOOGLE_IMPLICIT
+    if name == "opencode_session":
+        return _OPENCODE_SESSION_IMPLICIT
     return CACHE_NONE
 
 
@@ -130,6 +144,8 @@ def cache_profile(provider: Any, model: str | None = None) -> CacheProfile:
     Shared transports resolve by their configured spec name; anything not
     explicitly verified gets :data:`CACHE_NONE` (conservative no-feature).
     """
+    if isinstance(provider, str):
+        return _direct_profile(provider.strip().lower())
     spec = getattr(provider, "spec", None)
     spec_name = getattr(spec, "name", None)
     if isinstance(spec_name, str) and spec_name:
@@ -155,6 +171,37 @@ def cache_profile(provider: Any, model: str | None = None) -> CacheProfile:
     if provider_name == "OllamaProvider":
         return CACHE_NONE
     return CACHE_NONE
+
+
+def cache_status(provider: Any, model: str | None = None) -> dict[str, Any]:
+    """Human/machine-readable cache capability for usage and route reports.
+
+    A provider with no verified cache profile reports ``unsupported`` rather
+    than a misleading zero-read "miss". Kiro is the canonical example: its
+    gateway does not expose prompt-cache read/write counters.
+    """
+    profile = cache_profile(provider, model)
+    provider_name = provider if isinstance(provider, str) else type(provider).__name__
+    supported = profile.mode != "none"
+    if supported:
+        label = f"{profile.mode} prompt cache"
+        note = profile.notes
+    else:
+        label = "unsupported"
+        note = (
+            f"{provider_name} does not expose verified prompt-cache read/write "
+            "counters; zero cache tokens mean 'not reported', not a cache miss."
+        )
+    return {
+        "provider": provider_name,
+        "model": model or "",
+        "mode": profile.mode,
+        "supported": supported,
+        "label": label,
+        "usageFields": list(profile.usage_fields),
+        "verifiedAt": profile.verified_at,
+        "note": note,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,11 @@ def provider_models(provider: str) -> list[dict[str, Any]]:
     if not isinstance(providers, dict):
         return []
     rows = providers.get(provider)
+    if provider == "opencode_session":
+        # The local OpenCode session bridge serves the same available model
+        # catalog; capability metadata is inherited, tool support is narrowed
+        # by the routing inventory (the bridge is text-only).
+        rows = providers.get("opencode")
     if provider == "grok":
         rows = providers.get("xai")
         try:
@@ -53,6 +58,13 @@ def provider_models(provider: str) -> list[dict[str, Any]]:
                 "efforts": list(row.get("efforts") or []),
                 "contextWindow": int(row.get("context") or 0) or None,
                 "maxOutputTokens": int(row.get("output") or 0) or None,
+                # Routing metadata is part of the snapshot. Keeping it on the
+                # normalized row lets the model router rank capability-fit
+                # without importing the private snapshot shape.
+                "family": str(row.get("family") or ""),
+                "tools": bool(row.get("tools", False)),
+                "reasoning": bool(row.get("reasoning", False)),
+                "releaseDate": str(row.get("release_date") or ""),
                 "source": "models.dev",
             }
         )

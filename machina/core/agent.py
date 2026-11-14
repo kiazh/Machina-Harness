@@ -190,7 +190,7 @@ SYSTEM_PROMPT = """You are Machina, a self-hosted AI agent. You have access to t
 
 You are a general-purpose agent first: answer greetings and self-contained conceptual questions directly, act on tasks with the right tool for the job, and never go looking for work. Greetings need no tools, skills or delegation. Questions needing current settings, repository evidence or external facts use the relevant read tools. Never enumerate skill catalogs or directories unprompted; when you need a capability, search for it with a specific query.
 
-For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
+For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. For HTML/CSS/JS deliverables, run web_verify on the output directory and treat console/page errors or failed browser assertions as failures. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 
 Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. When the user explicitly says to parallelize or names independent tracks, you must issue at least two disjoint delegate calls together; a serial plan is not an acceptable substitute, even when the pieces look small. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence, and tell it to use workspace-relative paths rather than assuming a Unix `/tmp` location. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Treat a worker report as evidence to check, not as final truth: inspect the cited files or results before relaying a finding. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
@@ -214,8 +214,8 @@ SUBAGENT_SYSTEM_PROMPT = (
     "file lines or tool output. Use paths relative to the workspace; never assume a "
     "Unix /tmp location on Windows. "
     "Return a concise report to the main agent with findings, evidence, changes, "
-    "verification, and any remaining blocker. If work remains within your task, "
-    "continue it before reporting."
+    "verification, and any remaining blocker. For web artifacts, use web_verify "
+    "when available. If work remains within your task, continue it before reporting."
 )
 
 # Growth-progress listeners: (session_id, stage, detail) callbacks for
@@ -477,10 +477,15 @@ class BaseReActAgent:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         session_id: uuid.UUID | None = None,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ):
         """Call provider.complete() with exponential backoff retry.
 
         Retries once on transient errors (502, 503, 504) with a 1s delay.
+        Optional limits let the deterministic planner make one bounded call
+        without changing the main loop's configured budget.
         """
         # S3.1(b) BEGIN section-token log (revert: delete block; diagnostics only)
         try:
@@ -499,8 +504,12 @@ class BaseReActAgent:
                     self.agent_id,
                     messages,
                     tools=tools,
-                    max_tokens=int(config.get("max_tokens")),
-                    temperature=float(config.get("temperature")),
+                    max_tokens=int(
+                        max_tokens if max_tokens is not None else config.get("max_tokens")
+                    ),
+                    temperature=float(
+                        temperature if temperature is not None else config.get("temperature")
+                    ),
                 )
             except (UsageBudgetExceededError, DatabaseError):
                 raise
@@ -1432,9 +1441,9 @@ class BaseReActAgent:
         if runnable:
             semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
             try:
-                delegate_limit = int(config.get("max_delegate_concurrency") or 4)
+                delegate_limit = int(config.get("max_delegate_concurrency") or 8)
             except (TypeError, ValueError):
-                delegate_limit = 4
+                delegate_limit = 8
             delegate_semaphore = asyncio.Semaphore(max(1, min(delegate_limit, 64)))
 
             async def _bounded(item: dict[str, Any]) -> dict[str, Any]:
@@ -2011,6 +2020,8 @@ class BaseReActAgent:
         total_tokens: int,
         iterations: int,
         pending_chunks: list[dict[str, Any]],
+        *,
+        outcome: str = "completed",
     ) -> AgentResponse:
         """Persist and attribute one accepted, tool-free completion.
 
@@ -2033,10 +2044,13 @@ class BaseReActAgent:
             tool_calls=tool_calls_made,
             tokens_used=total_tokens,
             iterations=iterations,
+            outcome=outcome,
         )
         self._schedule_learning_review(session_id, user_message, completed)
-        # T0: attribute the accepted completion for cost views.
-        await mark_turn_accepted(session_id, self.agent_id, usage_store)
+        if outcome == "completed":
+            # T0: attribute the accepted completion for cost views. A paused
+            # turn is not accepted until the approval is resolved.
+            await mark_turn_accepted(session_id, self.agent_id, usage_store)
         return completed
 
     async def _append_assistant_content(
@@ -2410,6 +2424,27 @@ class ReActAgent(BaseReActAgent):
                     await self._flush_pending_cancellation_safe(pending_chunks, session_id)
                     raise
 
+                # Explicit parallel requests are harness-owned in multi-model
+                # mode: the plan is structured, validated, and executed in the
+                # first wave without relying on the model to emit N delegate
+                # tool calls. A failure here falls back to the normal loop.
+                try:
+                    from machina.core.orchestration.auto import maybe_auto_parallel
+
+                    auto_response = await maybe_auto_parallel(
+                        self,
+                        session,
+                        session_id,
+                        user_message,
+                        pending_chunks,
+                    )
+                    if auto_response is not None:
+                        return auto_response
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _auto_error:
+                    record_failure("agent.auto_parallel", _auto_error)
+
                 total_tokens = 0
                 tool_calls_made = []
 
@@ -2716,6 +2751,34 @@ class ReActAgent(BaseReActAgent):
                 except asyncio.CancelledError:
                     await self._flush_pending_cancellation_safe(pending_chunks, session_id)
                     raise
+
+                # Stream path uses the same harness-owned parallel plan. The
+                # final synthesis is emitted as one text delta because the
+                # scheduler executes child sessions rather than this loop's
+                # tool parser.
+                try:
+                    from machina.core.orchestration.auto import maybe_auto_parallel
+
+                    auto_response = await maybe_auto_parallel(
+                        self,
+                        session,
+                        session_id,
+                        user_message,
+                        pending_chunks,
+                    )
+                    if auto_response is not None:
+                        if auto_response.content:
+                            yield StreamEvent(type="text", content=auto_response.content)
+                        yield StreamEvent(
+                            type="token_usage",
+                            tokens_used=auto_response.tokens_used,
+                        )
+                        yield StreamEvent(type="done", response=auto_response)
+                        return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _auto_error:
+                    record_failure("agent.auto_parallel_stream", _auto_error)
 
                 total_tokens = 0
                 tool_calls_made = []

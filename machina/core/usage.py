@@ -53,6 +53,9 @@ def _row_int(row: Any, key: str, default: int = 0) -> int:
 
 def provider_identity(provider: Any) -> str:
     """Attribute shared transports to their configured provider family."""
+    explicit = getattr(provider, "provider_name", None)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip().lower()
     name = getattr(getattr(provider, "spec", None), "name", None)
     if isinstance(name, str) and name.strip():
         return name.strip().lower()
@@ -720,6 +723,26 @@ class UsageStore:
             _AGG + "agent_id = $1 OR ancestor_agent_ids @> ARRAY[$1::text]",
             agent_id,
         )
+        route = await db.fetchrow(
+            """
+            SELECT provider, model FROM llm_usage
+            WHERE (session_id = $1 OR ancestor_session_ids @> ARRAY[$1::uuid])
+              AND status = 'complete' AND provider IS NOT NULL
+            ORDER BY completed_at DESC NULLS LAST, created_at DESC, id DESC
+            LIMIT 1
+            """,
+            session_id,
+        )
+        cache_capability = None
+        if route is not None:
+            try:
+                from machina.core.provider.prompt_cache import cache_status
+
+                cache_capability = cache_status(
+                    str(route["provider"]), str(route["model"] or "")
+                )
+            except Exception:
+                cache_capability = None
 
         def view(row: Any, prefix: str) -> dict[str, Any]:
             requests, tokens = int(row["requests"]), int(row["tokens"])
@@ -741,6 +764,7 @@ class UsageStore:
                 "knownCompletionTokens": int(row["completion_tokens"]),
                 "cacheReadTokens": int(row["cache_read_tokens"]),
                 "cacheWriteTokens": int(row["cache_write_tokens"]),
+                "cacheCapability": cache_capability,
                 "exactCacheHits": _row_int(row, "exact_cache_hits"),
                 "unknownCalls": int(row["unknown_calls"]),
                 "estimatedCalls": int(row["estimated_calls"]),
@@ -759,6 +783,7 @@ class UsageStore:
         return {
             "sessionId": str(session_id),
             "agentId": agent_id,
+            "cache": cache_capability,
             "session": view(session, "session"),
             "agent": view(agent, "agent"),
         }

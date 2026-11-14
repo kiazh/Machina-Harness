@@ -132,6 +132,12 @@ def get_provider(
     elif provider == "grok":
         # xAI Grok subscription tokens from the device OAuth flow.
         return GrokProvider(model=model, reasoning_effort=reasoning_effort)
+    elif provider == "opencode_session":
+        from machina.core.provider.opencode_session import OpenCodeSessionProvider
+
+        return OpenCodeSessionProvider(
+            model=model or PROVIDER_SPECS["opencode_session"].default_model
+        )
     elif provider == "custom":
         return _custom_provider(model, reasoning_effort)
     elif provider == "ollama":

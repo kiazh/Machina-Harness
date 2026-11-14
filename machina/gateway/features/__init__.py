@@ -134,6 +134,7 @@ from machina.gateway.features.providers_feature import (
     providers_list,
     providers_remove,
 )
+from machina.gateway.features.routing import model_inventory, model_route
 from machina.gateway.features.runtime import runtime_capabilities
 from machina.gateway.features.secrets import secrets_clear, secrets_list, secrets_set
 from machina.gateway.features.sessions import (
@@ -246,6 +247,8 @@ METHODS: dict[str, Handler] = {
     "interop.communications": interop_communications,
     "meta.route": meta_route,
     "meta.harnesses": meta_harnesses,
+    "model.route": model_route,
+    "model.inventory": model_inventory,
     "session.fork": session_fork,
     "session.delete": session_delete,
     "session.rename": session_rename,

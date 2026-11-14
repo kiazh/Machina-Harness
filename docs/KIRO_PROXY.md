@@ -130,7 +130,12 @@ MACHINA_KIRO_AUTOSTART=false
 The local gateway's admin endpoint reads Kiro's `GetUsageLimits` through the
 same authenticated account session; Machina never duplicates token handling.
 A gateway build without `/admin/accounts/usage` reports usage as unavailable;
-fallback still works. (Upstream work is tracked in `jwadow/kiro-gateway`
+fallback still works.
+
+Kiro's provider response does not expose prompt-cache read/write counters.
+`machina usage` therefore labels Kiro's prompt cache as `unsupported`; a zero
+cache-read count means "not reported", not "cache miss". The durable ledger
+still records zero rather than inventing a hit rate. (Upstream work is tracked in `jwadow/kiro-gateway`
 PR #160; the checkout used here has the equivalent read-only route.)
 When credits are exhausted, Machina can move the current chat to a fallback
 route. Set it explicitly:

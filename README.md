@@ -717,6 +717,7 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `mistral` | `MISTRAL_API_KEY` | `mistral-large-4` |
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
+| `opencode_session` | Local OpenCode background service; no API key | Text-only bridge for the account's available OpenCode models, including free ones; `machina opencode-proxy` exposes the same bridge as an OpenAI-compatible loopback URL |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
 | `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start, `/auth kiro usage` for credits, fallback via `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full 22-alias catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog (GPT-6.1 Sol, GPT-6 Luna; no GPT-6.1 Luna exists) |
@@ -726,6 +727,22 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
 
 Model IDs are application defaults, not a guarantee of account access, pricing, or tool support.
+
+### Connected-model routing
+
+Machina can route work across every model you have actually connected rather than assuming one global ranking. `machina routes` lists the live inventory and its planner/supervisor/worker/utility fit. `machina route "<prompt>" --mode multi_model` explains the deterministic choice for a task, including fallbacks, estimated cost, and warnings. No model call is made to choose a route.
+
+- `orchestration_mode=single_model` copies the effective session route to every role. `multi_model` selects planner, supervisor, and a bounded worker pool.
+- `model_selection=auto|pinned` controls whether the router may choose or must honor an explicit route. A definition-level provider/model pin always wins.
+- `worker_count=0` auto-sizes; values up to 64 are accepted. Concurrency is capped by `max_delegate_concurrency` (default 8), and at most `max_worker_routes` distinct worker routes are reused per plan.
+- `worker_transport=native|proxy|mcp` selects in-process delegation, the OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
+- Explicit "in parallel" requests in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) are planned and executed by the harness, not left to whether the model happens to emit N `delegate` calls. Plans are JSON-validated, dependency-aware, and reject duplicate artifact ownership or cycles. The selected supervisor route performs a bounded final synthesis of the worker reports, falling back to the deterministic summary if it fails.
+- Text-only OpenCode session routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat.
+- `machina usage` reports prompt-cache support separately from counters. Kiro reports `unsupported` instead of a misleading zero-read miss; the OpenCode session bridge reports its real cache read/write categories.
+- For web artifacts, `web_verify` starts a loopback static server and runs a real headless Chrome/Edge check (DOM, clicks, storage, console/page errors, viewport). Install with `pip install 'Machina[browser]'`; an existing Chrome or Edge channel is used before any download.
+
+The full modes, transport, free-OpenCode, and verification contract is in
+[docs/ROUTING.md](docs/ROUTING.md).
 
 `kiro` is a community interoperability path, not an AWS-supported provider. Kiro authenticates upstream with your account login, but its terms prohibit third-party harnesses that route requests outside its native interfaces. Machina does not implement the login or bundle the proxy: run a reviewed local gateway such as [jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) after `kiro-cli login`, and review the risks before using it. The proxy's local password is not a Kiro API key; it defaults to the gateway's documented `dummy-local-only` value and can be overridden with `KIRO_API_KEY`.
 

@@ -136,6 +136,36 @@ async def _kiro_models(provider: str, refresh: bool, *, fast: bool = False) -> d
         )
 
 
+async def _opencode_session_models(
+    provider: str, refresh: bool, *, fast: bool = False
+) -> dict[str, Any]:
+    """Entitlement-aware OpenCode model list, never the public catalog."""
+    from machina.core.provider.opencode_session import available_models
+
+    models = await asyncio.to_thread(available_models, force=refresh)
+    if not models:
+        models = ("deepseek/deepseek-flash",)
+    metadata = {
+        str(row.get("id")): row for row in models_dev.provider_models("opencode") if row.get("id")
+    }
+    rows: list[dict[str, Any]] = []
+    for model_id in models:
+        bare = model_id.split("/", 1)[-1]
+        row = dict(metadata.get(bare) or metadata.get(model_id) or {})
+        row.update(
+            {
+                "id": model_id,
+                "displayName": row.get("displayName") or model_id,
+                "description": row.get("description")
+                or "OpenCode available model through the local session bridge",
+                "source": "opencode-models",
+                "tools": False,
+            }
+        )
+        rows.append(row)
+    return _models_payload(provider, source="opencode-models", models=rows)
+
+
 async def _named_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
     entry = store.get_provider_entry(provider)
     if entry is None:
@@ -215,6 +245,8 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         return await _chatgpt_models(provider, refresh, fast=fast)
     if provider == "kiro":
         return await _kiro_models(provider, refresh, fast=fast)
+    if provider == "opencode_session":
+        return await _opencode_session_models(provider, refresh, fast=fast)
     if store.is_named_provider(provider):
         return await _named_models(provider, refresh, fast=fast)
     # Built-in direct families use the bundled models.dev snapshot. This is

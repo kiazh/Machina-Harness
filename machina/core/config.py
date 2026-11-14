@@ -211,10 +211,33 @@ DEFAULTS: dict[str, Any] = {
     # 16k leaves room for the final answer without approaching the 32k ceiling.
     "max_tokens": 16384,
     # Maximum active delegated workers per event loop. Excess work is queued.
-    "max_delegate_concurrency": 4,
+    # Eight is the default connected-model fan-out; 64 remains the hard cap.
+    "max_delegate_concurrency": 8,
+    # A plan may contain up to worker_count tasks. 0 = auto: one for ordinary
+    # work, 2-8 for an explicit parallel request, up to 64 when pinned.
+    "worker_count": 0,
+    # Keep a bounded number of distinct worker model routes per plan. Twenty
+    # workers should reuse routes, not defeat cache reuse with twenty models.
+    "max_worker_routes": 4,
     # Wait this long for a delegated result in the current turn. 0 disables
     # early return while leaving the child work itself uncapped.
     "delegate_inline_wait_seconds": 120,
+    # Model orchestration. single_model copies the effective session route to
+    # every role; multi_model selects planner/supervisor/worker routes from the
+    # connected inventory. "auto" model selection may be overridden by a pin.
+    "orchestration_mode": "single_model",
+    "model_selection": "auto",
+    "worker_transport": "native",
+    "cost_tier": "balanced",
+    # A full fan-out plan is forced when the user explicitly asks for parallel
+    # or independent tracks. Normal turns stay serial/small by default.
+    # Single-model fan-out is opt-in because it otherwise changes the default
+    # route for every explicit parallel prompt.
+    "auto_parallel_delegation": True,
+    "single_model_auto_parallel": False,
+    # Headless verification for generated web artifacts: auto runs when a web
+    # build is detected; off always skips with an explicit status.
+    "browser_verification": "auto",
     # Reasoning depth for providers that support it: "" (provider default),
     # "low"/"medium"/"high" wire-wide, and "xhigh"/"max" for the ChatGPT
     # catalog tiers (per-model validated by the chatgpt provider). Sent as
@@ -509,6 +532,11 @@ LEGACY_ENV_VARS: dict[str, str] = {
 _ENUM_VALIDATORS: dict[str, tuple[str, ...]] = {
     "execution_mode": ("ask", "workspace", "sandbox", "full"),
     "terminal_sandbox": ("disabled", "local", "docker"),
+    "orchestration_mode": ("single_model", "multi_model"),
+    "model_selection": ("auto", "pinned"),
+    "worker_transport": ("native", "proxy", "mcp"),
+    "cost_tier": ("low", "balanced", "high"),
+    "browser_verification": ("auto", "off"),
     "embedding_backend": ("auto", "local", "onnx", "openai", "off"),
     "optimization_semantic_cache_mode": ("off", "shadow", "wired"),
     "optimization_warmers_prompt_cache_mode": ("off", "shadow", "wired"),
@@ -638,6 +666,8 @@ def _check_int_bounds(key: str, val: int) -> None:
         "context_budget": (100, None),
         "max_tokens": (1, MAX_TOKENS),
         "max_delegate_concurrency": (1, 64),
+        "worker_count": (0, 64),
+        "max_worker_routes": (1, 8),
         "delegate_inline_wait_seconds": (0, 3600),
         # 0 disables throttling (AsyncTokenBucket.acquire short-circuits);
         # documented in rate_limit.py and pinned by test_f5_zero_rate.
@@ -712,8 +742,17 @@ class Config:
     agent_id: str = "harness"
     temperature: float = 0.7
     max_tokens: int = 16384
-    max_delegate_concurrency: int = 4
+    max_delegate_concurrency: int = 8
+    worker_count: int = 0
+    max_worker_routes: int = 4
     delegate_inline_wait_seconds: int = 120
+    orchestration_mode: str = "single_model"
+    model_selection: str = "auto"
+    worker_transport: str = "native"
+    cost_tier: str = "balanced"
+    auto_parallel_delegation: bool = True
+    single_model_auto_parallel: bool = False
+    browser_verification: str = "auto"
     reasoning_effort: str = ""
     rate_limit_calls_per_minute: int = 10
     usage_session_token_limit: int = 0

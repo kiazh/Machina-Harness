@@ -430,6 +430,25 @@ def _detect_providers() -> dict[str, Any]:
             if not _endpoint_reachable(endpoint):
                 key_ok = False
                 reason = f"Kiro proxy unreachable at {endpoint} (start kiro-gateway)"
+        elif selected == "opencode_session":
+            # Free Zen models run inside OpenCode; readiness is the local
+            # OpenCode service, not an API key.
+            from machina.core.provider.opencode_session import (
+                OpenCodeBridgeError,
+                service_password,
+                service_url,
+            )
+
+            endpoint = service_url()
+            key_ok = True
+            try:
+                service_password()
+            except OpenCodeBridgeError as error:
+                key_ok = False
+                reason = str(error)
+            if key_ok and not _endpoint_reachable(endpoint):
+                key_ok = False
+                reason = f"OpenCode service unreachable at {endpoint}"
         elif selected in PROVIDER_SPECS:
             env_name = PROVIDER_SPECS[selected].api_key_env
             key_ok = bool(config.get(PROVIDER_SPECS[selected].config_key))

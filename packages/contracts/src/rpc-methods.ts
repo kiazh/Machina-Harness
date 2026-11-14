@@ -82,6 +82,8 @@ export const RPC_METHODS = [
   "mode.get",
   "mode.revoke",
   "mode.set",
+  "model.inventory",
+  "model.route",
   "models.list",
   "models.setEffort",
   "nowplaying.command",

@@ -103,6 +103,18 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         reasoning="none",
         description="Google (Gemini models, OpenAI-compat endpoint)",
     ),
+    "opencode_session": ProviderSpec(
+        name="opencode_session",
+        # Loopback v2 session bridge over the user's running OpenCode service.
+        # Free Zen models work here because OpenCode itself executes the turn;
+        # only text generation is exposed (no arbitrary Machina tool schemas).
+        base_url="http://127.0.0.1:45278",
+        api_key_env="OPENCODE_SESSION_API_KEY",
+        default_model="deepseek/deepseek-flash",
+        reasoning="none",
+        description="OpenCode local session bridge (text-only, free-model capable)",
+        requires_key=False,
+    ),
     "opencode": ProviderSpec(
         name="opencode",
         # OpenCode Zen gateway. Both candidate bases
