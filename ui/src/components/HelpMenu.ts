@@ -29,6 +29,7 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { Menu, type MenuOptions, type MenuSectionItem } from "./Menu.ts";
+import { COMMAND_GROUPS, commandCategory } from "../commandCatalog.ts";
 import { singleLine } from "../design/text.ts";
 import { SHORTCUT_ROWS } from "../design/shortcuts.ts";
 
@@ -37,6 +38,8 @@ export interface HelpCommandItem {
 	name: string;
 	description?: string;
 	argumentHint?: string;
+	/** Presentation group; assigned by `helpMenuCommands`. */
+	category?: string;
 	/** Extra searchable terms (typically the command's argument completions). */
 	keywords?: string[];
 }
@@ -97,6 +100,7 @@ export const HELP_QUERY_MAX = 200;
 const SECTION_VALUE = "__section__";
 const COMMAND_PREFIX = "command:";
 const KEY_PREFIX = "key:";
+const FALLBACK_CATEGORY = "Commands";
 
 /**
  * Menu whose filter is a tokenized match over an injected haystack. The house
@@ -135,6 +139,7 @@ function commandHaystack(command: HelpCommandItem): string {
 	return [
 		command.name,
 		`/${command.name}`,
+		command.category ?? "",
 		command.argumentHint ?? "",
 		command.description ?? "",
 		(command.keywords ?? []).join(" "),
@@ -175,6 +180,7 @@ export function helpMenuCommands(
 			name: command.name,
 			description: command.description,
 			argumentHint: command.argumentHint,
+			category: commandCategory(command.name),
 			keywords: [...keywords],
 		};
 	});
@@ -293,16 +299,33 @@ export class HelpMenu implements Component {
 		const rows: SelectItem[] = [];
 		const haystacks = new Map<string, string>();
 		const pushSection = (label: string) => rows.push({ value: SECTION_VALUE, label, section: true } as MenuSectionItem);
-		pushSection("Commands");
+
+		const grouped = new Map<string, HelpCommandItem[]>();
 		for (const command of this.commands) {
-			const value = `${COMMAND_PREFIX}${command.name}`;
-			rows.push({
-				value,
-				label: singleLine(commandLabel(command)),
-				description: command.description ? singleLine(command.description) : undefined,
-			});
-			haystacks.set(value, commandHaystack(command).toLowerCase());
+			const category = command.category ?? FALLBACK_CATEGORY;
+			const members = grouped.get(category) ?? [];
+			members.push(command);
+			grouped.set(category, members);
 		}
+		const categoryOrder = [...COMMAND_GROUPS.map((group) => group.label)];
+		for (const category of grouped.keys()) {
+			if (!categoryOrder.includes(category)) categoryOrder.push(category);
+		}
+		for (const category of categoryOrder) {
+			const members = grouped.get(category);
+			if (!members?.length) continue;
+			pushSection(category);
+			for (const command of members) {
+				const value = `${COMMAND_PREFIX}${command.name}`;
+				rows.push({
+					value,
+					label: singleLine(commandLabel(command)),
+					description: command.description ? singleLine(command.description) : undefined,
+				});
+				haystacks.set(value, commandHaystack(command).toLowerCase());
+			}
+		}
+
 		pushSection("Keys");
 		this.keys.forEach((key, index) => {
 			const value = `${KEY_PREFIX}${index}`;

@@ -43,7 +43,7 @@ import { NowPlayingBar } from "./components/NowPlayingBar.ts";
 import { sanitizePastedText } from "./design/text.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
-import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
+import { type FamilySession, type FeatureHost, type NoticeKind, QUICK_SLASH_COMMANDS, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import type { WorkspaceAttachmentHost } from "./features/workspace.ts";
 import { guardSubmit } from "./commandDispatch.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type HelpPaletteHost, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
@@ -568,7 +568,9 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.family.open(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
-		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
+		this.editor.setAutocompleteProvider(
+			new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd(), null, QUICK_SLASH_COMMANDS),
+		);
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
 	}

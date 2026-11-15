@@ -766,6 +766,8 @@ export async function openSettingsMenu(host: FeatureHost): Promise<void> {
 }
 
 export const settingsCommands: Command[] = [
+	// Kept callable for API compatibility, but hidden from the command catalog:
+	// `/settings` is parsed as the `/config` alias, and both open the same menu.
 	{
 		name: "settings",
 		description: "Open the settings menu (same as bare /config)",

@@ -1151,14 +1151,16 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 | Group | UI commands |
 |---|---|
-| Session | `/new`, `/resume`, `/sessions`, `/search`, `/recall`, `/rename`, `/fork`, `/delete`, `/export`, `/clear` |
-| Task | `/goal`, `/review`, `/init`, `/delegate`, `/agents` |
+| Start | `/help`, `/new`, `/resume`, `/sessions`, `/clear`, `/exit` |
+| Sessions | `/search`, `/recall`, `/rename`, `/fork`, `/delete`, `/export`, `/goal` |
+| Work | `/review`, `/init`, `/delegate`, `/agents`, `/activity`, `/jobs` |
 | Workspace | `/workspace`, `/editor`, `/explorer`, `/lsp`, `/problems`, `/quickopen`, `/attach` |
-| Memory and instructions | `/memory`, `/growth`, `/persona`, `/skills` |
-| Context | `/context`, `/compress` |
-| Automation | `/jobs` |
-| Models and setup | `/auth`, `/keys`, `/models`, `/provider`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals`, `/interop`, `/harnesses` |
-| Information | `/status`, `/usage`, `/output`, `/mcp`, `/music`, `/help`, `/exit` |
+| Memory | `/memory`, `/growth`, `/persona`, `/skills`, `/context`, `/compress` |
+| Setup | `/models`, `/provider`, `/keys`, `/auth`, `/routing`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals` |
+| Integrations | `/mcp`, `/interop`, `/harnesses`, `/music` |
+| Info | `/status`, `/usage`, `/output` |
+
+A bare `/` shows the eight-command quick palette; typing filters the full registry. `/help` opens the same commands grouped by these categories, with category names and argument completions searchable.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`.
 
