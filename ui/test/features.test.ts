@@ -726,6 +726,11 @@ test("argument completions offer subcommands", async () => {
 	const items = await memory.getArgumentCompletions!("pe");
 	assert.deepEqual(items?.map((i) => i.value), ["pending"]);
 	assert.equal(await memory.getArgumentCompletions!("search foo"), null);
+	const routing = SLASH_COMMANDS.find((c) => c.name === "routing")!;
+	assert.deepEqual(
+		(await routing.getArgumentCompletions!("m"))?.map((i) => i.value),
+		["mode"],
+	);
 });
 
 test("/agents list and show render agent definitions", async () => {
@@ -1193,7 +1198,7 @@ test("/models picker applies the provider carried by the chosen model row", asyn
 	assert.match(host.last().text, /\/keys/);
 });
 
-test("/models exposes Multi Auto and applies it without changing the session model", async () => {
+test("/routing mode exposes Multi Auto and applies it without changing the session model", async () => {
 	const host = new FakeHost();
 	host.responses["providers.list"] = {
 		selected: "deepseek",
@@ -1205,25 +1210,21 @@ test("/models exposes Multi Auto and applies it without changing the session mod
 			singleModelAutoParallel: false,
 		},
 	};
-	host.responses["models.list"] = {
-		provider: "deepseek",
-		source: "none",
-		models: [{ id: "deepseek-v4-flash" }],
-		fetchError: null,
-	};
 	host.responses["config.set"] = (p: Record<string, unknown>) => ({
 		model: "deepseek-v4-flash",
 		provider: "deepseek",
 		key: p.key,
 		value: p.value,
 	});
-	host.picks = ["__mode__::multi_auto"];
+	host.picks = ["multi_auto"];
 
-	await run("/models", host);
+	await run("/routing mode", host);
 
+	assert.equal(host.pickTitles[0], "Routing mode: Single Model");
 	const rows = host.pickItems[0]!;
-	assert.equal(rows.at(-1)!.value, "__mode__::single");
-	assert.equal(rows.at(-2)!.value, "__mode__::multi_auto");
+	assert.deepEqual(rows.map((row) => row.value), ["multi_auto", "single"]);
+	assert.equal(rows[0]!.label, "Multi Auto");
+	assert.equal(rows[1]!.label, "Single Model - current");
 	assert.deepEqual(
 		host.calls
 			.filter((call) => call.method === "config.set")
@@ -1236,6 +1237,74 @@ test("/models exposes Multi Auto and applies it without changing the session mod
 	);
 	assert.ok(!host.calls.some((call) => call.method === "session.setModel"));
 	assert.match(host.last().text, /Routing: Multi Auto/);
+});
+
+test("/routing mode can switch to Single Model", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+		routing: {
+			mode: "multi_auto",
+			modelSelection: "auto",
+			autoParallel: true,
+			singleModelAutoParallel: false,
+		},
+	};
+	host.responses["config.set"] = (p: Record<string, unknown>) => ({
+		model: "deepseek-v4-flash",
+		provider: "deepseek",
+		key: p.key,
+		value: p.value,
+	});
+	host.picks = ["single"];
+
+	await run("/routing mode", host);
+
+	assert.deepEqual(
+		host.calls
+			.filter((call) => call.method === "config.set")
+			.map((call) => [call.params.key, call.params.value, call.params.persist]),
+		[
+			["orchestration_mode", "single_model", true],
+			["model_selection", "auto", true],
+		],
+	);
+	assert.ok(!host.calls.some((call) => call.method === "session.setModel"));
+	assert.match(host.last().text, /Routing: Single Model/);
+});
+
+test("/models lists only concrete models, not routing mode", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+	};
+	host.responses["models.list"] = {
+		provider: "deepseek",
+		source: "none",
+		models: [{ id: "deepseek-v4-flash" }],
+		fetchError: null,
+	};
+	host.picks = [undefined];
+
+	await run("/models", host);
+
+	const rows = host.pickItems[0]!;
+	assert.ok(rows.some((row) => row.value === "deepseek::deepseek-v4-flash"));
+	assert.ok(rows.every((row) => !row.value.startsWith("__mode__")));
+	assert.ok(rows.every((row) => row.value !== "__section__::routing"));
+});
+
+test("/routing <prompt> still explains a route without switching modes", async () => {
+	const host = new FakeHost();
+	host.responses["model.route"] = { explanation: "planner=deepseek-v4-flash" };
+	await run("/routing Fix the parser", host);
+	assert.deepEqual(host.calls, [
+		{ method: "model.route", params: { prompt: "Fix the parser", sessionId: SESSION.id } },
+	]);
+	assert.equal(host.last().text, "planner=deepseek-v4-flash");
+	assert.equal(host.pickTitles.length, 0);
 });
 
 test("/models reuses the warm provider groups without another RPC", async () => {

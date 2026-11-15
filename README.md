@@ -932,11 +932,11 @@ Routing is a control-plane decision made before the model call, not a prompt sug
 
 - **Inventory.** `machina routes` builds the live catalog from every provider that currently has a usable credential or signed-in subscription. Each model gets planner/supervisor/worker/utility fit scores from metadata, capabilities, context window, cost, and observed availability.
 - **Deterministic choice.** `machina route "<prompt>" --mode multi_model --workers 4` classifies the task, applies the cost tier, honors definition and session pins, and prints the planner, supervisor, worker routes, fallbacks, estimated cost, and warnings. No model is called to choose a route.
-- **Multi Auto is the default.** `/models` (alias `/model`) lists **Multi Auto** alongside concrete models. It sets `orchestration_mode=multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
+- **Multi Auto is the default.** `/routing mode` lets you choose **Multi Auto** or **Single Model**; `/models` (alias `/model`) chooses concrete models. Multi Auto sets `orchestration_mode=multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
 - **Bounded workers.** `worker_count=0` auto-sizes; values up to 64 are accepted and capped by `max_delegate_concurrency` (default 8). At most `max_worker_routes` (default 4) distinct worker routes are reused per plan to preserve cache and review coherence.
 - **Transports.** `worker_transport=native|proxy|mcp` selects in-process delegation, an OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
 - **Explicit parallel plans.** An explicit "in parallel" request in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) is planned once and JSON-validated for cycles, duplicate artifact ownership, and task count. A dependency-aware scheduler runs the first wave up to the worker limit. The supervisor route performs a bounded final synthesis, falling back to the deterministic summary if it fails. Workers paused for approval are reported as awaiting approval, never as completed.
-- **Truthful roles.** Text-only `opencode_session` routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat; `/routing <prompt>` is the explanation surface, not the switch.
+- **Truthful roles.** Text-only `opencode_session` routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat; `/routing mode` is the switch, and `/routing <prompt>` only explains a route.
 
 The plan is only as good as the inventory. A provider that is configured but has no usable credential is reported as a warning, not silently treated as available. A model ID is a request, not a guarantee of account access or tool support.
 
@@ -1011,7 +1011,7 @@ Model IDs are application defaults, not a guarantee of account access, pricing, 
 
 Machina can route work across every model you have actually connected rather than assuming one global ranking. `machina routes` lists the live inventory and its planner/supervisor/worker/utility fit. `machina route "<prompt>" --mode multi_model` explains the deterministic choice for a task, including fallbacks, estimated cost, and warnings. No model call is made to choose a route.
 
-- **Multi Auto is the default** and is a first-class choice in `/models`/`/model`, listed alongside the concrete model rows. It sets `multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
+- **Multi Auto is the default.** Choose it with `/routing mode` (alongside **Single Model**); `/models`/`/model` lists concrete models only. It sets `multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
 - `model_selection=auto|pinned` controls whether the router may choose or must honor an explicit route. A definition-level provider/model pin always wins.
 - `worker_count=0` auto-sizes; values up to 64 are accepted. Concurrency is capped by `max_delegate_concurrency` (default 8), and at most `max_worker_routes` distinct worker routes are reused per plan.
 - `cost_tier=low|balanced|high` shifts the ranking without changing the task classification. Route pins and fallbacks are explicit in the explanation.
@@ -1469,7 +1469,7 @@ In the UI, ask something concrete:
 Explain how this project is organized and where its main entry point is.
 ```
 
-Use `/help` to print every command with its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model or **Multi Auto**, and `/sessions` returns to earlier work. `/routing <prompt>` explains how a prompt would be routed without changing the selection.
+Use `/help` to print every command with its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a concrete model, `/routing mode` chooses **Multi Auto** or **Single Model**, and `/sessions` returns to earlier work. `/routing <prompt>` explains how a prompt would be routed without changing the selection.
 
 For a single response without the UI:
 
@@ -1661,8 +1661,9 @@ machina chat -p deepseek -m deepseek-chat "Explain this project"
 | Command | Purpose |
 |---|---|
 | `/provider` | Manage provider URLs and credentials; add or remove custom endpoints |
-| `/models` / `/models catalog` | Choose and save a model or **Multi Auto**; inspect the selected catalog |
-| `/routing <prompt>` | Explain the deterministic route for one prompt; does not switch models |
+| `/models` / `/models catalog` | Choose and save a concrete model; inspect the selected catalog |
+| `/routing mode` | Choose **Multi Auto** or **Single Model** |
+| `/routing <prompt>` | Explain the deterministic route for one prompt; does not switch modes |
 | `/effort` | Adjust reasoning effort where supported |
 | `/auth` / `/keys` | Account sign-in or provider keys |
 
@@ -2912,7 +2913,7 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 | `/mcp` | `/mcp [list \| status <id>]` | Add, connect, inspect and remove MCP servers |
 | `/memory` | `/memory [list\|search\|add\|forget\|share\|pending\|approve\|reject\|stats]` | Long-term memory: list, search, add, forget, share, pending, approve, reject, stats |
 | `/mode` | `/mode [ask\|workspace\|sandbox\|full]` | Show or set execution mode (ask\|workspace\|sandbox\|full) |
-| `/models` | `/models [search\|catalog]` | Pick Multi Auto, Single Model, or a concrete model by provider |
+| `/models` | `/models [search\|catalog]` | Pick a concrete model by provider |
 | `/music` | `/music [toggle\|next\|prev\|status\|on\|off]` | Show and control what's playing on this computer |
 | `/new` | `/new [title]` | Start a new session |
 | `/output` | `/output [tool-id]` | Inspect retained tool output (menu when empty) |
@@ -2926,7 +2927,7 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 | `/rename` | `/rename <title>` | Rename the current session |
 | `/resume` | `/resume [id]` | Resume a session (menu when empty) |
 | `/review` | `/review [focus]` | Review my current changes and find issues |
-| `/routing` | `/routing <prompt>` | Explain the Multi Auto planner/supervisor/worker route for a prompt |
+| `/routing` | `/routing [mode\|<prompt>]` | Choose Multi Auto or Single Model, or explain the planner/supervisor/worker route for a prompt |
 | `/search` | `/search <words>` | Find sessions by title |
 | `/sessions` | `/sessions` | Resume a session (menu when empty) |
 | `/settings` | `/settings` | Open the settings menu (same as bare /config) |

@@ -14,16 +14,17 @@ machina route "..." --json
 ```
 
 Inside chat, use `route_explain` for one prompt and `model_inventory` for the
-connected catalog. The terminal UI also exposes `/routing <prompt>`.
+connected catalog. The terminal UI exposes `/routing mode` for the mode switch
+and `/routing <prompt>` for route explanation.
 
 ## Modes
 
-`Multi Auto` is the default and is now a first-class choice in `/models`
-(alias `/model`), listed after the concrete model rows. Selecting it sets
-`multi_model` + `model_selection=auto` + automatic explicit-parallel planning.
-The currently selected model remains the session/planner anchor; delegated and
-parallel work is routed automatically. `/routing <prompt>` is only the
-explanation surface, not the switch.
+`Multi Auto` is the default. `/routing mode` opens the first-class choice between
+**Multi Auto** and **Single Model**; `/models` (alias `/model`) lists concrete
+models only. Selecting Multi Auto sets `multi_model` + `model_selection=auto` +
+automatic explicit-parallel planning. The currently selected model remains the
+session/planner anchor; delegated and parallel work is routed automatically.
+`/routing <prompt>` is only the explanation surface, not the switch.
 
 - `multi_model` selects a planner, a supervisor, and a bounded worker pool.
   On high-risk work, the supervisor prefers a different model family from the

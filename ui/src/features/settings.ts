@@ -947,20 +947,6 @@ export const settingsCommands: Command[] = [
 		},
 	},
 	{
-		name: "routing",
-		description: "Explain the Multi Auto planner/supervisor/worker route for a prompt",
-		async run(args, host) {
-			const prompt = args.trim();
-			if (!prompt) throw new Error("Usage: /routing <prompt>");
-			const session = host.session();
-			const result = await host.request<{ explanation: string }>("model.route", {
-				prompt,
-				sessionId: session?.id,
-			});
-			host.print(result.explanation, "plain");
-		},
-	},
-	{
 		name: "usage",
 		description: "Token and request usage for this session",
 		async run(_args, host) {

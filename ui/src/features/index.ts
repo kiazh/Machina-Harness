@@ -14,6 +14,7 @@ import { jobsCommand } from "./jobs.ts";
 import { keysCommand } from "./keys.ts";
 import { approvalsCommand, modeCommand } from "./mode.ts";
 import { modelsCommand } from "./models.ts";
+import { routingCommand } from "./routing.ts";
 import { mcpCommand } from "./mcp.ts";
 import { interopCommand } from "./interop.ts";
 import { harnessesCommand } from "./harnesses.ts";
@@ -81,6 +82,7 @@ const COMMANDS: Command[] = [
 	modeCommand,
 	approvalsCommand,
 	modelsCommand,
+	routingCommand,
 	themeCommand,
 	musicCommand,
 	outputCommand,
