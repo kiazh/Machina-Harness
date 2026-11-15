@@ -1,6 +1,7 @@
 // Slash-command parsing and help text. Command definitions live in features.ts.
 
 import type { SlashCommand } from "@earendil-works/pi-tui";
+import { COMMAND_GROUPS, OTHER_COMMAND_CATEGORY } from "./commandCatalog.ts";
 import { theme } from "./theme.ts";
 
 const ALIASES: Record<string, string> = {
@@ -42,21 +43,6 @@ export function splitSub(args: string): [string, string] {
 	return [trimmed.slice(0, space).toLowerCase(), trimmed.slice(space).trim()];
 }
 
-/**
- * Codex-style command groups for /help. Commands not listed fall into Other.
- * Order here is the presentation order.
- */
-const HELP_GROUPS: Array<[group: string, names: string[]]> = [
-	["Session", ["new", "resume", "sessions", "search", "recall", "rename", "fork", "delete", "export", "clear"]],
-	["Task", ["goal", "review", "init", "delegate", "agents", "activity"]],
-	["Workspace", ["workspace", "editor", "explorer", "lsp", "problems", "quickopen"]],
-	["Memory", ["memory", "growth", "persona", "skills"]],
-	["Context", ["context", "compress"]],
-	["Automation", ["jobs"]],
-	["Setup", ["auth", "keys", "models", "provider", "effort", "config", "theme", "profile", "profiles", "mode", "approvals", "interop", "harnesses"]],
-	["Info", ["status", "usage", "output", "mcp", "help", "exit"]],
-];
-
 export function helpText(commands: SlashCommand[]): string {
 	const usage = (c: SlashCommand) => (c.argumentHint ? `${c.name} ${c.argumentHint}` : c.name);
 	const width = Math.max(...commands.map((c) => usage(c).length));
@@ -64,15 +50,19 @@ export function helpText(commands: SlashCommand[]): string {
 	const line = (c: SlashCommand) => `${theme.bold(`/${usage(c).padEnd(width)}`)}  ${c.description ?? ""}`;
 	const seen = new Set<string>();
 	const out: string[] = [];
-	for (const [group, names] of HELP_GROUPS) {
-		const members = commands.filter((c) => names.includes(c.name));
+	for (const group of COMMAND_GROUPS) {
+		const members = commands.filter((c) => group.names.includes(c.name));
 		if (!members.length) continue;
-		out.push(theme.bold(group));
+		out.push(theme.bold(group.label));
 		for (const c of members) {
 			seen.add(c.name);
 			out.push(`  ${line(c)}`);
 		}
 	}
-	for (const c of commands.filter((c) => !seen.has(c.name))) out.push(line(c));
+	const remaining = commands.filter((c) => !seen.has(c.name));
+	if (remaining.length) {
+		out.push(theme.bold(OTHER_COMMAND_CATEGORY));
+		for (const c of remaining) out.push(`  ${line(c)}`);
+	}
 	return out.join("\n");
 }

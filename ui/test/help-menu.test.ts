@@ -25,6 +25,7 @@ import {
 	type Terminal,
 } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
+import { COMMAND_GROUPS } from "../src/commandCatalog.ts";
 import { helpText, parseCommand } from "../src/commands.ts";
 import { DEFAULT_MENU_VISIBLE_ROWS } from "../src/components/Menu.ts";
 import {
@@ -243,6 +244,25 @@ test("HM-06 helpMenuCommands derives searchable keywords from argument completio
 	assert.deepEqual(mapped[0]?.keywords, [], "a throwing completion provider never breaks the menu");
 });
 
+test("HM-09 every slash command has exactly one task category", () => {
+	const grouped = COMMAND_GROUPS.flatMap((group) => group.names);
+	assert.equal(grouped.length, new Set(grouped).size, "no command appears in two categories");
+	assert.deepEqual(
+		[...grouped].sort(),
+		SLASH_COMMANDS.map((command) => command.name).sort(),
+		"the category catalog covers the full command registry",
+	);
+});
+
+test("HM-09 category labels are searchable in the help menu", () => {
+	const menu = new HelpMenu({ commands: helpMenuCommands(SLASH_COMMANDS), keys: [] });
+	menu.activate();
+	type(menu, "workspace");
+	assert.match(plain(menu), /\/workspace/);
+	assert.match(plain(menu), /\/lsp/, "typing a category shows its members");
+	assert.doesNotMatch(plain(menu), /\/models/);
+});
+
 test("HM-06 HELP_KEYS covers Composer, Workspace and Global contexts", () => {
 	const contexts = new Set(HELP_KEYS.map((key) => key.context));
 	assert.ok(contexts.has("Composer"));
@@ -370,7 +390,7 @@ test("HM-08 real /help opens the Menu; typing filters; Enter runs /status", asyn
 	await settle();
 	tui.renderNow(true);
 	assert.match(screen(), /Help/, "bare /help opens the interactive Menu");
-	assert.match(screen(), /Commands/);
+	assert.match(screen(), /Start/, "commands are grouped by task category");
 	const menu = menuOf(app);
 	assert.ok(menu, "the dialog is mounted");
 	assert.ok(menu.getView().commands.some((command) => command.name === "status"), "the full command set is indexed");
