@@ -55,7 +55,7 @@ and GitHub Copilot subscription sign-in in one place.
 
 See [Get started](#get-started) for manual setup, options, and Docker.
 
-> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations.
+> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, failure, and module catalogs.
 
 **Release status:** **1.2.14 open-source release.** `main` also carries post-release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](docs/verification/RELEASE_1.2.14.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
@@ -76,6 +76,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 - [Conceptual blueprint](#conceptual-blueprint) — how to build a harness like this
 - [Get started](#get-started) — installation, requirements, first task
 - [Reference](#reference) — commands, configuration, API, deployment, source map
+- [Appendices](#appendices) — complete RPC, tool, schema, configuration, event, route, command, failure, test, and module references
 - [Troubleshooting](#troubleshooting) — common failures and where to look
 
 ## Technical overview
@@ -248,6 +249,66 @@ flowchart TB
     OPS --> PG
 ```
 
+### How a turn moves through the system
+
+The chart above is the static structure. This is the dynamic path for one turn, including the approval branch. The numbers are message order, not model iterations.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Human
+    participant UI as Terminal UI
+    participant GW as Gateway
+    participant TC as Turn coordinator
+    participant RT as Router
+    participant AS as Assembler
+    participant PR as Provider
+    participant BR as Permission broker
+    participant TL as Tool backend
+    participant DB as PostgreSQL
+
+    U->>UI: prompt
+    UI->>GW: prompt.submit
+    GW->>DB: claim session lease (fencing token)
+    GW->>TC: start owned turn
+    TC->>RT: select route from connected inventory
+    RT-->>TC: planner, supervisor, workers, cost, fallbacks
+    TC->>AS: assemble working set
+    AS->>DB: read chunks, memories, documents, artifacts
+    AS-->>TC: bounded prompt and omission report
+    TC->>PR: stream completion
+    PR-->>TC: deltas and tool request
+    TC-->>GW: message.delta and tool.start
+    GW-->>UI: JSON-RPC notifications
+    TC->>BR: decide canonical action
+    alt allowed
+        BR-->>TC: allow and stamped execution context
+        TC->>TL: execute
+        TL-->>TC: bounded result
+        TC->>DB: artifact and context chunk
+    else review
+        BR->>DB: durable approval (pending)
+        TC-->>GW: needs_approval
+        GW-->>UI: approval card
+        U->>UI: approve
+        UI->>GW: approvals.resolve
+        GW->>DB: approved by the human surface
+        GW->>BR: revalidate digest and continue paused turn
+        BR-->>TC: allow
+    else denied
+        BR-->>TC: structured denial
+    end
+    TC->>PR: continue with tool result
+    PR-->>TC: final answer
+    TC->>DB: answer, usage, state
+    TC->>DB: release lease
+    TC->>DB: post-turn compaction and consolidation
+    TC-->>GW: message.complete
+    GW-->>UI: complete
+```
+
+The turn coordinator holds the lease for the sequence. A denial is recorded as a structured tool result. A review decision pauses the turn while logical ownership is renewed; execution revalidates the digest and consumes the capability once before the effect runs. On HTTP, recording the verdict does not execute anything: the client must post the reviewed arguments to `/resume`, which revalidates the proposal first.
+
 | Layer | What it owns | Where it lives |
 |---|---|---|
 | **Surfaces** | Transport, interaction, and approval presentation | [`ui/src`](ui/src), [`cli`](machina/cli), [`api`](machina/api), [`mcp_server`](machina/mcp_server), [`interop.py`](machina/interop.py) |
@@ -297,7 +358,9 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Interfaces | 43 built-in tools; 39 CLI commands; 138 gateway methods; 33 REST routes |
+| Tools and commands | 43 built-in tools; 39 top-level CLI commands (80 paths); 52 slash commands |
+| Protocol and API | 151 RPC methods (13 core + 138 feature); 33 REST routes; 24 protocol events |
+| Configuration | 130 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 28 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
 | CLI cold start | `machina version` measured at ~0.5 s on this checkout with a warm filesystem cache; the first run after install is slower |
@@ -751,6 +814,26 @@ Command classification follows the same principle. Literal commands joined by `;
 5. **Execution.** The backend receives a broker-stamped immutable execution context, revalidates the digest, and consumes the approval exactly once.
 6. **Audit.** Approval and execution are separate recorded steps.
 
+The durable state machine makes the pause inspectable and the replay impossible:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: durable proposal with canonical digest
+    Pending --> Approved: human allows once or for the session
+    Pending --> Denied: human denies
+    Pending --> Expired: approval_timeout
+    Pending --> Cancelled: turn or job cancelled
+    Approved --> Claimed: digest revalidated, consumed once
+    Claimed --> Completed: effect finished
+    Claimed --> Failed: execution failed
+    Claimed --> Cancelled: interrupted after claim
+    Denied --> [*]
+    Expired --> [*]
+    Completed --> [*]
+    Failed --> [*]
+    Cancelled --> [*]
+```
+
 An agent principal can never approve its own request. Remote RPC cannot gain host control: `approvals.resolve` requires a human principal and a session binding. A denial is a structured result, not a prompt loop that asks again forever.
 
 ### Pausing without holding the world open
@@ -812,6 +895,27 @@ claim session lease
   post-turn: compaction, memory consolidation, growth, optional learning review
 ```
 
+The same lifecycle as a state machine. These are operational states, not a database enum: the durable facts are the lease, the approval row, and the persisted turn result.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Claimed: durable lease and fencing token
+    Claimed --> Building: agent definition within session authority
+    Building --> Streaming: route chosen, prompt assembled and fitted
+    Streaming --> Deciding: tool request
+    Deciding --> Executing: allow
+    Deciding --> AwaitingApproval: review (lease renewed)
+    Deciding --> Streaming: denial recorded
+    AwaitingApproval --> Executing: approved and digest revalidated
+    AwaitingApproval --> Streaming: denied, expired, or cancelled
+    Executing --> Streaming: bounded result and artifact handle
+    Streaming --> Committed: final answer
+    Streaming --> Cleanup: cancelled or ownership lost
+    Committed --> Maintenance: release lease first
+    Maintenance --> [*]
+    Cleanup --> [*]
+```
+
 ### The mental model
 
 A turn is a **transaction over a conversation**, and the model is a stateless function called inside it. The transaction has an owner, a budget, a commit point, and a cleanup path. Tool calls are effects inside the transaction: they must be decided, executed, and recorded without pretending they are just another message.
@@ -820,7 +924,7 @@ This framing explains most of the loop's design. Ownership prevents two transact
 
 ### Turn ownership and cancellation
 
-Two writers on one session produce corrupted history. Machina uses a durable turn claim (a lease) plus fencing tokens (monotonic ownership markers). The gateway, REST API, CLI, scheduler, and delegation all go through the same coordinator. If a worker loses ownership, its effects are cancelled and the terminal success event is not emitted. A crash leaves an expired claim that another worker can reclaim.
+Two writers on one session produce corrupted history. Machina uses a durable turn claim (a lease) plus fencing tokens (opaque owner tokens, unique per claim). The gateway, REST API, CLI, scheduler, and delegation all go through the same coordinator. If a worker loses ownership, its effects are cancelled and the terminal success event is not emitted. A crash leaves an expired claim that another worker can reclaim.
 
 Cancellation is treated as a first-class outcome, not a failure. Expected `CancelledError` from an already-cancelled task is not recorded as an error; cleanup still runs; the lease is released in an independent `finally`.
 
@@ -1010,6 +1114,20 @@ There are two directions, and they are deliberately separate:
 | Cron prompt | Run on a five-field UTC schedule |
 | Heartbeat | Nudge an agent to continue its goal |
 | Script job | Run an operator-approved script on a schedule |
+
+```mermaid
+stateDiagram-v2
+    state "paused_approval" as Paused
+    [*] --> Idle
+    Idle --> Running: due claim with fenced token
+    Running --> Idle: success, next run scheduled
+    Running --> Error: failure recorded
+    Running --> Paused: tool requires human approval
+    Paused --> Idle: explicit jobs.resume
+    Error --> Running: next due run
+```
+
+The `enabled` flag is separate from status: setting it false removes the job from due claims without rewriting `idle`, `running`, `error`, or `paused_approval`. Re-enabling makes it eligible for the next scheduled claim.
 
 Jobs are stored in PostgreSQL and scheduled by the running backend. They use the normal agent and permission paths. Script jobs require an operator-owned `.script-policy.json` outside the agent workspace, listing allowed entry files and dependencies; hashes are checked again before execution. Adding a path to a prompt is not authorization.
 
@@ -1369,7 +1487,7 @@ Run `/help` to print the full command reference: every registered command with i
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
-The CLI mirrors these capabilities with 39 commands. The main groups are:
+The CLI mirrors these capabilities with 39 top-level commands and 80 invocable paths once grouped subcommands are counted. The main groups are:
 
 | Group | Commands |
 |---|---|
@@ -1378,6 +1496,149 @@ The CLI mirrors these capabilities with 39 commands. The main groups are:
 | **Memory and identity** | `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `memory-approve-all`, `memory-reject-all`, `memory-stats`, `user-profile`, `user-profile-update`, `user-profile-list`, `growth` |
 | **Skills and learning** | `skills`, `learn`, `curator`, `hub` |
 | **Operations** | `setup`, `init`, `doctor`, `serve`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
+
+<details>
+<summary>All 39 top-level CLI commands</summary>
+
+| Command | Purpose |
+|---|---|
+| `chat` | Send one message to the agent (or open the UI with -i). |
+| `compress` | Compress context for a session. Reduces token usage while preserving key information. |
+| `config` | Show current configuration. |
+| `config-set` | Set a configuration value. |
+| `context` | View context chunks for a session. |
+| `curator` | Run skill curator — background maintenance for skills. |
+| `delete` | Permanently delete a session and all its context chunks. |
+| `doctor` | Check Machina dependencies and configuration. |
+| `export` | Export a conversation as markdown. |
+| `fork` | Fork a session — create a new session with copied state and context. |
+| `hub` | Skill hub — community-curated skill sharing. |
+| `init` | Initialize Machina — create the database schema. |
+| `learn` | Learn a new skill from a source (file, URL, or existing skill). |
+| `memory-approve` | Approve a pending memory. |
+| `memory-approve-all` | Approve all pending memories. |
+| `memory-forget` | Delete a memory by ID. |
+| `memory-list` | List all memories. |
+| `memory-pending` | List pending memories awaiting approval. |
+| `memory-reject` | Reject a pending memory. |
+| `memory-reject-all` | Reject all pending memories. |
+| `memory-search` | Search memories by relevance. |
+| `memory-stats` | Show memory approval statistics. |
+| `mode` | Show or set the execution mode. |
+| `opencode-proxy` | Run the text-only OpenAI-compatible OpenCode session proxy. |
+| `repl` | Open the interactive UI (same as running `machina` with no arguments). |
+| `route` | Explain the connected-model route for a prompt without calling a model. |
+| `routes` | List connected models and their role-fit scores. |
+| `serve` | Start the Machina HTTP API server. |
+| `sessions` | List recent sessions. |
+| `sessions-search` | Full-text search over session titles. |
+| `setup` | First-launch setup — create the .env file and configure API keys. |
+| `status` | Show Machina status: database, sessions, tools and API key. |
+| `stop` | Stop Machina clients in order, then stop the managed database. |
+| `uninstall` | Uninstall Machina — answers yes to everything and nothing is left. |
+| `usage` | Show durable LLM usage and remaining budgets. |
+| `user-profile` | Show or create a user profile. |
+| `user-profile-list` | List all user profiles. |
+| `user-profile-update` | Update a user profile preference. |
+| `version` | Show Machina version. |
+
+</details>
+
+<details>
+<summary>All 80 invocable CLI paths, including grouped subcommands</summary>
+
+| Command path | Purpose |
+|---|---|
+| `auth chatgpt login` | Sign in with your ChatGPT account (browser PKCE flow). |
+| `auth chatgpt logout` | Remove Machina's ChatGPT token store (never ~/.codex/auth.json). |
+| `auth chatgpt status` | Show ChatGPT sign-in status; exit 0 when signed in, 1 otherwise. |
+| `auth copilot login` | Sign in with GitHub's device flow (no browser listener needed). |
+| `auth copilot logout` | Remove Machina's Copilot token store (never gh's credential store). |
+| `auth copilot status` | Show Copilot sign-in status; exit 0 when signed in, 1 otherwise. |
+| `auth grok login` | Sign in with a SuperGrok / X Premium+ subscription (device flow). |
+| `auth grok logout` | — |
+| `auth grok status` | — |
+| `auth grok-login` | Sign in with a SuperGrok / X Premium+ subscription (device flow). |
+| `auth grok-logout` | — |
+| `auth grok-status` | — |
+| `auth login` | Sign in with your ChatGPT account (browser PKCE flow). |
+| `auth logout` | Remove Machina's ChatGPT token store (never ~/.codex/auth.json). |
+| `auth status` | Show ChatGPT sign-in status; exit 0 when signed in, 1 otherwise. |
+| `chat` | Send one message to the agent (or open the UI with -i). |
+| `compress` | Compress context for a session. Reduces token usage while preserving key information. |
+| `config` | Show current configuration. |
+| `config-set` | Set a configuration value. |
+| `context` | View context chunks for a session. |
+| `curator` | Run skill curator — background maintenance for skills. |
+| `delete` | Permanently delete a session and all its context chunks. |
+| `doctor` | Check Machina dependencies and configuration. |
+| `export` | Export a conversation as markdown. |
+| `fork` | Fork a session — create a new session with copied state and context. |
+| `growth export-policy` | Export live weights in the offline trainer's JSON format. |
+| `growth export-soul` | Export the session's effective SoulSpec persona; lessons require opt-in. |
+| `growth feedback` | Rate a completed memory decision (-1 to +1), once per turn. |
+| `growth forget` | Remove one learned note using its kind:key name. |
+| `growth import-policy` | Install validated weights produced by the existing offline RL trainer. |
+| `growth import-soul` | Import identity into this agent; keep ownership and permissions unchanged. |
+| `growth rollback` | Restore an owned persona/policy revision from the retained history. |
+| `growth show` | Show learned notes, policy weights and recent decision IDs. |
+| `growth teach` | Teach a preference, style request or verified lesson. |
+| `harnesses disable` | Remove Machina's MCP server registration (manual where unsupported). |
+| `harnesses enable` | Register Machina's MCP server for a harness (idempotent). |
+| `harnesses run` | Delegate a task to an installed harness headlessly and print the result. |
+| `harnesses setup` | Detect harnesses and register Machina's MCP server (best-effort). |
+| `harnesses status` | Show which harnesses are installed, running, registered, and enabled. |
+| `hub` | Skill hub — community-curated skill sharing. |
+| `init` | Initialize Machina — create the database schema. |
+| `interop disable` | Remove Machina's MCP server registration (manual where unsupported). |
+| `interop enable` | Register Machina's MCP server for a harness (idempotent). |
+| `interop run` | Delegate a task to an installed harness headlessly and print the result. |
+| `interop setup` | Detect harnesses and register Machina's MCP server (best-effort). |
+| `interop status` | Show which harnesses are installed, running, registered, and enabled. |
+| `learn` | Learn a new skill from a source (file, URL, or existing skill). |
+| `memory-approve` | Approve a pending memory. |
+| `memory-approve-all` | Approve all pending memories. |
+| `memory-forget` | Delete a memory by ID. |
+| `memory-list` | List all memories. |
+| `memory-pending` | List pending memories awaiting approval. |
+| `memory-reject` | Reject a pending memory. |
+| `memory-reject-all` | Reject all pending memories. |
+| `memory-search` | Search memories by relevance. |
+| `memory-stats` | Show memory approval statistics. |
+| `mode` | Show or set the execution mode. |
+| `opencode-proxy` | Run the text-only OpenAI-compatible OpenCode session proxy. |
+| `optimization prefix-plan` | Estimate paid prefix-warming economics without making a provider call. |
+| `optimization status` | Show configured modes and, optionally, shadow decision counts. |
+| `providers add` | Register a provider, store its key, and pull its model catalog. |
+| `providers list` | List built-in and user-added providers (keys are never shown). |
+| `providers models` | Print a provider's model catalog (chatgpt: live, with efforts). |
+| `providers remove` | Remove a provider and every trace: store, .env key line, cached models. |
+| `repl` | Open the interactive UI (same as running `machina` with no arguments). |
+| `route` | Explain the connected-model route for a prompt without calling a model. |
+| `routes` | List connected models and their role-fit scores. |
+| `serve` | Start the Machina HTTP API server. |
+| `sessions` | List recent sessions. |
+| `sessions-search` | Full-text search over session titles. |
+| `setup` | First-launch setup — create the .env file and configure API keys. |
+| `skills enrich` | Generate missing schema-v2 metadata for installed/local skills. |
+| `status` | Show Machina status: database, sessions, tools and API key. |
+| `stop` | Stop Machina clients in order, then stop the managed database. |
+| `uninstall` | Uninstall Machina — answers yes to everything and nothing is left. |
+| `usage` | Show durable LLM usage and remaining budgets. |
+| `user-profile` | Show or create a user profile. |
+| `user-profile-list` | List all user profiles. |
+| `user-profile-update` | Update a user profile preference. |
+| `version` | Show Machina version. |
+
+</details>
+
+<details>
+<summary>All 52 terminal UI slash commands</summary>
+
+`/activity`, `/agents`, `/approvals`, `/attach`, `/auth`, `/clear`, `/compress`, `/config`, `/context`, `/delegate`, `/delete`, `/editor`, `/effort`, `/exit`, `/explorer`, `/export`, `/fork`, `/goal`, `/growth`, `/harnesses`, `/help`, `/init`, `/interop`, `/jobs`, `/keys`, `/lsp`, `/mcp`, `/memory`, `/mode`, `/models`, `/music`, `/new`, `/output`, `/persona`, `/problems`, `/profile`, `/profiles`, `/provider`, `/quickopen`, `/recall`, `/rename`, `/resume`, `/review`, `/routing`, `/search`, `/sessions`, `/settings`, `/skills`, `/status`, `/theme`, `/usage`, `/workspace`
+
+
+</details>
 
 Run any command with `--help`. `machina route` explains one prompt; `machina routes` lists the connected inventory and role fit.
 
@@ -1521,7 +1782,7 @@ curl -N "http://127.0.0.1:8000/api/v1/sessions/<session-id>/prompt" \
 
 The prompt endpoint streams SSE progress and result events. If it pauses for approval, resolve the pending request through `POST /api/v1/approvals/{id}/resolve`, then use the corresponding `/resume` endpoint with the session, turn, and reviewed arguments.
 
-Gateway feature methods are also available through `POST /rpc`; `prompt.submit`, `prompt.cancel`, and `shutdown` are not dispatched through that bridge. Turns use the session prompt endpoints. The gateway uses JSON-RPC 2.0 over stdio for the terminal UI and authenticates with `MACHINA_GATEWAY_TOKEN`.
+Gateway methods are also available through `POST /rpc`; `prompt.submit`, `prompt.cancel`, and `shutdown` are not dispatched through that bridge. Turns use the session prompt endpoints. The gateway uses JSON-RPC 2.0 over stdio for the terminal UI and authenticates with `MACHINA_GATEWAY_TOKEN`.
 
 See [the gateway protocol](communications/ui-gateway-protocol.md), [event definitions](machina/protocol/events.json), and [HTTP routes](machina/api/routes/).
 
@@ -1646,6 +1907,968 @@ scripts/            Operator script mount point and setup guidance
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
 | The launcher skips the update check | A dirty checkout, local-ahead branch, non-TTY launch, or `CI` skips the pull; within 15 minutes of Machina's own check, the cached result is printed instead |
 | The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
+
+## Appendices
+
+These appendices are reference material, generated from the code at this commit. Counts are snapshots: regenerate them from the source rather than trusting a stale copy.
+
+### Appendix A: RPC method catalog
+
+The gateway exposes **151** JSON-RPC methods: **13 core** methods handled directly by `gateway/server.py` and **138 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
+
+| Core method | Purpose |
+|---|---|
+| `initialize` | handshake, protocol version, capabilities |
+| `session.create` | create a session with provider/model defaults |
+| `session.list` | list recent sessions |
+| `session.family` | delegation family for a session |
+| `session.resume` | reopen a session |
+| `usage.get` | usage and budget summary |
+| `prompt.submit` | start an owned turn |
+| `prompt.cancel` | cancel the running turn |
+| `prompt.steer` | queue steering for the running turn |
+| `prompt.steering` | read pending and delivered steering |
+| `shell.jobs` | list background shell jobs |
+| `config.set` | persist a non-secret setting |
+| `shutdown` | stop the gateway |
+
+| Namespace | Feature methods |
+|---|---|
+| **agents** (5) | `agents.delete`, `agents.history`, `agents.list`, `agents.run`, `agents.save` |
+| **approvals** (2) | `approvals.list`, `approvals.resolve` |
+| **auth** (16) | `auth.chatgpt.importCodex`, `auth.chatgpt.login`, `auth.chatgpt.logout`, `auth.chatgpt.status`, `auth.copilot.importGh`, `auth.copilot.login`, `auth.copilot.logout`, `auth.copilot.status`, `auth.grok.login`, `auth.grok.logout`, `auth.grok.status`, `auth.kiro.fallback`, `auth.kiro.start`, `auth.kiro.status`, `auth.kiro.stop`, `auth.kiro.usage` |
+| **config** (1) | `config.get` |
+| **context** (2) | `context.compress`, `context.get` |
+| **growth** (6) | `growth.feedback`, `growth.forget`, `growth.get`, `growth.installPolicy`, `growth.rollback`, `growth.teach` |
+| **interop** (6) | `interop.communications`, `interop.disable`, `interop.enable`, `interop.list`, `interop.run`, `interop.status` |
+| **jobs** (5) | `jobs.create`, `jobs.delete`, `jobs.list`, `jobs.resume`, `jobs.setEnabled` |
+| **learning** (4) | `learning.approve`, `learning.list`, `learning.reject`, `learning.revert` |
+| **mcp** (17) | `mcp.catalog`, `mcp.config`, `mcp.configure`, `mcp.connect`, `mcp.disconnect`, `mcp.list`, `mcp.oauth.cancel`, `mcp.oauth.forget`, `mcp.oauth.open`, `mcp.oauth.preview`, `mcp.oauth.start`, `mcp.oauth.status`, `mcp.oauth.url`, `mcp.preview`, `mcp.remove`, `mcp.status`, `mcp.tools` |
+| **memory** (11) | `memory.add`, `memory.approve`, `memory.approveAll`, `memory.forget`, `memory.list`, `memory.pending`, `memory.reject`, `memory.rejectAll`, `memory.search`, `memory.share`, `memory.stats` |
+| **meta** (2) | `meta.harnesses`, `meta.route` |
+| **mode** (3) | `mode.get`, `mode.revoke`, `mode.set` |
+| **model** (2) | `model.inventory`, `model.route` |
+| **models** (2) | `models.list`, `models.setEffort` |
+| **nowplaying** (2) | `nowplaying.command`, `nowplaying.get` |
+| **operations** (3) | `operations.cancel`, `operations.get`, `operations.start` |
+| **profile** (3) | `profile.get`, `profile.list`, `profile.set` |
+| **providers** (3) | `providers.add`, `providers.list`, `providers.remove` |
+| **runtime** (2) | `runtime.capabilities`, `runtime.selectWorkspace` |
+| **secrets** (3) | `secrets.clear`, `secrets.list`, `secrets.set` |
+| **session** (10) | `session.delete`, `session.export`, `session.fork`, `session.history`, `session.recall`, `session.recall.window`, `session.rename`, `session.search`, `session.setGoal`, `session.setModel` |
+| **skills** (12) | `skills.curator`, `skills.delete`, `skills.learn`, `skills.list`, `skills.marketplace.discover`, `skills.marketplace.install`, `skills.marketplace.preview`, `skills.marketplace.search`, `skills.preview_route`, `skills.search`, `skills.section`, `skills.show` |
+| **status** (1) | `status` |
+| **workspace** (15) | `workspace.changes`, `workspace.close`, `workspace.diff`, `workspace.documentChange`, `workspace.documentClose`, `workspace.documentOpen`, `workspace.intelligence`, `workspace.list`, `workspace.lspControl`, `workspace.lspStatus`, `workspace.open`, `workspace.quickOpen`, `workspace.quickOpenCancel`, `workspace.read`, `workspace.save` |
+
+
+### Appendix B: Tool catalog
+
+The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
+
+| Tool | Effects | What it does |
+|---|---|---|
+| `artifact_describe` | `context.read` | Show metadata for a retained artifact (kind, size, status, completeness, source/revision binding, retention) without reading its content. |
+| `artifact_read` | `context.read` | Read a retained tool-result artifact by its handle (character paging). |
+| `artifact_search` | `context.read` | Search retained artifacts (one handle, or the session's recent artifacts) for a case-insensitive substring. |
+| `browser_verify` | — | Run a real headless-browser check against a local web app. |
+| `code_intelligence` | `fs.read` | Read-only code intelligence for the open workspace editor: diagnostics, definition, references, symbols or hover for one workspace-relative file, answered by the same la… |
+| `delegate` | `delegate` | Hand a self-contained task to another agent and get its result. |
+| `delegate_status` | — | Check whether one of your delegated workers is queued, running, finished, or interrupted. |
+| `harness_delegate` | `exec`, `delegate` | Run one bounded task in an installed external agent harness. |
+| `harness_features` | — | Inspect the live capability inventory of installed external harnesses: available models, agents, MCP servers, auth providers, and plugins. |
+| `harness_status` | — | Read current harness configuration, persona, and this agent's saved learning/RSI state. |
+| `index_document` | `fs.read` | Index a document into the RAG pipeline for semantic search. |
+| `learn_directory` | `fs.read` | Learn a workspace directory: a bounded, deterministic inventory digest (files, modules, LOC, packages, largest modules, import hubs, entry points, tests). |
+| `learn_personality` | `memory` | Persist an evidenced user preference, requested conversational style, or verified reusable lesson across sessions. |
+| `list_agents` | — | Find delegation specialists by task keyword. |
+| `list_files` | `fs.read` | List files in a directory. |
+| `mcp_call` | `net` | Call a connected MCP tool by its namespaced name with complete JSON arguments. |
+| `mcp_connect` | `net`, `exec` | Add and connect an MCP server, then report the tools it exposes. |
+| `mcp_describe` | — | Read the validated input schema for one namespaced MCP tool. |
+| `mcp_disconnect` | `fs.write` | Remove an MCP server by name: disconnects it and deletes its saved configuration (set remove=false to only close the connection). |
+| `mcp_list` | — | List configured MCP servers with enabled/trust/state and cached tool counts, or a page of tools on one connected server. |
+| `model_inventory` | — | List connected models with their role-fit scores, context, tool support, and whether the route is native/proxy/MCP. |
+| `read_file` | `fs.read` | Read the contents of a file. |
+| `recall` | `memory` | Retrieve relevant memories. |
+| `remember` | `memory` | Store a memory for future reference. |
+| `repo_activate` | `fs.write` | Install staged repo skills for an exact reviewed digest from repo_stage. |
+| `repo_stage` | `net`, `fs.write` | Stage a GitHub repo link for skill installation. |
+| `route_explain` | — | Inspect the connected-model inventory and the role-specific route Machina would choose for a prompt. |
+| `search_documents` | `rag.read` | Search indexed documents using hybrid search (PostgreSQL full-text ranking + dense vector + RRF fusion). |
+| `search_files` | `fs.read` | Search file contents recursively with regex. |
+| `session_recall` | `context.read` | Find evidence in your own past conversation transcripts. |
+| `session_recall_window` | `context.read` | Read messages around a session_recall hit from one of your past conversations. |
+| `share_memory` | `memory` | Share one signed memory you own with another agent. |
+| `skill_list` | `skill.read` | Search and rank skills for a task by query (4 per page). |
+| `skill_read` | `skill.read` | Read skill instructions. |
+| `skill_resource` | `skill.read` | List or read ECC supporting files. |
+| `terminal` | `exec` | Execute a shell command for git, builds, tests, etc. |
+| `terminal_job` | — | Inspect, wait for, or stop a background command in this session. |
+| `web_crawl` | `net`, `rag.write` | Crawl a site from a starting URL, following links up to max_pages/max_depth, and save each page's text to the active session's RAG context for later turns. |
+| `web_extract` | `net` | Extract text from a public URL using static HTTP. |
+| `web_research` | `net`, `rag.write` | Search the public web, fetch up to three pages, and save their text to the active session's RAG context for later turns. |
+| `web_search` | `net` | Search the web for information |
+| `web_verify` | — | Start a temporary loopback static server for a built web artifact and run a real headless-browser check. |
+| `write_file` | `fs.write` | Write content to a file. |
+
+
+### Appendix C: Database catalog
+
+PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sql` plus the additive schema files (`growth_schema.sql`, `delegation_schema.sql`, `image_context_schema.sql`, `soulspec_schema.sql`); no gateway process runs migrations on startup. The catalog below covers all **28** tables.
+
+| Group | Table | What it holds |
+|---|---|---|
+| **Session and context** | `sessions` | One conversation: title, agent, goal, pinned provider/model, serialized state, status, activity time |
+| | `context_chunks` | Typed live events: user/assistant messages, tool calls and results, documents, summaries, with token counts and embeddings |
+| | `context_archive` | Originals displaced by compaction or eviction, with the reason and resurrection history |
+| | `tool_artifacts` | Verbatim oversized tool results with kind, completeness, revision, retention, and access counters |
+| | `session_image_context` | Attached image context per session and agent |
+| **Agents, work, accounting** | `agents` | Saved agent definitions: prompt, tools, model/provider, source |
+| | `agent_messages` | Parent/child delegation records with task, response, status, and tokens used |
+| | `jobs` | Interval, cron, and heartbeat jobs: schedule, enabled flag, claim token, approval pause, last error |
+| | `llm_usage` | One row per model call or reservation: token categories, basis, status, attribution |
+| | `audit_events` | Append-only permission, approval, and privileged-operation events |
+| | `learning_reviews` | Proposed learned skills with trigger, status, reviewer, and auto-apply flag |
+| | `semantic_cache_entries` | Optional semantic response cache: scope, request hash, response, expiry, hit count |
+| | `optimization_shadow_events` | Shadow decisions from semantic cache, compression, and warming experiments |
+| **Memory and identity** | `memories` | Durable claims with category, importance, strength, embedding, access history, quarantine flag |
+| | `pending_memories` | Approval queue holding a candidate memory, redactions, and review status before it becomes durable |
+| | `memory_provenance` | Source agent, signature, and parent memory for a stored claim |
+| | `shared_memory_deliveries` | Signed memory deliveries between agents and their acceptance status |
+| | `persona_memories` | Persona interpretation and emotional weighting of a memory fact |
+| | `user_profiles` | Durable user preferences, topics, and interaction counts |
+| | `agent_beliefs` | Current versioned belief for an agent |
+| | `agent_belief_history` | Belief revisions with drift score and containment outcome |
+| **Growth** | `agent_growth` | Learned notes, policy weights, interaction and feedback counters per agent |
+| | `growth_episodes` | Recorded actions with features, probability, completion, and reward |
+| | `rsi_profiles` | Stable and trial revision pointers plus metrics per agent |
+| | `rsi_revisions` | Strategy/policy revisions with reason, status, and episode counts |
+| | `rsi_episodes` | Episodes that evaluate one revision: domain, strategy, tokens, reward |
+| **Authority** | `permission_grants` | Reusable session authority: capability, scope, digest, expiry, revocation |
+| | `permission_approvals` | Exact proposal, digest, human principal, status, and one-time consumption flag |
+
+#### Relationships: conversation and work
+
+`context_chunks`, `context_archive`, `tool_artifacts`, `jobs`, `llm_usage`, `learning_reviews`, `agent_messages`, and `session_image_context` all hang off a session. Delegation messages also reference the child session. Usage rows attribute a call to a session and agent; artifacts are addressed by the session ancestry.
+
+```mermaid
+erDiagram
+    sessions ||--o{ context_chunks : contains
+    sessions ||--o{ context_archive : archives
+    sessions ||--o{ tool_artifacts : retains
+    sessions ||--o| session_image_context : attaches
+    sessions ||--o{ agent_messages : parents
+    sessions ||--o{ jobs : schedules
+    sessions ||--o{ llm_usage : accounts
+    sessions ||--o{ learning_reviews : proposes
+    agents ||--o{ agent_messages : sends
+
+    sessions {
+        uuid id PK
+        text title
+        text agent_id
+        text status
+        text goal
+        text model
+        text provider
+        int context_budget
+        timestamptz created_at
+        timestamptz last_activity
+    }
+    context_chunks {
+        uuid id PK
+        uuid session_id FK
+        text agent_id
+        text chunk_type
+        int token_count
+        timestamptz created_at
+    }
+    context_archive {
+        uuid id PK
+        uuid session_id FK
+        uuid chunk_id
+        text archive_reason
+        int resurrection_count
+        timestamptz archived_at
+    }
+    tool_artifacts {
+        uuid id PK
+        uuid session_id FK
+        text kind
+        text status
+        boolean complete
+        int content_revision
+        timestamptz expires_at
+    }
+    session_image_context {
+        uuid session_id PK
+        text agent_id PK
+        bytea images_msgpack
+        timestamptz updated_at
+    }
+    agents {
+        text name PK
+        text description
+        text model
+        text provider
+        text source
+    }
+    agent_messages {
+        uuid id PK
+        uuid session_id FK
+        uuid child_session_id FK
+        text from_agent
+        text to_agent
+        text status
+        int tokens_used
+    }
+    jobs {
+        uuid id PK
+        uuid session_id FK
+        text kind
+        boolean enabled
+        text status
+        text claim_token
+        text paused_for_approval
+        timestamptz next_run_at
+    }
+    llm_usage {
+        uuid id PK
+        uuid session_id FK
+        text agent_id
+        text provider
+        text model
+        text status
+        int prompt_tokens
+        int completion_tokens
+    }
+    audit_events {
+        bigint id PK
+        text event
+        jsonb payload
+        timestamptz created_at
+    }
+    learning_reviews {
+        uuid id PK
+        uuid session_id FK
+        text agent_id
+        text status
+        boolean auto_applied
+        timestamptz created_at
+    }
+```
+
+#### Relationships: knowledge and authority
+
+Memories carry provenance, optional review, persona interpretations, and signed sharing. Growth revisions build on recorded episodes. Permission grants and approvals both reference a session; `sessions` is shown in the previous diagram.
+
+```mermaid
+erDiagram
+    memories ||--o| memory_provenance : sourced_by
+    memories ||--o{ persona_memories : interpreted_as
+    memories ||--o{ shared_memory_deliveries : source
+    memories ||--o{ pending_memories : reviewed_as
+    agent_growth ||--o{ growth_episodes : records
+    agent_growth ||--o{ rsi_profiles : owns
+    agent_growth ||--o{ rsi_revisions : revises
+    growth_episodes ||--o{ rsi_episodes : learns_from
+
+    memories {
+        uuid id PK
+        uuid session_id
+        text agent_id
+        text content
+        text category
+        float importance
+        float base_strength
+        boolean quarantined
+        timestamptz created_at
+    }
+    pending_memories {
+        uuid id PK
+        uuid memory_id FK
+        uuid session_id
+        text content
+        text status
+        text review_note
+        timestamptz reviewed_at
+    }
+    memory_provenance {
+        uuid memory_id PK
+        text source_agent
+        text signature
+        uuid parent_memory_id
+        timestamptz created_at
+    }
+    shared_memory_deliveries {
+        uuid source_memory_id PK
+        text recipient_agent PK
+        uuid target_memory_id
+        text status
+        text reason
+    }
+    persona_memories {
+        uuid id PK
+        uuid fact_id FK
+        text persona_id
+        text interpretation
+        float confidence
+    }
+    user_profiles {
+        uuid id PK
+        text user_id
+        text display_name
+        jsonb preferences
+        int interaction_count
+    }
+    agent_beliefs {
+        text agent_id PK
+        text belief
+        int version
+        timestamptz updated_at
+    }
+    agent_belief_history {
+        uuid id PK
+        text agent_id
+        int from_version
+        int to_version
+        float drift_score
+        boolean contained
+    }
+    agent_growth {
+        text agent_id PK
+        jsonb notes
+        jsonb policy
+        int feedback_count
+        timestamptz updated_at
+    }
+    growth_episodes {
+        uuid id PK
+        text agent_id
+        uuid session_id
+        text action
+        float reward
+        boolean completed
+    }
+    rsi_profiles {
+        text agent_id PK
+        int revision
+        int stable_revision
+        int trial_revision
+        jsonb metrics
+    }
+    rsi_revisions {
+        text agent_id PK
+        int revision PK
+        jsonb notes
+        jsonb policy
+        text status
+        timestamptz created_at
+    }
+    rsi_episodes {
+        uuid id PK
+        int revision
+        text domain
+        text strategy
+        int tokens
+        float automatic_reward
+    }
+    permission_grants {
+        uuid id PK
+        uuid session_id FK
+        text agent_id
+        text mode
+        text capability
+        text digest
+        boolean revoked
+        timestamptz expires_at
+    }
+    permission_approvals {
+        uuid id PK
+        text request_id
+        uuid session_id
+        text turn_id
+        text agent_id
+        text principal
+        text digest
+        text status
+        boolean consumed
+    }
+    semantic_cache_entries {
+        uuid id PK
+        uuid session_id
+        text provider
+        text model
+        text request_hash
+        text response_content
+        timestamptz expires_at
+        int hit_count
+    }
+    optimization_shadow_events {
+        uuid id PK
+        text subsystem
+        text mode
+        text decision
+        uuid session_id
+        int tokens_before
+        int tokens_after
+        timestamptz created_at
+    }
+```
+
+### Appendix D: Configuration reference
+
+**130** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys.
+
+<details>
+<summary>All 130 keys and defaults</summary>
+
+#### Model and routing
+
+| Key | Default |
+|---|---|
+| `provider` | `openrouter` |
+| `model` | `openrouter/free` |
+| `temperature` | `0.7` |
+| `max_tokens` | `16384` |
+| `context_budget` | `8000` |
+| `reasoning_effort` | `""` |
+| `output_policy` | `legacy` |
+| `rate_limit_calls_per_minute` | `10` |
+| `turn_timeout` | `0` |
+| `pricing_table_json` | `""` |
+| `orchestration_mode` | `multi_model` |
+| `model_selection` | `auto` |
+| `worker_count` | `0` |
+| `max_delegate_concurrency` | `8` |
+| `max_worker_routes` | `4` |
+| `worker_transport` | `native` |
+| `cost_tier` | `balanced` |
+| `auto_parallel_delegation` | `true` |
+| `single_model_auto_parallel` | `false` |
+| `delegate_inline_wait_seconds` | `120` |
+| `temp` | `""` |
+
+#### Context, retrieval, and artifacts
+
+| Key | Default |
+|---|---|
+| `compression_enabled` | `true` |
+| `compression_llm_summarize` | `true` |
+| `compression_preserve_recent` | `3` |
+| `compression_target_ratio` | `0.5` |
+| `compression_threshold` | `0.8` |
+| `auto_compaction_enabled` | `true` |
+| `reducers_enabled` | `true` |
+| `request_projection_enabled` | `true` |
+| `retrieval_selection_enabled` | `true` |
+| `retrieval_token_budget` | `6000` |
+| `rrf_dense_weight` | `0.25` |
+| `rrf_keyword_weight` | `1.0` |
+| `artifacts_enabled` | `true` |
+| `artifact_max_chars` | `2000000` |
+| `artifact_max_per_session` | `500` |
+| `artifact_retention_days` | `30` |
+| `eviction_max_tokens` | `0` |
+| `rag_enabled` | `true` |
+| `skills_disclosure_planner` | `true` |
+
+#### Memory, persona, and growth
+
+| Key | Default |
+|---|---|
+| `memory_enabled` | `true` |
+| `memory_approval_enabled` | `false` |
+| `memory_consolidation_enabled` | `true` |
+| `memory_digest_enabled` | `true` |
+| `memory_digest_candidates` | `16` |
+| `memory_digest_max_chars` | `1200` |
+| `memory_digest_max_facts` | `6` |
+| `persona_default_emotion` | `trust` |
+| `persona_description` | `""` |
+| `persona_memory_enabled` | `true` |
+| `personality_growth_enabled` | `true` |
+| `rsi_enabled` | `true` |
+| `learning_review_enabled` | `false` |
+| `learning_review_auto_apply` | `true` |
+| `learning_review_auto_apply_per_day` | `5` |
+| `learning_review_max_per_session` | `3` |
+
+#### Execution, workspace, and permissions
+
+| Key | Default |
+|---|---|
+| `execution_mode` | `ask` |
+| `workspace_root` | `""` |
+| `workspace_ui_state` | `""` |
+| `machina_home` | `""` |
+| `tmpdir` | `""` |
+| `terminal_sandbox` | `disabled` |
+| `terminal_image` | `machina-tool-sandbox:latest` |
+| `browser_verification` | `auto` |
+| `approval_timeout` | `300` |
+| `meta_harness_enabled` | `true` |
+| `meta_harness_hint` | `true` |
+
+#### Providers and credentials
+
+| Key | Default |
+|---|---|
+| `openrouter_api_key` | `""` |
+| `openai_api_key` | `""` |
+| `anthropic_api_key` | `""` |
+| `deepseek_api_key` | `""` |
+| `xai_api_key` | `""` |
+| `groq_api_key` | `""` |
+| `together_api_key` | `""` |
+| `mistral_api_key` | `""` |
+| `google_api_key` | `""` |
+| `opencode_api_key` | `""` |
+| `opencode_base_url` | `""` |
+| `kimi_api_key` | `""` |
+| `kiro_api_key` | `""` |
+| `kiro_base_url` | `""` |
+| `kiro_autostart` | `true` |
+| `kiro_fallback` | `""` |
+| `kiro_gateway_command` | `""` |
+| `kiro_gateway_dir` | `""` |
+| `custom_base_url` | `""` |
+| `custom_api_key` | `""` |
+| `cohere_api_key` | `""` |
+| `database_url` | `""` |
+| `searxng_url` | `""` |
+
+#### Embeddings and reranking
+
+| Key | Default |
+|---|---|
+| `embedding_backend` | `off` |
+| `embedding_base_url` | `""` |
+| `embedding_model` | `""` |
+| `reranker_backend` | `none` |
+| `reranker_http_model` | `""` |
+| `reranker_http_url` | `""` |
+| `reranker_local_model` | `""` |
+| `reranker_timeout` | `10.0` |
+
+#### Web research and Firecrawl
+
+| Key | Default |
+|---|---|
+| `firecrawl_autostart` | `false` |
+| `firecrawl_home` | `~/firecrawl` |
+| `firecrawl_stop_on_exit` | `true` |
+
+#### Optimization
+
+| Key | Default |
+|---|---|
+| `optimization_emergency_disabled` | `false` |
+| `optimization_semantic_cache_mode` | `off` |
+| `optimization_semantic_cache_similarity_threshold` | `0.975` |
+| `optimization_semantic_cache_ttl_seconds` | `86400` |
+| `optimization_semantic_cache_max_entries` | `10000` |
+| `optimization_semantic_cache_allow_cross_session_aux` | `false` |
+| `optimization_warmers_startup_enabled` | `true` |
+| `optimization_warmers_prompt_cache_mode` | `off` |
+| `optimization_warmers_min_prefix_tokens` | `4096` |
+| `optimization_compression_mode` | `off` |
+| `optimization_compression_backend` | `llmlingua2` |
+| `optimization_compression_min_trigger_tokens` | `8192` |
+| `optimization_compression_trigger_ratio` | `0.5` |
+| `optimization_compression_target_ratio` | `0.6` |
+| `optimization_compression_min_ratio` | `0.4` |
+| `optimization_compression_min_embedding_similarity` | `0.88` |
+| `optimization_compression_max_latency_ms` | `75` |
+| `optimization_shadow_retention_days` | `30` |
+
+#### Budgets and usage
+
+| Key | Default |
+|---|---|
+| `usage_session_token_limit` | `0` |
+| `usage_session_request_limit` | `0` |
+| `usage_agent_token_limit` | `0` |
+| `usage_agent_request_limit` | `0` |
+
+#### Interface and media
+
+| Key | Default |
+|---|---|
+| `agent_id` | `harness` |
+| `prompt_cache_enabled` | `false` |
+| `keybindings` | `""` |
+| `theme` | `codex` |
+| `transparent_background` | `false` |
+| `ui_preferences` | `""` |
+| `nowplaying_enabled` | `true` |
+
+</details>
+
+### Appendix E: Protocol events
+
+The protocol declares **24** events in `machina/protocol/events.json`; `machina/protocol` generates the TypeScript types consumed by the UI. Payload fields are exact keys from the contract; `?` marks optional fields.
+
+| Event | Payload |
+|---|---|
+| `message.start` | — |
+| `turn.started` | — |
+| `message.delta` | `text` |
+| `message.stopping` | `reason` |
+| `tool.start` | `id`, `name`, `args` |
+| `tool.complete` | `id`, `name`, `result`, `isError`, `truncated?`, `outcome?` |
+| `usage` | `tokens`, `contextTokens?`, `contextPercent?`, `creditsUsed?` |
+| `growth.status` | `stage`, `detail?` |
+| `agent.child` | `childSessionId`, `phase`, `value` |
+| `steering.update` | `items`, `delivered` |
+| `shell.job` | `job` |
+| `message.complete` | `text`, `tokens`, `iterations`, `toolCalls`, `cancelled`, `needsApproval?` |
+| `error` | `message` |
+| `needs_approval` | `requestId`, `operation`, `target`, `argv`, `cwd`, `backend`, `capabilities`, `tool?`, `shell?`, `timeout?`, `network?`, `contentDigest?`, `contentPreview?`, `contentLength?`, `fileDiff?`, `durable?`, `status?`, `originTurnId?` |
+| `approval.resolved` | `requestId`, `status`, `originTurnId?` |
+| `approval.resumed` | `requestId`, `originTurnId` |
+| `turn.ownership_lost` | `reason?` |
+| `turn.cleanup_pending` | `reason?` |
+| `auth.chatgpt.completed` | `account_id`, `expiry` |
+| `auth.chatgpt.failed` | `reason` |
+| `auth.grok.completed` | `account_id`, `expiry` |
+| `auth.grok.failed` | `reason` |
+| `auth.copilot.completed` | `account_id`, `token_family` |
+| `auth.copilot.failed` | `reason` |
+
+### Appendix F: Wire examples
+
+**JSON-RPC handshake (stdio gateway).** The gateway reads newline-delimited JSON-RPC 2.0 and authenticates state-changing calls with `MACHINA_GATEWAY_TOKEN`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}
+{"jsonrpc":"2.0","id":1,"result":{"version":"1.2.14","protocolVersion":2,"model":"openrouter/free","provider":"openrouter","cwd":"machina","branch":"main"}}
+```
+
+**Start a turn.** The session ID is a UUID; the stream is delivered as `event` notifications.
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"prompt.submit","params":{"sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","text":"Fix the parser bug and run its tests"}}
+{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"message.delta","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","text":"I will start by"}}
+{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"tool.start","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","id":"call_1","name":"terminal","args":{"command":"pytest -q","background":false}}}
+{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"message.complete","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","text":"The parser is fixed and all tests pass.","tokens":8421,"iterations":6,"toolCalls":4,"cancelled":false}}
+```
+
+**HTTP SSE.** A protocol-v2 prompt stream emits canonical frames and terminates with `[DONE]`.
+
+```text
+data: {"protocolVersion":2,"type":"turn.started","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b"}
+
+data: {"protocolVersion":2,"type":"tool.complete","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","id":"call_1","name":"terminal","result":"42 passed","isError":false}
+
+data: [DONE]
+```
+
+**Approval pause and resume.** Resolving records the human decision; resuming is a separate request with the reviewed arguments.
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/approvals/$REQUEST_ID/resolve" \
+  -H "Authorization: Bearer $MACHINA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"verdict":"approved","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","grant":"once"}'
+
+curl -N -X POST "http://127.0.0.1:8000/api/v1/approvals/$REQUEST_ID/resume" \
+  -H "Authorization: Bearer $MACHINA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"protocolVersion":2,"sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","toolArgs":{"path":"src/parser.py","content":"..."}}'
+```
+
+The resume endpoint revalidates the digest against `toolArgs`, refuses if the approval was consumed, denied, or belongs to another session, and requires fresh approval when the arguments changed.
+
+
+### Appendix G: Failure semantics
+
+Every optional subsystem has a defined degraded mode. The table consolidates the behaviors described in the deep dives; it is the checklist used when a failure is reported.
+
+| Failure | Defined behavior |
+|---|---|
+| Provider times out or returns a transient error | Retry policy applies where configured; the turn fails with a typed error instead of emitting a false completion |
+| Provider reports no usage | Usage basis is `missing`; counters are not fabricated as zero |
+| Model has no known price | Cost stays `NULL`; never zero and never a sibling model's rate |
+| Artifact storage unavailable | The ordinary bounded tool result is kept; no recovery claim is made |
+| Artifact quota or retention refuses a store | New evidence is refused; live evidence is not evicted to make room |
+| Tool result was already truncated upstream | Stored with `upstream_truncated=true`; completeness is never invented |
+| Compaction cannot take its claim | Deferred to a later safe boundary; the live turn is not blocked |
+| Compaction stops shrinking the prompt | A no-progress guard stops further compaction |
+| Continuity history read fails | Falls back to the recent native window; the turn continues |
+| No usable summary row exists | A bounded scan of recent summaries runs; nothing is fabricated |
+| Projection fits nothing at zero budget | The first protected entry is kept rather than silently erased |
+| Embedding backend is off | Retrieval degrades to keyword-only and reports the mode |
+| Retrieval is entirely unavailable | A typed error is raised, distinct from a legitimate empty result |
+| Approval wait exceeds `approval_timeout` | Approval becomes `expired`; execution refuses it |
+| Action changed after approval | Digest mismatch fails closed and requires a fresh decision |
+| Approval is replayed after consumption | `approval.unavailable` / denied; the effect cannot run twice |
+| An agent tries to approve its own action | Rejected; resolution requires a human principal bound to the session |
+| Turn ownership is lost | Effects are cancelled and no terminal success event is emitted |
+| User cancels a turn | Cleanup runs, the lease is released, and the CLI exits `130` |
+| A delegated worker fails | Its error is recorded and reported; other workers are bounded by the plan |
+| A delegated worker pauses for approval | Reported as awaiting approval, never as completed |
+| A job needs approval | Parks in `paused_approval`, is excluded from due claims, resumes only via `jobs.resume` |
+| A cron expression cannot be rescheduled | A bounded retry is scheduled and the error is surfaced; `next_run_at` is not set to `NULL` |
+| Schema is one version behind | The gateway does not self-migrate; `machina init` must run before workers start |
+| Database is unreachable | Startup fails closed with diagnostics; there is no in-memory fallback store |
+| An MCP server is unavailable | The call fails explicitly; no fabricated tool result |
+| Headless browser is unavailable | Verification reports the missing backend; it does not claim a pass |
+| Update checkout is dirty or local-ahead | The pull is skipped with an explicit reason; local work is never discarded |
+
+
+### Appendix H: Verification map
+
+The local suite (`tests/`, 449 collected at this commit) covers contracts and fast regression paths; the full 6,487-test backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+
+| Area | Representative coverage | What it proves |
+|---|---|---|
+| Routing and plans | `test_model_routing.py`, `test_orchestration_plan.py`, `test_gateway_routing.py` | Deterministic role selection, cost tiers, dependency-aware plans |
+| Context and tokens | `test_token_budget.py`, `test_prompt_token_pressure.py`, `test_archive_ordering.py`, `test_context_window_catalog.py` | Budgets, compaction ordering, window resolution |
+| Memory | `test_memory_digest.py`, `test_experience_brief.py` | Bounded multi-fact digest and experience rendering |
+| Permissions | `test_permission_ask_room.py`, DevTools approval suites | Ask-mode classification, canonical decisions, resume |
+| Turn control | `test_steering.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, background jobs, empty-final recovery |
+| Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
+| Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
+| Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py`, `test_opencode_session.py` | Catalog normalization, subscription adapters, bridge behavior |
+| MCP and interop | `test_interop_fast.py`, `test_meta_harness.py`, `test_harness_inventory.py`, `test_researcher_mcp_web.py` | Registration, routing, bounded external delegation |
+| Web and browser | `test_web_extract_validation.py`, `test_web_search_fallback.py`, `test_browser_verify.py` | Untrusted extraction, fallback, real browser checks |
+| Skills | `test_skill_catalog.py`, `test_skill_install_durability.py` | Catalog ranking, durable installs, revisions |
+| Workspace | `test_workspace_git_review.py`, `test_windows_lsp_launch.py` | Git review, language-server launch |
+| Launch and configuration | `test_entrypoint.py`, `test_update.py`, `test_config_home.py`, `test_cli_output_markers.py` | Fast path, updater cache, config root, CLI markers |
+| Gateway and protocol | `test_gateway_operations.py`, `test_gateway_branch.py`, `test_contracts.py` | Operation lifecycle, branch behavior, contracts |
+| UI behavior | `gateway.e2e`, `protocol-parity`, `approval`, `r4-approval-expiry`, `editor-*`, `workspace-*`, `nowplaying-*`, `themes-extended` | End-to-end parity, approval expiry, editor/workspace/media behavior |
+
+The DevTools suite adds architecture ratchets (layer boundaries, file-size ceilings), a deferred-import census, performance gates for assembly and indexing, failure injection for cancellation/ownership/stale snapshots, and real-database tests for vectors, approvals, resume, compaction, and jobs.
+
+### Appendix I: Module map
+
+| Path | Responsibility |
+|---|---|
+| `machina/__main__.py`, `entrypoint.py` | Process entry, fast interactive path, UI launch |
+| `machina/update.py` | Cached `origin/main` update check, fast-forward, re-exec |
+| `machina/services.py` | Shared session/compression/export services |
+| `machina/interop.py` | External harness detection and registration |
+| `machina/fsops.py` | Atomic filesystem helpers |
+| `machina/api/` | FastAPI app, auth, REST routes, SSE streaming |
+| `machina/gateway/` | JSON-RPC server, feature dispatch, serializers, errors |
+| `machina/protocol/` | Event contract and TypeScript generation |
+| `machina/core/` | Turns, agent loop, assembly, context, continuity, compaction, artifacts, reducers, projection, delegation, repair, scheduling, usage, pricing |
+| `machina/core/routing/` | Connected-model inventory, role scoring, deterministic router |
+| `machina/core/orchestration/` | Task classification, plans, parallel execution |
+| `machina/core/provider/` | Provider adapters, factory, transport, retry, rate limits, SSE, caching |
+| `machina/core/optimization/` | Semantic cache, compression, prefix warming, shadow evaluation |
+| `machina/db/` | Pool, lifecycle leases, provisioning, schema and additive migrations |
+| `machina/memory/` | Consolidation, scoring, redaction, retrieval, digest, approval, growth, RSI |
+| `machina/permissions/` | Policy, canonical digests, broker, durable store, shell classification |
+| `machina/tools/` | Tool registry and all built-in tools |
+| `machina/skills/` | Catalog, metadata, stage-aware selection, learning, revisions, marketplace |
+| `machina/rag/` | Loaders, chunking, embeddings, search, reranking, evaluation |
+| `machina/connectors/` | MCP clients, HTTP transport, OAuth, policy, registry |
+| `machina/mcp_server/` | Machina's MCP server for other assistants |
+| `machina/workspace/` | Files, documents, git review, LSP, quick open, intelligence |
+| `machina/observability/` | Audit, traces, metrics, diagnostics, safe logging |
+| `machina/security/` | Credential stores, provider sign-in, secret backends |
+| `machina/controller/` | Complexity triage and repair-controller wiring |
+| `machina/desktop/` | Desktop-shell gateway bootstrap |
+| `machina/plugins/` | Plugin loading and registry |
+| `machina/repomap/` | Repository map and symbol navigation |
+| `machina/research/` | Benchmarks, head-to-head evaluation, workflow trials |
+| `machina/soulspec/` | Reviewed identity schema, merge, lifecycle |
+| `machina/bundled_agents/` | 74 shipped agent definitions, including ECC |
+| `machina/bench/` | Benchmark harness entry points |
+| `ui/src/` | Terminal UI, editor, explorer, transcript, protocol client |
+| `ui/test/` | Node/TypeScript UI suite |
+| `skills/` | 77 bundled `SKILL.md` packages |
+| `docs/` | Design contracts, routing, memory, MCP, operations, verification |
+| `communications/` | Gateway protocol reference |
+| `tools/`, `scripts/` | Release checks and operator scripts |
+
+### Appendix J: Extension points
+
+| Extension | Where it lives | Contract |
+|---|---|---|
+| **Built-in tool** | `machina/tools/` | Register with `@registry.register`; declare `effects` for the broker; import the module from `machina/tools/__init__.py` so it registers at startup |
+| **OpenAI-compatible provider** | `machina/core/provider/specs.py` | Add a `ProviderSpec` (name, base URL, key env, default model, reasoning mode, usage flag); the shared direct transport handles the rest |
+| **Native provider dialect** | `machina/core/provider/` | Subclass the provider interface, normalize streaming/usage/tool calls, add a `factory.py` branch, and store credentials through `security/` |
+| **User-added provider** | Runtime store | `machina providers add` or `/provider`; stored outside the fixed table, no code change |
+| **Agent definition** | `machina/bundled_agents/` or `agents.save` | YAML frontmatter with `name`, `description`, `tools`, optional `model`/`provider`; an empty tool list means every registered tool, always intersected with session authority |
+| **Skill** | `skills/`, `MACHINA_SKILLS_DIR`, or the marketplace | `SKILL.md` plus optional metadata, references, and scripts; catalog-first selection; `machina skills enrich` validates metadata |
+| **Plugin** | Entry point group `agent_harness.plugins` | Duck-typed object with a non-empty `name` and any of `pre_agent_run`, `post_agent_run`, `on_tool_call`, `on_tool_result`, `on_memory_extract`; enabled with `MACHINA_PLUGINS=a,b`; failures are isolated and circuit-broken |
+| **Gateway method** | `machina/gateway/features/` | Async `handler(gw, params)` returning a JSON-serializable dict, registered in `METHODS`; add protocol/UI handling if it is user-visible, and broker approval if it has effects |
+| **Remote MCP tool** | Runtime connectors | `mcp.connect` or `/mcp`; HTTP/stdio, optional OAuth; schemas are browsed catalog-first and calls are approved |
+| **UI command** | `ui/src/features/` | Add a command with `name`, `description`, `argumentHint`, and `run(args, host)`, then register it in `features/index.ts`; add protocol support for new backend calls |
+| **Recurring automation** | Jobs | Interval, cron, heartbeat, or operator-approved script; runs through the normal agent and permission paths |
+
+A minimal tool:
+
+```python
+from machina.tools.base import registry
+
+@registry.register(
+    name="read_issue",
+    description="Read one issue from the project tracker.",
+    effects=("net",),  # broker metadata, never sent to the model
+)
+async def read_issue(issue_id: int) -> str:
+    ...
+```
+
+A minimal plugin:
+
+```python
+class AuditPlugin:
+    name = "audit-plugin"
+
+    def on_tool_call(self, tool_name, arguments):
+        ...
+```
+
+Extension rules that do not bend: an extension cannot expand session authority, a tool name is not a permission, and remote or third-party content is data rather than instruction. New side-effecting tools must declare effects or they fall through to approval as unknown mutating operations.
+
+### Appendix K: Glossary
+
+| Term | Meaning in this codebase |
+|---|---|
+| **Harness** | The runtime around the model: state, tools, permissions, routing, recovery, and surfaces |
+| **Session** | One durable conversation and its pins, goal, state, and ownership record |
+| **Turn** | One transaction over a session: claim, assemble, act, commit, release, maintain |
+| **Turn lease** | Durable claim that gives exactly one worker permission to write a session |
+| **Fencing token** | Unique owner token that prevents a stale worker from committing or releasing after a new claim |
+| **Chunk** | Typed durable event: message, tool call, tool result, document, image context, or summary |
+| **Working set** | The subset of chunks actually sent to the model for one request |
+| **Projection** | Deterministic construction of the working set: dedupe, budget, preserve groups, disclose omissions |
+| **Token budget** | The allocation of the model's input capacity across system, skills, history, memory, documents, and output |
+| **Compaction** | Replacing older chunks with a checkpoint while archiving the originals |
+| **Checkpoint** | Structured summary of objective, constraints, findings, open questions, and next action |
+| **Continuity window** | The recent native tail kept between compactions so dialogue shape and prompt caching survive |
+| **Artifact** | Verbatim durable copy of a large tool result with authorized, revision-bound paging |
+| **Reducer** | Deterministic format-aware smaller view of a large result, without a model call |
+| **Memory** | A durable, categorized claim with importance, provenance, and a usage history |
+| **Consolidation** | Post-turn extraction of candidate memories from chunks not yet processed |
+| **Memory digest** | Bounded query-conditioned selection of a few relevant facts for multi-fact queries |
+| **Provenance** | The source session/agent/signature attached to a memory so it can be audited |
+| **Quarantine** | A held-out memory state for suspicious or low-trust content |
+| **Hybrid retrieval** | Dense vector search plus keyword search, merged with reciprocal rank fusion and optional reranking |
+| **Embedding** | Vector representation used for semantic retrieval; optional and off by default |
+| **Reranker** | Optional second-stage relevance model over retrieved candidates |
+| **Skill** | Instruction package (`SKILL.md`) loaded by task stage; guidance, not authority |
+| **MCP** | Model Context Protocol: a standard way to expose tools to or from an agent |
+| **Harness interop** | Registering Machina with OpenCode, Codex, or Hermes, or delegating work to them |
+| **Canonical action** | Normalized, length-prefixed representation of exactly what a tool will do |
+| **Action digest** | SHA-256 identity of a canonical action, binding approval to every material field |
+| **Approval** | Durable, single-use human decision for one action digest |
+| **Grant** | Explicit reusable session authority for an operation and scope, with content re-approval |
+| **Execution context** | Broker-stamped immutable context that revalidates the digest at execution |
+| **Route** | Deterministic choice of planner, supervisor, worker, and utility models for a task |
+| **Planner / supervisor / worker / utility** | Distinct role profiles scored against model metadata and task class |
+| **Cost tier** | `low`, `balanced`, or `high` ranking preference for route selection |
+| **Worker transport** | `native` in-process delegation, OpenAI-compatible `proxy`, or external `mcp` harness |
+| **Job** | Durable interval, cron, heartbeat, or script task with a fenced claim and next-run time |
+| **Paused approval** | Job state that waits for a human without remaining eligible for due claims |
+| **Audit event** | Append-only record of a permission, approval, or privileged operation |
+| **Usage basis** | Whether token counts came from the provider, a partial report, a local estimate, or are missing |
+| **Shadow event** | Recorded optimization decision that did not alter the user-visible response |
+| **SoulSpec** | Reviewed persona/identity schema with merge and lifecycle rules, never hidden prompt mutation |
+| **Growth / RSI** | Bounded learned notes, policy revisions, and rollback for an agent; not model weights |
+| **ECC** | The bundled curated set of engineering skills and agents, retained with upstream attribution |
+
+### Appendix L: HTTP route catalog
+
+The HTTP API exposes **33** functional routes (the FastAPI docs endpoints are excluded). `/health` and `/ready` are public; every other route requires `Authorization: Bearer $MACHINA_API_KEY`. `POST /rpc` bridges feature methods; the turn and shutdown methods are not dispatched through it.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/agents` | List all agents. |
+| `GET` | `/api/v1/approvals` | List pending human approvals for a session (poll-based recovery). |
+| `POST` | `/api/v1/approvals/{request_id}/resolve` | Resolve a pending approval. Ownership enforced via stored session binding. |
+| `POST` | `/api/v1/approvals/{request_id}/resume` | Validate an approved continuation and stream it, requiring fresh approval on changes. |
+| `POST` | `/api/v1/documents` | Index a document into the RAG pipeline. |
+| `GET` | `/api/v1/documents/search` | Search indexed documents. |
+| `DELETE` | `/api/v1/jobs/{job_id}` | Delete a scheduled job and its claim. |
+| `POST` | `/api/v1/memory` | Create a new memory entry in the store. |
+| `GET` | `/api/v1/memory/search` | Search memories by hybrid semantic + keyword similarity. |
+| `POST` | `/api/v1/persona-memory` | Create a persona-specific interpretation of an existing fact. |
+| `GET` | `/api/v1/sessions` | List sessions. |
+| `POST` | `/api/v1/sessions` | Create a new session. |
+| `DELETE` | `/api/v1/sessions/{session_id}` | Delete a session by ID (mutation claim; live turns reject first). |
+| `GET` | `/api/v1/sessions/{session_id}` | Get a session by ID. |
+| `PATCH` | `/api/v1/sessions/{session_id}` | Update session title, goal, or emotion state. |
+| `POST` | `/api/v1/sessions/{session_id}/chat` | Stream a prompt turn as SSE (same handler as `/prompt`). |
+| `GET` | `/api/v1/sessions/{session_id}/context` | Read context chunks, token total, budget, and goal. |
+| `GET` | `/api/v1/sessions/{session_id}/jobs` | List jobs for a session. |
+| `POST` | `/api/v1/sessions/{session_id}/jobs` | Create a new job. |
+| `POST` | `/api/v1/sessions/{session_id}/prompt` | Stream a prompt turn as SSE. |
+| `GET` | `/api/v1/sessions/{session_id}/usage` | Get token usage summary for a session, optionally filtered by agent. |
+| `GET` | `/health` | Return service health status and version. |
+| `GET` | `/metrics` | Return Prometheus-formatted metrics including LLM usage totals. |
+| `GET` | `/ready` | Check if the database is connected and schema is initialized. |
+| `POST` | `/rpc` | Generic JSON-RPC dispatch to gateway methods (turns and shutdown excluded). |
+| `GET` | `/sessions` | List sessions. |
+| `POST` | `/sessions` | Create a new session. |
+| `GET` | `/sessions/{session_id}` | Get a session by ID. |
+| `GET` | `/sessions/{session_id}/context` | Legacy alias for the v1 context route. |
+| `GET` | `/sessions/{session_id}/jobs` | Legacy alias for the v1 job list. |
+| `POST` | `/sessions/{session_id}/jobs` | Legacy alias for the v1 job create route. |
+| `GET` | `/sessions/{session_id}/memory` | List memories for a session. |
+| `POST` | `/sessions/{session_id}/prompt` | Legacy alias for the v1 prompt stream. |
+
+### Appendix M: Slash command catalog
+
+The terminal UI registers **52** slash commands. A bare `/` lists the registry, typing filters it, and `/help` prints every command with its usage and description.
+
+| Command | Usage | Description |
+|---|---|---|
+| `/activity` | `/activity` | View queued steering, background commands, and agents |
+| `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K) |
+| `/approvals` | `/approvals [list\|allow <id>\|deny <id>\|revoke]` | List pending approvals, or allow/deny one |
+| `/attach` | `/attach` | Attach the editor selection to the next message |
+| `/auth` | `/auth [chatgpt\|grok\|copilot\|kiro] [status\|sign-in\|start\|stop]` | Sign in to ChatGPT, Grok, or Copilot — or manage the Kiro local proxy |
+| `/clear` | `/clear` | Clear the terminal and start a new chat |
+| `/compress` | `/compress` | Summarize older context to free up tokens |
+| `/config` | `/config [list\|<key> [value] [--save]]` | Settings menu, or get/set one key (--save to keep it) |
+| `/context` | `/context` | Show what the agent remembers in this session |
+| `/delegate` | `/delegate [agent] [task]` | Choose an agent and delegate a task |
+| `/delete` | `/delete [id]` | Select sessions to delete |
+| `/editor` | `/editor [maximize\|restore\|complete\|close]` | Maximize or restore the editor pane |
+| `/effort` | `/effort [low\|medium\|high\|xhigh\|max\|off]` | Show or set reasoning effort (provider-specific tiers) |
+| `/exit` | `/exit` | Quit Machina |
+| `/explorer` | `/explorer [toggle\|open\|close]` | Toggle the workspace file explorer |
+| `/export` | `/export [file.md]` | Save this conversation and its subagents as Markdown |
+| `/fork` | `/fork [title]` | Copy this session and continue in the copy |
+| `/goal` | `/goal [goal]` | Show or set the session goal |
+| `/growth` | `/growth [show\|teach\|feedback\|forget\|rollback]` | Manage learned personality, feedback, and reversible improvement |
+| `/harnesses` | `/harnesses [<harness>]` | List external agent harnesses; register, unregister or run a task |
+| `/help` | `/help` | List every command with its description |
+| `/init` | `/init` | Create an AGENTS.md file with instructions for the agent |
+| `/interop` | `/interop [status \| enable <platform> [--scope global\|project] [--dry-run] \| disable <platform>]` | Register Machina's MCP server with OpenCode, Codex or Hermes |
+| `/jobs` | `/jobs [list\|add\|script\|heartbeat\|cron\|on\|off\|delete]` | Scheduled jobs: list, add, script, heartbeat, cron, on, off, delete |
+| `/keys` | `/keys [list\|set KEY VALUE [--no-save]\|clear KEY]` | Manage API keys: list, set or clear (menu when empty) |
+| `/lsp` | `/lsp [status\|start\|stop\|restart] [profile]` | Language-server status and control |
+| `/mcp` | `/mcp [list \| status <id>]` | Add, connect, inspect and remove MCP servers |
+| `/memory` | `/memory [list\|search\|add\|forget\|share\|pending\|approve\|reject\|stats]` | Long-term memory: list, search, add, forget, share, pending, approve, reject, stats |
+| `/mode` | `/mode [ask\|workspace\|sandbox\|full]` | Show or set execution mode (ask\|workspace\|sandbox\|full) |
+| `/models` | `/models [search\|catalog]` | Pick Multi Auto, Single Model, or a concrete model by provider |
+| `/music` | `/music [toggle\|next\|prev\|status\|on\|off]` | Show and control what's playing on this computer |
+| `/new` | `/new [title]` | Start a new session |
+| `/output` | `/output [tool-id]` | Inspect retained tool output (menu when empty) |
+| `/persona` | `/persona [description\|--clear]` | Manage your default persona (menu when empty) |
+| `/problems` | `/problems` | Open the Problems pane (diagnostics) |
+| `/profile` | `/profile [key value]` | View, create, or switch your profile (menu when empty) |
+| `/profiles` | `/profiles` | List all user profiles |
+| `/provider` | `/provider [provider name]` | Manage provider URLs and credentials |
+| `/quickopen` | `/quickopen` | Open Quick Open (also Ctrl+P) |
+| `/recall` | `/recall <words>` | Search past conversation text and inspect a match |
+| `/rename` | `/rename <title>` | Rename the current session |
+| `/resume` | `/resume [id]` | Resume a session (menu when empty) |
+| `/review` | `/review [focus]` | Review my current changes and find issues |
+| `/routing` | `/routing` | Explain the Multi Auto planner/supervisor/worker route for a prompt |
+| `/search` | `/search <words>` | Find sessions by title |
+| `/sessions` | `/sessions` | Resume a session (menu when empty) |
+| `/settings` | `/settings` | Open the settings menu (same as bare /config) |
+| `/skills` | `/skills [list\|search\|show\|learn\|proposals\|approve\|reject\|revert\|delete\|curator]` | Skills: browse, list, search, show, learn, proposals, approve, reject, revert, delete, curator |
+| `/status` | `/status` | Database, counts and configuration health |
+| `/theme` | `/theme [skin]` | Switch UI skin (menu when empty) |
+| `/usage` | `/usage` | Token and request usage for this session |
+| `/workspace` | `/workspace [split\|chat\|editor\|ratio\|side\|open <path>\|status\|close]` | Show or change the integrated workspace |
 
 ## License and credits
 
