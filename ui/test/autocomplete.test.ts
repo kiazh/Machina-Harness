@@ -73,21 +73,3 @@ test("single-word arguments are unaffected", async () => {
 test("bare command-name completion is unaffected", async () => {
 	assert.equal(await accept("/key", "keys"), "/keys ");
 });
-
-test("a bare slash shows only the quick palette; typing searches every command", async () => {
-	const p = new ArgumentAwareAutocompleteProvider(
-		[keysLike, themeLike] as never,
-		process.cwd(),
-		null,
-		[themeLike] as never,
-	);
-	const { signal } = new AbortController();
-	const quick = await p.getSuggestions(["/"], 0, 1, { signal });
-	assert.ok(quick);
-	assert.deepEqual(quick.items.map((item) => item.value), ["theme"]);
-	assert.equal(quick.prefix, "/");
-
-	const typed = await p.getSuggestions(["/k"], 0, 2, { signal });
-	assert.ok(typed);
-	assert.ok(typed.items.some((item) => item.value === "keys"), "typing still searches the full registry");
-});

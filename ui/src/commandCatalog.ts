@@ -1,9 +1,8 @@
 // One source of truth for how the flat slash-command registry is presented.
 //
 // Command names are intentionally stable: existing muscle memory, docs and
-// scripts keep working. This catalog only decides grouping, search keywords,
-// and the small set of commands shown by a bare `/`. It never changes whether
-// a command exists or how it runs.
+// scripts keep working. This catalog only decides grouping and search
+// keywords. Every registered command remains visible and runnable.
 
 export interface CommandGroup {
 	label: string;
@@ -42,6 +41,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
 			"routing",
 			"effort",
 			"config",
+			"settings",
 			"theme",
 			"profile",
 			"profiles",
@@ -70,19 +70,3 @@ export const OTHER_COMMAND_CATEGORY = "Other";
 export function commandCategory(name: string): string {
 	return CATEGORY_BY_COMMAND.get(name) ?? OTHER_COMMAND_CATEGORY;
 }
-
-/**
- * Bare `/` is a launch pad, not a catalog dump. These fit the editor's
- * eight-row autocomplete and cover the common entry points; typing filters the
- * full registry and `/help` exposes every command.
- */
-export const QUICK_COMMAND_NAMES: readonly string[] = [
-	"new",
-	"resume",
-	"models",
-	"workspace",
-	"skills",
-	"review",
-	"status",
-	"help",
-] as const;

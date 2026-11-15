@@ -1156,11 +1156,11 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 | Work | `/review`, `/init`, `/delegate`, `/agents`, `/activity`, `/jobs` |
 | Workspace | `/workspace`, `/editor`, `/explorer`, `/lsp`, `/problems`, `/quickopen`, `/attach` |
 | Memory | `/memory`, `/growth`, `/persona`, `/skills`, `/context`, `/compress` |
-| Setup | `/models`, `/provider`, `/keys`, `/auth`, `/routing`, `/effort`, `/config`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals` |
+| Setup | `/models`, `/provider`, `/keys`, `/auth`, `/routing`, `/effort`, `/config`, `/settings`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals` |
 | Integrations | `/mcp`, `/interop`, `/harnesses`, `/music` |
 | Info | `/status`, `/usage`, `/output` |
 
-A bare `/` shows the eight-command quick palette; typing filters the full registry. `/help` opens the same commands grouped by these categories, with category names and argument completions searchable.
+A bare `/` still lists the full command registry; typing filters it. `/help` shows the same commands grouped by these categories, with category names and argument completions searchable.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`.
 
