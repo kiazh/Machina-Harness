@@ -183,6 +183,40 @@ async def harness_features(refresh: bool = False) -> str:
     return json.dumps(redact_value(payload), ensure_ascii=False, separators=(",", ":"))
 
 
+@registry.register(
+    name="harness_catalog",
+    description=(
+        "Return Machina's complete capability catalog: surfaces, mechanisms, every "
+        "built-in tool with effects, providers, modes, job types, approval states, "
+        "route roles, transports, cost tiers, memory categories, and reducer formats. "
+        "Read-only; no secrets. Use section=all for everything, or one section."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "section": {
+                "type": "string",
+                "enum": ["summary", "tools", "providers", "vocabularies", "surfaces", "all"],
+                "description": "Catalog section to return (default summary)",
+            }
+        },
+        "additionalProperties": False,
+    },
+)
+async def harness_catalog(section: str = "summary") -> str:
+    """Return one section of the generated capability catalog."""
+    from machina.core.capability_catalog import SECTIONS, catalog
+
+    normalized = (section or "summary").strip().lower()
+    if normalized not in SECTIONS:
+        raise ToolError(f"section must be one of: {', '.join(SECTIONS)}")
+    try:
+        payload = catalog(normalized)
+    except Exception:
+        raise ToolError("Capability catalog unavailable") from None
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _harness_features_summary() -> dict:
     try:
         from machina.core import harness_inventory

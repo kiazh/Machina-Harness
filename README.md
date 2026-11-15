@@ -134,7 +134,7 @@ flowchart TB
 
     subgraph TOOLS["Tools and integrations"]
         direction LR
-        TOOLREG["Tool registry<br/>43 built-in tools"]
+        TOOLREG["Tool registry<br/>44 built-in tools"]
         WORKSPACE["Workspace + LSP<br/>files, completion<br/>diagnostics"]
         RAG["Documents + RAG<br/>ingest, embed<br/>search, rerank"]
         SKILLS["Skills<br/>77 packages<br/>catalog-first"]
@@ -339,7 +339,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 43 built-in tools; 39 top-level CLI commands (80 paths); 52 slash commands |
+| Tools and commands | 44 built-in tools; 39 top-level CLI commands (80 paths); 52 slash commands |
 | Protocol and API | 151 RPC methods (13 core + 138 feature); 33 REST routes; 24 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 28 tables |
@@ -381,9 +381,10 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Harness interop** | Let OpenCode, Codex, or Hermes use Machina as an MCP server, or delegate Machina work to an installed external harness | [Surfaces](#harness-interop) |
 | **Durable automation** | Interval, cron, heartbeat, and operator-approved script jobs that survive restarts | [Surfaces](#jobs-that-survive-restarts) |
 | **Workspace and LSP** | Editor, tabs, explorer, Quick Open, diagnostics, and optional language servers | [Surfaces](#workspace-and-language-intelligence) |
+| **Capability awareness** | Every turn carries a generated index of surfaces, mechanisms, tools, providers, and vocabularies; a read-only tool returns the full catalog | [Self-knowledge](#self-knowledge-the-capability-catalog) |
 | **Observability** | Audit events, traces, metrics, usage accounting, and redaction at the boundary | [Reliability](#reliability-and-testing) |
 
-Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, browser verification, artifacts, memory, skills, delegation, routing explanation, and MCP. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
+Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, browser verification, artifacts, memory, skills, delegation, routing explanation, MCP, and the capability catalog itself. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
 
 ## Deep dive 1: Context management
 
@@ -1062,6 +1063,21 @@ Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `hi
 Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
 
 The mental model is an **adapter over shared semantics**, not an implementation of the harness. The surfaces differ in transport, authentication, and interaction style. They must not differ in what a turn means, what an approval authorizes, or what a usage record contains. The test of a surface is parity: pause the same action in two surfaces and the approval identity should be the same.
+
+### Self-knowledge: the capability catalog
+
+The model cannot use a capability it does not know exists, and it should not guess at one that does not. Every turn carries a generated capability index built from live registries:
+
+- the six surfaces (terminal UI, CLI, HTTP, MCP server, MCP client, external harness interop);
+- the mechanisms (sessions, steering, terminal, context, memory, permissions, routing, orchestration, repair, jobs, skills, RAG, workspace, web, artifacts, MCP, interop, media, observability, accounting);
+- every built-in tool, grouped by function;
+- the 18 provider IDs;
+- the vocabularies for modes, terminal backends, orchestration, route roles, transports, cost tiers, job schedules and states, approval states, session states, delegation states, memory categories, usage bases, and reducer formats;
+- the exact set of tools offered to this agent in this request.
+
+**Exists is not the same as callable now.** The index lists the full built-in catalog, marks the offered set, and states that only offered tools are callable. Tool schemas remain the authority for arguments and availability; when a capability is not offered, the model can explain the correct surface or ask for the right mode or agent instead of inventing a call.
+
+`harness_catalog` returns the detailed, read-only catalog. Its `summary` section covers surfaces, mechanisms, tool groups, providers, and vocabularies; `tools`, `providers`, `vocabularies`, and `surfaces` return one area; `all` returns everything. It reads no database, filesystem, provider, credential, or secret. A local test pins every registered tool and routing vocabulary to the catalog, so adding a capability without describing it fails the suite.
 
 ### Skills: catalog first, bodies on demand
 
@@ -1897,7 +1913,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 | Appendix | Contents |
 |---|---|
 | [A](#appendix-a-rpc-method-catalog) | 151 RPC methods |
-| [B](#appendix-b-tool-catalog) | 43 tools and their effects |
+| [B](#appendix-b-tool-catalog) | 44 tools and their effects |
 | [C](#appendix-c-database-catalog) | 28 tables and two ER diagrams |
 | [D](#appendix-d-configuration-reference) | 130 configuration keys |
 | [E](#appendix-e-protocol-events) | 24 protocol events |
@@ -1964,7 +1980,7 @@ The gateway exposes **151** JSON-RPC methods: **13 core** methods handled direct
 
 ### Appendix B: Tool catalog
 
-The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
+The registry exposes **44** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
 
 | Tool | Effects | What it does |
 |---|---|---|
@@ -1975,6 +1991,7 @@ The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.re
 | `code_intelligence` | `fs.read` | Read-only workspace code intelligence: diagnostics, definition, references, symbols, or hover via the editor's language server. |
 | `delegate` | `delegate` | Hand a self-contained task to another agent and get its result. |
 | `delegate_status` | — | Check whether one of your delegated workers is queued, running, finished, or interrupted. |
+| `harness_catalog` | — | Return Machina's complete capability catalog: surfaces, mechanisms, every built-in tool with effects, providers, modes, job types, approval states, route roles, transports, cost tiers, memory categories, and reducer formats. |
 | `harness_delegate` | `exec`, `delegate` | Run one bounded task in an installed external agent harness. |
 | `harness_features` | — | Inspect the live capability inventory of installed external harnesses: available models, agents, MCP servers, auth providers, and plugins. |
 | `harness_status` | — | Read current harness configuration, persona, and this agent's saved learning/RSI state. |
@@ -2665,7 +2682,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 449 collected at this commit) covers contracts and fast regression paths; the full 6,487-test backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 455 collected at this commit) covers contracts and fast regression paths; the full 6,487-test backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|
@@ -2683,6 +2700,7 @@ The local suite (`tests/`, 449 collected at this commit) covers contracts and fa
 | Workspace | `test_workspace_git_review.py`, `test_windows_lsp_launch.py` | Git review, language-server launch |
 | Launch and configuration | `test_entrypoint.py`, `test_update.py`, `test_config_home.py`, `test_cli_output_markers.py` | Fast path, updater cache, config root, CLI markers |
 | Gateway and protocol | `test_gateway_operations.py`, `test_gateway_branch.py`, `test_contracts.py` | Operation lifecycle, branch behavior, contracts |
+| Self-knowledge | `test_capability_catalog.py` | Catalog covers every registered tool, provider, and routing vocabulary; the prompt index stays complete and bounded |
 | UI behavior | `gateway.e2e`, `protocol-parity`, `approval`, `r4-approval-expiry`, `editor-*`, `workspace-*`, `nowplaying-*`, `themes-extended` | End-to-end parity, approval expiry, editor/workspace/media behavior |
 
 The DevTools suite adds architecture ratchets (layer boundaries, file-size ceilings), a deferred-import census, performance gates for assembly and indexing, failure injection for cancellation/ownership/stale snapshots, and real-database tests for vectors, approvals, resume, compaction, and jobs.

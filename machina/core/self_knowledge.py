@@ -6,7 +6,7 @@ Feature facts are distinct from configuration and observed learning evidence.
 Style: 1-3 terse sentences per entry; the brief is bounded (prompt token pin and
 ``harness_status`` response cap), so trim before adding. snake_case tokens are
 configuration keys or registered tool names, pinned against the real
-inventories by ``tests/test_self_knowledge_completeness.py``; never add an
+inventories by ``tests/test_capability_catalog.py``; never add an
 invented name.
 """
 
@@ -112,6 +112,8 @@ def _workspace_summary() -> object:
 
 def capability_context(session: Session, *, tool_names: set[str], growth_state: str) -> str:
     """Always explain features, even with a custom prompt or failed growth store."""
+    from machina.core.capability_catalog import capability_index
+
     facts = "\n".join(f"{name}: {description}" for name, description in FEATURES.items())
     flags = {**configuration(session), "growth_turn": growth_state}
     inspection = (
@@ -121,6 +123,8 @@ def capability_context(session: Session, *, tool_names: set[str], growth_state: 
     )
     return (
         "\n\nHarness capabilities (implementation facts):\n"
+        + capability_index(offered=tool_names)
+        + "\n\nFeature details:\n"
         + facts
         + "\nCurrent configuration (enabled is not proof of successful learning): "
         + json.dumps(flags, separators=(",", ":"))

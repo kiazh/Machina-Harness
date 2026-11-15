@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Every turn now carries a generated capability index covering all surfaces, mechanisms, built-in tools, providers, and vocabularies, plus the exact callable set; the new read-only `harness_catalog` tool returns the full detailed inventory, and a local test pins it to the live registries.
 - Cached update checks now report their last result on every launch (for example, "Machina is up to date. Last checked 3m ago") instead of staying silent for 15 minutes.
 - Launch update status is no longer hidden by unrelated `git fetch` calls; only Machina's own check marker counts toward the 15-minute cache.
 - Interactive launches now show an animated update status (checking, updating, refreshing dependencies, or up to date) before the UI opens.
