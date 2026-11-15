@@ -62,11 +62,27 @@ Plan validation rejects:
 - more than the configured task cap (64 hard cap)
 
 Workers reuse at most `max_worker_routes` distinct routes so 20 workers do not
-invalidate every cache prefix. `worker_count=20` is supported; active
-concurrency remains bounded by `max_delegate_concurrency`. After the workers
-finish, the selected supervisor route (when multi-model and native/proxy) does
-one bounded synthesis of their reports; if it fails, the deterministic report
-summary is returned instead.
+invalidate every cache prefix. The pool picks one model per family before
+filling remaining slots with version aliases, so four Sonnet revisions cannot
+crowd out MiniMax, Qwen, or Kimi on a mixed task. Direct, tool-free work uses
+utility-fit workers; coding/review/debug work uses worker fit. For example, with
+only Kiro connected:
+
+```text
+quick summary      planner=Opus, workers=Haiku + Qwen + MiniMax
+security review    planner=Opus, supervisor=Sonnet, workers=Qwen + Sonnet + MiniMax + Haiku
+portfolio build    planner=Opus, workers=Sonnet + Qwen + MiniMax + Kimi
+```
+
+`cost_tier=low` weights price more heavily and promotes Haiku/MiniMax/Qwen;
+`balanced` and `high` leave more room for Sonnet/Opus quality. Family task
+priors are used when a provider catalog (like Kiro's) only says "Claude Sonnet
+5.5 model with 1M context window" and provides no benchmark metadata.
+
+`worker_count=20` is supported; active concurrency remains bounded by
+`max_delegate_concurrency`. After the workers finish, the selected supervisor
+route (when multi-model and native/proxy) does one bounded synthesis of their
+reports; if it fails, the deterministic report summary is returned instead.
 
 Example:
 

@@ -45,7 +45,7 @@ _DEFAULT_TRANSPORTS = ("native", "proxy")
 #: Cost tier -> (input/output token budget, cost weight). Planner planning and
 #: a small worker turn are enough for selection; actual spend is metered.
 _TIER_BUDGET: dict[str, tuple[int, int, float]] = {
-    "low": (6_000, 1_200, 1.15),
+    "low": (6_000, 1_200, 2.50),
     "balanced": (10_000, 2_500, 0.55),
     "high": (18_000, 4_000, 0.15),
 }
@@ -534,13 +534,56 @@ def route_task(
             if task.needs_tools
             else "no worker candidate satisfies the task"
         )
+    # Direct, tool-free work is utility-shaped: a compact model is the right
+    # worker even though a planner/reviewer route would not be. Keep the
+    # planner and supervisor on their quality ranking; only the worker pool
+    # switches to utility fit.
+    utility_workers = (
+        task.complexity == "direct"
+        and not task.needs_tools
+        and not task.needs_reasoning
+        and bool(candidates_by_role.get("utility"))
+    )
+    selected_workers = candidates_by_role["utility"] if utility_workers else ranked_workers
     worker_routes: list[ModelRoute] = []
     # Reuse a bounded set of worker routes. Twenty workers should not mean
     # twenty different models: that defeats cache reuse and coherent review.
+    # Pick one model per family first so version aliases do not crowd out a
+    # genuinely different capability (for example four Sonnet revisions
+    # displacing MiniMax on a mixed task).
     distinct_limit = max(1, min(int(_cfg(config, "max_worker_routes", 4) or 4), 8))
-    cycle = [candidate.route for candidate in ranked_workers[:distinct_limit]]
+    cycle: list[ModelRoute] = []
+    seen_keys: set[str] = set()
+    seen_families: set[str] = set()
+    for candidate in selected_workers:
+        if len(cycle) >= distinct_limit:
+            break
+        route = candidate.route
+        family = route.profile.family
+        if route.key in seen_keys or family in seen_families:
+            continue
+        cycle.append(route)
+        seen_keys.add(route.key)
+        seen_families.add(family)
+    if len(cycle) < distinct_limit:
+        for candidate in selected_workers:
+            if len(cycle) >= distinct_limit:
+                break
+            route = candidate.route
+            if route.key in seen_keys:
+                continue
+            cycle.append(route)
+            seen_keys.add(route.key)
     for index in range(count):
         worker_routes.append(cycle[index % len(cycle)])
+    actual_families = {route.profile.family for route in worker_routes}
+    if len(actual_families) > 1:
+        warnings.append(
+            f"worker pool spans {len(actual_families)} model families: "
+            + ", ".join(sorted(actual_families))
+        )
+    if utility_workers:
+        warnings.append("direct tool-free task uses utility-fit worker routes")
     if count > len(cycle):
         warnings.append(
             f"{count} workers reuse {len(cycle)} worker route(s) to preserve cache and coherence"

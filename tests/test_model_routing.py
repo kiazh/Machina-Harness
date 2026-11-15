@@ -45,6 +45,47 @@ def _inventory(**overrides):
     )
 
 
+def _profile(
+    model: str,
+    *,
+    family: str,
+    worker: float,
+    utility: float | None = None,
+    coding: float = 0.8,
+    cost: float = 1.0,
+    provider: str = "test",
+) -> ModelProfile:
+    return ModelProfile(
+        provider=provider,
+        model=model,
+        canonical=f"{family}:{model}",
+        display_name=model,
+        family=family,
+        description="test route",
+        context_window=1_000_000,
+        max_output_tokens=32_000,
+        tools=True,
+        reasoning=True,
+        vision=False,
+        input_cost_per_mtok=cost,
+        output_cost_per_mtok=cost * 3,
+        role_scores={
+            "planner": 0.8,
+            "supervisor": 0.8,
+            "worker": worker,
+            "utility": utility if utility is not None else worker,
+        },
+        task_scores={
+            "coding": coding,
+            "web-build": coding,
+            "debug": coding,
+            "review": coding,
+            "research": coding,
+            "documentation": coding,
+        },
+    )
+
+
 def test_inventory_only_contains_connected_models() -> None:
     config = _config(anthropic_api_key="", deepseek_api_key="")
     inventory = build_inventory(
@@ -96,6 +137,98 @@ def test_multi_model_selects_roles_and_bounds_worker_routes() -> None:
     assert 1 <= len(decision.distinct_worker_routes) <= 4
     assert decision.estimated_cost() is not None
     assert "planner=" in decision.explain()
+
+
+def test_worker_pool_diversifies_families_before_version_aliases() -> None:
+    from machina.core.routing.catalog import ModelInventory
+
+    inventory = ModelInventory(
+        profiles=(
+            _profile("sonnet-5.5", family="claude-sonnet", worker=0.95, coding=0.95, cost=2),
+            _profile("sonnet-5", family="claude-sonnet", worker=0.95, coding=0.95, cost=2),
+            _profile("sonnet-4.6", family="claude-sonnet", worker=0.95, coding=0.95, cost=2),
+            _profile("qwen-coder", family="qwen", worker=0.86, coding=0.86, cost=0.2),
+            _profile("minimax", family="minimax", worker=0.84, coding=0.84, cost=0.3),
+            _profile("kimi", family="kimi-k3", worker=0.83, coding=0.88, cost=0.4),
+        ),
+        provider_status={"test": "configured"},
+    )
+
+    decision = route_task(
+        "Implement the frontend, backend, and tests in parallel",
+        inventory=inventory,
+        config=_config(orchestration_mode="multi_model", max_worker_routes=4),
+        mode="multi_model",
+        worker_count=3,
+    )
+
+    families = {route.profile.family for route in decision.workers}
+    assert len(families) == 3
+    assert "claude-sonnet" in families
+    assert "qwen" in families
+
+
+def test_direct_tool_free_tasks_use_utility_fit_workers() -> None:
+    from machina.core.routing.catalog import ModelInventory
+
+    inventory = ModelInventory(
+        profiles=(
+            _profile(
+                "strong-worker",
+                family="claude-sonnet",
+                worker=0.99,
+                utility=0.60,
+                coding=0.99,
+                cost=10,
+            ),
+            _profile(
+                "fast-utility",
+                family="claude-haiku",
+                worker=0.70,
+                utility=0.99,
+                coding=0.70,
+                cost=0.1,
+            ),
+        ),
+        provider_status={"test": "configured"},
+    )
+
+    decision = route_task(
+        "Say hello",
+        inventory=inventory,
+        config=_config(orchestration_mode="multi_model"),
+        mode="multi_model",
+        worker_count=1,
+    )
+
+    assert decision.task.complexity == "direct"
+    assert decision.workers[0].profile.model == "fast-utility"
+    assert decision.workers[0].key == decision.candidates["utility"][0].route.key
+
+
+def test_family_task_priors_keep_kiro_aliases_differentiated() -> None:
+    from machina.core.routing.catalog import profile_from_row
+
+    def profile(model: str) -> ModelProfile:
+        return profile_from_row(
+            "kiro",
+            {
+                "id": model,
+                "description": f"{model} model with 1M context window",
+                "contextWindow": 1_000_000,
+                "source": "live",
+            },
+        )
+
+    opus = profile("claude-opus-5.5")
+    sonnet = profile("claude-sonnet-5.5")
+    haiku = profile("claude-haiku-5.5")
+    minimax = profile("minimax-m2.5")
+
+    assert sonnet.task_scores["coding"] > opus.task_scores["coding"]
+    assert opus.task_scores["review"] > sonnet.task_scores["review"]
+    assert haiku.role_scores["utility"] > sonnet.role_scores["utility"]
+    assert minimax.task_scores["coding"] >= 0.84
 
 
 def test_high_risk_work_prefers_an_independent_supervisor_family() -> None:

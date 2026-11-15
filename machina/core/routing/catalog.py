@@ -109,6 +109,96 @@ _FAMILY_COST: tuple[tuple[str, tuple[float, float]], ...] = (
     ("big-pickle", (0.0, 0.0)),
 )
 
+#: Explicit task-family priors. Unlike keyword inference on a model name,
+#: these survive provider catalogs that only say \"Claude Sonnet 5.5 model
+#: with 1M context window\" and keep Sonnet/Opus/Haiku differentiated.
+_TASK_PRIORS: dict[str, dict[str, float]] = {
+    "claude-fable": {
+        "coding": 0.94, "web-build": 0.93, "debug": 0.95, "review": 0.98,
+        "research": 0.94, "documentation": 0.90,
+    },
+    "claude-opus": {
+        "coding": 0.92, "web-build": 0.91, "debug": 0.94, "review": 0.96,
+        "research": 0.88, "documentation": 0.86,
+    },
+    "claude-sonnet": {
+        "coding": 0.96, "web-build": 0.94, "debug": 0.94, "review": 0.90,
+        "research": 0.86, "documentation": 0.88,
+    },
+    "claude-haiku": {
+        "coding": 0.78, "web-build": 0.80, "debug": 0.78, "review": 0.78,
+        "research": 0.80, "documentation": 0.92,
+    },
+    "gpt-astra": {
+        "coding": 0.95, "web-build": 0.92, "debug": 0.96, "review": 0.97,
+        "research": 0.95, "documentation": 0.88,
+    },
+    "gpt-sol": {
+        "coding": 0.94, "web-build": 0.91, "debug": 0.94, "review": 0.92,
+        "research": 0.90, "documentation": 0.88,
+    },
+    "gpt-terra": {
+        "coding": 0.88, "web-build": 0.86, "debug": 0.88, "review": 0.86,
+        "research": 0.88, "documentation": 0.86,
+    },
+    "gpt-luna": {
+        "coding": 0.77, "web-build": 0.78, "debug": 0.76, "review": 0.74,
+        "research": 0.76, "documentation": 0.94,
+    },
+    "gpt": {
+        "coding": 0.80, "web-build": 0.80, "debug": 0.80, "review": 0.78,
+        "research": 0.80, "documentation": 0.84,
+    },
+    "minimax": {
+        "coding": 0.84, "web-build": 0.86, "debug": 0.82, "review": 0.80,
+        "research": 0.78, "documentation": 0.82,
+    },
+    "qwen": {
+        "coding": 0.86, "web-build": 0.86, "debug": 0.83, "review": 0.80,
+        "research": 0.78, "documentation": 0.80,
+    },
+    "glm": {
+        "coding": 0.83, "web-build": 0.82, "debug": 0.84, "review": 0.82,
+        "research": 0.80, "documentation": 0.80,
+    },
+    "kimi-k3": {
+        "coding": 0.88, "web-build": 0.83, "debug": 0.86, "review": 0.84,
+        "research": 0.86, "documentation": 0.82,
+    },
+    "kimi": {
+        "coding": 0.84, "web-build": 0.82, "debug": 0.82, "review": 0.80,
+        "research": 0.82, "documentation": 0.82,
+    },
+    "deepseek-thinking": {
+        "coding": 0.87, "web-build": 0.84, "debug": 0.89, "review": 0.86,
+        "research": 0.84, "documentation": 0.80,
+    },
+    "deepseek-flash": {
+        "coding": 0.84, "web-build": 0.84, "debug": 0.82, "review": 0.78,
+        "research": 0.78, "documentation": 0.82,
+    },
+    "deepseek": {
+        "coding": 0.84, "web-build": 0.83, "debug": 0.84, "review": 0.80,
+        "research": 0.80, "documentation": 0.80,
+    },
+    "gemini": {
+        "coding": 0.87, "web-build": 0.86, "debug": 0.87, "review": 0.86,
+        "research": 0.90, "documentation": 0.86,
+    },
+    "grok": {
+        "coding": 0.85, "web-build": 0.84, "debug": 0.86, "review": 0.86,
+        "research": 0.88, "documentation": 0.82,
+    },
+    "mistral": {
+        "coding": 0.76, "web-build": 0.78, "debug": 0.76, "review": 0.76,
+        "research": 0.78, "documentation": 0.84,
+    },
+    "auto": {
+        "coding": 0.72, "web-build": 0.72, "debug": 0.72, "review": 0.72,
+        "research": 0.72, "documentation": 0.72,
+    },
+}
+
 #: Families that are usually subscription/flat-rate. They can still be
 #: expensive in practice because they consume a finite quota.
 _QUOTA_SENSITIVE = frozenset({"chatgpt", "kiro", "copilot", "grok"})
@@ -250,17 +340,35 @@ def _task_scores(
     family: str, model_id: str, description: str, context_window: int
 ) -> dict[str, float]:
     text = f"{family} {model_id} {description}".lower()
-    base = 0.55
-    coding = 0.72 if any(
-        token in text for token in ("code", "coder", "codex", "swe", "dev", "agent", "tool")
-    ) else base
-    review = 0.70 if any(token in text for token in ("review", "audit", "reason", "think")) else 0.62
-    research = 0.72 if any(
-        token in text for token in ("research", "knowledge", "long", "vision")
-    ) else 0.62
-    web = min(0.92, coding + 0.08)
-    debug = min(0.95, coding + 0.06)
-    docs = 0.68 if "mini" in text or "flash" in text or "luna" in text else 0.62
+    prior: dict[str, float] = {}
+    for prefix, scores in _TASK_PRIORS.items():
+        if family.startswith(prefix) or prefix in family or prefix in text:
+            prior = scores
+            break
+    base = prior or {
+        "coding": 0.55,
+        "web-build": 0.60,
+        "debug": 0.58,
+        "review": 0.58,
+        "research": 0.58,
+        "documentation": 0.62,
+    }
+    coding = base["coding"]
+    review = base["review"]
+    research = base["research"]
+    web = base["web-build"]
+    debug = base["debug"]
+    docs = base["documentation"]
+    # Small, explicit name-level nudges for variants the family prior cannot
+    # distinguish (coder/vision/codex and compact/chat variants).
+    if any(token in text for token in ("coder", "codex", "swe")):
+        coding = min(0.99, coding + 0.03)
+        web = min(0.99, web + 0.02)
+        debug = min(0.99, debug + 0.02)
+    if "vision" in text:
+        research = min(0.99, research + 0.03)
+    if any(token in text for token in ("mini", "flash", "luna", "haiku")):
+        docs = min(0.99, docs + 0.02)
     long_context = min(0.99, 0.55 + min(context_window, 2_000_000) / 2_000_000 * 0.4)
     return {
         "coding": round(coding, 4),
