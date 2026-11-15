@@ -1925,7 +1925,10 @@ class BaseReActAgent:
                 "content": (
                     "Continue the task after completed tool work. Use the provided "
                     "tools if more work remains; otherwise write the final response. "
-                    "Do not repeat a tool action that already succeeded."
+                    "Do not repeat a tool action that already succeeded. Do not page "
+                    "or search an artifact for a result already shown; act on its "
+                    "failure details. If web verification failed, fix the failed "
+                    "checks and rerun web_verify."
                 ),
             },
             {
@@ -1962,33 +1965,46 @@ class BaseReActAgent:
         bounded, tool-free summary from a fresh context and fall back to a
         deterministic report if the route still returns nothing.
         """
-        if not tool_calls_made:
-            return "", 0
         result_lines = []
         for entry in tool_calls_made[-8:]:
             tool = str(entry.get("tool") or "tool")
             preview = " ".join(str(entry.get("result_preview") or "").split())[:300]
             result_lines.append(f"- {tool}: {preview or '(completed)'}")
-        recovery_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Write the final response after completed tool work. "
-                    "Do not call tools. Be concise and factual."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"The task was:\n{user_message[:4000]}\n\n"
-                    "The tool results were:\n"
-                    + "\n".join(result_lines)
-                    + "\n\nWrite a concise final response summarizing what was "
-                    "completed, any files changed, and verification. "
-                    "Do not call tools."
-                ),
-            },
-        ]
+        if tool_calls_made:
+            recovery_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Write the final response after completed tool work. "
+                        "Do not call tools. Be concise and factual."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"The task was:\n{user_message[:4000]}\n\n"
+                        "The tool results were:\n"
+                        + "\n".join(result_lines)
+                        + "\n\nWrite a concise final response summarizing what was "
+                        "completed, any files changed, and verification. "
+                        "Do not call tools."
+                    ),
+                },
+            ]
+        else:
+            recovery_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "The previous model completion was empty. Answer the user's "
+                        "task directly. Do not call tools."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": user_message[:8000],
+                },
+            ]
         recovered = ""
         tokens = 0
         try:
@@ -2000,7 +2016,7 @@ class BaseReActAgent:
         except Exception as exc:
             logger.warning("Empty-final summary recovery failed: %s", exc)
         used_fallback = not recovered
-        if used_fallback:
+        if used_fallback and tool_calls_made:
             recovered = self._fallback_final_content(tool_calls_made)
         audit_log(
             "agent_empty_final_recovery",
@@ -2636,11 +2652,18 @@ class ReActAgent(BaseReActAgent):
                                 verification_nudges += 1
                                 iteration += 1
                                 continue
+                            outcome = "completed"
                             if not content:
                                 content, recovery_tokens = await self._recover_empty_final(
                                     session_id, user_message, tool_calls_made
                                 )
                                 total_tokens += recovery_tokens
+                            if not content:
+                                content = (
+                                    "The model provider returned an empty response; "
+                                    "no work was performed. Retry the turn."
+                                )
+                                outcome = "failed"
                             return await self._finish_turn_completion(
                                 session_id,
                                 user_message,
@@ -2649,6 +2672,7 @@ class ReActAgent(BaseReActAgent):
                                 total_tokens,
                                 iteration + 1,
                                 pending_chunks,
+                                outcome=outcome,
                             )
                     await self._append_assistant_content(
                         session_id, response.content, pending_chunks
@@ -3056,11 +3080,18 @@ class ReActAgent(BaseReActAgent):
                                 verification_nudges += 1
                                 iteration += 1
                                 continue
+                            outcome = "completed"
                             if not content:
                                 content, recovery_tokens = await self._recover_empty_final(
                                     session_id, user_message, tool_calls_made
                                 )
                                 total_tokens += recovery_tokens
+                            if not content:
+                                content = (
+                                    "The model provider returned an empty response; "
+                                    "no work was performed. Retry the turn."
+                                )
+                                outcome = "failed"
                             completed = await self._finish_turn_completion(
                                 session_id,
                                 user_message,
@@ -3069,6 +3100,7 @@ class ReActAgent(BaseReActAgent):
                                 total_tokens,
                                 iteration + 1,
                                 pending_chunks,
+                                outcome=outcome,
                             )
                             yield StreamEvent(type="done", response=completed)
                             return

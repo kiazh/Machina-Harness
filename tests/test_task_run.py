@@ -161,6 +161,24 @@ def test_artifact_paging_and_job_polling_get_one_nudge() -> None:
     assert jobs.take_nudge() is None
 
 
+def test_artifact_paging_nudge_also_applies_outside_repair_tasks() -> None:
+    policy = TaskRunPolicy("Build a portfolio website")
+    for offset in range(3):
+        policy.observe(
+            [
+                {
+                    "tool": "artifact_read",
+                    "args": {"artifact_id": "artifact-1", "offset": offset},
+                    "outcome": "completed",
+                }
+            ]
+        )
+
+    assert policy.active is False
+    assert policy.take_nudge() == TASK_RUN_ARTIFACT_NUDGE
+    assert policy.take_nudge() is None
+
+
 def test_edit_suppresses_the_no_edit_nudge() -> None:
     policy = TaskRunPolicy(REPAIR, edit_nudge_turns=2)
     policy.observe([{"tool": "write_file", "args": {"path": "a.py"}, "outcome": "completed"}])

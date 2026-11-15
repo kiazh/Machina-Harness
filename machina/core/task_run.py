@@ -24,7 +24,7 @@ DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_EDIT_NUDGE_TURNS = 10
-DEFAULT_ARTIFACT_NUDGE_READS = 6
+DEFAULT_ARTIFACT_NUDGE_READS = 3
 DEFAULT_JOB_NUDGE_POLLS = 6
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"
 MAX_TOOL_CALLS_ENV = "MACHINA_TASK_RUN_MAX_TOOL_CALLS"
@@ -230,28 +230,34 @@ class TaskRunPolicy:
         return "orient"
 
     def observe(self, batch: list[dict[str, Any]] | None) -> None:
-        """Fold one completed tool batch into controller state."""
-        if not self.active:
-            return
-        self.turns += 1
+        """Fold one completed tool batch into controller state.
+
+        Artifact paging is tracked even when the repair controller is inactive:
+        repeatedly re-reading the same retained result is wasteful on ordinary
+        web/verification turns too.
+        """
+        self.turns += 1 if self.active else 0
         edited_this_turn = False
         for entry in batch or []:
             if not isinstance(entry, dict):
                 continue
-            self.tool_calls += 1
+            if self.active:
+                self.tool_calls += 1
+            if entry.get("tool") in {"artifact_read", "artifact_search"}:
+                self.artifact_reads += 1
+                args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
+                handle = str(args.get("artifact_id") or "") or str(args.get("query") or "")
+                if handle:
+                    self._artifact_counts[handle] = self._artifact_counts.get(handle, 0) + 1
+            if not self.active:
+                continue
             if _is_edit(entry):
                 edited_this_turn = True
             if _is_verification(entry):
                 self.reproduced = True
                 if has_verification_evidence([entry]):
                     self.verified = True
-            if entry.get("tool") == "artifact_read":
-                self.artifact_reads += 1
-                args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
-                handle = str(args.get("artifact_id") or "")
-                if handle:
-                    self._artifact_counts[handle] = self._artifact_counts.get(handle, 0) + 1
-            elif entry.get("tool") == "terminal_job":
+            if entry.get("tool") == "terminal_job":
                 self.job_polls += 1
             if _failed(entry):
                 digest = _fingerprint(entry)
@@ -263,7 +269,7 @@ class TaskRunPolicy:
         if edited_this_turn:
             self.edited = True
             self.turns_without_edit = 0
-        else:
+        elif self.active:
             self.turns_without_edit += 1
 
     def stop_reason(
@@ -287,14 +293,14 @@ class TaskRunPolicy:
 
     def take_nudge(self) -> str | None:
         """Return one bounded process nudge, if a loop is becoming wasteful."""
-        if not self.active:
-            return None
         if (
             not self._artifact_nudged
             and max(self._artifact_counts.values(), default=0) >= DEFAULT_ARTIFACT_NUDGE_READS
         ):
             self._artifact_nudged = True
             return TASK_RUN_ARTIFACT_NUDGE
+        if not self.active:
+            return None
         if not self._job_nudged and self.job_polls >= DEFAULT_JOB_NUDGE_POLLS:
             self._job_nudged = True
             return TASK_RUN_JOB_NUDGE

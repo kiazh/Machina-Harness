@@ -89,11 +89,23 @@ async def test_empty_tool_turn_restarts_with_tools_and_current_results(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_empty_final_recovery_is_a_noop_without_tool_calls(monkeypatch):
+async def test_empty_final_recovery_without_tools_retries_a_fresh_prompt(monkeypatch):
     agent = ReActAgent(provider=object(), agent_id="harness")
+    seen: dict = {}
 
-    async def unexpected(*_args, **_kwargs):
-        raise AssertionError("must not call the provider without tool results")
+    async def complete(messages, tools, session_id=None):
+        seen["messages"] = messages
+        seen["tools"] = tools
+        return LLMResponse(
+            content="Recovered answer",
+            model="fake",
+            usage={"total_tokens": 4},
+        )
 
-    monkeypatch.setattr(agent, "_call_llm_with_retry", unexpected)
-    assert await agent._recover_empty_final(uuid.uuid4(), "hello", []) == ("", 0)
+    monkeypatch.setattr(agent, "_call_llm_with_retry", complete)
+    content, tokens = await agent._recover_empty_final(uuid.uuid4(), "hello", [])
+
+    assert content == "Recovered answer"
+    assert tokens == 4
+    assert seen["tools"] == []
+    assert seen["messages"][1]["content"] == "hello"

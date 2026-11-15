@@ -61,6 +61,47 @@ def _check_result(name: str, ok: bool, detail: str = "") -> dict[str, Any]:
     return {"check": name, "ok": bool(ok), "detail": detail}
 
 
+def _compact_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Failure-first report bounded for the model's tool-result budget.
+
+    Passing checks are summarized; only failures carry full detail. This keeps
+    the report well under the append-time cap so a verification result never
+    turns into an artifact-read cycle.
+    """
+    checks = [check for check in report.get("checks") or [] if isinstance(check, dict)]
+    failed = [
+        {
+            "check": str(check.get("check") or "check"),
+            "detail": str(check.get("detail") or ""),
+        }
+        for check in checks
+        if not check.get("ok")
+    ]
+    compact: dict[str, Any] = {
+        "ok": bool(report.get("ok")),
+        "status": str(report.get("status") or ("passed" if report.get("ok") else "failed")),
+        "url": str(report.get("url") or ""),
+        "title": str(report.get("title") or ""),
+        "checks_total": len(checks),
+        "checks_passed": len(checks) - len(failed),
+        "failed_checks": failed,
+        "console_errors": list(report.get("console_errors") or [])[-5:],
+        "page_errors": list(report.get("page_errors") or [])[-5:],
+        "failed_responses": list(report.get("failed_responses") or [])[-5:],
+        "duration_ms": int(report.get("duration_ms") or 0),
+        "next": (
+            "All checks passed."
+            if report.get("ok")
+            else "Fix the failed_checks, then rerun web_verify or browser_verify."
+        ),
+    }
+    if report.get("root"):
+        compact["root"] = str(report["root"])
+    if report.get("error"):
+        compact["error"] = str(report["error"])
+    return compact
+
+
 async def _run_checks(page, checks: list[dict[str, Any]], timeout_ms: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for index, raw in enumerate(checks):
@@ -320,7 +361,7 @@ async def browser_verify(
         timeout_ms=timeout,
         viewport=viewport,
     )
-    return json.dumps(report, ensure_ascii=False)
+    return json.dumps(_compact_report(report), ensure_ascii=False)
 
 
 class _QuietStaticHandler(SimpleHTTPRequestHandler):
@@ -378,7 +419,7 @@ async def web_verify(
             viewport=None,
         )
         report["root"] = str(root)
-        return json.dumps(report, ensure_ascii=False)
+        return json.dumps(_compact_report(report), ensure_ascii=False)
     finally:
         server.shutdown()
         server.server_close()

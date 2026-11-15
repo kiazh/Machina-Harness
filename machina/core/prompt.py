@@ -707,6 +707,21 @@ def tool_message_limit(tool_name: str | None) -> int:
     """
     return (
         9000
-        if tool_name in ("skill_read", "skill_resource", "harness_status", "search_documents")
+        if tool_name
+        in (
+            "skill_read",
+            "skill_resource",
+            "harness_status",
+            "search_documents",
+            # Artifact pages can be up to ~4k by contract. Capping them to the
+            # generic 1k preview made the model re-read the same page forever.
+            "artifact_read",
+            "artifact_search",
+            "artifact_describe",
+            # Browser reports are bounded and failure-first; do not split a
+            # small verification report into an artifact + re-read cycle.
+            "browser_verify",
+            "web_verify",
+        )
         else 1000
     )
