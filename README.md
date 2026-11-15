@@ -141,10 +141,11 @@ flowchart TB
         MCPCLIENT["MCP clients + browser<br/>stdio, HTTP, OAuth<br/>web verification"]
     end
 
-    subgraph ROUTE["Connected-model routing"]
+    subgraph ROUTE["Routing, providers, and credentials"]
         direction LR
         INVENTORY["Model inventory<br/>credentials, role fit"]
         ROUTER["Deterministic router<br/>planner, supervisor<br/>worker, utility"]
+        SECRETS["Secrets + auth<br/>.env 0600, keyring<br/>subscription OAuth"]
         PROVIDERS["18 provider adapters<br/>cloud, subscription<br/>local"]
         USAGE["Usage + pricing<br/>normalized tokens<br/>budgets"]
     end
@@ -153,7 +154,6 @@ flowchart TB
         direction LR
         SCHED["Scheduler + jobs<br/>interval, cron<br/>heartbeat, scripts"]
         OBS["Observability<br/>audit, traces<br/>metrics, diagnostics"]
-        SECRETS["Secrets + auth<br/>.env 0600, keyring<br/>subscription OAuth"]
     end
 
     PG[("PostgreSQL 16 + pgvector<br/>28 tables + migrations")]
@@ -191,7 +191,7 @@ flowchart TB
     MSAFE --> MAPPROVE
     MAPPROVE --> MRETRIEVE
     MSAFE --> MRETRIEVE
-    MRETRIEVE --> MGROWTH
+    MGROWTH -. policy .-> MRETRIEVE
     MRETRIEVE --> ASM
 
     LOOP --> POLICY
@@ -206,7 +206,6 @@ flowchart TB
     TOOLREG --> RAG
     TOOLREG --> SKILLS
     TOOLREG --> MCPCLIENT
-    TOOLREG --> REDUCERS
 
     LOOP --> ROUTER
     ORCH --> ROUTER
@@ -218,6 +217,7 @@ flowchart TB
     MCPCLIENT --> EXTERNAL
 
     SCHED --> LOOP
+    LOOP -. outcomes .-> MGROWTH
     LOOP -. stages .-> OBS
     BROKER -. decisions .-> OBS
     PROVIDERS -. latency .-> OBS
@@ -255,7 +255,7 @@ sequenceDiagram
     TC->>RT: select route from connected inventory
     RT-->>TC: planner, supervisor, workers, cost, fallbacks
     TC->>AS: assemble working set
-    AS->>DB: read chunks, memories, documents, artifacts
+    AS->>DB: read context and retrieval evidence
     AS-->>TC: bounded prompt and omission report
     TC->>PR: stream completion
     PR-->>TC: deltas and tool request
@@ -266,7 +266,7 @@ sequenceDiagram
         BR-->>TC: allow and stamped execution context
         TC->>TL: execute
         TL-->>TC: bounded result
-        TC->>DB: artifact and context chunk
+        TC->>DB: context chunk, artifact if large
     else review
         BR->>DB: durable approval (pending)
         TC-->>GW: needs_approval
@@ -621,9 +621,11 @@ flowchart LR
     D --> R[Redact secrets<br/>attach provenance]
     R --> A{Approval enabled?}
     A -- yes --> P[Pending queue]
-    P --> W[Store + embed]
+    P --> H{Human review}
+    H -- approve --> W[Store + embed<br/>if configured]
+    H -- reject --> X[Reject candidate]
     A -- no --> W
-    W --> Q[Hybrid retrieval]
+    W --> Q[Hybrid retrieval<br/>keyword fallback]
     Q --> U[Prompt evidence]
     U --> F[Access feedback]
     F --> W
@@ -799,6 +801,7 @@ The durable state machine makes the pause inspectable and the replay impossible:
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> Pending: durable proposal with canonical digest
     Pending --> Approved: human allows once or for the session
     Pending --> Denied: human denies
@@ -880,6 +883,7 @@ The same lifecycle as a state machine. These are operational states, not a datab
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> Claimed: durable lease and fencing token
     Claimed --> Building: agent definition within session authority
     Building --> Streaming: route chosen, prompt assembled and fitted
@@ -888,7 +892,8 @@ stateDiagram-v2
     Deciding --> AwaitingApproval: review (lease renewed)
     Deciding --> Streaming: denial recorded
     AwaitingApproval --> Executing: approved and digest revalidated
-    AwaitingApproval --> Streaming: denied, expired, or cancelled
+    AwaitingApproval --> Streaming: denied or expired
+    AwaitingApproval --> Cleanup: turn cancelled
     Executing --> Streaming: bounded result and artifact handle
     Streaming --> Committed: final answer
     Streaming --> Cleanup: cancelled or ownership lost
@@ -2051,9 +2056,9 @@ erDiagram
     sessions ||--o{ context_chunks : contains
     sessions ||--o{ context_archive : archives
     sessions ||--o{ tool_artifacts : retains
-    sessions ||--o| session_image_context : attaches
-    sessions ||--o{ agent_messages : parents
-    sessions ||--o{ jobs : schedules
+    sessions ||--o{ session_image_context : attaches
+    sessions o|--o{ agent_messages : parents
+    sessions o|--o{ jobs : schedules
     sessions ||--o{ llm_usage : accounts
     sessions ||--o{ learning_reviews : proposes
     agents ||--o{ agent_messages : sends
@@ -2160,13 +2165,14 @@ Memories carry provenance, optional review, persona interpretations, and signed 
 ```mermaid
 erDiagram
     memories ||--o| memory_provenance : sourced_by
-    memories ||--o{ persona_memories : interpreted_as
+    memories o|--o{ persona_memories : interpreted_as
     memories ||--o{ shared_memory_deliveries : source
-    memories ||--o{ pending_memories : reviewed_as
+    memories o|--o{ pending_memories : reviewed_as
+    agent_beliefs ||--o{ agent_belief_history : versions
     agent_growth ||--o{ growth_episodes : records
-    agent_growth ||--o{ rsi_profiles : owns
+    agent_growth ||--o| rsi_profiles : owns
     agent_growth ||--o{ rsi_revisions : revises
-    growth_episodes ||--o{ rsi_episodes : learns_from
+    growth_episodes ||--o| rsi_episodes : learns_from
 
     memories {
         uuid id PK
