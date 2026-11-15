@@ -98,8 +98,17 @@ test("HM-01 grouped Commands/Keys in a bounded Menu with the hint last", () => {
 	assert.match(screen, /Workspace: Fuzzy file search in the workspace/, "key rows carry their context");
 	assert.equal(menu.getView().selected?.id, "command:help", "the first command is selected");
 	assert.ok(lines(menu).length <= DEFAULT_MENU_VISIBLE_ROWS + 3, "bounded to the default cap plus chrome");
-	assert.equal(lines(menu).length, 13, "10 grouped rows + title/filter/hint");
+	assert.equal(lines(menu).length, 15, "10 grouped rows + 2 detail rows + title/filter/hint");
 	assert.match(lines(menu).at(-1)!, /esc close/, "the hint is the last row");
+});
+
+test("HM-01 the selected command shows its full explanation", () => {
+	const menu = new HelpMenu({ commands: COMMANDS, keys: [] });
+	menu.activate();
+	assert.match(plain(menu), /Show available commands/);
+	menu.handleInput("\x1b[B");
+	assert.match(plain(menu), /\/status/);
+	assert.match(plain(menu), /Database, counts and configuration health/);
 });
 
 test("HM-01 a long command set stays bounded", () => {
@@ -107,7 +116,7 @@ test("HM-01 a long command set stays bounded", () => {
 	const menu = new HelpMenu({ commands: many, keys: [] });
 	menu.activate();
 	const frame = lines(menu, 80);
-	assert.equal(frame.length, DEFAULT_MENU_VISIBLE_ROWS + 3);
+	assert.equal(frame.length, DEFAULT_MENU_VISIBLE_ROWS + 5);
 	assert.ok(frame.length < 24, "the dialog is shorter than a 24-row page");
 	assert.match(frame.at(-1)!, /type to filter/);
 });

@@ -1133,7 +1133,7 @@ In the UI, ask something concrete:
 Explain how this project is organized and where its main entry point is.
 ```
 
-Use `/help` for the searchable command menu. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
+Use `/help` for the searchable command menu; selecting a command shows its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
 
 For a single response without the UI:
 

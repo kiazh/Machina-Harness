@@ -1,5 +1,8 @@
-// Concise notice: 1–2 lines with a text marker plus semantic color, so
-// state survives monochrome skins. Explicit reports use a viewer instead.
+// Notices are generated output from commands, tools, and the harness.
+// Generated reports, multi-line output, and guidance use the same quiet framed
+// surface as assistant prose. Short status lines stay compact so they do not
+// crowd out approval evidence. Narrow terminals keep a plain fallback because
+// a frame would consume the text column.
 
 import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { NoticeKind } from "../features/types.ts";
@@ -12,6 +15,15 @@ import { BLOCK_GAP } from "../design/tokens.ts";
 import { transcriptInset } from "../design/spacing.ts";
 import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
 import { repairFill, theme } from "../theme.ts";
+
+const LABELS: Record<NoticeKind, string> = {
+	info: "notice",
+	plain: "output",
+	guidance: "next steps",
+	success: "success",
+	warning: "warning",
+	error: "error",
+};
 
 export class Notice extends Text {
 	private readonly raw: string;
@@ -28,67 +40,74 @@ export class Notice extends Text {
 	/** Re-resolve theme colors (skins switch live; text was baked at construction). */
 	refreshSkin(): void {
 		this.cached.clear();
-		// Untrusted content path (command output, recalled transcripts, MCP
-		// errors): strip terminal controls before display — same sanitizer
-		// UserTurn/ToolTurn/ApprovalCard already use (wave-3 hotfix).
-		const safe = sanitizeDisplay(this.raw);
-		const marked =
-			this.kind === "success"
-				? `✓ ${safe}`
-				: this.kind === "warning"
-					? `! ${safe}`
-					: this.kind === "error"
-						? `✗ ${safe}`
-						: safe;
-		const style = {
+		this.setText(this.style(this.markedText()));
+	}
+
+	override render(width: number): string[] {
+		const cached = this.cached.get(width);
+		if (cached) return cached;
+		const rows = this.renderFramed(width);
+		if (this.cached.size >= 4) this.cached.clear();
+		this.cached.set(width, rows);
+		return rows;
+	}
+
+	override invalidate(): void {
+		this.cached.clear();
+		super.invalidate();
+	}
+
+	private style(text: string): string {
+		return {
 			info: theme.info,
 			plain: theme.text,
 			guidance: theme.text,
 			success: theme.success,
 			warning: theme.warning,
 			error: theme.error,
-		}[this.kind];
-		this.setText(style(marked));
+		}[this.kind](text);
 	}
 
-	override render(width: number): string[] {
-		const cached = this.cached.get(width);
-		if (cached) return cached;
-		const rows = this.kind === "guidance" ? this.renderGuidance(width) : this.renderPlain(width);
-		if (this.cached.size >= 4) this.cached.clear();
-		this.cached.set(width, rows);
-		return rows;
+	/** The semantic marker and sanitized body, without ANSI styling. */
+	private markedText(): string {
+		const safe = sanitizeDisplay(this.raw);
+		if (this.kind === "success") return `✓ ${safe}`;
+		if (this.kind === "warning") return `! ${safe}`;
+		if (this.kind === "error") return `✗ ${safe}`;
+		return safe;
 	}
 
-	private renderPlain(width: number): string[] {
-		const total = Math.max(0, width);
-		const gutter = " ".repeat(transcriptInset(width));
-		return [...BLOCK_GAP, ...super.render(Math.max(1, width - gutter.length)).map((line) => truncateToWidth(gutter + line, total))];
-	}
-
-	/**
-	 * A guidance notice is an explanation, not a one-line status. Give it the
-	 * same adaptive frame as an assistant response, labeled "next steps", so
-	 * it reads as a deliberate panel instead of loose transcript text.
-	 */
-	private wrapGuidance(width: number): string[] {
-		const w = Math.max(1, width);
-		return sanitizeDisplay(this.raw)
+	private wrappedLines(width: number): string[] {
+		const text = this.markedText();
+		return text
 			.split("\n")
 			.flatMap((line) => {
+				if (!line) return [""];
 				const leading = /^\s*/.exec(line)?.[0] ?? "";
 				const body = line.slice(leading.length);
-				const pieces = wrapDisplay(body, Math.max(1, w - visibleWidth(leading)));
-				return pieces.map((piece) => leading + piece);
+				return wrapDisplay(body, Math.max(1, width - visibleWidth(leading))).map(
+					(piece) => leading + piece,
+				);
 			});
 	}
 
-	private renderGuidance(width: number): string[] {
+	private shouldFrame(): boolean {
+		// Short status lines stay compact. Generated reports, multi-line
+		// output, and guidance get the full framed surface.
+		return (
+			this.kind === "plain" ||
+			this.kind === "guidance" ||
+			this.raw.includes("\n") ||
+			this.raw.length > 120
+		);
+	}
+
+	private renderFramed(width: number): string[] {
 		const total = Math.max(0, width);
 		const budget = assistantFrameBudget(total);
-		if (!budget.framed) return this.renderPlain(width);
-		const contentWidth = Math.min(Math.max(1, budget.available), 96);
-		const rows = this.wrapGuidance(contentWidth);
+		if (!this.shouldFrame() || !budget.framed) return this.renderPlain(width);
+		const contentWidth = Math.max(1, budget.available);
+		const rows = this.wrappedLines(contentWidth).map((line) => this.style(line));
 		const geometry: ResponseGeometry = {
 			paneWidth: total,
 			widthClass: "full",
@@ -110,13 +129,21 @@ export class Notice extends Text {
 					fill: (line) => repairFill("assistantBg", theme.assistantBg(line)),
 					dim: theme.dim,
 				},
-				{ label: "next steps" },
+				{ label: LABELS[this.kind] },
 			),
 		];
 	}
 
-	override invalidate(): void {
-		this.cached.clear();
-		super.invalidate();
+	private renderPlain(width: number): string[] {
+		const total = Math.max(0, width);
+		const gutter = " ".repeat(transcriptInset(width));
+		const text = this.style(this.markedText());
+		this.setText(text);
+		return [
+			...BLOCK_GAP,
+			...super
+				.render(Math.max(1, width - gutter.length))
+				.map((line) => truncateToWidth(gutter + line, total)),
+		];
 	}
 }

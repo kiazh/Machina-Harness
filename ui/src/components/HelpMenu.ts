@@ -7,9 +7,12 @@
 //   plus searchable argument-completion keywords) and keybinding reference
 //   rows with their context ("Composer", "Workspace", "Global"). No provider
 //   calls; typing filters locally through the Menu's own filter line.
-// - Two grouped sections (Commands, Keys): an empty query shows everything,
-//   a non-empty query hides empty sections and renders the Menu's distinct
-//   no-match state — never a blank pane.
+// - Commands are grouped by task category, then Keys: an empty query shows
+//   everything, a non-empty query hides empty sections and renders the Menu's
+//   distinct no-match state - never a blank pane.
+// - The selected row's full usage and explanation are shown as wrapped detail
+//   lines above the hint, so every command's purpose is visible without
+//   widening the table.
 // - Selection is tracked by stable id (command name / source key index) by the
 //   Menu itself (value-based), so a filter change can never re-route Enter.
 // - Enter on a no-argument command hands it to the host to run through the
@@ -30,8 +33,9 @@ import {
 } from "@earendil-works/pi-tui";
 import { Menu, type MenuOptions, type MenuSectionItem } from "./Menu.ts";
 import { COMMAND_GROUPS, commandCategory } from "../commandCatalog.ts";
-import { singleLine } from "../design/text.ts";
+import { sanitizeDisplay, singleLine, wrapDisplay } from "../design/text.ts";
 import { SHORTCUT_ROWS } from "../design/shortcuts.ts";
+import { theme } from "../theme.ts";
 
 /** One searchable command row (built from `SLASH_COMMANDS`). */
 export interface HelpCommandItem {
@@ -275,7 +279,11 @@ export class HelpMenu implements Component {
 	}
 
 	render(width: number): string[] {
-		return this.menu.render(width);
+		const rows = this.menu.render(width);
+		const detail = this.detailRows(width);
+		if (!detail.length) return rows;
+		const hint = rows.pop();
+		return [...rows, ...detail, ...(hint ? [hint] : [])];
 	}
 
 	handleInput(data: string): void {
@@ -341,6 +349,35 @@ export class HelpMenu implements Component {
 		menu.onSelect = (item) => this.activateItem(item);
 		menu.onCancel = () => this.dismiss();
 		return menu;
+	}
+
+	/**
+	 * Full explanation for the selected row. The list stays compact; the
+	 * selected command's usage and description are shown as wrapped detail
+	 * lines immediately above the hint, inside the same dialog box.
+	 */
+	private detailRows(width: number): string[] {
+		const selected = this.selectedEntry();
+		let text: string;
+		if (selected?.kind === "command") {
+			const command = selected.command;
+			const usage = command?.argumentHint ? `/${command.name} ${command.argumentHint}` : `/${command?.name}`;
+			const category = command?.category ? ` · ${command.category}` : "";
+			text = `${usage}${category}\n${command?.description?.trim() || "No description available."}`;
+		} else if (selected?.kind === "key") {
+			const key = selected.key;
+			const context = key?.description ? `${key.context}: ${key.description}` : key?.context;
+			text = `${key?.label ?? "Keyboard shortcut"}\n${context ?? ""}`;
+		} else {
+			text = "Type to filter commands, or use arrow keys to browse.";
+		}
+		const lines = wrapDisplay(sanitizeDisplay(text), Math.max(1, width - 2));
+		const terminalRows = this.tui?.terminal.rows ?? 24;
+		const budget =
+			terminalRows < 15 ? 0 : terminalRows < 18 ? 1 : terminalRows < 19 ? 3 : width >= 80 ? 4 : 3;
+		return lines.slice(0, budget).map((line, index) =>
+			index === 0 ? theme.secondary(line) : theme.muted(line),
+		);
 	}
 
 	private filteredItems(prefix: string): SelectItem[] {
