@@ -1,7 +1,6 @@
 // Re-exports all feature commands and maintains the same public API.
 
 import type { SlashCommand } from "@earendil-works/pi-tui";
-import { QUICK_COMMAND_NAMES } from "../commandCatalog.ts";
 import { helpText, type ParsedCommand } from "../commands.ts";
 import type { SessionResult } from "../protocol.ts";
 import { codexCommands } from "./codex.ts";
@@ -71,7 +70,7 @@ const helpCommand: Command = {
 			return;
 		}
 		host.print(
-			`${helpText(SLASH_COMMANDS)}\n\nKeys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+N then J/K switch agents\nWorkspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · Ctrl+N then D definition, R references, M rename · N/P cycle focus · C maximize chat, E maximize editor, S restore split · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept) · /settings keyboard shortcuts to edit`,
+			`${helpText(COMMANDS)}\n\nKeys: Enter send · Shift+Enter newline · Esc stop reply · Tab complete · ↓ on empty input picks a subagent · Ctrl+C exit · Ctrl+N then J/K switch agents\nWorkspace: Ctrl+P quick open · Ctrl+S save · Ctrl+Space completion (/editor complete when macOS steals it) · Ctrl+N then D definition, R references, M rename · N/P cycle focus · C maximize chat, E maximize editor, S restore split · Ctrl+T explorer · Ctrl+W close tab (terminal may intercept) · /settings keyboard shortcuts to edit`,
 			"plain",
 		);
 	},
@@ -104,19 +103,8 @@ const COMMANDS: Command[] = [
 	...appCommands,
 ];
 
-// Name-only compatibility entries stay dispatchable but do not appear in the
-// catalog. `/settings` is the documented alias for `/config`.
-const HIDDEN_COMMANDS = new Set(["settings"]);
-
-/** Commands offered by editor autocomplete and the help catalog. */
-export const SLASH_COMMANDS: SlashCommand[] = COMMANDS.filter(
-	(command) => !HIDDEN_COMMANDS.has(command.name),
-);
-
-/** The short bare-`/` palette; typing filters the full registry. */
-export const QUICK_SLASH_COMMANDS: SlashCommand[] = QUICK_COMMAND_NAMES.map((name) =>
-	COMMANDS.find((command) => command.name === name),
-).filter((command): command is Command => command !== undefined);
+/** Commands offered by editor autocomplete. */
+export const SLASH_COMMANDS: SlashCommand[] = COMMANDS;
 
 /** Run a parsed slash command. Errors are reported through the host. */
 export async function runCommand({ name, args }: ParsedCommand, host: FeatureHost): Promise<void> {

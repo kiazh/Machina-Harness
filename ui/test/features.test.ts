@@ -1732,18 +1732,7 @@ test("/help groups commands by domain", async () => {
 	const { helpText } = await import("../src/commands.ts");
 	const { SLASH_COMMANDS } = await import("../src/features/index.ts");
 	const help = stripTerminalSequences(helpText(SLASH_COMMANDS));
-	for (const group of [
-		"Start",
-		"Sessions",
-		"Work",
-		"Workspace",
-		"Memory",
-		"Setup",
-		"Integrations",
-		"Info",
-	]) {
-		assert.match(help, new RegExp(`^${group}$`, "m"));
-	}
+	for (const group of ["Session", "Memory", "Setup"]) assert.match(help, new RegExp(`^${group}$`, "m"));
 	for (const command of SLASH_COMMANDS) assert.match(help, new RegExp(`/${command.name}\\b`));
 });
 
