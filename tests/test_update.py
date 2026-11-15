@@ -217,3 +217,11 @@ def test_update_cache_resolves_a_worktree_gitdir(tmp_path: Path) -> None:
 
     assert (git_dir / update._CHECK_MARKER).is_file()
     assert update._check_is_fresh(worktree)
+
+
+def test_update_cache_ignores_foreign_fetches(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "FETCH_HEAD").write_text("", encoding="utf-8")
+
+    assert not update._check_is_fresh(checkout)

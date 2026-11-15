@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Launch update status is no longer hidden by unrelated `git fetch` calls; only Machina's own check marker counts toward the 15-minute cache.
 - Interactive launches now show an animated update status (checking, updating, refreshing dependencies, or up to date) before the UI opens.
 - Added deterministic connected-model routing across every credentialed provider: role- and task-specific planner/supervisor/worker/utility hierarchies, single-model route copying, multi-model role selection, cost tiers, route pins, fallbacks, `machina route`/`machina routes`, and in-chat `route_explain`/`model_inventory`.
 - Made **Multi Auto** the default routing mode and a first-class `/models` (alias `/model`) choice alongside concrete models. Selecting it writes `orchestration_mode=multi_model`, `model_selection=auto`, and automatic explicit-parallel delegation; the current model remains the session/planner anchor. `/routing` is now only the explanation surface. `single_model` remains selectable from the same picker.

@@ -71,23 +71,22 @@ def _mark_checked(root: Path) -> None:
 
 
 def _check_is_fresh(root: Path) -> bool:
-    """True when a recent fetch/check already answered the update question.
+    """True when Machina's own recent check already answered the question.
 
-    ``FETCH_HEAD`` is written by the normal auto-update fetch. The dedicated
-    marker also covers failed/offline attempts and identical-version checks.
-    Worktrees store both under their resolved gitdir, not the ``.git`` file.
+    Only the dedicated marker counts. Other tools write ``FETCH_HEAD`` too,
+    and treating any fetch as a completed check hid the launch status (and
+    delayed real updates) for 15 minutes after a manual ``git fetch``.
+    Worktrees store the marker under their resolved gitdir, not the ``.git``
+    file.
     """
     git_dir = _git_dir(root)
     if git_dir is None:
         return False
-    now = time.time()
-    for candidate in (git_dir / "FETCH_HEAD", git_dir / _CHECK_MARKER):
-        try:
-            if now - candidate.stat().st_mtime < _CHECK_INTERVAL_SECONDS:
-                return True
-        except OSError:
-            continue
-    return False
+    try:
+        age = time.time() - (git_dir / _CHECK_MARKER).stat().st_mtime
+    except OSError:
+        return False
+    return age < _CHECK_INTERVAL_SECONDS
 
 
 class _UpdateSpinner:
