@@ -1,26 +1,14 @@
 # Machina
 
-**A self-hosted AI agent harness where context and memory are engineered, not improvised.**
+**A self-hosted AI agent harness where context, memory, and model routing are engineered, not improvised.**
 
-Machina is a terminal AI workspace: chat beside your code, delegate to specialist agents, automate recurring work, and return to the same conversations after a restart. It runs on your machine and your PostgreSQL database, and it can talk to cloud providers, subscription accounts, or local models.
+Machina is a terminal-first AI workspace: chat beside your code, route work across every model you have actually connected, delegate to specialist agents in parallel, automate recurring work, and return to the same conversations after a restart. It runs on your machine and your PostgreSQL database, and it can talk to cloud providers, subscription accounts, or local models.
 
-During a reply, **Enter queues steering** and **Escape interrupts**. Queued
-messages are applied at the next safe tool boundary so the agent can reconsider
-its next action. **Ctrl+N then A** or `/activity` opens pending prompts, background
-commands, and agent views. Queued text can be edited or removed before delivery.
-Slow shell commands can run with `terminal(background=true)`; the agent uses
-`terminal_job` to inspect output, wait for completion, or stop them while doing
-other work. Background commands remain visible after a turn ends, and stop when
-the gateway closes. Text steering and background job handles are session-local
-to the running gateway; delivered messages remain in the saved conversation.
+During a reply, **Enter queues steering** and **Escape interrupts**. Queued messages are applied at the next safe tool boundary so the agent can reconsider its next action. **Ctrl+N then A** or `/activity` opens pending prompts, background commands, and agent views. Queued text can be edited or removed before delivery. Slow shell commands can run with `terminal(background=true)`; the agent uses `terminal_job` to inspect output, wait for completion, or stop them while doing other work. Background commands remain visible after a turn ends, and stop when the gateway closes. Text steering and background job handles are session-local to the running gateway; delivered messages remain in the saved conversation.
 
-Running commands show **Background**, **Output**, and **Stop** controls above
-the composer. Background releases the agent to continue without rerunning the
-command; a foreground command keeps its original execution deadline. Commands
-started with `background=true` have no execution deadline. The same controls
-are available by keyboard through **Ctrl+N then A** or `/activity`.
+Running commands show **Background**, **Output**, and **Stop** controls above the composer. Background releases the agent to continue without rerunning the command; a foreground command keeps its original execution deadline. Commands started with `background=true` have no execution deadline. The same controls are available by keyboard through **Ctrl+N then A** or `/activity`.
 
-**In one sentence:** Machina keeps the model's working set small, its long-term memory governed, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
+**In one sentence:** Machina keeps the model's working set small, its long-term memory governed, its route across connected models explicit, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -67,26 +55,28 @@ and GitHub Copilot subscription sign-in in one place.
 
 See [Get started](#get-started) for manual setup, options, and Docker.
 
-> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation and operations.
+> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations.
 
-**Release status:** **1.2.14 open-source release.** Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](docs/verification/RELEASE_1.2.14.md) and the [changelog](CHANGELOG.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.14 open-source release.** `main` also carries post-release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](docs/verification/RELEASE_1.2.14.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
 - [Install](#install) — one-command setup
 - [Technical overview](#technical-overview) — the problems a harness must solve
+- [Architecture in one chart](#architecture-in-one-chart) — every subsystem in one map
 - [One session, end to end](#one-session-end-to-end) — the whole system in a worked example
 - [Feature tour](#feature-tour) — the headline capabilities
 - [Deep dive 1: Context management](#deep-dive-1-context-management) — the model's working set
 - [Deep dive 2: Memory management](#deep-dive-2-memory-management) — knowledge that survives sessions
 - [Deep dive 3: The permission kernel](#deep-dive-3-the-permission-kernel) — approvals that bind to an exact action
-- [Deep dive 4: The agent loop](#deep-dive-4-the-agent-loop) — turns, tools, delegation, and recovery
+- [Deep dive 4: The agent loop](#deep-dive-4-the-agent-loop) — turns, routing, tools, delegation, and recovery
 - [Deep dive 5: Providers and accounting](#deep-dive-5-providers-and-accounting) — one interface, many models
 - [Deep dive 6: Surfaces and integrations](#deep-dive-6-surfaces-and-integrations) — TUI, CLI, HTTP, MCP, skills, jobs
 - [Reliability and testing](#reliability-and-testing) — how the project is kept honest
 - [Conceptual blueprint](#conceptual-blueprint) — how to build a harness like this
-- [Get started](#get-started) — install and run
-- [Reference](#reference) — commands, providers, configuration, API, Docker, development
+- [Get started](#get-started) — installation, requirements, first task
+- [Reference](#reference) — commands, configuration, API, deployment, source map
+- [Troubleshooting](#troubleshooting) — common failures and where to look
 
 ## Technical overview
 
@@ -97,24 +87,189 @@ A chat API solves one problem: given a sequence of messages, return a completion
 | **What the model sees** | The context window is finite, priced per token, and degrades when it is filled with irrelevant or repetitive material. The naive approach resends the transcript until the provider truncates it. | Store typed events, build a budgeted projection for each request, compact at safe boundaries, and keep large results recoverable as artifacts. |
 | **What the system remembers** | A transcript is episodic. Durable knowledge has to survive the session that produced it, stay correctable, and remain retrievable without drowning the current instruction. | Run a memory lifecycle: extract, score, categorize, deduplicate, redact, attach provenance, optionally approve, retrieve with relevance first, and decay reversibly. |
 | **What the agent may do** | A tool call is a real action on a real machine. A tool name is not a security boundary. | Canonicalize the exact action, bind approval to a digest of every material field, revalidate at execution, and consume the approval once. |
+| **Which model does which part** | One global model ranking is either overpaying for simple work or underpowered for hard work. A hard-coded model choice also ignores what the account can actually reach today. | Build a live inventory from connected credentials, score planner/supervisor/worker/utility fit per task, and choose deterministically with cost tiers, pins, and fallbacks. |
 | **What happens when something interrupts** | Processes crash, users take time to approve, and scheduled jobs restart mid-flight. A held transaction does not survive any of that. | Use turn leases with fencing, durable jobs, resumable approvals, and explicit pause states. |
 | **How the surfaces stay consistent** | Reimplementing the loop in each surface produces four subtly different harnesses. | Keep one core behind the terminal UI, CLI, HTTP/SSE, and MCP adapters, and test parity between them. |
 
 The central design claim is that an agent harness is a **state-management system**, not a prompt-engineering system. The model is the only stateless component. Everything else exists to give it a coherent, bounded, auditable view of durable state.
 
+### Architecture in one chart
+
+This is the whole runtime on one page: surfaces, protocol edge, turn engine, context, memory, permissions, tools, connected-model routing, operations, and durable state. Follow an arrow to see which layer owns a decision; follow a dashed arrow to see events or telemetry.
+
 ```mermaid
 flowchart TB
-    UI[Terminal UI] --> GW[Gateway]
-    CLI[CLI] --> CORE[Core runtime]
-    API[HTTP API + SSE] --> CORE
-    MCP[MCP server] --> CORE
-    GW --> CORE
-    CORE <--> MODEL[Provider adapters]
-    CORE <--> DB[(PostgreSQL + pgvector)]
-    CORE --> BROKER[Permission broker]
-    BROKER --> TOOLS[Files, terminal, web, MCP tools]
-    TOOLS --> CORE
+    subgraph SURF["Surfaces and entry points"]
+        direction LR
+        TUI["Terminal UI<br/>chat, editor, explorer<br/>approval cards"]
+        CLI["CLI<br/>chat, sessions, memory<br/>jobs, routing"]
+        API["HTTP API + SSE<br/>33 REST routes<br/>approval pause"]
+        MCPS["MCP server<br/>bounded Machina tools<br/>for other agents"]
+        EXT["External harnesses<br/>OpenCode, Codex<br/>Hermes"]
+    end
+
+    subgraph EDGE["Edge protocol"]
+        direction LR
+        GW["Gateway<br/>JSON-RPC 2.0 over stdio"]
+        FEATURES["138 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
+        REST["REST + event stream<br/>sessions, jobs<br/>approvals"]
+    end
+
+    subgraph TURN["Turn engine"]
+        direction LR
+        OWN["Turn ownership<br/>lease, fencing<br/>cancellation"]
+        FACTORY["Agent factory<br/>74 definitions<br/>intersected with authority"]
+        LOOP["Agent loop<br/>stream, tools<br/>recovery, budgets"]
+        ORCH["Orchestrator<br/>delegation, parallel plan<br/>supervisor synthesis"]
+        REPAIR["Repair controller<br/>caps, evidence<br/>verify gate"]
+    end
+
+    subgraph CTX["Context: working set"]
+        direction LR
+        BUDGET["Token budget + windows<br/>per-model limits"]
+        ASM["Assembler<br/>system, skills, history"]
+        PROJ["Projection<br/>dedupe, fit<br/>disclose omissions"]
+        COMP["Compaction + continuity<br/>checkpoint, archive<br/>native tail"]
+        REDUCERS["Reducers + artifacts<br/>deterministic views<br/>paged recovery"]
+    end
+
+    subgraph MEM["Memory: durable claims"]
+        direction LR
+        MEXTRACT["Consolidator<br/>extract, watermark"]
+        MSAFE["Score, dedupe, redact<br/>provenance, quarantine"]
+        MAPPROVE["Pending queue<br/>optional approval"]
+        MRETRIEVE["Hybrid retrieval<br/>dense, sparse, rerank"]
+        MGROWTH["Growth + persona<br/>revisions, rollback"]
+    end
+
+    subgraph PERM["Permission kernel"]
+        direction LR
+        POLICY["Canonical policy<br/>effects, modes<br/>SHA-256 v2 digest"]
+        BROKER["Broker<br/>allow, deny, review"]
+        APPROVALS["Durable approvals<br/>human principal<br/>one-time use"]
+        EXECCTX["Execution context<br/>digest revalidation"]
+    end
+
+    subgraph TOOLS["Tools and integrations"]
+        direction LR
+        TOOLREG["Tool registry<br/>43 built-in tools"]
+        WORKSPACE["Workspace + LSP<br/>files, completion<br/>diagnostics"]
+        RAG["Documents + RAG<br/>ingest, embed<br/>search, rerank"]
+        SKILLS["Skills<br/>77 packages<br/>catalog-first"]
+        MCPCLIENT["MCP clients + browser<br/>stdio, HTTP, OAuth<br/>web verification"]
+    end
+
+    subgraph ROUTE["Connected-model routing"]
+        direction LR
+        INVENTORY["Model inventory<br/>credentials, role fit"]
+        ROUTER["Deterministic router<br/>planner, supervisor<br/>worker, utility"]
+        PROVIDERS["18 provider adapters<br/>cloud, subscription<br/>local"]
+        USAGE["Usage + pricing<br/>normalized tokens<br/>budgets"]
+    end
+
+    subgraph OPS["Operations"]
+        direction LR
+        SCHED["Scheduler + jobs<br/>interval, cron<br/>heartbeat, scripts"]
+        OBS["Observability<br/>audit, traces<br/>metrics, diagnostics"]
+        SECRETS["Secrets + auth<br/>.env 0600, keyring<br/>subscription OAuth"]
+    end
+
+    PG[("PostgreSQL 16 + pgvector<br/>28 tables + migrations")]
+    EXTERNAL["Cloud APIs, subscription accounts<br/>local models, remote MCP servers"]
+
+    TUI --> GW
+    CLI --> LOOP
+    API --> REST
+    MCPS --> LOOP
+    EXT <--> MCPS
+    GW --> FEATURES
+    GW --> LOOP
+    REST --> LOOP
+    GW -. events .-> TUI
+
+    LOOP --> OWN
+    OWN --> FACTORY
+    FACTORY --> LOOP
+    LOOP --> ORCH
+    ORCH --> LOOP
+    REPAIR --> LOOP
+
+    LOOP --> BUDGET
+    BUDGET --> ASM
+    ASM --> PROJ
+    PROJ --> LOOP
+    ASM --> COMP
+    COMP --> ASM
+    LOOP --> REDUCERS
+    ASM --> MRETRIEVE
+    ASM --> RAG
+    ASM --> SKILLS
+
+    MEXTRACT --> MSAFE
+    MSAFE --> MAPPROVE
+    MAPPROVE --> MRETRIEVE
+    MSAFE --> MRETRIEVE
+    MRETRIEVE --> MGROWTH
+    MRETRIEVE --> ASM
+
+    LOOP --> POLICY
+    ORCH --> POLICY
+    POLICY --> BROKER
+    BROKER -- allow --> EXECCTX
+    BROKER -- review --> APPROVALS
+    APPROVALS --> EXECCTX
+    EXECCTX --> TOOLREG
+
+    TOOLREG --> WORKSPACE
+    TOOLREG --> RAG
+    TOOLREG --> SKILLS
+    TOOLREG --> MCPCLIENT
+    TOOLREG --> REDUCERS
+
+    LOOP --> ROUTER
+    ORCH --> ROUTER
+    INVENTORY --> ROUTER
+    ROUTER --> PROVIDERS
+    PROVIDERS --> USAGE
+    SECRETS --> PROVIDERS
+    PROVIDERS --> EXTERNAL
+    MCPCLIENT --> EXTERNAL
+
+    SCHED --> LOOP
+    LOOP -. stages .-> OBS
+    BROKER -. decisions .-> OBS
+    PROVIDERS -. latency .-> OBS
+
+    CTX --> PG
+    MEM --> PG
+    PERM --> PG
+    TOOLS --> PG
+    ROUTE --> PG
+    OPS --> PG
 ```
+
+| Layer | What it owns | Where it lives |
+|---|---|---|
+| **Surfaces** | Transport, interaction, and approval presentation | [`ui/src`](ui/src), [`cli`](machina/cli), [`api`](machina/api), [`mcp_server`](machina/mcp_server), [`interop.py`](machina/interop.py) |
+| **Edge** | JSON-RPC methods, events, REST routes, and the protocol contract | [`gateway`](machina/gateway), [`protocol/events.json`](machina/protocol/events.json), [`api/routes`](machina/api/routes) |
+| **Turn engine** | Ownership, agent construction, the model loop, delegation, and repair | [`core/turns.py`](machina/core/turns.py), [`core/agent_factory.py`](machina/core/agent_factory.py), [`core/turn_engine.py`](machina/core/turn_engine.py), [`core/orchestrator.py`](machina/core/orchestrator.py), [`core/orchestration`](machina/core/orchestration), [`core/task_run.py`](machina/core/task_run.py) |
+| **Context** | Token budget, assembly, projection, compaction, continuity, artifacts, reducers | [`core/assembler.py`](machina/core/assembler.py), [`core/context.py`](machina/core/context.py), [`core/compression.py`](machina/core/compression.py), [`core/continuity.py`](machina/core/continuity.py), [`core/projection.py`](machina/core/projection.py), [`core/reducers.py`](machina/core/reducers.py), [`core/artifacts.py`](machina/core/artifacts.py) |
+| **Memory** | Extraction, safety, approval, retrieval, digest, growth | [`memory/`](machina/memory) |
+| **Permission kernel** | Canonicalization, policy, approvals, execution revalidation | [`permissions/`](machina/permissions), [`core/approval_resume.py`](machina/core/approval_resume.py) |
+| **Tools** | Built-in tools, workspace/LSP, RAG, skills, MCP, browser verification | [`tools/`](machina/tools), [`workspace/`](machina/workspace), [`rag/`](machina/rag), [`skills/`](machina/skills), [`connectors/`](machina/connectors) |
+| **Routing** | Connected-model inventory, role selection, provider adapters, usage | [`core/routing`](machina/core/routing), [`core/provider`](machina/core/provider), [`core/usage.py`](machina/core/usage.py), [`core/pricing.py`](machina/core/pricing.py) |
+| **Operations** | Scheduling, audit, traces, metrics, secrets, subscription auth | [`core/scheduler.py`](machina/core/scheduler.py), [`observability/`](machina/observability), [`security/`](machina/security) |
+| **Durable state** | PostgreSQL schema, pgvector indexes, and additive migrations | [`db/`](machina/db) |
+
+**What persists.** The database is not a cache. It is the source of truth for the graph of evidence:
+
+| Group | Tables |
+|---|---|
+| **Session and context** | `sessions`, `context_chunks`, `context_archive`, `tool_artifacts`, `session_image_context` |
+| **Memory and identity** | `memories`, `pending_memories`, `memory_provenance`, `shared_memory_deliveries`, `persona_memories`, `user_profiles`, `agent_beliefs`, `agent_belief_history` |
+| **Agents and learning** | `agents`, `agent_messages`, `learning_reviews`, `agent_growth`, `growth_episodes`, `rsi_profiles`, `rsi_revisions`, `rsi_episodes` |
+| **Authority and audit** | `permission_grants`, `permission_approvals`, `audit_events` |
+| **Work and accounting** | `jobs`, `llm_usage`, `semantic_cache_entries`, `optimization_shadow_events` |
 
 ### The two core systems
 
@@ -122,14 +277,14 @@ flowchart TB
 
 **Memory: claims versus facts.** A memory is not a transcript line and not a document. It is a durable claim extracted from experience, with a category, an importance, a source, and a history of use. The lifecycle is extraction, scoring, deduplication, redaction, provenance, optional approval, hybrid retrieval, reinforcement, and decay. The design assumes memories can be wrong. That is why inspection, correction, forgetting, and approval exist. The goal is not to remember everything; it is to keep the useful subset trustworthy and retrievable.
 
-Both systems share the same discipline: **store the original, project a bounded view, and be explicit about what was lost.** Context applies that discipline to the conversation; memory applies it to knowledge.
+Both systems share the same discipline: **store the original, project a bounded view, and be explicit about what was lost.** Context applies that discipline to the conversation; memory applies it to knowledge. Routing applies the same honesty to model choice: show the inventory, the role fit, the cost estimate, and the reason.
 
 ### Engineering map
 
 | Area | Where to start | Why it is hard |
 |---|---|---|
 | **Distributed systems** | [Turn ownership](#turn-ownership-and-cancellation), [jobs](machina/core/scheduler.py), [approval resume](machina/core/approval_resume.py) | Exactly-once effects across crashes, restarts, and human waits; leases, fencing, and cancellation-safe cleanup |
-| **ML / inference infrastructure** | [Context](#deep-dive-1-context-management), [memory](#deep-dive-2-memory-management), [usage ledger](docs/TOKEN_EFFICIENCY.md) | Bounded prompts with honest recovery, hybrid retrieval, token accounting that distinguishes missing data from zero |
+| **ML / inference infrastructure** | [Context](#deep-dive-1-context-management), [memory](#deep-dive-2-memory-management), [routing](#connected-model-routing), [usage ledger](docs/TOKEN_EFFICIENCY.md) | Bounded prompts with honest recovery, hybrid retrieval, role-aware model selection, token accounting that distinguishes missing data from zero |
 | **Security / systems** | [Permission kernel](#deep-dive-3-the-permission-kernel), [SECURITY.md](SECURITY.md) | TOCTOU-resistant approvals, canonical digests, confused-deputy resistance, redaction boundaries |
 | **Product / UX** | [Surfaces](#surfaces), [workspace](docs/design/WORKSPACE.md) | The same semantics across a terminal UI, a CLI, HTTP/SSE, and an MCP server |
 | **Testing / rigor** | [Reliability](#reliability-and-testing) | 6,400+ backend tests, real-PostgreSQL suites, architecture ratchets, and performance gates |
@@ -138,12 +293,14 @@ Both systems share the same discipline: **store the original, project a bounded 
 
 | Metric | This checkout |
 |---|---|
-| Python backend | ~106,000 lines across 319 files |
-| Backend tests | 6,514 passed, 8 skipped (DevTools CI snapshot, real PostgreSQL) |
-| Providers | 17 built-in connection types, including custom OpenAI-compatible endpoints |
-| Bundled skills | 77 `SKILL.md` packages, plus learned and installed skills |
-| Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client |
-| CLI cold start | `machina version` measured at ~0.6–1.5 seconds depending on platform and process cache |
+| Python backend | ~124,000 lines across 336 files |
+| Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
+| Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
+| Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
+| Interfaces | 43 built-in tools; 39 CLI commands; 138 gateway methods; 33 REST routes |
+| Storage | PostgreSQL 16 + pgvector, 28 tables |
+| Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
+| CLI cold start | `machina version` measured at ~0.5 s on this checkout with a warm filesystem cache; the first run after install is slower |
 
 Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](CHANGELOG.md); historical release-gate evidence is in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
 
@@ -152,15 +309,17 @@ Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](
 Here is what the machinery feels like in practice. Suppose you ask Machina to fix a failing test suite.
 
 1. **The turn starts with ownership.** Machina claims the session with a lease so two surfaces cannot write the same conversation at once. It builds an agent from its definition (role, tools, model) intersected with the session's authority.
-2. **The prompt is assembled, not dumped.** The model receives the system instructions, two relevant skills, the recent conversation, a few high-relevance memories, and selected document excerpts. Everything is fitted to the model's input budget before the request is sent.
-3. **A big tool result does not flood the window.** `pytest` produces 1.2 MB of output. Machina stores the verbatim result as an artifact first, then publishes a deterministic reducer view: the pass/fail counts, the failing test names, and the decisive stack-trace lines, plus an `artifact_read` handle. The model can page or search the original later instead of re-running the tests.
-4. **The context crosses its threshold.** At a safe turn boundary, automatic compaction archives the replaced chunks and writes a checkpoint: objective, expected artifact, constraints, findings, open questions, and next action. Recent chunks stay native; the summary anchors the older work. The next request targets a much smaller working set.
-5. **A risky action pauses.** The agent asks to edit a file outside the workspace. The permission broker canonicalizes the action, hashes every material field, and creates a durable approval. The terminal UI shows the exact arguments, working directory, backend, timeout, and a redacted content preview. You approve it once. Execution revalidates the digest and consumes the approval.
-6. **The turn ends with accounting.** Usage is recorded by provider, model, purpose, session, and agent. Input, cached input, cache writes, and output are normalized. Unknown prices stay unknown rather than becoming zero.
-7. **Memory is consolidated.** In the background, an extractor reads the new conversation chunks and proposes durable memories: a decision ("the project uses PostgreSQL because of pgvector"), a preference, a fact. Candidates are scored, deduplicated, redacted, given provenance, and stored.
-8. **A week later, a new session asks "which database did we choose?"** The transcript is not replayed. Hybrid retrieval finds the decision memory, relevance-first, and adds it to the prompt with its provenance. The answer survives the session that produced it.
+2. **The route is chosen from what you actually have.** In the default Multi Auto mode, the connected-model inventory supplies a planner, a supervisor, and a bounded pool of workers. The currently selected model remains the session anchor. No model call is made to choose a model; the router explains its choice, estimated cost, fallbacks, and warnings.
+3. **The prompt is assembled, not dumped.** The model receives the system instructions, two relevant skills, the recent conversation, a few high-relevance memories, and selected document excerpts. Everything is fitted to the model's input budget before the request is sent.
+4. **A big tool result does not flood the window.** `pytest` produces 1.2 MB of output. Machina stores the verbatim result as an artifact first, then publishes a deterministic reducer view: the pass/fail counts, the failing test names, and the decisive stack-trace lines, plus an `artifact_read` handle. The model can page or search the original later instead of re-running the tests.
+5. **The context crosses its threshold.** At a safe turn boundary, automatic compaction archives the replaced chunks and writes a checkpoint: objective, expected artifact, constraints, findings, open questions, and next action. Recent chunks stay native; the summary anchors the older work. The next request targets a much smaller working set.
+6. **A risky action pauses.** The agent asks to edit a file outside the workspace. The permission broker canonicalizes the action, hashes every material field, and creates a durable approval. The terminal UI shows the exact arguments, working directory, backend, timeout, and a redacted content preview. You approve it once. Execution revalidates the digest and consumes the approval.
+7. **Independent work fans out.** If the request names parallel tracks, the orchestrator plans them once, validates the dependency graph, runs bounded worker sessions, and has the supervisor synthesize their reports. A repair task gets the narrow controller: phase tracking, evidence checks, turn and token caps, repeated-loop stops, and a final verification gate. Web artifacts can be checked in a real headless browser rather than by reading the HTML.
+8. **The turn ends with accounting.** Usage is recorded by provider, model, purpose, session, and agent. Input, cached input, cache writes, and output are normalized. Unknown prices stay unknown rather than becoming zero.
+9. **Memory is consolidated.** In the background, an extractor reads the new conversation chunks and proposes durable memories: a decision ("the project uses PostgreSQL because of pgvector"), a preference, a fact. Candidates are scored, deduplicated, redacted, given provenance, and stored.
+10. **A week later, a new session asks "which database did we choose?"** The transcript is not replayed. Hybrid retrieval finds the decision memory, relevance-first, and adds it to the prompt with its provenance. The answer survives the session that produced it.
 
-That is the whole thesis: **the transcript is an event log, the prompt is a projection, and memory is a separate, governed lifecycle.**
+That is the whole thesis: **the transcript is an event log, the prompt is a projection, memory is a separate governed lifecycle, and model choice is an explicit routing decision.**
 
 ## Feature tour
 
@@ -169,15 +328,18 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Context management** | Long tasks stay coherent inside a finite window; large outputs remain recoverable | [Context](#deep-dive-1-context-management) |
 | **Long-term memory** | Preferences, decisions, and lessons carry across sessions without replaying history; multi-fact queries use a bounded query-conditioned digest | [Memory](#deep-dive-2-memory-management), [digest](docs/MEMORY_DIGEST.md) |
 | **Permission kernel** | Sensitive actions are approved once, for an exact canonical action, and revalidated | [Permissions](#deep-dive-3-the-permission-kernel) |
-| **Agent orchestration** | Main agents delegate to specialists with inherited authority and separate accounting | [Agent loop](#deep-dive-4-the-agent-loop) |
+| **Connected-model routing** | A live inventory of credentialed models, role-specific fit, deterministic selection, cost tiers, pins, and fallbacks | [Routing](#connected-model-routing) |
+| **Parallel delegation** | Explicit parallel requests become a validated dependency plan with bounded workers and a supervisor synthesis | [Agent loop](#routing-and-parallel-delegation) |
 | **Repair controller** | Narrow tool catalog, phase/evidence tracking, turn and token caps, repeated-loop stops, and a final verification gate | [Controller](docs/TASK_RUN_CONTROLLER.md) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
 | **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
+| **Harness interop** | Let OpenCode, Codex, or Hermes use Machina as an MCP server, or delegate Machina work to an installed external harness | [Surfaces](#harness-interop) |
 | **Durable automation** | Interval, cron, heartbeat, and operator-approved script jobs that survive restarts | [Surfaces](#jobs-that-survive-restarts) |
+| **Workspace and LSP** | Editor, tabs, explorer, Quick Open, diagnostics, and optional language servers | [Surfaces](#workspace-and-language-intelligence) |
 | **Observability** | Audit events, traces, metrics, usage accounting, and redaction at the boundary | [Reliability](#reliability-and-testing) |
 
-Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, artifacts, memory, skills, delegation, and MCP. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
+Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, browser verification, artifacts, memory, skills, delegation, routing explanation, and MCP. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
 
 ## Deep dive 1: Context management
 
@@ -461,6 +623,8 @@ Memory retrieval is hybrid:
 
 The ranking contract is explicit: **relevance is primary**. Keyword matches are scored as a fraction of the query terms. Catalog or echo content (a memory that merely repeats a tool description, for example) is demoted, never silently dropped. Recency, importance, and a forgetting-curve strength only break ties. This stops a highly "important" but irrelevant memory from crowding out the instruction the user just gave.
 
+For multi-fact questions, a bounded **query-conditioned digest** can select up to six relevant facts and render a hard-limited text block (`memory_digest_max_chars`, default 1,200) instead of dumping every candidate. It is a reading aid, not a second memory store; the provenance remains on the underlying rows.
+
 If no embedder is configured, retrieval degrades honestly to keyword-only and reports that mode. An empty result and a total retrieval outage are different states; the latter raises a typed error instead of claiming "no relevant memory exists."
 
 ### 5. Reinforcement and forgetting
@@ -469,7 +633,7 @@ Each memory tracks `importance`, `base_strength`, `last_accessed`, and `access_c
 
 ### 6. Growth and personality are bounded
 
-Machina also stores agent-owned preferences and lessons ("growth"). These are not model weights and they do not grant authority. They are bounded notes with revisions, feedback, and rollback. The related RSI feature adjusts saved strategy guidance and retrieval policy from recorded outcomes; it does not retrain the model, change tool permissions, or make an agent more powerful. `/growth` exposes the state; `rollback` restores an earlier revision.
+Machina also stores agent-owned preferences and lessons ("growth"). These are not model weights and they do not grant authority. They are bounded notes with revisions, feedback, and rollback. The related RSI feature adjusts saved strategy guidance and retrieval policy from recorded outcomes; it does not retrain the model, change tool permissions, or make an agent more powerful. `/growth` exposes the state; `rollback` restores an earlier revision. SoulSpec identities are stored as reviewed configuration, not as hidden prompt mutations.
 
 ### 7. What memory is not
 
@@ -504,7 +668,7 @@ The lifecycle is a sequence of filters. Each one removes a different kind of err
 
 The result is not a database of everything the user ever said. It is a small, reviewable set of claims that can be retrieved when relevant and corrected when wrong.
 
-Read the implementation in [`memory/consolidator.py`](machina/memory/consolidator.py), [`memory/store.py`](machina/memory/store.py), [`memory/retriever.py`](machina/memory/retriever.py), [`memory/approval.py`](machina/memory/approval.py), and [`memory/growth.py`](machina/memory/growth.py).
+Read the implementation in [`memory/consolidator.py`](machina/memory/consolidator.py), [`memory/store.py`](machina/memory/store.py), [`memory/retriever.py`](machina/memory/retriever.py), [`memory/digest.py`](machina/memory/digest.py), [`memory/approval.py`](machina/memory/approval.py), and [`memory/growth.py`](machina/memory/growth.py).
 
 ## Deep dive 3: The permission kernel
 
@@ -633,6 +797,7 @@ Read [`permissions/policy.py`](machina/permissions/policy.py), [`permissions/bro
 
 ```text
 claim session lease
+  choose a route from the connected-model inventory
   build agent = definition ∩ session authority
   assemble prompt = system + skills + recent context + memory + RAG
   loop:
@@ -663,12 +828,30 @@ Cancellation is treated as a first-class outcome, not a failure. Expected `Cance
 
 A subagent is not a second copy of the main agent. It is a child session with:
 
-- its own model/provider choice from the definition,
+- its own model/provider choice from the definition or the route plan,
 - tools intersected with the parent's authority (`cap_child_authority`),
 - its own usage accounting,
 - the same broker, coordinator, and cancellation path.
 
 The parent can inspect the child's result without merging every child message into its own transcript. Delegation can run sequentially or in parallel. Creating a subagent does not bypass a budget, an approval, or a tool restriction.
+
+### Routing and parallel delegation
+
+Routing is a control-plane decision made before the model call, not a prompt suggestion.
+
+- **Inventory.** `machina routes` builds the live catalog from every provider that currently has a usable credential or signed-in subscription. Each model gets planner/supervisor/worker/utility fit scores from metadata, capabilities, context window, cost, and observed availability.
+- **Deterministic choice.** `machina route "<prompt>" --mode multi_model --workers 4` classifies the task, applies the cost tier, honors definition and session pins, and prints the planner, supervisor, worker routes, fallbacks, estimated cost, and warnings. No model is called to choose a route.
+- **Multi Auto is the default.** `/models` (alias `/model`) lists **Multi Auto** alongside concrete models. It sets `orchestration_mode=multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
+- **Bounded workers.** `worker_count=0` auto-sizes; values up to 64 are accepted and capped by `max_delegate_concurrency` (default 8). At most `max_worker_routes` (default 4) distinct worker routes are reused per plan to preserve cache and review coherence.
+- **Transports.** `worker_transport=native|proxy|mcp` selects in-process delegation, an OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
+- **Explicit parallel plans.** An explicit "in parallel" request in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) is planned once and JSON-validated for cycles, duplicate artifact ownership, and task count. A dependency-aware scheduler runs the first wave up to the worker limit. The supervisor route performs a bounded final synthesis, falling back to the deterministic summary if it fails. Workers paused for approval are reported as awaiting approval, never as completed.
+- **Truthful roles.** Text-only `opencode_session` routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat; `/routing <prompt>` is the explanation surface, not the switch.
+
+The plan is only as good as the inventory. A provider that is configured but has no usable credential is reported as a warning, not silently treated as available. A model ID is a request, not a guarantee of account access or tool support.
+
+### Repair tasks are narrower on purpose
+
+A failing test or a broken build is not an open-ended feature request. The TaskRun controller tracks the repair phase, the evidence gathered, the number of repeated failures, and the remaining turn and token budget. It may switch to a lean tool catalog, nudge the model to page a large artifact, require a final verification gate, or stop a loop that keeps retrying the same failing action. The controller does not grant authority; it constrains an already-authorized turn.
 
 ### Post-turn maintenance
 
@@ -682,6 +865,8 @@ When the answer is complete, the turn releases its lease and then performs enabl
 | Fencing token | A stale worker committing after losing ownership |
 | Cancellation as an outcome | False failures and leaked leases |
 | Bounded loops | Runaway tool calls and unbounded spend |
+| Deterministic route | A global ranking that ignores credentials, role fit, or cost |
+| Validated parallel plan | Cycles, duplicate ownership, and unbounded fan-out |
 | Post-commit maintenance | Maintenance blocking the next user turn |
 | Child authority cap | Delegation becoming a privilege escalation |
 
@@ -692,8 +877,9 @@ The loop is a state machine, not a while-loop around a model call. Each transiti
 1. **One owner per session.** Use a lease with a fencing token, not an in-process lock.
 2. **Build the agent from data.** Role, tools, model, and limits live in a definition; intersect with session authority.
 3. **Make every tool call a transaction.** Decide, execute, record, and consume separately.
-4. **Bound every loop.** Tokens, requests, wall time, approval time, and tool output all need ceilings.
-5. **Release before maintenance.** The user sees the answer; compaction and memory extraction happen after.
+4. **Route before you call.** Choose from the models that are actually reachable; explain the choice; never hide a fallback.
+5. **Bound every loop.** Tokens, requests, wall time, approval time, worker count, and tool output all need ceilings.
+6. **Release before maintenance.** The user sees the answer; compaction and memory extraction happen after.
 
 The difference between a demo and a harness is here: the demo handles the successful path; the harness defines what happens on the other paths.
 
@@ -711,24 +897,24 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 |---|---|---|
 | `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` |
 | `openai` | `OPENAI_API_KEY` | `gpt-6.1-sol` |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022` |
 | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
 | `xai` | `XAI_API_KEY` | `grok-4.7` |
 | `groq` | `GROQ_API_KEY` | `qwen/qwen3.8-27b` |
-| `together` | `TOGETHER_API_KEY` | `deepseek-ai/DeepSeek-V4.1-Flash` |
+| `together` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
 | `mistral` | `MISTRAL_API_KEY` | `mistral-large-4` |
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `opencode_session` | Local OpenCode background service; no API key | Text-only bridge for the account's available OpenCode models, including free ones; `machina opencode-proxy` exposes the same bridge as an OpenAI-compatible loopback URL |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
-| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start, `/auth kiro usage` for credits, fallback via `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full 22-alias catalog |
-| `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog (GPT-6.1 Sol, GPT-6 Luna; no GPT-6.1 Luna exists) |
+| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start, `/auth kiro usage` for credits, fallback via `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full alias catalog |
+| `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog |
 | `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
 | `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
 | `ollama` | A running Ollama service | `llama3.1`; the model must be installed |
 | `custom` | `CUSTOM_BASE_URL`, optional `CUSTOM_API_KEY` | Supply your server's model ID |
 
-Model IDs are application defaults, not a guarantee of account access, pricing, or tool support.
+Model IDs are application defaults, not a guarantee of account access, pricing, or tool support. User-added named providers use the same OpenAI-compatible transport and are stored outside the fixed table.
 
 ### Connected-model routing
 
@@ -737,14 +923,14 @@ Machina can route work across every model you have actually connected rather tha
 - **Multi Auto is the default** and is a first-class choice in `/models`/`/model`, listed alongside the concrete model rows. It sets `multi_model` + `model_selection=auto`; the selected model remains the session/planner anchor while delegated and parallel work is routed automatically. `orchestration_mode=single_model` copies the effective session route to every role; set `single_model_auto_parallel=true` to fan an explicit parallel request out on that same route.
 - `model_selection=auto|pinned` controls whether the router may choose or must honor an explicit route. A definition-level provider/model pin always wins.
 - `worker_count=0` auto-sizes; values up to 64 are accepted. Concurrency is capped by `max_delegate_concurrency` (default 8), and at most `max_worker_routes` distinct worker routes are reused per plan.
+- `cost_tier=low|balanced|high` shifts the ranking without changing the task classification. Route pins and fallbacks are explicit in the explanation.
 - `worker_transport=native|proxy|mcp` selects in-process delegation, the OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
 - Explicit "in parallel" requests in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) are planned and executed by the harness, not left to whether the model happens to emit N `delegate` calls. Plans are JSON-validated, dependency-aware, and reject duplicate artifact ownership or cycles. The selected supervisor route performs a bounded final synthesis of the worker reports, falling back to the deterministic summary if it fails.
 - Text-only OpenCode session routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat.
 - `machina usage` reports prompt-cache support separately from counters. Kiro reports `unsupported` instead of a misleading zero-read miss; the OpenCode session bridge reports its real cache read/write categories.
 - For web artifacts, `web_verify` starts a loopback static server and runs a real headless Chrome/Edge check (DOM, clicks, storage, console/page errors, viewport). Install with `pip install 'Machina[browser]'`; an existing Chrome or Edge channel is used before any download.
 
-The full modes, transport, free-OpenCode, and verification contract is in
-[docs/ROUTING.md](docs/ROUTING.md).
+The full modes, transport, free-OpenCode, and verification contract is in [docs/ROUTING.md](docs/ROUTING.md).
 
 `kiro` is a community interoperability path, not an AWS-supported provider. Kiro authenticates upstream with your account login, but its terms prohibit third-party harnesses that route requests outside its native interfaces. Machina does not implement the login or bundle the proxy: run a reviewed local gateway such as [jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) after `kiro-cli login`, and review the risks before using it. The proxy's local password is not a Kiro API key; it defaults to the gateway's documented `dummy-local-only` value and can be overridden with `KIRO_API_KEY`.
 
@@ -777,12 +963,13 @@ Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `hi
 | Surface | Transport | Why it exists |
 |---|---|---|
 | **Terminal UI** | JSON-RPC over stdio to the gateway | Interactive work beside the code, streaming, approval cards, editor, explorer |
-| **CLI** | Direct calls into the shared services | Scripting, headless work, automation, recovery |
+| **CLI** | Direct calls into the shared services | Scripting, headless work, automation, recovery, route inspection |
 | **HTTP API** | REST + server-sent events | Integrations, dashboards, remote clients |
 | **MCP server** | Model Context Protocol | Let other assistants use a bounded slice of Machina |
 | **MCP client** | stdio or HTTP | Bring external tools into Machina's catalog |
+| **External harnesses** | MCP registration and delegated child runs | Let OpenCode, Codex, or Hermes orchestrate durable Machina work |
 
-Every surface shares the same agent factory, turn coordinator, permission broker, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
+Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
 
 The mental model is an **adapter over shared semantics**, not an implementation of the harness. The surfaces differ in transport, authentication, and interaction style. They must not differ in what a turn means, what an approval authorizes, or what a usage record contains. The test of a surface is parity: pause the same action in two surfaces and the approval identity should be the same.
 
@@ -792,7 +979,7 @@ A skill is an instruction package, usually a `SKILL.md` file. It is guidance, no
 
 The context-window problem with skills is obvious: a large catalog can consume more prompt than the task. Machina keeps a compact catalog in the prompt and loads the body only when needed (`skill_read`). Stage-aware loading means a planning stage gets planning instructions and prerequisites, not every later implementation or review section. Routing uses metadata (task types, languages, tools, exclusions, sections) and deterministic ranking, so matching does not require another model call. Malformed metadata is rejected or ignored; instructions can never expand authority.
 
-Learning new skills after turns is opt-in (`learning_review_enabled`, default `false`). When enabled, proposals can be auto-applied under a per-agent daily cap or staged for review. Published learned skills have revisions and a revert path.
+The checkout bundles 77 `SKILL.md` packages, including the curated ECC set. Learning new skills after turns is opt-in (`learning_review_enabled`, default `false`). When enabled, proposals can be auto-applied under a per-agent daily cap or staged for review. Published learned skills have revisions and a revert path.
 
 ### MCP: catalog-first tool use
 
@@ -805,6 +992,15 @@ MCP tools are not injected wholesale into every request. The agent:
 This keeps remote schemas out of prompts until they are relevant. Remote tool calls still go through ordinary approvals. Server-provided descriptions and results are data, never authority. A namespaced allowlist entry such as `firecrawl__firecrawl_scrape` is matched against both the remote name and the namespaced tool name, so "allow this read-only scrape" actually means what it says.
 
 The other direction is `machina harnesses`: register Machina's MCP server with supported external assistants. It exposes status, session creation, a bounded text chat task, agent listing, and single/bounded-batch child delegation. That lets OpenCode or Codex act as the orchestrator while Machina runs durable specialist subagents; it is not a remote copy of every UI feature.
+
+### Harness interop
+
+There are two directions, and they are deliberately separate:
+
+- **Machina as the server.** `machina harnesses setup` (or `/harnesses`) detects supported OpenCode, Codex, and Hermes installations and registers Machina's MCP server; `enable` and `disable` manage one harness at a time. The external harness can list agents, create a session, run a bounded chat turn, or delegate a task back into Machina's durable runtime.
+- **Machina as the delegator.** `worker_transport=mcp` and `harness_delegate` send a bounded task to an installed harness, then report that task's route and status. This is for work that genuinely belongs in another harness, not a way to bypass Machina's permissions or accounting.
+
+`machina interop` exposes the same detection and registration surface for scripts. Detection is read-only and cached; registration edits only the selected harness's own configuration.
 
 ### Jobs that survive restarts
 
@@ -868,7 +1064,7 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 
 ### The test strategy
 
-The backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). It runs against a real PostgreSQL test database, not only mocks. The latest recorded CI run passes **6,514 tests with 8 skipped**; this is a release snapshot, not a promise that every local platform collects the same set. The terminal UI has its own TypeScript checks and Node tests.
+The full backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools); this checkout also carries focused tests in [`tests/`](tests/). The DevTools suite runs against a real PostgreSQL test database, not only mocks. The latest recorded CI run (2026-10-26) passed **6,487 tests with 27 skipped and 8 deselected**; a separate workflow-trial selection passed **8**. This is a release snapshot, not a promise that every local platform collects the same set. The terminal UI has its own TypeScript checks and Node tests.
 
 The suite is not just feature coverage. It includes:
 
@@ -884,6 +1080,7 @@ The suite is not just feature coverage. It includes:
 - **Host execution is not a sandbox.** The Docker sandbox is a specific execution backend. A workspace being open does not sandbox language servers or host commands.
 - **Summaries are lossy.** Artifacts and archives make recovery honest where enabled; they do not make compaction lossless.
 - **Memory can be wrong.** Inspection, correction, forgetting, provenance, and optional approval exist for that reason.
+- **Routing is only as good as the inventory.** A configured provider without a usable credential is reported, not assumed. Model access and pricing can change between runs.
 - **Embeddings and reranking are optional.** Search is keyword-only by default and reports its degraded mode rather than fabricating vectors.
 - **Prompt caching is opt-in.** The project does not claim savings it has not measured.
 
@@ -900,7 +1097,8 @@ Write these down before choosing a database, a framework, or a model provider:
 3. Nothing is published as recoverable before the original is stored.
 4. An approval binds to an exact canonical action, not a tool name.
 5. A turn has exactly one owner.
-6. Every optional subsystem degrades honestly and never fabricates success.
+6. A route is chosen from reachable models, and the choice is explainable.
+7. Every optional subsystem degrades honestly and never fabricates success.
 
 These are not implementation details. They are the rules that make failures diagnosable. If you break one, the symptom appears much later as "the model forgot" or "the agent did something unexpected," and there is no clean place to look. The invariants turn vague misbehavior into a specific violated contract.
 
@@ -1018,7 +1216,7 @@ This prevents "approve the tool, execute something else." It also produces a nat
 
 ### 9. Keep one core behind every surface
 
-A terminal UI, a CLI, an HTTP API, and an MCP server have different transports and different user experiences. They should not have different semantics. Put the agent factory, turn coordinator, permission broker, and accounting in one core. Make each surface an adapter:
+A terminal UI, a CLI, an HTTP API, and an MCP server have different transports and different user experiences. They should not have different semantics. Put the agent factory, turn coordinator, permission broker, routing inventory, and accounting in one core. Make each surface an adapter:
 
 - the terminal UI renders events and approval cards;
 - the CLI exposes headless commands and exit codes;
@@ -1027,7 +1225,20 @@ A terminal UI, a CLI, an HTTP API, and an MCP server have different transports a
 
 Then test parity: the same pause must produce the same approval identity, the same usage record, and the same resume behavior on every surface.
 
-### 10. Operate it like a system
+### 10. Route across the models you actually have
+
+Model selection is an inventory problem before it is a preference problem. A production harness should:
+
+- **Build from credentials.** Enumerate only the providers that can actually serve a request right now. Treat configured-but-unusable providers as warnings, not capacity.
+- **Score roles separately.** A model that plans well is not automatically the best worker, and a cheap utility model is not a supervisor. Keep planner, supervisor, worker, and utility profiles distinct.
+- **Classify the task.** Debugging, coding, research, review, and simple chat stress different capabilities and context sizes.
+- **Make cost explicit.** Apply a named cost tier, estimate from the same price table used for accounting, and show the estimate before the run.
+- **Honor pins and explain fallbacks.** A definition or session pin wins. If the preferred route is unavailable, say which fallback was used and why.
+- **Validate the fan-out.** Parallel work needs a dependency graph, bounded worker count, route reuse, and a synthesis step. Duplicate artifact ownership and cycles are planning errors, not runtime surprises.
+
+The route is part of the audit trail. "The model did it" is not an explanation; "this planner, these workers, this cost tier, and this fallback" is.
+
+### 11. Operate it like a system
 
 The least visible layer is the one that keeps the rest honest:
 
@@ -1044,7 +1255,8 @@ The least visible layer is the one that keeps the rest honest:
 | Context | Last N messages | Typed chunks, token budget, projection, compaction, continuity, artifacts |
 | Memory | One `notes` table | Extraction, scoring, dedupe, provenance, approval, hybrid retrieval, decay |
 | Permissions | Yes/no dialog | Canonical digest, durable approval, revalidation, one-time consumption |
-| Concurrency | One process, one lock | Leases, fencing, cancellation-safe cleanup |
+| Routing | One hard-coded model | Credential-aware inventory, role fit, cost tiers, pins, fallbacks, plan validation |
+| Concurrency | One process, one lock | Leases, fencing, cancellation-safe cleanup, bounded workers |
 | Surfaces | CLI | TUI, CLI, HTTP/SSE, MCP with parity tests |
 | Reliability | Try/except | Failure injection, real-database tests, architecture and performance ratchets |
 
@@ -1056,6 +1268,7 @@ You can build these in a different order, but the dependency structure is real:
 - Memory without provenance and review is a rumor engine.
 - Permissions without canonicalization are a dialog, not a control.
 - A turn loop without ownership is a race.
+- Routing without credential truth is a fantasy ranking.
 - Surface parity without a shared core is four implementations waiting to diverge.
 
 ## Get started
@@ -1069,7 +1282,7 @@ You can build these in a different order, but the dependency structure is real:
 | Node.js 22.19+ and npm | Terminal UI |
 | An AI provider or local model | Responses and agent tools |
 
-The installer supports macOS, Linux, and Git Bash on Windows. It can provision a local database with Docker, or Homebrew on macOS. The terminal UI needs an interactive terminal; Node.js is optional for CLI and HTTP use.
+`install.sh` supports macOS, Linux, and Git Bash on Windows; `install.ps1` is the native Windows path. The installer can provision a local database with Docker, or Homebrew on macOS. The terminal UI needs an interactive terminal; Node.js is optional for CLI and HTTP use.
 
 ### Install and launch
 
@@ -1123,7 +1336,7 @@ machina doctor
 machina
 ```
 
-Optional extras: `pip install -e ".[dev,embeddings-onnx,rerank]"` adds development tools, local ONNX embeddings, and reranking.
+Optional extras: `pip install -e ".[dev,embeddings-onnx,rerank,browser]"` adds development tools, local ONNX embeddings, reranking, and headless browser verification.
 
 </details>
 
@@ -1135,7 +1348,7 @@ In the UI, ask something concrete:
 Explain how this project is organized and where its main entry point is.
 ```
 
-Use `/help` to print every command with its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
+Use `/help` to print every command with its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model or **Multi Auto**, and `/sessions` returns to earlier work. `/routing <prompt>` explains how a prompt would be routed without changing the selection.
 
 For a single response without the UI:
 
@@ -1143,19 +1356,36 @@ For a single response without the UI:
 machina chat "Summarize the repository layout"
 machina chat -c "Continue from the last session"
 machina chat -s "<session-id>" "Resume this conversation"
+machina route "Fix the parser bug and run its tests" --mode multi_model --workers 4
 ```
 
-Headless chat exits `0` for completion, `1` for failure, `3` for an approval pause, and `130` for interruption.
+Headless chat exits `0` for completion, `1` for failure, `3` for an approval pause, and `130` for interruption. `machina route` makes no model call and exits `0` with an explanation (or `1` when no valid route exists).
 
 ## Reference
 
 ### Commands
 
-Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it.
+Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 52 slash commands.
 
-Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`.
+Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
-The CLI mirrors these capabilities: `machina sessions`, `sessions-search`, `export`, `fork`, `delete`, `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `skills`, `providers`, `auth`, `growth`, `usage`, `config`, `config-set`, `doctor`, `serve`, `stop`, and `harnesses`. Run any command with `--help`.
+The CLI mirrors these capabilities with 39 commands. The main groups are:
+
+| Group | Commands |
+|---|---|
+| **Work** | `chat`, `repl`, `status`, `sessions`, `sessions-search`, `export`, `fork`, `delete`, `context`, `compress` |
+| **Routing and providers** | `route`, `routes`, `providers`, `auth`, `opencode-proxy` |
+| **Memory and identity** | `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `memory-approve-all`, `memory-reject-all`, `memory-stats`, `user-profile`, `user-profile-update`, `user-profile-list`, `growth` |
+| **Skills and learning** | `skills`, `learn`, `curator`, `hub` |
+| **Operations** | `setup`, `init`, `doctor`, `serve`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
+
+Run any command with `--help`. `machina route` explains one prompt; `machina routes` lists the connected inventory and role fit.
+
+### Launch and updates
+
+Interactive launches check `origin/main` at most once every 15 minutes. A clean source checkout fast-forwards and re-executes into the new code; a short animated status line reports checking, updating, refreshing dependencies, or up to date. Later launches inside the cache window print the stored result with its age instead of staying silent.
+
+The updater refuses to discard work: dirty checkouts, branches with local commits, non-git installs, non-TTY launches, and `CI` skip the pull with an explicit reason. Set `MACHINA_AUTO_UPDATE=0` to disable the check entirely. Installed copies that are not a git checkout are not updated.
 
 ### Providers and model selection
 
@@ -1168,11 +1398,25 @@ machina chat -p deepseek -m deepseek-chat "Explain this project"
 | Command | Purpose |
 |---|---|
 | `/provider` | Manage provider URLs and credentials; add or remove custom endpoints |
-| `/models` / `/models catalog` | Choose and save a model with its provider route; inspect the selected catalog |
+| `/models` / `/models catalog` | Choose and save a model or **Multi Auto**; inspect the selected catalog |
+| `/routing <prompt>` | Explain the deterministic route for one prompt; does not switch models |
 | `/effort` | Adjust reasoning effort where supported |
 | `/auth` / `/keys` | Account sign-in or provider keys |
 
 New sessions resolve explicit choices first, then agent-definition defaults, then global defaults. Existing session pins stay in force until changed. Provider and model are resolved together so switching one does not silently carry over an incompatible model.
+
+Routing defaults live in configuration and can be inspected without a model call:
+
+```bash
+machina routes
+machina route "Fix the parser bug and run its tests" --mode multi_model --workers 4
+machina config-set orchestration_mode multi_model
+machina config-set model_selection auto
+machina config-set worker_count 20
+machina config-set max_worker_routes 4
+machina config-set cost_tier balanced
+machina config-set worker_transport native
+```
 
 ### Permissions and approvals
 
@@ -1198,8 +1442,15 @@ Precedence: explicit overrides > environment variables > saved configuration > d
 | Setting | Default | Meaning |
 |---|---|---|
 | `provider` / `model` | `openrouter` / `openrouter/free` | Global fallback AI connection |
-| `temperature` / `max_tokens` | `0.7` / `4096` | Sampling and response ceiling |
-| `max_delegate_concurrency` | `4` | Child agents active at once in a parallel batch |
+| `temperature` / `max_tokens` | `0.7` / `16384` | Sampling and response ceiling |
+| `orchestration_mode` | `multi_model` | Connected-model role routing |
+| `model_selection` | `auto` | Router chooses, or `pinned` honors explicit routes |
+| `worker_count` | `0` | Auto-size plan workers (up to 64) |
+| `max_delegate_concurrency` | `8` | Child agents active at once in a parallel batch |
+| `max_worker_routes` | `4` | Distinct worker routes reused per plan |
+| `worker_transport` | `native` | `native`, `proxy`, or `mcp` |
+| `cost_tier` | `balanced` | `low`, `balanced`, or `high` route ranking |
+| `single_model_auto_parallel` | `false` | Fan explicit parallel work out on one route |
 | `execution_mode` | `ask` | Default authority preset for new sessions |
 | `turn_timeout` / `approval_timeout` | `0` / `300` | Optional turn limit (`0` disables it) and approval-wait limit, in seconds |
 | `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables |
@@ -1234,6 +1485,7 @@ Common environment groups:
 |---|---|
 | Database | `DATABASE_URL` or `MACHINA_DATABASE_URL`; `MACHINA_TEST_DATABASE_URL` for tests |
 | Default model | `MACHINA_PROVIDER`, `MACHINA_MODEL` |
+| Routing | `MACHINA_ORCHESTRATION_MODE`, `MACHINA_MODEL_SELECTION`, `MACHINA_WORKER_COUNT`, `MACHINA_MAX_WORKER_ROUTES`, `MACHINA_COST_TIER`, `MACHINA_WORKER_TRANSPORT` |
 | HTTP authentication | `MACHINA_API_KEY` |
 | Workspace and scripts | `MACHINA_WORKSPACE_ROOT`, `MACHINA_SCRIPTS_DIR` |
 | Embeddings | `MACHINA_EMBEDDING_BACKEND`, `MACHINA_EMBEDDING_MODEL`, `MACHINA_EMBEDDING_BASE_URL` |
@@ -1255,18 +1507,6 @@ machina serve --host 127.0.0.1 --port 8000
 
 Authenticate with `Authorization: Bearer <MACHINA_API_KEY>`. `/health` and `/ready` are public; `/metrics` requires authentication.
 
-### Shutdown
-
-```bash
-machina stop
-```
-
-This stops `machina serve` first, then the TUI/gateway, then the managed
-`machina-db` Docker container — only after every Machina client has released
-its database lease. The next `machina` or `machina serve` starts the container
-again automatically. Native/external PostgreSQL is never stopped. Set
-`MACHINA_DB_MANAGE=0` to opt out of Docker container management.
-
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/sessions \
   -H "Authorization: Bearer $MACHINA_API_KEY" \
@@ -1284,6 +1524,18 @@ The prompt endpoint streams SSE progress and result events. If it pauses for app
 Gateway feature methods are also available through `POST /rpc`; `prompt.submit`, `prompt.cancel`, and `shutdown` are not dispatched through that bridge. Turns use the session prompt endpoints. The gateway uses JSON-RPC 2.0 over stdio for the terminal UI and authenticates with `MACHINA_GATEWAY_TOKEN`.
 
 See [the gateway protocol](communications/ui-gateway-protocol.md), [event definitions](machina/protocol/events.json), and [HTTP routes](machina/api/routes/).
+
+### Shutdown
+
+```bash
+machina stop
+```
+
+This stops `machina serve` first, then the TUI/gateway, then the managed
+`machina-db` Docker container — only after every Machina client has released
+its database lease. The next `machina` or `machina serve` starts the container
+again automatically. Native/external PostgreSQL is never stopped. Set
+`MACHINA_DB_MANAGE=0` to opt out of Docker container management.
 
 ### Docker Compose
 
@@ -1305,7 +1557,7 @@ Use [OPERATIONS.md](OPERATIONS.md) for deployment configuration, migrations, bac
 
 ### Development
 
-The Python backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools). The terminal UI tests live in [`ui/test/`](ui/test/).
+The full backend suite lives in the separate [Machina-DevTools repository](https://github.com/kiazh/Machina-DevTools); local focused tests live in [`tests/`](tests/). The terminal UI tests live in [`ui/test/`](ui/test/).
 
 ```bash
 # From a Machina-DevTools checkout, point its runner at this source tree:
@@ -1326,12 +1578,14 @@ CI covers locked dependencies, style and formatting, security scanning, release 
 ```text
 machina/
   cli/              Commands, setup, and the terminal UI launcher
-  core/             Agent loop, context, continuity, compression, artifacts, providers, jobs
+  core/             Agent loop, turns, context, continuity, compression, artifacts,
+                    routing, providers, delegation, repair, jobs, usage
   api/              HTTP application and resource routes
   gateway/          Local JSON-RPC server and feature handlers
   protocol/         Shared event definitions and TypeScript generation
-  db/               PostgreSQL connection and schema
-  memory/           Memory storage, retrieval, growth, and consolidation
+  db/               PostgreSQL connection, schema, and additive migrations
+  bench/            Benchmark harnesses and performance ledgers
+  memory/           Memory storage, retrieval, digest, growth, and consolidation
   rag/              Document ingestion, embeddings, search, and reranking
   skills/           Skill discovery, metadata, routing, learning, and revisions
   tools/            Agent tools and their registry
@@ -1341,6 +1595,12 @@ machina/
   mcp_server/       Machina tools exposed to other AI assistants
   workspace/        Project file access and language-server integration
   observability/    Logging, diagnostics, tracing, and metrics
+  controller/       Task triage, complexity, and repair-controller wiring
+  desktop/          Desktop-shell bootstrap around the gateway
+  plugins/          Plugin loading and registry
+  repomap/          Repository map and symbol navigation
+  research/         Benchmarks, evaluation, and workflow trials
+  soulspec/         Reviewed persona/identity schema and lifecycle
   bundled_agents/   Shipped specialist definitions
 skills/             Bundled instruction packages, including curated ECC skills
 ui/                 TypeScript UI source and Node tests
@@ -1357,12 +1617,16 @@ scripts/            Operator script mount point and setup guidance
 | Guide | What you will find |
 |---|---|
 | [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, artifacts, reducers, projection, recovery, accounting |
+| [Connected-model routing](docs/ROUTING.md) | Modes, role selection, transports, cost tiers, route explanation |
+| [TaskRun controller](docs/TASK_RUN_CONTROLLER.md) | Repair phases, caps, evidence, and verification gates |
+| [Memory digest](docs/MEMORY_DIGEST.md) | Query-conditioned multi-fact memory selection |
 | [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, shortcuts |
 | [UI design](docs/design/TUI_DESIGN.md) / [themes](docs/design/THEME_COLORS.md) | Interface behavior, appearance, color roles |
 | [Personality and growth](docs/PERSONALITY_GROWTH.md) | Preferences, feedback, rollback, SoulSpec identities |
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
 | [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
+| [Benchmarking](docs/BENCHMARKING.md) | Benchmark ledger, lockbox, and held-out verification |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
 | [Release evidence](docs/verification/RELEASE_READINESS.md) | Verification scope and open operational gates |
@@ -1375,9 +1639,12 @@ scripts/            Operator script mount point and setup guidance
 | Database connection or initialization fails | Check `DATABASE_URL`, confirm PostgreSQL and pgvector, run `machina init` and `machina doctor` |
 | Terminal UI will not start | Check Node.js 22.19+, an interactive terminal, and `npm ci --ignore-scripts --prefix ui` |
 | A model will not respond | Check `/provider`, `/models`, and `/keys`; confirm account access and quota |
+| A route chose an unexpected model | Run `machina route "<prompt>" --json` and inspect the inventory, cost tier, pins, and warnings |
+| No workers were planned | Check `orchestration_mode`, `model_selection`, `worker_count`, and whether the task actually contains independent tracks |
 | Code completion is missing | Check `/lsp status`; language servers must be installed separately; on macOS, try `/editor complete` if `Ctrl+Space` is intercepted |
 | Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras |
 | A headless task pauses for approval | Resolve the pending request, then resume through the approval API |
+| The launcher skips the update check | A dirty checkout, local-ahead branch, non-TTY launch, or `CI` skips the pull; within 15 minutes of Machina's own check, the cached result is printed instead |
 | The music bar is empty or prompts for permission | On macOS check Automation permissions; on Windows confirm the app publishes a System Media Transport Controls session and that the WinRT media packages installed. Hide it with `/music off` |
 
 ## License and credits
