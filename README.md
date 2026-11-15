@@ -59,7 +59,8 @@ On Windows, Docker Desktop is the simplest database option. The installer can
 also use an existing local PostgreSQL with pgvector.
 
 Interactive launches check `origin/main` at most once every 15 minutes and
-fast-forward a clean source checkout before opening the UI; set
+fast-forward a clean source checkout before opening the UI; a short animated
+status line reports whether the checkout is current, updating, or skipped. Set
 `MACHINA_AUTO_UPDATE=0` to opt out. The `/auth` page manages ChatGPT, Grok,
 and GitHub Copilot subscription sign-in in one place.
 

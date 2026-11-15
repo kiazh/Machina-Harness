@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from machina import update
@@ -141,7 +142,21 @@ def test_update_never_pulls_a_dirty_checkout(monkeypatch, tmp_path: Path, capsys
     assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 1\n"
 
 
-def test_update_never_fast_forwards_over_local_commits(monkeypatch, tmp_path: Path) -> None:
+def test_update_reports_when_checkout_is_current(monkeypatch, tmp_path: Path, capsys) -> None:
+    checkout = _repo_pair(tmp_path)
+    _git(checkout, "pull", "--ff-only")
+    _enable_tty(monkeypatch)
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+    monkeypatch.setattr(update, "_check_is_fresh", lambda _root: False)
+    exec_calls = _capture_exec(monkeypatch)
+
+    update.auto_update()
+
+    assert not exec_calls
+    assert "up to date" in capsys.readouterr().err
+
+
+def test_update_never_fast_forwards_over_local_commits(monkeypatch, tmp_path: Path, capsys) -> None:
     checkout = _repo_pair(tmp_path)
     (checkout / "local-work.txt").write_text("local\n", encoding="utf-8")
     _git(checkout, "add", "local-work.txt")
@@ -154,8 +169,41 @@ def test_update_never_fast_forwards_over_local_commits(monkeypatch, tmp_path: Pa
     update.auto_update()
 
     assert not exec_calls
+    assert "local commits" in capsys.readouterr().err
     assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 1\n"
     assert '"1.0.0"' in (checkout / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_update_spinner_animates_and_finishes(monkeypatch) -> None:
+    class TtyStream:
+        encoding = "utf-8"
+
+        def __init__(self) -> None:
+            self.value = ""
+
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+        def write(self, value: str) -> None:
+            self.value += value
+
+        @staticmethod
+        def flush() -> None:
+            pass
+
+    stream = TtyStream()
+    monkeypatch.setattr(update.sys, "stderr", stream)
+
+    spinner = update._UpdateSpinner("Checking for updates...").start()
+    deadline = time.monotonic() + 2.0
+    while "\r" not in stream.value and time.monotonic() < deadline:
+        time.sleep(0.02)
+    spinner.finish("Machina is up to date.")
+
+    assert "\r" in stream.value
+    assert "Machina is up to date." in stream.value
+    assert spinner._thread is None
 
 
 def test_update_cache_resolves_a_worktree_gitdir(tmp_path: Path) -> None:

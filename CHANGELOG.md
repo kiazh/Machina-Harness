@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Interactive launches now show an animated update status (checking, updating, refreshing dependencies, or up to date) before the UI opens.
 - Added deterministic connected-model routing across every credentialed provider: role- and task-specific planner/supervisor/worker/utility hierarchies, single-model route copying, multi-model role selection, cost tiers, route pins, fallbacks, `machina route`/`machina routes`, and in-chat `route_explain`/`model_inventory`.
 - Made **Multi Auto** the default routing mode and a first-class `/models` (alias `/model`) choice alongside concrete models. Selecting it writes `orchestration_mode=multi_model`, `model_selection=auto`, and automatic explicit-parallel delegation; the current model remains the session/planner anchor. `/routing` is now only the explanation surface. `single_model` remains selectable from the same picker.
 - Stopped browser-verification loops: `web_verify`/`browser_verify` now return a failure-first report under the tool cap (failed checks + counts, not every passing check), artifact pages and verification results get their full bounded budget instead of a truncated 1,000-char preview, and artifact paging gets one nudge even outside repair tasks. An empty model response with no tool calls now retries once and then fails explicitly instead of silently completing.
