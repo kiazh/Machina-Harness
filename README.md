@@ -26,36 +26,17 @@ irm https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.ps1 | i
 curl -fsSL https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.sh | bash
 ```
 
-The Windows installer uses winget to install missing Python/Node/Git when
-available, creates the `.venv`, installs the UI, configures `.env`, starts
-Docker Desktop when it is installed, creates or reuses the pgvector
-`machina-db` container, initializes the schema, and adds the `machina`
-command to your user PATH. If Docker Desktop is missing, the installer
-attempts a winget install before falling back to manual database setup.
+The Windows installer uses winget to install missing Python/Node/Git when available, creates the `.venv`, installs the UI, configures `.env`, starts Docker Desktop when it is installed, creates or reuses the pgvector `machina-db` container, initializes the schema, and adds the `machina` command to your user PATH. If Docker Desktop is missing, the installer attempts a winget install before falling back to manual database setup.
 
-When you launch `machina`, run `machina serve`, or run `machina init`, Machina
-checks the database: it starts Docker Desktop/Engine if needed, starts an
-existing `machina-db` container, or creates and initializes one when the
-loopback `DATABASE_URL` is the installer default. If a native PostgreSQL server
-is already reachable but the `machina` database is missing, `machina init`
-creates the database and enables the required extensions. If port 5432 is
-already occupied, the Windows installer provisions Docker on a free port and
-writes both `DATABASE_URL` and `MACHINA_DB_PORT` accordingly.
+When you launch `machina`, run `machina serve`, or run `machina init`, Machina checks the database: it starts Docker Desktop/Engine if needed, starts an existing `machina-db` container, or creates and initializes one when the loopback `DATABASE_URL` is the installer default. If a native PostgreSQL server is already reachable but the `machina` database is missing, `machina init` creates the database and enables the required extensions. If port 5432 is already occupied, the Windows installer provisions Docker on a free port and writes both `DATABASE_URL` and `MACHINA_DB_PORT` accordingly.
 
-**Requirements:** Python 3.11+, Node.js 22.19+, and PostgreSQL with pgvector.
-On Windows, Docker Desktop is the simplest database option. The installer can
-also use an existing local PostgreSQL with pgvector.
+**Requirements:** Python 3.11+, Node.js 22.19+, and PostgreSQL with pgvector. On Windows, Docker Desktop is the simplest database option. The installer can also use an existing local PostgreSQL with pgvector.
 
-Interactive launches check `origin/main` at most once every 15 minutes and
-fast-forward a clean source checkout before opening the UI; a short animated
-status line reports whether the checkout is current, updating, or skipped, and
-later launches repeat the cached result instantly. Set
-`MACHINA_AUTO_UPDATE=0` to opt out. The `/auth` page manages ChatGPT, Grok,
-and GitHub Copilot subscription sign-in in one place.
+Interactive launches check `origin/main` at most once every 15 minutes and fast-forward a clean source checkout before opening the UI; a short animated status line reports whether the checkout is current, updating, or skipped, and later launches repeat the cached result instantly. Set `MACHINA_AUTO_UPDATE=0` to opt out. The `/auth` page manages ChatGPT, Grok, GitHub Copilot, and Kiro account sign-in in one place.
 
 See [Get started](#get-started) for manual setup, options, and Docker.
 
-> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, failure, and module catalogs.
+> **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
 **Release status:** **1.2.14 open-source release.** `main` also carries post-release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](docs/verification/RELEASE_1.2.14.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
@@ -1011,7 +992,7 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `opencode_session` | Local OpenCode background service; no API key | Text-only bridge for the account's available OpenCode models, including free ones; `machina opencode-proxy` exposes the same bridge as an OpenAI-compatible loopback URL |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
-| `kiro` | Kiro account login through a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start` or auto-start, `/auth kiro usage` for credits, fallback via `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; `/models` loads the full alias catalog |
+| `kiro` | Kiro account via a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start`, `/auth kiro usage`; fallback `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; full alias catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog |
 | `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
 | `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
@@ -1044,7 +1025,7 @@ The usage ledger records one row per model call with:
 
 - **Logical input** = uncached input + cache reads + cache writes.
 - **Output** tokens.
-- **Usage basis**: provider, provider-partial, local estimate, missing, or failed.
+- **Usage basis**: `provider`, `provider_partial`, `local_estimate`, `missing`, or `failed`.
 - **Attribution**: requested model, resolved model, purpose (agent, compression summary, memory rerank, consolidation, skill learning), session, and agent.
 - **Cost** only when a dated price record or explicit override exists. Unknown price stays `NULL`, never zero and never a sibling model's rate.
 
@@ -1101,7 +1082,7 @@ The other direction is `machina harnesses`: register Machina's MCP server with s
 
 There are two directions, and they are deliberately separate:
 
-- **Machina as the server.** `machina harnesses setup` (or `/harnesses`) detects supported OpenCode, Codex, and Hermes installations and registers Machina's MCP server; `enable` and `disable` manage one harness at a time. The external harness can list agents, create a session, run a bounded chat turn, or delegate a task back into Machina's durable runtime.
+- **Machina as the server.** `machina harnesses setup` detects supported OpenCode, Codex, and Hermes installations and registers Machina's MCP server; `/harnesses` lists them and manages one harness at a time (`enable`, `disable`, `run`). The external harness can list agents, create a session, run a bounded chat turn, or delegate a task back into Machina's durable runtime.
 - **Machina as the delegator.** `worker_transport=mcp` and `harness_delegate` send a bounded task to an installed harness, then report that task's route and status. This is for work that genuinely belongs in another harness, not a way to bypass Machina's permissions or accounting.
 
 `machina interop` exposes the same detection and registration surface for scripts. Detection is read-only and cached; registration edits only the selected harness's own configuration.
@@ -1149,8 +1130,9 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
 | Show or hide the file explorer | `Ctrl+T` or `/explorer` |
 | Change pane focus | `Ctrl+N`, then `N` / `P` |
+| Rename symbol | `Ctrl+N`, then `M` |
 | Show code completion | `Ctrl+Space` or `/editor complete` |
-| Go to definition / find references | `Ctrl+N`, then `D` / `R` |
+| Go to definition / find references | `Ctrl+N`, then `G` / `R` |
 | Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
 | Switch between agents | `Ctrl+N`, then `J` / `K` |
 | Change keyboard shortcuts | `/settings` → Keyboard shortcuts |
@@ -1170,7 +1152,7 @@ Reliability is a property of the failure paths, not the happy path. The design q
 
 ### The source of truth
 
-PostgreSQL with pgvector is the durable store for sessions, context, archives, memories, documents, approvals, jobs, usage, and artifacts. Schema initialization is explicit (`machina init`); additive runtime migrations handle compatible upgrades. The gateway does not self-migrate, so a code + schema deployment must run initialization before starting workers. That is documented in [OPERATIONS.md](OPERATIONS.md) because ignoring it is a real outage.
+PostgreSQL with pgvector is the durable store for sessions, context, archives, memories, documents, approvals, jobs, usage, and artifacts. Base schema creation is explicit (`machina init`), which applies `schema.sql` and the additive schema files. On connect, the gateway and shared runtime apply the idempotent additive migrations to an already-initialized database; they do not create the base schema. A deployment against a new database must run initialization first. The upgrade path is documented in [OPERATIONS.md](OPERATIONS.md).
 
 ### Observability
 
@@ -1637,7 +1619,6 @@ The CLI mirrors these capabilities with 39 top-level commands and 80 invocable p
 
 `/activity`, `/agents`, `/approvals`, `/attach`, `/auth`, `/clear`, `/compress`, `/config`, `/context`, `/delegate`, `/delete`, `/editor`, `/effort`, `/exit`, `/explorer`, `/export`, `/fork`, `/goal`, `/growth`, `/harnesses`, `/help`, `/init`, `/interop`, `/jobs`, `/keys`, `/lsp`, `/mcp`, `/memory`, `/mode`, `/models`, `/music`, `/new`, `/output`, `/persona`, `/problems`, `/profile`, `/profiles`, `/provider`, `/quickopen`, `/recall`, `/rename`, `/resume`, `/review`, `/routing`, `/search`, `/sessions`, `/settings`, `/skills`, `/status`, `/theme`, `/usage`, `/workspace`
 
-
 </details>
 
 Run any command with `--help`. `machina route` explains one prompt; `machina routes` lists the connected inventory and role fit.
@@ -1664,19 +1645,19 @@ machina chat -p deepseek -m deepseek-chat "Explain this project"
 | `/effort` | Adjust reasoning effort where supported |
 | `/auth` / `/keys` | Account sign-in or provider keys |
 
-New sessions resolve explicit choices first, then agent-definition defaults, then global defaults. Existing session pins stay in force until changed. Provider and model are resolved together so switching one does not silently carry over an incompatible model.
+New sessions resolve explicit choices first, then existing session pins, then agent-definition defaults, then global defaults. Existing session pins stay in force until changed. Provider and model are resolved together so switching one does not silently carry over an incompatible model.
 
 Routing defaults live in configuration and can be inspected without a model call:
 
 ```bash
 machina routes
 machina route "Fix the parser bug and run its tests" --mode multi_model --workers 4
-machina config-set orchestration_mode multi_model
-machina config-set model_selection auto
-machina config-set worker_count 20
-machina config-set max_worker_routes 4
-machina config-set cost_tier balanced
-machina config-set worker_transport native
+machina config-set orchestration_mode multi_model --persist
+machina config-set model_selection auto --persist
+machina config-set worker_count 20 --persist
+machina config-set max_worker_routes 4 --persist
+machina config-set cost_tier balanced --persist
+machina config-set worker_transport native --persist
 ```
 
 ### Permissions and approvals
@@ -1792,11 +1773,7 @@ See [the gateway protocol](communications/ui-gateway-protocol.md), [event defini
 machina stop
 ```
 
-This stops `machina serve` first, then the TUI/gateway, then the managed
-`machina-db` Docker container — only after every Machina client has released
-its database lease. The next `machina` or `machina serve` starts the container
-again automatically. Native/external PostgreSQL is never stopped. Set
-`MACHINA_DB_MANAGE=0` to opt out of Docker container management.
+This stops `machina serve` first, then the TUI/gateway, then the managed `machina-db` Docker container — only after every Machina client has released its database lease. The next `machina` or `machina serve` starts the container again automatically. Native/external PostgreSQL is never stopped. Set `MACHINA_DB_MANAGE=0` to opt out of Docker container management.
 
 ### Docker Compose
 
@@ -1900,7 +1877,7 @@ scripts/            Operator script mount point and setup guidance
 | Database connection or initialization fails | Check `DATABASE_URL`, confirm PostgreSQL and pgvector, run `machina init` and `machina doctor` |
 | Terminal UI will not start | Check Node.js 22.19+, an interactive terminal, and `npm ci --ignore-scripts --prefix ui` |
 | A model will not respond | Check `/provider`, `/models`, and `/keys`; confirm account access and quota |
-| A route chose an unexpected model | Run `machina route "<prompt>" --json` and inspect the inventory, cost tier, pins, and warnings |
+| A route chose an unexpected model | Run `machina route "<prompt>" --json` for the decision and `machina routes` for the connected inventory, then inspect the cost tier, pins, and warnings |
 | No workers were planned | Check `orchestration_mode`, `model_selection`, `worker_count`, and whether the task actually contains independent tracks |
 | Code completion is missing | Check `/lsp status`; language servers must be installed separately; on macOS, try `/editor complete` if `Ctrl+Space` is intercepted |
 | Search only matches keywords | That is the default. Configure an embedding backend and the appropriate extras |
@@ -1910,11 +1887,29 @@ scripts/            Operator script mount point and setup guidance
 
 ## Appendices
 
-These appendices are reference material, generated from the code at this commit. Counts are snapshots: regenerate them from the source rather than trusting a stale copy.
+These appendices are reference material. Catalogs and counts were checked against the code at this commit; they are snapshots, so regenerate them from the source rather than trusting a stale copy.
+
+| Appendix | Contents |
+|---|---|
+| [A](#appendix-a-rpc-method-catalog) | 151 RPC methods |
+| [B](#appendix-b-tool-catalog) | 43 tools and their effects |
+| [C](#appendix-c-database-catalog) | 28 tables and two ER diagrams |
+| [D](#appendix-d-configuration-reference) | 130 configuration keys |
+| [E](#appendix-e-protocol-events) | 24 protocol events |
+| [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
+| [G](#appendix-g-failure-semantics) | Failure and degradation matrix |
+| [H](#appendix-h-verification-map) | Test coverage by area |
+| [I](#appendix-i-module-map) | Package-level module map |
+| [J](#appendix-j-extension-points) | How to extend each surface |
+| [K](#appendix-k-glossary) | 42 terms |
+| [L](#appendix-l-http-route-catalog) | 33 HTTP routes |
+| [M](#appendix-m-slash-command-catalog) | 52 slash commands |
 
 ### Appendix A: RPC method catalog
 
 The gateway exposes **151** JSON-RPC methods: **13 core** methods handled directly by `gateway/server.py` and **138 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
+
+**Core methods**
 
 | Core method | Purpose |
 |---|---|
@@ -1929,8 +1924,10 @@ The gateway exposes **151** JSON-RPC methods: **13 core** methods handled direct
 | `prompt.steer` | queue steering for the running turn |
 | `prompt.steering` | read pending and delivered steering |
 | `shell.jobs` | list background shell jobs |
-| `config.set` | persist a non-secret setting |
+| `config.set` | set a non-secret setting (optionally persist it) |
 | `shutdown` | stop the gateway |
+
+**Feature namespaces**
 
 | Namespace | Feature methods |
 |---|---|
@@ -1960,7 +1957,6 @@ The gateway exposes **151** JSON-RPC methods: **13 core** methods handled direct
 | **status** (1) | `status` |
 | **workspace** (15) | `workspace.changes`, `workspace.close`, `workspace.diff`, `workspace.documentChange`, `workspace.documentClose`, `workspace.documentOpen`, `workspace.intelligence`, `workspace.list`, `workspace.lspControl`, `workspace.lspStatus`, `workspace.open`, `workspace.quickOpen`, `workspace.quickOpenCancel`, `workspace.read`, `workspace.save` |
 
-
 ### Appendix B: Tool catalog
 
 The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
@@ -1971,7 +1967,7 @@ The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.re
 | `artifact_read` | `context.read` | Read a retained tool-result artifact by its handle (character paging). |
 | `artifact_search` | `context.read` | Search retained artifacts (one handle, or the session's recent artifacts) for a case-insensitive substring. |
 | `browser_verify` | — | Run a real headless-browser check against a local web app. |
-| `code_intelligence` | `fs.read` | Read-only code intelligence for the open workspace editor: diagnostics, definition, references, symbols or hover for one workspace-relative file, answered by the same la… |
+| `code_intelligence` | `fs.read` | Read-only workspace code intelligence: diagnostics, definition, references, symbols, or hover via the editor's language server. |
 | `delegate` | `delegate` | Hand a self-contained task to another agent and get its result. |
 | `delegate_status` | — | Check whether one of your delegated workers is queued, running, finished, or interrupted. |
 | `harness_delegate` | `exec`, `delegate` | Run one bounded task in an installed external agent harness. |
@@ -2011,10 +2007,9 @@ The registry exposes **43** built-in tools. `effects` is broker metadata (`fs.re
 | `web_verify` | — | Start a temporary loopback static server for a built web artifact and run a real headless-browser check. |
 | `write_file` | `fs.write` | Write content to a file. |
 
-
 ### Appendix C: Database catalog
 
-PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sql` plus the additive schema files (`growth_schema.sql`, `delegation_schema.sql`, `image_context_schema.sql`, `soulspec_schema.sql`); no gateway process runs migrations on startup. The catalog below covers all **28** tables.
+PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sql` plus the additive schema files (`growth_schema.sql`, `delegation_schema.sql`, `image_context_schema.sql`, `soulspec_schema.sql`). On connect, the gateway applies those idempotent additive migrations to an already-initialized database; it does not create the base schema. The catalog below covers all **28** tables.
 
 | Group | Table | What it holds |
 |---|---|---|
@@ -2027,7 +2022,7 @@ PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sq
 | | `agent_messages` | Parent/child delegation records with task, response, status, and tokens used |
 | | `jobs` | Interval, cron, and heartbeat jobs: schedule, enabled flag, claim token, approval pause, last error |
 | | `llm_usage` | One row per model call or reservation: token categories, basis, status, attribution |
-| | `audit_events` | Append-only permission, approval, and privileged-operation events |
+| | `audit_events` | Append-only security, lifecycle, and privileged-operation events |
 | | `learning_reviews` | Proposed learned skills with trigger, status, reviewer, and auto-apply flag |
 | | `semantic_cache_entries` | Optional semantic response cache: scope, request hash, response, expiry, hit count |
 | | `optimization_shadow_events` | Shadow decisions from semantic cache, compression, and warming experiments |
@@ -2097,7 +2092,7 @@ erDiagram
         text kind
         text status
         boolean complete
-        int content_revision
+        text content_revision
         timestamptz expires_at
     }
     session_image_context {
@@ -2128,7 +2123,7 @@ erDiagram
         text kind
         boolean enabled
         text status
-        text claim_token
+        uuid claim_token
         text paused_for_approval
         timestamptz next_run_at
     }
@@ -2223,7 +2218,7 @@ erDiagram
     }
     agent_beliefs {
         text agent_id PK
-        text belief
+        jsonb belief
         int version
         timestamptz updated_at
     }
@@ -2232,14 +2227,14 @@ erDiagram
         text agent_id
         int from_version
         int to_version
-        float drift_score
+        double drift_score
         boolean contained
     }
     agent_growth {
         text agent_id PK
         jsonb notes
         jsonb policy
-        int feedback_count
+        bigint feedback_count
         timestamptz updated_at
     }
     growth_episodes {
@@ -2247,19 +2242,19 @@ erDiagram
         text agent_id
         uuid session_id
         text action
-        float reward
+        double reward
         boolean completed
     }
     rsi_profiles {
         text agent_id PK
-        int revision
-        int stable_revision
-        int trial_revision
+        bigint revision
+        bigint stable_revision
+        bigint trial_revision
         jsonb metrics
     }
     rsi_revisions {
         text agent_id PK
-        int revision PK
+        bigint revision PK
         jsonb notes
         jsonb policy
         text status
@@ -2267,11 +2262,11 @@ erDiagram
     }
     rsi_episodes {
         uuid id PK
-        int revision
+        bigint revision
         text domain
         text strategy
-        int tokens
-        float automatic_reward
+        bigint tokens
+        double automatic_reward
     }
     permission_grants {
         uuid id PK
@@ -2310,25 +2305,26 @@ erDiagram
         text mode
         text decision
         uuid session_id
-        int tokens_before
-        int tokens_after
+        bigint tokens_before
+        bigint tokens_after
         timestamptz created_at
     }
 ```
 
 ### Appendix D: Configuration reference
 
-**130** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys.
+**130** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys. `temp` is a legacy compatibility alias for `temperature`.
 
 <details>
 <summary>All 130 keys and defaults</summary>
 
-#### Model and routing
+#### Model, routing, and identity
 
 | Key | Default |
 |---|---|
 | `provider` | `openrouter` |
 | `model` | `openrouter/free` |
+| `agent_id` | `harness` |
 | `temperature` | `0.7` |
 | `max_tokens` | `16384` |
 | `context_budget` | `8000` |
@@ -2337,6 +2333,7 @@ erDiagram
 | `rate_limit_calls_per_minute` | `10` |
 | `turn_timeout` | `0` |
 | `pricing_table_json` | `""` |
+| `prompt_cache_enabled` | `false` |
 | `orchestration_mode` | `multi_model` |
 | `model_selection` | `auto` |
 | `worker_count` | `0` |
@@ -2394,7 +2391,7 @@ erDiagram
 | `learning_review_auto_apply_per_day` | `5` |
 | `learning_review_max_per_session` | `3` |
 
-#### Execution, workspace, and permissions
+#### Execution, workspace, and storage
 
 | Key | Default |
 |---|---|
@@ -2409,6 +2406,7 @@ erDiagram
 | `approval_timeout` | `300` |
 | `meta_harness_enabled` | `true` |
 | `meta_harness_hint` | `true` |
+| `database_url` | `""` |
 
 #### Providers and credentials
 
@@ -2434,9 +2432,6 @@ erDiagram
 | `kiro_gateway_dir` | `""` |
 | `custom_base_url` | `""` |
 | `custom_api_key` | `""` |
-| `cohere_api_key` | `""` |
-| `database_url` | `""` |
-| `searxng_url` | `""` |
 
 #### Embeddings and reranking
 
@@ -2450,11 +2445,13 @@ erDiagram
 | `reranker_http_url` | `""` |
 | `reranker_local_model` | `""` |
 | `reranker_timeout` | `10.0` |
+| `cohere_api_key` | `""` |
 
 #### Web research and Firecrawl
 
 | Key | Default |
 |---|---|
+| `searxng_url` | `""` |
 | `firecrawl_autostart` | `false` |
 | `firecrawl_home` | `~/firecrawl` |
 | `firecrawl_stop_on_exit` | `true` |
@@ -2495,8 +2492,6 @@ erDiagram
 
 | Key | Default |
 |---|---|
-| `agent_id` | `harness` |
-| `prompt_cache_enabled` | `false` |
 | `keybindings` | `""` |
 | `theme` | `codex` |
 | `transparent_background` | `false` |
@@ -2538,46 +2533,94 @@ The protocol declares **24** events in `machina/protocol/events.json`; `machina/
 
 ### Appendix F: Wire examples
 
-**JSON-RPC handshake (stdio gateway).** The gateway reads newline-delimited JSON-RPC 2.0 and authenticates state-changing calls with `MACHINA_GATEWAY_TOKEN`.
+The gateway speaks newline-delimited JSON-RPC 2.0 over stdio. The HTTP API uses REST plus SSE. Identifiers below are placeholders.
+
+**Handshake**
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}
-{"jsonrpc":"2.0","id":1,"result":{"version":"1.2.14","protocolVersion":2,"model":"openrouter/free","provider":"openrouter","cwd":"machina","branch":"main"}}
 ```
-
-**Start a turn.** The session ID is a UUID; the stream is delivered as `event` notifications.
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"prompt.submit","params":{"sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","text":"Fix the parser bug and run its tests"}}
-{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"message.delta","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","text":"I will start by"}}
-{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"tool.start","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","id":"call_1","name":"terminal","args":{"command":"pytest -q","background":false}}}
-{"jsonrpc":"2.0","method":"event","params":{"protocolVersion":2,"type":"message.complete","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","text":"The parser is fixed and all tests pass.","tokens":8421,"iterations":6,"toolCalls":4,"cancelled":false}}
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "version": "1.2.14",
+    "protocolVersion": 2,
+    "model": "openrouter/free",
+    "provider": "openrouter",
+    "cwd": "machina",
+    "branch": "main"
+  }
+}
 ```
 
-**HTTP SSE.** A protocol-v2 prompt stream emits canonical frames and terminates with `[DONE]`.
+**Start a turn and receive events**
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"prompt.submit","params":{"sessionId":"<session-id>","text":"Fix the parser bug and run its tests"}}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event",
+  "params": {
+    "protocolVersion": 2,
+    "type": "message.delta",
+    "sessionId": "<session-id>",
+    "turnId": "<turn-id>",
+    "text": "I will start by"
+  }
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event",
+  "params": {
+    "protocolVersion": 2,
+    "type": "tool.start",
+    "sessionId": "<session-id>",
+    "turnId": "<turn-id>",
+    "id": "call_1",
+    "name": "terminal",
+    "args": {"command": "pytest -q", "background": false}
+  }
+}
+```
+
+The terminal event is `message.complete`, carrying the redacted final text, token count, iterations, tool calls, and whether the turn was cancelled or needs approval.
+
+**HTTP SSE**
 
 ```text
-data: {"protocolVersion":2,"type":"turn.started","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b"}
+data: {"protocolVersion":2,"type":"turn.started","sessionId":"<session-id>","turnId":"<turn-id>"}
 
-data: {"protocolVersion":2,"type":"tool.complete","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","id":"call_1","name":"terminal","result":"42 passed","isError":false}
+data: {"protocolVersion":2,"type":"tool.complete","sessionId":"<session-id>","turnId":"<turn-id>","id":"call_1","name":"terminal","result":"42 passed","isError":false}
 
 data: [DONE]
 ```
 
-**Approval pause and resume.** Resolving records the human decision; resuming is a separate request with the reviewed arguments.
+**Approval pause and resume**
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:8000/api/v1/approvals/$REQUEST_ID/resolve" \
-  -H "Authorization: Bearer $MACHINA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"verdict":"approved","sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","grant":"once"}'
-
-curl -N -X POST "http://127.0.0.1:8000/api/v1/approvals/$REQUEST_ID/resume" \
-  -H "Authorization: Bearer $MACHINA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"protocolVersion":2,"sessionId":"3f1c7f2e-6d7a-4f6e-9d2a-1b0c9e8f4a11","turnId":"9a2f1c7d4e6b","toolArgs":{"path":"src/parser.py","content":"..."}}'
+  -H "Authorization: Bearer $MACHINA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"verdict":"approved","sessionId":"<session-id>","grant":"once"}'
 ```
 
-The resume endpoint revalidates the digest against `toolArgs`, refuses if the approval was consumed, denied, or belongs to another session, and requires fresh approval when the arguments changed.
+```bash
+curl -N -X POST "http://127.0.0.1:8000/api/v1/approvals/$REQUEST_ID/resume" \
+  -H "Authorization: Bearer $MACHINA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"protocolVersion":2,"sessionId":"<session-id>","turnId":"<turn-id>","toolArgs":{"path":"src/parser.py","content":"..."}}'
+```
 
+Resolving records the decision. Resuming is separate: the endpoint revalidates the digest against `toolArgs`, refuses a consumed or denied approval or a session mismatch, and requires fresh approval when the arguments changed.
 
 ### Appendix G: Failure semantics
 
@@ -2608,12 +2651,11 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 | A delegated worker pauses for approval | Reported as awaiting approval, never as completed |
 | A job needs approval | Parks in `paused_approval`, is excluded from due claims, resumes only via `jobs.resume` |
 | A cron expression cannot be rescheduled | A bounded retry is scheduled and the error is surfaced; `next_run_at` is not set to `NULL` |
-| Schema is one version behind | The gateway does not self-migrate; `machina init` must run before workers start |
+| Schema is one version behind | Additive migrations apply on connect; a new database or a base-schema change still requires `machina init` |
 | Database is unreachable | Startup fails closed with diagnostics; there is no in-memory fallback store |
 | An MCP server is unavailable | The call fails explicitly; no fabricated tool result |
 | Headless browser is unavailable | Verification reports the missing backend; it does not claim a pass |
 | Update checkout is dirty or local-ahead | The pull is skipped with an explicit reason; local work is never discarded |
-
 
 ### Appendix H: Verification map
 
@@ -2860,7 +2902,7 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 | `/rename` | `/rename <title>` | Rename the current session |
 | `/resume` | `/resume [id]` | Resume a session (menu when empty) |
 | `/review` | `/review [focus]` | Review my current changes and find issues |
-| `/routing` | `/routing` | Explain the Multi Auto planner/supervisor/worker route for a prompt |
+| `/routing` | `/routing <prompt>` | Explain the Multi Auto planner/supervisor/worker route for a prompt |
 | `/search` | `/search <words>` | Find sessions by title |
 | `/sessions` | `/sessions` | Resume a session (menu when empty) |
 | `/settings` | `/settings` | Open the settings menu (same as bare /config) |
