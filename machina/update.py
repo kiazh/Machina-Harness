@@ -7,6 +7,7 @@ when the worktree is dirty so local work is never overwritten. Set
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -59,21 +60,24 @@ def _git_dir(root: Path) -> Path | None:
     return None
 
 
-def _mark_checked(root: Path) -> None:
-    """Record an update attempt so the next launch can skip the network."""
+def _mark_checked(root: Path, status: str = "current", message: str = "") -> None:
+    """Record the check result so later launches can report it without the network."""
     git_dir = _git_dir(root)
     if git_dir is None:
         return
     try:
-        (git_dir / _CHECK_MARKER).touch()
+        (git_dir / _CHECK_MARKER).write_text(
+            json.dumps({"status": status, "message": message}),
+            encoding="utf-8",
+        )
     except OSError:
         pass
 
 
-def _check_is_fresh(root: Path) -> bool:
-    """True when Machina's own recent check already answered the question.
+def _cached_check(root: Path) -> dict[str, object] | None:
+    """Return the recent check result, including a human-readable message.
 
-    Only the dedicated marker counts. Other tools write ``FETCH_HEAD`` too,
+    Only Machina's own marker counts. Other tools write ``FETCH_HEAD`` too,
     and treating any fetch as a completed check hid the launch status (and
     delayed real updates) for 15 minutes after a manual ``git fetch``.
     Worktrees store the marker under their resolved gitdir, not the ``.git``
@@ -81,12 +85,50 @@ def _check_is_fresh(root: Path) -> bool:
     """
     git_dir = _git_dir(root)
     if git_dir is None:
-        return False
+        return None
+    marker = git_dir / _CHECK_MARKER
     try:
-        age = time.time() - (git_dir / _CHECK_MARKER).stat().st_mtime
+        age = time.time() - marker.stat().st_mtime
+        if age >= _CHECK_INTERVAL_SECONDS:
+            return None
+        raw = marker.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return False
-    return age < _CHECK_INTERVAL_SECONDS
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "status": str(payload.get("status", "unknown")),
+        "message": str(payload.get("message", "")),
+        "age": age,
+    }
+
+
+def _check_is_fresh(root: Path) -> bool:
+    """True when Machina's own recent check already answered the question."""
+    return _cached_check(root) is not None
+
+
+def _age_text(seconds: float) -> str:
+    if seconds < 90:
+        return "just now"
+    return f"{int(seconds // 60)}m ago"
+
+
+def _report_cached(cached: dict[str, object]) -> None:
+    """Print the previous check's result without touching the network."""
+    # The post-update re-exec already printed the "restarting" line; don't
+    # repeat a cached status into the fresh UI start.
+    if os.environ.pop("MACHINA_UPDATE_REEXEC", None):
+        return
+    message = str(cached.get("message") or "")
+    if not message:
+        return
+    age = float(cached.get("age") or 0.0)
+    print(f"{message} Last checked {_age_text(age)}.", file=sys.stderr)
 
 
 class _UpdateSpinner:
@@ -165,7 +207,9 @@ def auto_update() -> None:
     root = _repo_root()
     if root is None:
         return
-    if _check_is_fresh(root):
+    cached = _cached_check(root)
+    if cached is not None:
+        _report_cached(cached)
         return
 
     status = _UpdateSpinner("Checking for updates...").start()
@@ -177,9 +221,10 @@ def auto_update() -> None:
 
 def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
     fetched = _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root, timeout=3)
-    _mark_checked(root)
     if fetched is None or fetched.returncode != 0:
-        status.finish("Could not check for updates; continuing on the local version.")
+        message = "Could not check for updates; continuing on the local version."
+        _mark_checked(root, "error", message)
+        status.finish(message)
         return
     remote = _run(["git", "show", "origin/main:pyproject.toml"], cwd=root, timeout=5)
     remote_version = None
@@ -196,36 +241,45 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
         cwd=root,
         timeout=5,
     )
+    message = "Could not read origin/main; continuing on the local version."
     if counts is None or counts.returncode != 0:
-        status.finish("Could not read origin/main; continuing on the local version.")
+        _mark_checked(root, "error", message)
+        status.finish(message)
         return
     try:
         ahead, behind = (int(part) for part in counts.stdout.split())
     except ValueError:
-        status.finish("Could not read origin/main; continuing on the local version.")
+        _mark_checked(root, "error", message)
+        status.finish(message)
         return
 
     from machina import __version__
 
     noun = "commit" if behind == 1 else "commits"
     if behind == 0:
-        status.finish(f"Machina is up to date (v{__version__}).")
+        message = f"Machina is up to date (v{__version__})."
+        _mark_checked(root, "current", message)
+        status.finish(message)
         return
     if ahead > 0:
         # Local commits are not on origin/main, so a fast-forward would
         # discard them. Leave that decision to the operator.
-        status.finish(
+        message = (
             f"origin/main has {behind} new {noun}, but this branch has local commits; "
             "skipping auto-update."
         )
+        _mark_checked(root, "skipped", message)
+        status.finish(message)
         return
 
     dirty = _run(["git", "status", "--porcelain"], cwd=root, timeout=5)
     if dirty is None or dirty.returncode != 0 or dirty.stdout.strip():
-        status.finish(
+        message = (
             f"origin/main has {behind} new {noun}, but this checkout has local changes; "
             "not pulling automatically."
         )
+        _mark_checked(root, "skipped", message)
+        status.finish(message)
         return
 
     status.set(f"Updating ({behind} new {noun})...")
@@ -235,7 +289,9 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
         timeout=45,
     )
     if pulled is None or pulled.returncode != 0:
-        status.finish("Could not fast-forward; continuing on the local version.")
+        message = "Could not fast-forward; continuing on the local version."
+        _mark_checked(root, "error", message)
+        status.finish(message)
         return
     # Editable installs see source changes immediately; refresh dependency
     # metadata only when packaging files changed. Failure is non-fatal: the
@@ -252,5 +308,14 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
     version_note = (
         "" if remote_version in (None, __version__) else f" {__version__} -> {remote_version}"
     )
+    new_version = remote_version or __version__
+    _mark_checked(
+        root,
+        "updated",
+        f"Machina was updated to v{new_version} ({behind} new {noun}).",
+    )
     status.finish(f"Updated Machina{version_note} ({behind} new {noun}); restarting...")
+    # The re-exec runs this module again; the marker is fresh, so suppress the
+    # cached status it would otherwise print over the new UI's first frame.
+    os.environ["MACHINA_UPDATE_REEXEC"] = "1"
     os.execv(sys.executable, [sys.executable, "-m", "machina", *sys.argv[1:]])

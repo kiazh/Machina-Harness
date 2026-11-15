@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Cached update checks now report their last result on every launch (for example, "Machina is up to date. Last checked 3m ago") instead of staying silent for 15 minutes.
 - Launch update status is no longer hidden by unrelated `git fetch` calls; only Machina's own check marker counts toward the 15-minute cache.
 - Interactive launches now show an animated update status (checking, updating, refreshing dependencies, or up to date) before the UI opens.
 - Added deterministic connected-model routing across every credentialed provider: role- and task-specific planner/supervisor/worker/utility hierarchies, single-model route copying, multi-model role selection, cost tiers, route pins, fallbacks, `machina route`/`machina routes`, and in-chat `route_explain`/`model_inventory`.

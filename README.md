@@ -60,7 +60,8 @@ also use an existing local PostgreSQL with pgvector.
 
 Interactive launches check `origin/main` at most once every 15 minutes and
 fast-forward a clean source checkout before opening the UI; a short animated
-status line reports whether the checkout is current, updating, or skipped. Set
+status line reports whether the checkout is current, updating, or skipped, and
+later launches repeat the cached result instantly. Set
 `MACHINA_AUTO_UPDATE=0` to opt out. The `/auth` page manages ChatGPT, Grok,
 and GitHub Copilot subscription sign-in in one place.
 
