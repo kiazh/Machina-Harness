@@ -1133,7 +1133,7 @@ In the UI, ask something concrete:
 Explain how this project is organized and where its main entry point is.
 ```
 
-Use `/help` for the searchable command menu; selecting a command shows its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
+Use `/help` to print every command with its full usage and explanation. `/workspace open .` browses the current project, `/models` chooses a model, and `/sessions` returns to earlier work.
 
 For a single response without the UI:
 
@@ -1149,18 +1149,7 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 ### Commands
 
-| Group | UI commands |
-|---|---|
-| Start | `/help`, `/new`, `/resume`, `/sessions`, `/clear`, `/exit` |
-| Sessions | `/search`, `/recall`, `/rename`, `/fork`, `/delete`, `/export`, `/goal` |
-| Work | `/review`, `/init`, `/delegate`, `/agents`, `/activity`, `/jobs` |
-| Workspace | `/workspace`, `/editor`, `/explorer`, `/lsp`, `/problems`, `/quickopen`, `/attach` |
-| Memory | `/memory`, `/growth`, `/persona`, `/skills`, `/context`, `/compress` |
-| Setup | `/models`, `/provider`, `/keys`, `/auth`, `/routing`, `/effort`, `/config`, `/settings`, `/theme`, `/profile`, `/profiles`, `/mode`, `/approvals` |
-| Integrations | `/mcp`, `/interop`, `/harnesses`, `/music` |
-| Info | `/status`, `/usage`, `/output` |
-
-A bare `/` still lists the full command registry; typing filters it. `/help` shows the same commands grouped by these categories, with category names and argument completions searchable.
+Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`.
 

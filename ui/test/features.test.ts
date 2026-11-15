@@ -1728,23 +1728,19 @@ test("/compact is an alias for /compress", () => {
 	assert.deepEqual(parseCommand("/compact"), { name: "compress", args: "" });
 });
 
-test("/help groups commands by domain", async () => {
+test("/help prints every command with its description", async () => {
 	const { helpText } = await import("../src/commands.ts");
 	const { SLASH_COMMANDS } = await import("../src/features/index.ts");
 	const help = stripTerminalSequences(helpText(SLASH_COMMANDS));
-	for (const group of [
-		"Start",
-		"Sessions",
-		"Work",
-		"Workspace",
-		"Memory",
-		"Setup",
-		"Integrations",
-		"Info",
-	]) {
-		assert.match(help, new RegExp(`^${group}$`, "m"));
+	assert.doesNotMatch(help, /^Start$/m, "there is no category section");
+	for (const command of SLASH_COMMANDS) {
+		assert.ok(help.includes(`/${command.name}`), command.name);
+		assert.ok(help.includes(command.description ?? ""), `missing description for ${command.name}`);
 	}
-	for (const command of SLASH_COMMANDS) assert.match(help, new RegExp(`/${command.name}\\b`));
+	const host = new FakeHost();
+	await run("/help", host);
+	assert.equal(host.last().kind, "plain");
+	assert.equal(host.last().text, helpText(SLASH_COMMANDS));
 });
 
 test("/init scaffolds AGENTS.md", async () => {

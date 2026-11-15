@@ -152,18 +152,6 @@ export interface FeatureHost {
 	 * without it keep the legacy printed `/skills` table.
 	 */
 	skillsDirectory?(): SkillsDirectoryHost | undefined;
-	/**
-	 * Interactive `/help` palette surface: the App owns the searchable
-	 * command/keybinding overlay, its focus and its dispatch. Optional: hosts
-	 * without it keep the legacy printed help text byte-for-byte.
-	 */
-	helpPalette?(): HelpPaletteHost | undefined;
-}
-
-/** Interactive `/help` palette surface (implemented by App). */
-export interface HelpPaletteHost {
-	/** Open the searchable palette overlay; `query` prefills the search box. */
-	openHelpPalette(query?: string): void;
 }
 
 /** Interactive `/skills` picker surface (implemented by App). */

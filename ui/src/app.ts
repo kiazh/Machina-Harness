@@ -24,7 +24,6 @@ import { ComposerBox, Footer, header, Picker, SecretForm, TextForm, ThinkingIndi
 import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
 import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsFilters, type SkillsPreviewResult, type SkillsSearchParams, type SkillsSearchResult, type SkillsSectionParams, type SkillsSectionResult } from "./components/SkillsMenu.ts";
-import { HelpMenu, helpMenuCommands } from "./components/HelpMenu.ts";
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
@@ -46,7 +45,7 @@ import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import type { WorkspaceAttachmentHost } from "./features/workspace.ts";
 import { guardSubmit } from "./commandDispatch.ts";
-import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type HelpPaletteHost, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
+import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
 import { FamilyStore, listFamilySessions } from "./family.ts";
 import { agentSessionItems } from "./features/agents.ts";
 import type { GatewayClient } from "./gateway.ts";
@@ -491,8 +490,6 @@ export class App implements FeatureHost {
 	private quickOpenHandle: OverlayHandle | undefined;
 	/** `/skills` Menu dialog (A5, spec §12.3): the mounted component (dedup + tests). */
 	private skillsMenu: SkillsMenu | undefined;
-	/** `/help` searchable command/keybinding Menu dialog. */
-	private helpMenu: HelpMenu | undefined;
 	/** Re-entrancy guard for the dirty-exit review. */
 	private dirtyExitInProgress = false;
 	/** Stored workspace_ui_state captured BEFORE open (open overwrites it). */
@@ -821,15 +818,6 @@ export class App implements FeatureHost {
 	 */
 	skillsDirectory(): SkillsDirectoryHost | undefined {
 		return { openSkillsPicker: (query) => this.openSkillsPicker(query ?? "") };
-	}
-
-	/**
-	 * FeatureHost: the searchable `/help` palette surface. Present whenever
-	 * the app runs; the palette filters local command/key data and routes
-	 * chosen commands back through the same dispatcher as typed input.
-	 */
-	helpPalette(): HelpPaletteHost | undefined {
-		return { openHelpPalette: (query) => this.openHelpPalette(query ?? "") };
 	}
 
 	// ─── global UI settings (closing pass) ──────────────────────────────────
@@ -2222,9 +2210,9 @@ export class App implements FeatureHost {
 
 		const questionKey = matchesKey(data, Key.question) || matchesKey(data, Key.shift("?")) || matchesKey(data, Key.shift("/"));
 		if (this.keybindings.matches(data, "shortcuts") || (questionKey && !this.editor.getText() && !this.editor.isShowingAutocomplete())) {
-			// Selecting the `/help — all commands` row dispatches the real
-			// command, so with the palette surface it opens the searchable
-			// overlay; other rows are documentation and just close.
+			// Selecting the `/help - all commands` row dispatches the real
+			// command, which prints the full command reference; other rows are
+			// documentation and just close.
 			void this.openDialog((close) => new Picker("Keyboard shortcuts", this.shortcutItems(), (item) => {
 				close();
 				if (item.value === "commands") {
@@ -3760,45 +3748,6 @@ export class App implements FeatureHost {
 			if (result?.delete === undefined) return;
 			const command = parseCommand(`/skills delete ${result.delete}`);
 			if (command) void runCommand(command, this);
-		});
-	}
-
-	// ─── help palette (searchable /help) ────────────────────────────────────
-
-	/**
-	 * `/help`: the searchable command/keybinding Menu (menu-shaped surface
-	 * rule). Enter on a no-argument command closes the dialog and dispatches
-	 * through the same parseCommand/runCommand path as typed input; a command
-	 * with an argument hint closes and prefills `/name ` into the composer
-	 * instead. Key rows are read-only reference; Esc closes.
-	 */
-	private openHelpPalette(initialQuery = ""): void {
-		if (this.helpMenu) return;
-		void this.openDialog<{ run?: string; prefill?: string }>((close) => {
-			const menu = new HelpMenu({
-				commands: helpMenuCommands(SLASH_COMMANDS),
-				keys: effectiveShortcutRows(this.keybindings.get()).map(({ context, label, description }) =>
-					description === undefined ? { context, label } : { context, label, description }),
-				initialQuery,
-				title: "Help",
-				tui: this.tui,
-				visibleRows: DEFAULT_MENU_VISIBLE_ROWS,
-				onChange: () => this.tui.requestRender(),
-				onClose: () => close(),
-				onRun: (name) => close({ run: name }),
-				onPrefill: (text) => close({ prefill: text }),
-			});
-			this.helpMenu = menu;
-			menu.activate();
-			return menu;
-		}).then((result) => {
-			this.helpMenu = undefined;
-			if (result?.run !== undefined) {
-				const parsed = parseCommand(`/${result.run}`);
-				if (parsed) void runCommand(parsed, this);
-			} else if (result?.prefill !== undefined) {
-				this.prefillInput(result.prefill);
-			}
 		});
 	}
 

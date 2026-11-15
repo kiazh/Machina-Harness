@@ -1,8 +1,7 @@
-// Slash-command parsing and help text. Command definitions live in features.ts.
+// Slash-command parsing and reference text. Command definitions live in
+// features/index.ts.
 
 import type { SlashCommand } from "@earendil-works/pi-tui";
-import { COMMAND_GROUPS, OTHER_COMMAND_CATEGORY } from "./commandCatalog.ts";
-import { theme } from "./theme.ts";
 
 const ALIASES: Record<string, string> = {
 	quit: "exit",
@@ -43,26 +42,15 @@ export function splitSub(args: string): [string, string] {
 	return [trimmed.slice(0, space).toLowerCase(), trimmed.slice(space).trim()];
 }
 
+/**
+ * Flat command reference for `/help`: one command per line with its complete
+ * description. No category headers and no interactive menu.
+ */
 export function helpText(commands: SlashCommand[]): string {
-	const usage = (c: SlashCommand) => (c.argumentHint ? `${c.name} ${c.argumentHint}` : c.name);
-	const width = Math.max(...commands.map((c) => usage(c).length));
-	// Pad before styling so columns stay aligned; bold names act as headers.
-	const line = (c: SlashCommand) => `${theme.bold(`/${usage(c).padEnd(width)}`)}  ${c.description ?? ""}`;
-	const seen = new Set<string>();
-	const out: string[] = [];
-	for (const group of COMMAND_GROUPS) {
-		const members = commands.filter((c) => group.names.includes(c.name));
-		if (!members.length) continue;
-		out.push(theme.bold(group.label));
-		for (const c of members) {
-			seen.add(c.name);
-			out.push(`  ${line(c)}`);
-		}
-	}
-	const remaining = commands.filter((c) => !seen.has(c.name));
-	if (remaining.length) {
-		out.push(theme.bold(OTHER_COMMAND_CATEGORY));
-		for (const c of remaining) out.push(`  ${line(c)}`);
-	}
-	return out.join("\n");
+	const usage = (command: SlashCommand) =>
+		command.argumentHint ? `${command.name} ${command.argumentHint}` : command.name;
+	return [...commands]
+		.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+		.map((command) => `/${usage(command)}  ${command.description?.trim() || "No description."}`)
+		.join("\n");
 }
