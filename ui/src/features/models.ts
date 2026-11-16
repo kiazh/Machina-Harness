@@ -19,6 +19,7 @@
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { keyValues, table } from "../format.ts";
 import type { ConfigSetResult, ModelsListResult, ProvidersListResult } from "../protocol.ts";
+import { RpcError } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
 import { pickRoutingMode } from "./routing.ts";
 import { type Command, type FeatureHost } from "./types.ts";
@@ -157,19 +158,32 @@ export function formatContextWindow(tokens: number | null | undefined): string {
 	return String(tokens);
 }
 
-/** Ask the gateway for the request session's models; undefined when the
- *  gateway cannot answer (older server or transport error) so callers can
- *  fall back to the curated list. Session identity lets a resumed session
- *  list ITS pinned provider (round-3 review finding 10). */
-export async function fetchCatalog(host: FeatureHost, refresh = false): Promise<ModelsListResult | undefined> {
+/** Model catalog request outcome: transport failure and capability gap stay distinct. */
+export type CatalogFetch =
+	| { ok: true; result: ModelsListResult }
+	| { ok: false; reason: "unsupported" | "error"; message: string };
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** Ask the gateway for the request session's models. A METHOD_NOT_FOUND
+ *  (-32601) answer means an older gateway without the catalog; every other
+ *  failure is a real transport/server error and keeps its message. Session
+ *  identity lets a resumed session list ITS pinned provider (round-3 review
+ *  finding 10). */
+export async function fetchCatalog(host: FeatureHost, refresh = false): Promise<CatalogFetch> {
 	const session = host.session();
 	const params: Record<string, unknown> = {};
 	if (refresh) params.refresh = true;
 	if (session) params.sessionId = session.id;
 	try {
-		return await host.request<ModelsListResult>("models.list", params);
-	} catch {
-		return undefined;
+		return { ok: true, result: await host.request<ModelsListResult>("models.list", params) };
+	} catch (error) {
+		if (error instanceof RpcError && error.code === -32601) {
+			return { ok: false, reason: "unsupported", message: error.message };
+		}
+		return { ok: false, reason: "error", message: errorMessage(error) };
 	}
 }
 
@@ -291,7 +305,7 @@ export async function fetchModelGroups(host: FeatureHost, fast = false): Promise
 		}
 	} else {
 		const catalog = await fetchCatalog(host);
-		if (catalog) results.set(catalog.provider || current, catalog);
+		if (catalog.ok) results.set(catalog.result.provider || current, catalog.result);
 	}
 
 	const groups = names.map((name): ModelGroup => {
@@ -432,10 +446,14 @@ export async function openGroupedModelPicker(
 }
 
 async function printCatalog(host: FeatureHost): Promise<void> {
-	const result = await fetchCatalog(host, true);
-	if (!result) {
-		throw new Error("This gateway cannot list provider catalogs. Update Machina or use /models with a curated id.");
+	const fetched = await fetchCatalog(host, true);
+	if (!fetched.ok) {
+		if (fetched.reason === "unsupported") {
+			throw new Error("This gateway cannot list provider catalogs. Update Machina or use /models with a curated id.");
+		}
+		throw new Error(`Model catalog request failed: ${fetched.message}`);
 	}
+	const result = fetched.result;
 	// A live catalog read supersedes the picker snapshot; the next menu open
 	// should see it rather than the previous warm cache.
 	invalidateModelGroups(host);

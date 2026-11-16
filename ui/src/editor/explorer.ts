@@ -144,6 +144,9 @@ export class ExplorerModel {
 	/** Last known visible index of the selection; the deterministic fallback. */
 	private selectionHint = 0;
 	private lastExclusions: string[] = [];
+	/** One visible-node walk per mutation revision (selection included). */
+	private revisionValue = 0;
+	private visibleCache: { revision: number; nodes: ExplorerVisibleNode[]; hasMore: boolean } | undefined;
 
 	constructor(list: ExplorerListFn, options: { includeHidden?: boolean } = {}) {
 		this.list = list;
@@ -184,14 +187,23 @@ export class ExplorerModel {
 
 	/** True when a visible directory has a next backend page. */
 	hasMorePages(): boolean {
-		return this.visibleNodes().some((node) => node.kind === "load-more");
+		this.visibleCacheFor();
+		return this.visibleCache?.hasMore === true;
 	}
 
 	/** Visible nodes in tree order: loaded entries plus `load more` rows. */
 	visibleNodes(): ExplorerVisibleNode[] {
-		const out: ExplorerVisibleNode[] = [];
-		this.walk("", 0, out);
-		return out;
+		return this.visibleCacheFor();
+	}
+
+	private visibleCacheFor(): ExplorerVisibleNode[] {
+		const cached = this.visibleCache;
+		if (cached && cached.revision === this.revisionValue) return cached.nodes;
+		const nodes: ExplorerVisibleNode[] = [];
+		this.walk("", 0, nodes);
+		const hasMore = nodes.some((node) => node.kind === "load-more");
+		this.visibleCache = { revision: this.revisionValue, nodes, hasMore };
+		return nodes;
 	}
 
 	private walk(dirPath: string, depth: number, out: ExplorerVisibleNode[]): void {
@@ -437,6 +449,9 @@ export class ExplorerModel {
 	 * every settled load re-runs this reconcile.
 	 */
 	private reconcileSelection(): void {
+		// The tree state just mutated; never reconcile against a pre-mutation
+		// cached walk.
+		this.visibleCache = undefined;
 		const nodes = this.visibleNodes();
 		if (nodes.length === 0) return; // keep the identity until something is visible
 		const index = nodes.findIndex((node) => node.id === this.selectedEntryId);
@@ -458,6 +473,8 @@ export class ExplorerModel {
 	}
 
 	private emit(): void {
+		this.revisionValue += 1;
+		this.visibleCache = undefined;
 		for (const listener of this.listeners) listener();
 	}
 }

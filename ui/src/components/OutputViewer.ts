@@ -83,6 +83,20 @@ export class OutputStore {
 		return this.records.get(OutputStore.key(sessionId, toolId));
 	}
 
+	/** Drop retained output records for one dormant session. */
+	pruneSession(sessionId: string): void {
+		const keys = this.order.filter((key) => this.records.get(key)?.sessionId === sessionId);
+		if (keys.length === 0) return;
+		const dropped = new Set(keys);
+		for (const key of keys) {
+			const record = this.records.get(key);
+			if (record) this.totalBytes -= record.byteLength;
+			this.records.delete(key);
+		}
+		this.order = this.order.filter((key) => !dropped.has(key));
+		if (this.totalBytes < 0) this.totalBytes = 0;
+	}
+
 	/** Resolve an exact tool ID or unambiguous prefix within one session. */
 	resolve(sessionId: string, idOrPrefix: string): OutputRecord {
 		const wanted = idOrPrefix.trim();

@@ -939,8 +939,8 @@ test("SM-08 preview never starts a turn and records zero non-preview RPCs", asyn
 	);
 	assert.deepEqual(unexpected, [], "the preview path records zero non-preview RPCs (skills.list is the read-only catalog browse)");
 	assert.equal(client.requests.filter((entry) => entry.method === "prompt.submit").length, 0, "no turn was started");
-	const internals = app as unknown as { inFlight: Set<string>; running: boolean };
-	assert.equal(internals.inFlight.size, 0);
+	const internals = app as unknown as { turnSession: { inFlight: Set<string> }; running: boolean };
+	assert.equal(internals.turnSession.inFlight.size, 0);
 	assert.equal(internals.running, false);
 	assert.match(screen(), /Route preview: make me a website/);
 	assert.match(screen(), /preview only — no turn, no provider call/);

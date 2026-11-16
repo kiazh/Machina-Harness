@@ -58,6 +58,46 @@ function assertDirtyInvariant(store: EditorStore, documentId: string): void {
 	assert.equal(record.dirty, expected, "dirty must be derived from savedTextHash");
 }
 
+test("edits preserve line ending without a full scan and expose their exact range", () => {
+	const store = new EditorStore();
+	const record = open(store, "file:///w/script.ts", "const x = 1;\r\nconst y = 2;\r\n", { revision: "rev-1" });
+	store.setSelection(record.id, { cursorOffset: 11 });
+	const editResult = store.insertText(record.id, "0");
+	assert.ok(editResult.ok);
+	// A newline-free edit cannot change the ending kind.
+	assert.equal(doc(store, record.id).lineEnding, "CRLF");
+	assert.equal(doc(store, record.id).text, "const x = 10;\r\nconst y = 2;\r\n");
+	assert.equal(store.totalTextBytes(), new TextEncoder().encode(doc(store, record.id).text).length);
+	assertDirtyInvariant(store, record.id);
+	const recorded = store.lastEdit(record.id);
+	assert.ok(recorded, "a single-edit transaction records its exact range");
+	assert.equal(recorded.fromVersion, 0);
+	assert.equal(recorded.toVersion, doc(store, record.id).version);
+	assert.deepEqual(recorded.edit, { range: { startOffset: 11, endOffset: 11 }, text: "0" });
+
+	// A same-length replacement still tracks dirty honestly.
+	const sameLength = open(store, "file:///w/same-length.ts", "abc", { revision: "rev-1" });
+	store.applyEdit(sameLength.id, [edit(1, 2, "x")]);
+	assert.equal(doc(store, sameLength.id).dirty, true);
+	store.applyEdit(sameLength.id, [edit(1, 2, "b")]);
+	assert.equal(doc(store, sameLength.id).text, "abc");
+	assert.equal(doc(store, sameLength.id).dirty, false, "returning to the saved text clears dirty");
+});
+
+test("undo restores clean state and byte accounting from cached sizes", () => {
+	const store = new EditorStore();
+	const text = "héllo\r\nworld";
+	const record = open(store, "file:///w/undo.txt", text, { revision: "rev-1" });
+	store.setSelection(record.id, { cursorOffset: text.length });
+	assert.ok(store.insertText(record.id, "!").ok);
+	assert.equal(doc(store, record.id).dirty, true);
+	assert.equal(store.totalTextBytes(), new TextEncoder().encode(`${text}!`).length);
+	assert.ok(store.undo(record.id).ok);
+	assert.equal(doc(store, record.id).text, text);
+	assert.equal(doc(store, record.id).dirty, false);
+	assert.equal(store.totalTextBytes(), new TextEncoder().encode(text).length);
+});
+
 test("openDocument builds a record with detected line endings and saved identity", () => {
 	const store = new EditorStore();
 	const text = "let x = 1;\r\n";

@@ -57,8 +57,14 @@ export class Transcript {
 	private readonly coordinator: AnimationCoordinator | undefined;
 	private current: AssistantTurn | undefined;
 	private wroteText = false;
+	/** True while the current block is still marked streaming. */
+	private assistantStreaming = false;
 	/** Text rendered via deltas this turn; reconciled with canonical final. */
-	private displayed = "";
+	private displayedChunks: string[] = [];
+	/** Lazily joined projection; invalidated per appended delta. */
+	private displayedJoined: string | undefined;
+	/** Spinner presence is tracked explicitly, never rediscovered per delta. */
+	private spinnerVisible = false;
 	private readonly tools = new Map<string, ToolTurn>();
 	private readonly toolSubs = new Map<string, AnimationSubscription>();
 	private assistantSub: AnimationSubscription | undefined;
@@ -80,6 +86,23 @@ export class Transcript {
 	/** Frame source for widgets: live coordinator or a static stub. */
 	private get activity(): ActivitySource {
 		return this.coordinator ?? { frame: (frames) => frames[0] ?? "" };
+	}
+
+	/** Joined delta text, computed only when a completion/reconcile reads it. */
+	private displayedText(): string {
+		if (this.displayedJoined === undefined) this.displayedJoined = this.displayedChunks.join("");
+		return this.displayedJoined;
+	}
+
+	private appendDisplayed(text: string): void {
+		if (text.length === 0) return;
+		this.displayedChunks.push(text);
+		this.displayedJoined = undefined;
+	}
+
+	private resetDisplayed(text = ""): void {
+		this.displayedChunks = text.length > 0 ? [text] : [];
+		this.displayedJoined = text;
 	}
 
 	addComponent(component: Component): void {
@@ -137,9 +160,10 @@ export class Transcript {
 		this.stopTools();
 		this.container.clear();
 		this.current = undefined;
-		this.displayed = "";
+		this.resetDisplayed();
 		this.wroteText = false;
 		this.trimNotice = undefined;
+		this.spinnerVisible = false;
 		this.tools.clear();
 		this.lastCompletedTurn = undefined;
 	}
@@ -151,7 +175,9 @@ export class Transcript {
 	}
 
 	private stopAssistant(): void {
+		this.current?.dispose();
 		this.current?.setStreaming(false);
+		this.assistantStreaming = false;
 		this.assistantSub?.stop();
 		this.assistantSub = undefined;
 	}
@@ -187,7 +213,7 @@ export class Transcript {
 			this.stopAssistant();
 			this.current = undefined;
 			this.wroteText = false;
-			this.displayed = "";
+			this.resetDisplayed();
 			this.lastCompletedTurn = undefined;
 			this.showSpinner();
 			return undefined;
@@ -196,12 +222,15 @@ export class Transcript {
 			if (!this.current) {
 				this.current = new AssistantTurn("", this.activity);
 				this.current.setStreaming(true);
+				this.assistantStreaming = true;
 				this.retain(this.current);
 				this.assistantSub = this.coordinator?.subscribe("assistant:stream", ACTIVITY_INTERVAL_MS);
 			}
 			this.current.append(event.text);
-			if (this.current.getText().length > Transcript.STREAM_ANIMATION_LIMIT) this.stopAssistant();
-			this.displayed += event.text;
+			if (this.current.getText().length > Transcript.STREAM_ANIMATION_LIMIT && this.assistantStreaming) {
+				this.stopAssistant();
+			}
+			this.appendDisplayed(event.text);
 			this.wroteText = true;
 			return undefined;
 		case "tool.start": {
@@ -279,24 +308,25 @@ export class Transcript {
 			// raw deltas are never exposed alongside it.
 			if (!this.wroteText && event.text) {
 				this.retain(new AssistantTurn(event.text));
-				this.displayed = event.text;
-			} else if (event.text && event.text !== this.displayed) {
-				if (event.text.startsWith(this.displayed)) {
-					const missing = event.text.slice(this.displayed.length);
+				this.resetDisplayed(event.text);
+			} else if (event.text && event.text !== this.displayedText()) {
+				const displayed = this.displayedText();
+				if (event.text.startsWith(displayed)) {
+					const missing = event.text.slice(displayed.length);
 					if (missing) {
 						if (this.current) this.current.append(missing);
 						else {
 							this.current = new AssistantTurn(missing);
 							this.retain(this.current);
 						}
-						this.displayed = event.text;
+						this.appendDisplayed(missing);
 					}
 				} else if (this.current) {
 					this.current.setText(event.text);
-					this.displayed = event.text;
+					this.resetDisplayed(event.text);
 				} else {
 					this.retain(new AssistantTurn(event.text));
-					this.displayed = event.text;
+					this.resetDisplayed(event.text);
 				}
 			}
 			if (event.cancelled) {
@@ -320,7 +350,8 @@ export class Transcript {
 }
 
 	private showSpinner(): void {
-		if (this.container.children.includes(this.spinner)) return;
+		if (this.spinnerVisible) return;
+		this.spinnerVisible = true;
 		this.container.addChild(this.spinner);
 		this.spinner.start();
 		// The shared animation coordinator owns render demand; elapsed text
@@ -329,10 +360,10 @@ export class Transcript {
 	}
 
 	private hideSpinner(): void {
-		if (this.container.children.includes(this.spinner)) {
-			this.spinner.stop();
-			this.container.removeChild(this.spinner);
-		}
+		if (!this.spinnerVisible) return;
+		this.spinnerVisible = false;
+		this.spinner.stop();
+		this.container.removeChild(this.spinner);
 	}
 
 	/** Stop activity presentation without clearing content (disconnect/exit/switch). */

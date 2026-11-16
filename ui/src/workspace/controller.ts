@@ -202,6 +202,8 @@ export const WORKSPACE_EDIT_COALESCE_LIMIT = 4;
 export const WORKSPACE_PERSIST_OPEN_URI_LIMIT = 20;
 /** Files reopenRecent attempts (plan §21: revalidate, never auto-restore all). */
 export const WORKSPACE_REOPEN_LIMIT = 8;
+/** Bounded open-tab policy: clean non-active tabs past this count are evicted. */
+export const WORKSPACE_MAX_OPEN_TABS = 32;
 /** Global retained diagnostics cap; overflow drops the oldest producer sets. */
 export const WORKSPACE_DIAGNOSTICS_CAP = 1000;
 /** Bounded best-effort window for close/dispose RPCs. */
@@ -303,6 +305,25 @@ function cloneChange(change: { range: LspRange; text: string }): { range: LspRan
 	return {
 		range: { start: { ...change.range.start }, end: { ...change.range.end } },
 		text: change.text,
+	};
+}
+
+/**
+ * Direct LSP change for one recorded store edit. The range comes from the
+ * transaction itself, so no full old/new text diff is needed per keystroke.
+ */
+function changeFromRecordedEdit(
+	before: string,
+	edit: { range: { startOffset: number; endOffset: number }; text: string },
+): { range: LspRange; text: string } {
+	const startOffset = Math.max(0, Math.min(before.length, edit.range.startOffset));
+	const endOffset = Math.max(startOffset, Math.min(before.length, edit.range.endOffset));
+	return {
+		range: {
+			start: offsetToPosition(before, startOffset),
+			end: offsetToPosition(before, endOffset),
+		},
+		text: edit.text,
 	};
 }
 
@@ -735,12 +756,21 @@ export class WorkspaceController {
 			return { status: "failed", uri: read.uri, message: tab.error.message };
 		}
 		if (tab.replacedDocumentId) {
-			await this.evictReplaced(tab.replacedDocumentId);
+			await this.evictDocument(tab.replacedDocumentId);
 			if (!this.ownsDocumentLifetime(generation, identity)) {
 				// A close/switch interleaved while the replaced preview retired:
 				// roll the just-published buffer/tab back instead of leaking it.
 				this.tabs.close(document.id);
 				this.store.closeDocument(document.id);
+				return { status: "no-workspace", uri };
+			}
+		}
+		// Bounded tab policy: evict the oldest clean non-active tabs (never a
+		// dirty buffer, never the active tab) and release their documents.
+		const overflow = this.tabs.enforceOverflow(WORKSPACE_MAX_OPEN_TABS);
+		for (const evictedId of overflow.evicted) {
+			await this.evictDocument(evictedId);
+			if (!this.ownsDocumentLifetime(generation, identity)) {
 				return { status: "no-workspace", uri };
 			}
 		}
@@ -845,7 +875,14 @@ export class WorkspaceController {
 		if (delta === 0) {
 			state.observedText = document.text;
 		} else if (delta === 1) {
-			state.pending.push(replacementChange(state.observedText, document.text));
+			// Normal single-edit transactions carry their exact range; only
+			// multi-edit/unknown paths fall back to the common-prefix diff.
+			const recorded = this.store.lastEdit(documentId);
+			const direct =
+				recorded && recorded.fromVersion === state.observedVersion && recorded.toVersion === document.version
+					? changeFromRecordedEdit(state.observedText, recorded.edit)
+					: undefined;
+			state.pending.push(direct ?? replacementChange(state.observedText, document.text));
 			state.observedVersion = document.version;
 			state.observedText = document.text;
 		} else {
@@ -1364,7 +1401,7 @@ export class WorkspaceController {
 		this.documentReleasedCallback?.(documentId);
 	}
 
-	private async evictReplaced(documentId: string): Promise<void> {
+	private async evictDocument(documentId: string): Promise<void> {
 		const record = this.store.getDocument(documentId);
 		this.retireDocument(documentId);
 		this.store.closeDocument(documentId);

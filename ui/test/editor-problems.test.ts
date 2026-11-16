@@ -188,6 +188,36 @@ test("rows sort severity → uri → line and counts track each severity", () =>
 	assert.deepEqual(model.counts(), { error: 2, warning: 1, info: 1, hint: 1, total: 5 });
 });
 
+test("the projection is cached by mutation revision and counts share it", () => {
+	const model = new ProblemsModel();
+	model.push({
+		uri: "file:///w/a.ts",
+		source: "pyright",
+		version: 1,
+		diagnostics: [
+			{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1, message: "error" },
+			{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } }, severity: 2, message: "warning" },
+		],
+	});
+	const revision = model.revision;
+	const first = model.rows();
+	const counts = model.counts();
+	assert.equal(model.revision, revision, "reads never bump the mutation revision");
+	assert.deepEqual(counts, { error: 1, warning: 1, info: 0, hint: 0, total: 2 });
+	assert.equal(model.omitted(), 0);
+	assert.deepEqual(model.rows(), first, "repeat reads share one projection");
+	assert.equal(model.revision, revision);
+	model.push({
+		uri: "file:///w/a.ts",
+		source: "pyright",
+		version: 2,
+		diagnostics: [],
+	});
+	assert.ok(model.revision > revision, "a mutation invalidates the projection");
+	assert.deepEqual(model.rows(), []);
+	assert.equal(model.counts().total, 0);
+});
+
 test("the total cap evicts the least-severe rows first and discloses them as omitted", () => {
 	const model = new ProblemsModel();
 	const hints = Array.from({ length: PROBLEMS_TOTAL_CAP + 5 }, (_, index) =>

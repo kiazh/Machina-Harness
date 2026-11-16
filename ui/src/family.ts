@@ -77,6 +77,8 @@ export interface FamilyHost {
 	changed(): void;
 	/** A subagent switch failed; report it in the visible transcript. */
 	report(error: unknown): void;
+	/** Drop dormant per-session App state for a session leaving the family. */
+	pruneSessionState?(sessionId: string): void;
 }
 
 /**
@@ -112,12 +114,18 @@ export class FamilyStore {
 		if (!session) return;
 		const rootId = familyRootOf(session);
 		if (rootId !== this.rootId) {
+			const previous = this.members;
 			this.rootId = rootId;
 			this.members = [];
 			// Discovery verdicts are per family: a new root re-opens them.
 			this.unknown.clear();
 			this.foreign.clear();
 			this.dismissed.clear();
+			// Per-session state (turns, activity, tails, tokens) belongs to the
+			// family we just left; drop it unless it is the visible session.
+			for (const member of previous) {
+				if (member.id !== session.id) this.host.pruneSessionState?.(member.id);
+			}
 		}
 		this.members = this.dismissed.has(session.id)
 			? this.members.filter((member) => member.id !== session.id)
@@ -161,6 +169,15 @@ export class FamilyStore {
 		this.dismissed.add(sessionId);
 		this.members = this.members.filter((member) => member.id !== sessionId);
 		this.host.changed();
+	}
+
+	/** Drop cached family membership/verdicts for one dormant session. */
+	pruneSession(sessionId: string): void {
+		this.dismissed.delete(sessionId);
+		this.unknown.delete(sessionId);
+		this.foreign.delete(sessionId);
+		this.members = this.members.filter((member) => member.id !== sessionId);
+		if (this.rootId === sessionId) this.rootId = undefined;
 	}
 
 	/**

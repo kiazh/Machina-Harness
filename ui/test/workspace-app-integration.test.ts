@@ -889,6 +889,29 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	await app.exit();
 });
 
+test("a narrow terminal refuses the explorer toggle with one honest notice", async () => {
+	const { app, tui } = makeApp();
+	await app.start();
+	await waitForWorkspace(app);
+	const state = internals(app);
+	const notices = captureNotices(app);
+	// Close the explorer while the split can still dock it.
+	state.shell.onWorkspaceExplorerToggle?.();
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false);
+	// Narrow viewport + editor preference makes the explorer an overlay.
+	(tui.terminal as { columns: number }).columns = 88;
+	state.setFocusForRegion("editor");
+	state.shell.onWorkspaceExplorerToggle?.();
+	assert.equal(
+		state.integration!.controller.getLayoutInput().explorerRequested,
+		false,
+		"the uncomposable overlay intent is not persisted",
+	);
+	assert.equal(notices.filter((notice) => /wider terminal/.test(notice.text)).length, 1);
+	assert.equal(internals(app).workspaceLayout?.explorer, undefined, "no drawer was painted");
+	await app.exit();
+});
+
 test("a fresh workspace persists the explorer open; an explicit stored false stays closed", async () => {
 	const { app, client } = makeApp();
 	await app.start();

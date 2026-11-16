@@ -41,6 +41,7 @@ import {
 } from "../src/workspace/gateway.ts";
 import {
 	WORKSPACE_DIAGNOSTICS_CAP,
+	WORKSPACE_MAX_OPEN_TABS,
 	WorkspaceController,
 	type NoticeKind,
 	type WorkspaceLspStatusSnapshot,
@@ -785,6 +786,49 @@ test("edit debounce coalesces one documentChange per window; versions strictly i
 	assert.equal(all.length, 2);
 	assert.equal(all[1]?.params.baseVersion, 3, "the next base is the last accepted version");
 	assert.equal(all[1]?.params.version, 4);
+	await h.controller.dispose();
+});
+
+test("a single edit syncs its exact store range without a full-text diff", async () => {
+	const h = build();
+	await openWorkspace(h);
+	const { documentId } = await mustOpen(h, "abc.ts", "abc\n");
+	// Replace a range whose before/after share both prefix and suffix: the
+	// common-prefix diff would collapse it, the recorded range must not.
+	h.store.setSelection(documentId, { cursorOffset: 1 });
+	h.store.applyEdit(documentId, [{ range: { startOffset: 1, endOffset: 2 }, text: "x" }]);
+	h.controller.noteEdit(documentId);
+	await h.controller.flushPending();
+	const changes = h.gateway.callsOf("workspace.documentChange").at(-1)?.params.changes as Array<{
+		range: { start: { line: number; character: number }; end: { line: number; character: number } };
+		text: string;
+	}>;
+	assert.equal(changes.length, 1);
+	assert.deepEqual(changes[0]?.range, {
+		start: { line: 0, character: 1 },
+		end: { line: 0, character: 2 },
+	});
+	assert.equal(changes[0]?.text, "x");
+	await h.controller.dispose();
+});
+
+test("tab overflow evicts the oldest clean tab and releases its document", async () => {
+	const h = build();
+	await openWorkspace(h);
+	for (let index = 0; index <= WORKSPACE_MAX_OPEN_TABS; index += 1) {
+		await mustOpen(h, `tab-${index}.ts`, `content ${index}\n`);
+	}
+	assert.equal(h.tabs.count(), WORKSPACE_MAX_OPEN_TABS);
+	assert.equal(h.store.documents().length, WORKSPACE_MAX_OPEN_TABS, "evicted buffers are closed");
+	assert.equal(h.controller.getLayoutInput().explorerRequested, true);
+	const evictedUri = fileUri("tab-0.ts");
+	assert.ok(
+		h.gateway.callsOf("workspace.documentClose").some((call) => call.params.uri === evictedUri),
+		"the mirror is closed for the evicted tab",
+	);
+	const active = h.tabs.activeDocumentId();
+	assert.ok(active, "the newest tab stays active");
+	assert.equal(h.store.getDocument(active)?.uri, fileUri(`tab-${WORKSPACE_MAX_OPEN_TABS}.ts`));
 	await h.controller.dispose();
 });
 

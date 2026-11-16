@@ -1252,6 +1252,12 @@ interface ProducerEntry {
 	dropped: number;
 }
 
+interface ProblemsProjection {
+	rows: ProblemRow[];
+	counts: SeverityCounts;
+	omitted: number;
+}
+
 /** severity (errors first) → uri → line → character → producer. */
 function compareRows(a: ProblemRow, b: ProblemRow): number {
 	if (a.severity !== b.severity) return a.severity - b.severity;
@@ -1304,6 +1310,9 @@ export class ProblemsModel {
 	private readonly upstreamOmitted = new Map<string, number>();
 	private rowCount = 0;
 	private staleCount = 0;
+	/** Mutation revision: one sorted/deduped projection per accepted change. */
+	private revisionValue = 0;
+	private projectionCache: ProblemsProjection | undefined;
 
 	constructor(options: { request?: IntelligenceRequest } = {}) {
 		this.request = options.request;
@@ -1317,7 +1326,9 @@ export class ProblemsModel {
 		const version = update.version === null || typeof update.version === "number" ? update.version : null;
 		const diagnostics = narrowDiagnosticList(update.diagnostics);
 		const rows = diagnostics.map((diagnostic) => this.toRow(uri, producer, version, diagnostic));
-		return this.replace(uri, producer, version, rows);
+		const stored = this.replace(uri, producer, version, rows);
+		this.invalidateProjection();
+		return stored;
 	}
 
 	/** Drop entries for a uri (all producers) or one producer. */
@@ -1328,6 +1339,7 @@ export class ProblemsModel {
 			for (const entry of uriMap.values()) this.rowCount -= entry.rows.length;
 			this.entries.delete(uri);
 			this.upstreamOmitted.delete(uri);
+			this.invalidateProjection();
 			return true;
 		}
 		const entry = uriMap.get(producer);
@@ -1335,6 +1347,7 @@ export class ProblemsModel {
 		this.rowCount -= entry.rows.length;
 		uriMap.delete(producer);
 		if (uriMap.size === 0) this.entries.delete(uri);
+		this.invalidateProjection();
 		return true;
 	}
 
@@ -1379,6 +1392,7 @@ export class ProblemsModel {
 		}
 		if (groups.size > 0 || payload.omitted > 0) this.upstreamOmitted.set(uri, payload.omitted);
 		this.enforceCap();
+		this.invalidateProjection();
 		return { ok: true, producers: groups.size, records };
 	}
 
@@ -1390,37 +1404,50 @@ export class ProblemsModel {
 	 * labels; distinct content still renders as distinct rows.
 	 */
 	rows(): ProblemRow[] {
-		return this.projected().map((row) => ({ ...row, range: copyRange(row.range) }));
+		return this.projection().rows.map((row) => ({ ...row, range: copyRange(row.range) }));
+	}
+
+	/** Monotonic mutation revision (cache key for presentation projections). */
+	get revision(): number {
+		return this.revisionValue;
 	}
 
 	/** Deduped projection shared by `rows()` and `counts()` (one truth). */
-	private projected(): ProblemRow[] {
+	private projection(): ProblemsProjection {
+		const cached = this.projectionCache;
+		if (cached) return cached;
 		const all: ProblemRow[] = [];
 		for (const uriMap of this.entries.values()) {
 			for (const entry of uriMap.values()) all.push(...entry.rows);
 		}
 		all.sort(compareRows);
 		const seen = new Set<string>();
-		const out: ProblemRow[] = [];
+		const rows: ProblemRow[] = [];
+		const counts: SeverityCounts = { error: 0, warning: 0, info: 0, hint: 0, total: 0 };
+		let dropped = 0;
+		for (const uriMap of this.entries.values()) {
+			for (const entry of uriMap.values()) dropped += entry.dropped;
+		}
+		let upstream = 0;
+		for (const value of this.upstreamOmitted.values()) upstream += value;
 		for (const row of all) {
 			const key = problemRowKey(row);
 			if (seen.has(key)) continue;
 			seen.add(key);
-			out.push(row);
-		}
-		return out;
-	}
-
-	counts(): SeverityCounts {
-		const counts: SeverityCounts = { error: 0, warning: 0, info: 0, hint: 0, total: 0 };
-		for (const row of this.projected()) {
+			rows.push(row);
 			if (row.severity === 1) counts.error += 1;
 			else if (row.severity === 2) counts.warning += 1;
 			else if (row.severity === 3) counts.info += 1;
 			else counts.hint += 1;
 			counts.total += 1;
 		}
-		return counts;
+		const projection: ProblemsProjection = { rows, counts, omitted: dropped + upstream };
+		this.projectionCache = projection;
+		return projection;
+	}
+
+	counts(): SeverityCounts {
+		return { ...this.projection().counts };
 	}
 
 	total(): number {
@@ -1432,13 +1459,7 @@ export class ProblemsModel {
 	 * producer clears its share) plus the server's latest omitted counts.
 	 */
 	omitted(): number {
-		let upstream = 0;
-		for (const value of this.upstreamOmitted.values()) upstream += value;
-		let dropped = 0;
-		for (const uriMap of this.entries.values()) {
-			for (const entry of uriMap.values()) dropped += entry.dropped;
-		}
-		return dropped + upstream;
+		return this.projection().omitted;
 	}
 
 	stalePushes(): number {
@@ -1461,6 +1482,12 @@ export class ProblemsModel {
 	}
 
 	// ------------------------------------------------------------- internals
+
+	/** Mutation revision: one sorted/deduped projection per accepted change. */
+	private invalidateProjection(): void {
+		this.revisionValue += 1;
+		this.projectionCache = undefined;
+	}
 
 	private toRow(
 		uri: string,
@@ -1509,22 +1536,29 @@ export class ProblemsModel {
 	/** Evict the lowest-priority rows until the total cap holds. */
 	private enforceCap(): void {
 		if (this.rowCount <= PROBLEMS_TOTAL_CAP) return;
-		const ranked: Array<{ uri: string; producer: string; row: ProblemRow }> = [];
-		for (const [uri, uriMap] of this.entries.entries()) {
-			for (const [producer, entry] of uriMap.entries()) {
-				for (const row of entry.rows) ranked.push({ uri, producer, row });
+		const ranked: Array<{ entry: ProducerEntry; row: ProblemRow }> = [];
+		for (const uriMap of this.entries.values()) {
+			for (const entry of uriMap.values()) {
+				for (const row of entry.rows) ranked.push({ entry, row });
 			}
 		}
 		ranked.sort((a, b) => compareRows(a.row, b.row));
-		while (this.rowCount > PROBLEMS_TOTAL_CAP && ranked.length > 0) {
-			const worst = ranked.pop() as { uri: string; producer: string; row: ProblemRow };
-			const entry = this.entries.get(worst.uri)?.get(worst.producer);
-			if (!entry) continue;
-			const at = entry.rows.indexOf(worst.row);
-			if (at < 0) continue;
-			entry.rows.splice(at, 1);
-			entry.dropped += 1;
-			this.rowCount -= 1;
+		const remove = this.rowCount - PROBLEMS_TOTAL_CAP;
+		const removed = new Set<ProblemRow>();
+		for (let index = ranked.length - 1; index >= 0 && removed.size < remove; index--) {
+			removed.add(ranked[index]!.row);
 		}
+		if (removed.size === 0) return;
+		// One filter pass per producer: no per-removal indexOf/splice scan.
+		for (const uriMap of this.entries.values()) {
+			for (const entry of uriMap.values()) {
+				const kept = entry.rows.filter((row) => !removed.has(row));
+				if (kept.length === entry.rows.length) continue;
+				entry.dropped += entry.rows.length - kept.length;
+				this.rowCount -= entry.rows.length - kept.length;
+				entry.rows = kept;
+			}
+		}
+		if (this.rowCount < 0) this.rowCount = 0;
 	}
 }

@@ -183,6 +183,11 @@ export class SessionTailStore {
 		return tail;
 	}
 
+	/** Drop a dormant session's buffered tail. */
+	pruneSession(sessionId: string): void {
+		this.tails.delete(sessionId);
+	}
+
 	buffer(event: GatewayEvent): void {
 		bufferHiddenEvent(this.ensure(event.sessionId), event);
 	}

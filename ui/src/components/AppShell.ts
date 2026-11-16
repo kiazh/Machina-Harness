@@ -23,6 +23,8 @@ export type Density = "full" | "reduced" | "compact" | "degraded";
 export interface ComposerBudget {
 	setMaxRows(rows: number): void;
 	setDegradedMode(degraded: boolean): void;
+	/** Cheap chrome measurement; falls back to render() when absent. */
+	measureRows?(width: number): number;
 }
 
 /** Pinned bar contract: a component that can hide itself and size by budget. */
@@ -56,6 +58,8 @@ export class AppShell {
 	private pinnedBar: PinnedBarSlot | undefined;
 	private agentBar: (Component & { visible: boolean }) | undefined;
 	private activityBar: (Component & { visible: boolean }) | undefined;
+	/** Cached chrome row budget; invalidated by composer/dock changes. */
+	private chromeCache: { key: string; rows: number } | undefined;
 	/** Created on first workspace use; its absence means today's chat-only tree. */
 	private workspace: WorkspaceShell | undefined;
 
@@ -83,6 +87,7 @@ export class AppShell {
 
 	setDock(component?: Component): void {
 		this.dock = component;
+		this.invalidateChrome();
 		this.applyBudgets();
 		this.rebuild();
 	}
@@ -105,6 +110,7 @@ export class AppShell {
 
 	setActivityBar(bar: Component & { visible: boolean }): void {
 		this.activityBar = bar;
+		this.invalidateChrome();
 		this.rebuild();
 	}
 
@@ -166,21 +172,51 @@ export class AppShell {
 	 * panes row for the optional dock, the pinned composer and the footer. The
 	 * app subtracts this from the pane's allocated rows so render() height and
 	 * the live viewport stay exactly aligned.
+	 *
+	 * Measured once per state/layout key: the footer is a fixed single row,
+	 * the composer caches its own wrapped height, and dock/activity heights
+	 * only change when their component identity/visibility does. Callers that
+	 * mutate chrome content call {@link invalidateChrome}.
 	 */
 	chromeRows(): number {
 		const width = this.liveColumns();
+		const activity = this.activityBar;
+		const activityRows = activity?.visible
+			? (activity as Component & { measureRows?(columns: number): number }).measureRows?.(width)
+				?? activity.render(width).length
+			: 0;
+		// measureRows is itself keyed by the composer's draft/window state, so
+		// this stays a cheap lookup while catching draft/popup height changes.
+		const composerRows = this.composer.measureRows?.(width) ?? this.composer.render(width).length;
+		const key = [
+			width,
+			this.lastRows,
+			this.density,
+			activityRows,
+			composerRows,
+			this.dock ? "dock" : "nodock",
+		].join("|");
+		const cached = this.chromeCache;
+		if (cached && cached.key === key) return cached.rows;
 		const gap = this.gapRows();
-		let rows = this.composer.render(width).length + this.footer.render(width).length;
-		let sections = 3; // panes row + composer + footer
-		if (this.activityBar?.visible) {
-			rows += this.activityBar.render(width).length;
+		let rows = composerRows + 1;
+		let sections = 3; // panes row + composer + footer (footer is one row)
+		if (activity?.visible) {
+			rows += activityRows;
 			sections += 1;
 		}
 		if (this.dock) {
 			rows += this.dock.render(width).length;
 			sections += 1;
 		}
-		return rows + gap * (sections - 1);
+		const total = rows + gap * (sections - 1);
+		this.chromeCache = { key, rows: total };
+		return total;
+	}
+
+	/** Chrome content changed (composer text, dock state): re-measure once. */
+	invalidateChrome(): void {
+		this.chromeCache = undefined;
 	}
 
 	/** Inter-section gap for the current density and dock state (single source). */

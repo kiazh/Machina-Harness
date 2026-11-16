@@ -224,29 +224,31 @@ test("W5 transcript scrollback is capped and marked with a trim notice", () => {
 test("W5 dormant per-session state is pruned with an LRU bound", () => {
 	const { app } = makeApp();
 	const internal = app as unknown as {
-		turns: Map<string, unknown>;
-		sessionTokensById: Map<string, number>;
-		inFlight: Set<string>;
-		sessionTokens: number;
+		turnSession: {
+			turns: Map<string, unknown>;
+			sessionTokensById: Map<string, number>;
+			inFlight: Set<string>;
+			sessionTokens: number;
+		};
 	};
 	// Oldest session: in flight, so it must never be evicted.
 	const active = sessionInfo("aaaaaaaa-0000-0000-0000-000000000000");
 	app.switchTo(active, []);
-	internal.inFlight.add(active.id);
-	internal.turns.set(active.id, {});
-	internal.sessionTokensById.set(active.id, 42);
-	internal.sessionTokens = 42; // the visible counter mirrors the active session
+	internal.turnSession.inFlight.add(active.id);
+	internal.turnSession.turns.set(active.id, {});
+	internal.turnSession.sessionTokensById.set(active.id, 42);
+	internal.turnSession.sessionTokens = 42; // the visible counter mirrors the active session
 
 	for (let i = 0; i < 60; i++) {
 		const s = sessionInfo(`session-${i}`);
 		app.switchTo(s, []);
-		internal.turns.set(s.id, {});
-		internal.sessionTokensById.set(s.id, i);
+		internal.turnSession.turns.set(s.id, {});
+		internal.turnSession.sessionTokensById.set(s.id, i);
 	}
-	assert.ok(internal.turns.size <= 50, `turns bounded, got ${internal.turns.size}`);
-	assert.ok(internal.sessionTokensById.size <= 50, `tokens bounded, got ${internal.sessionTokensById.size}`);
-	assert.ok(internal.turns.has(active.id), "in-flight session state is never pruned");
-	assert.equal(internal.sessionTokensById.get(active.id), 42, "in-flight token count is preserved");
+	assert.ok(internal.turnSession.turns.size <= 50, `turns bounded, got ${internal.turnSession.turns.size}`);
+	assert.ok(internal.turnSession.sessionTokensById.size <= 50, `tokens bounded, got ${internal.turnSession.sessionTokensById.size}`);
+	assert.ok(internal.turnSession.turns.has(active.id), "in-flight session state is never pruned");
+	assert.equal(internal.turnSession.sessionTokensById.get(active.id), 42, "in-flight token count is preserved");
 });
 
 // ─── W6: cursor pagination scans are bounded ────────────────────────────────
@@ -315,4 +317,32 @@ test("W6 job prefix resolution scans one bounded listing, never a cursor chain",
 		/No job starts with/i,
 	);
 	assert.equal(pages.requestCount(), 1, "jobs.list has no cursor: exactly one bounded listing");
+});
+
+test("W5 per-session pruning clears activity, tails and retained outputs in one place", async (t) => {
+	const { app } = makeApp();
+	t.after(() => app.exit());
+	await app.start();
+	const state = app as unknown as {
+		current: SessionInfo | undefined;
+		turnSession: {
+			sessionRecency: string[];
+			sessionTails: { buffer(event: Record<string, unknown>): void; has(id: string): boolean };
+		};
+		activity: { setQueue(id: string, items: Array<{ id: string; text: string }>): void; queue(id: string): unknown[]; setJob(id: string, job: Record<string, unknown>): void; listJobs(id: string): unknown[] };
+		outputStore: { put(id: string, toolId: string, name: string, result: string, truncated: boolean): void; list(id: string): unknown[] };
+		rememberSession(id: string): void;
+	};
+	const dormant = sessionInfo("aaaaaaaa-0000-0000-0000-00000000dead");
+	state.activity.setQueue(dormant.id, [{ id: "q1", text: "queued" }]);
+	state.activity.setJob(dormant.id, { id: "job1", command: "sleep 1", status: "running" });
+	state.turnSession.sessionTails.buffer({ protocolVersion: 2, sessionId: dormant.id, turnId: "t", type: "message.start" });
+	state.outputStore.put(dormant.id, "tool1", "terminal", "output", false);
+	state.rememberSession(dormant.id);
+	// Fill the LRU past its bound until the dormant session is evicted.
+	for (let index = 0; index < 60; index++) state.rememberSession(`session-${index}`);
+	assert.equal(state.activity.queue(dormant.id).length, 0, "queued steering is dropped");
+	assert.equal(state.activity.listJobs(dormant.id).length, 0, "shell jobs are dropped");
+	assert.equal(state.turnSession.sessionTails.has(dormant.id), false, "buffered hidden tail is dropped");
+	assert.deepEqual(state.outputStore.list(dormant.id), [], "retained outputs are dropped");
 });

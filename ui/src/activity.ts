@@ -47,6 +47,12 @@ export class ActivityStore {
 	}
 	queue(sessionId: string): SteeringItem[] { return this.queues.get(sessionId) ?? []; }
 	listJobs(sessionId: string): ShellJob[] { return [...(this.jobs.get(sessionId)?.values() ?? [])]; }
+	/** Drop every dormant per-session queue/job record for one session. */
+	pruneSession(sessionId: string): void {
+		this.queues.delete(sessionId);
+		this.queueVersions.delete(sessionId);
+		this.jobs.delete(sessionId);
+	}
 }
 
 export class ActivityBar {
@@ -78,6 +84,10 @@ export class ActivityBar {
 	}
 	render(width: number): string[] {
 		return this.layout(width).rows;
+	}
+	/** Row count without a second full render when chrome is measured again. */
+	measureRows(width: number): number {
+		return this.layout(width).rows.length;
 	}
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;

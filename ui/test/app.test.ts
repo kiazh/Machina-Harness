@@ -392,9 +392,12 @@ test("retired steering and tool events cannot mutate the current activity", asyn
 	client.emit(ev({ type: "tool.start", turnId: "new", id: "live", name: "read_file", args: {} }));
 	client.emit(ev({ type: "steering.update", turnId: "old", items: [{ id: "stale", text: "old" }], delivered: [{ id: "stale", text: "old" }] }));
 	client.emit(ev({ type: "message.complete", turnId: "old", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
-	const state = app as unknown as { activity: { queue(id: string): unknown[] }; activeTools: Map<string, Map<string, string>> };
+	const state = app as unknown as {
+		activity: { queue(id: string): unknown[] };
+		turnSession: { activeTools: Map<string, Map<string, string>> };
+	};
 	assert.deepEqual(state.activity.queue(SESSION_A.id), []);
-	assert.equal(state.activeTools.get(SESSION_A.id)?.has("live"), true);
+	assert.equal(state.turnSession.activeTools.get(SESSION_A.id)?.has("live"), true);
 	await app.exit();
 });
 
@@ -698,12 +701,12 @@ test("local watchdog warns once and retains the guard (never ownership)", async 
 	await submitPromise;
 
 	const internal = app as unknown as {
-		inFlight: Set<string>;
+		turnSession: { inFlight: Set<string> };
 		transcript: { apply: (event: GatewayEvent) => unknown };
 	};
 	// Exercise the real production watchdog callback with fake time.
 	t.mock.timers.tick(300_000);
-	assert.equal(internal.inFlight.has(SESSION_A.id), true, "guard retained after the diagnostic deadline");
+	assert.equal(internal.turnSession.inFlight.has(SESSION_A.id), true, "guard retained after the diagnostic deadline");
 	await submitPromise.catch(() => {});
 	const second = (app as unknown as { submitTurn: (text: string) => Promise<void> }).submitTurn("too soon");
 	await second;

@@ -1531,6 +1531,23 @@ test("/models catalog reports fetch errors honestly", async () => {
 	assert.match(host.last().text, /source: fallback/);
 });
 
+test("/models catalog keeps the unsupported-gateway message only for METHOD_NOT_FOUND", async () => {
+	const unsupported = new FakeHost();
+	unsupported.responses["models.list"] = () => {
+		throw new RpcError(-32601, "method not found");
+	};
+	await run("/models catalog", unsupported);
+	assert.match(unsupported.last().text, /This gateway cannot list provider catalogs/);
+
+	const failed = new FakeHost();
+	failed.responses["models.list"] = () => {
+		throw new RpcError(-32000, "catalog backend unavailable");
+	};
+	await run("/models catalog", failed);
+	assert.match(failed.last().text, /Model catalog request failed: catalog backend unavailable/);
+	assert.doesNotMatch(failed.last().text, /This gateway cannot list provider catalogs/);
+});
+
 test("/models groups catalogs per provider with the selected provider first", async () => {
 	const host = new FakeHost();
 	host.current = { ...SESSION, provider: "chatgpt", model: "gpt-6.1-sol" };

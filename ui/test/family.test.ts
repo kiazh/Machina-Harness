@@ -210,13 +210,23 @@ async function boot(options: BootOptions = {}) {
 }
 
 function internals(app: App) {
-	return app as unknown as {
-		inFlight: Set<string>;
-		turns: Map<string, { turnId?: string }>;
-		sessionTokensById: Map<string, number>;
-		sessionTails: Map<string, { blocks: unknown[] }>;
+	const state = app as unknown as {
+		turnSession: {
+			inFlight: Set<string>;
+			turns: Map<string, { turnId?: string }>;
+			sessionTokensById: Map<string, number>;
+			sessionTails: Map<string, { blocks: unknown[] }>;
+		};
 		footer: { tokens: number };
 		editor: { getText(): string; isShowingAutocomplete(): boolean };
+	};
+	return {
+		get inFlight() { return state.turnSession.inFlight; },
+		get turns() { return state.turnSession.turns; },
+		get sessionTokensById() { return state.turnSession.sessionTokensById; },
+		get sessionTails() { return state.turnSession.sessionTails; },
+		footer: state.footer,
+		editor: state.editor,
 	};
 }
 
@@ -630,4 +640,27 @@ test("/agents sessions lists the family and switches to the picked child", async
 	await pending;
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id, "picking the child switches through session.resume");
+});
+
+test("changing family roots prunes dormant per-session state from the old family", async (t) => {
+	const { app } = await boot({ sessions: [MAIN, CHILD, UNRELATED] });
+	t.after(() => app.exit());
+	await settle();
+	app.switchTo(CHILD, []);
+	await settle();
+	const state = internals(app) as unknown as {
+		turns: Map<string, unknown>;
+		sessionTokensById: Map<string, number>;
+	};
+	state.turns.set(MAIN.id, {});
+	state.turns.set(CHILD.id, {});
+	state.sessionTokensById.set(MAIN.id, 11);
+	state.sessionTokensById.set(CHILD.id, 22);
+	// Switching to an unrelated root leaves the MAIN family behind.
+	app.switchTo(UNRELATED, []);
+	await settle();
+	assert.equal(state.turns.has(MAIN.id), false, "old family root state is pruned");
+	assert.equal(state.turns.has(CHILD.id), false, "old family child state is pruned");
+	assert.equal(state.sessionTokensById.has(MAIN.id), false);
+	assert.equal(state.sessionTokensById.has(CHILD.id), false);
 });

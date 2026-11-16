@@ -15,7 +15,7 @@ import {
 	type Terminal,
 } from "@earendil-works/pi-tui";
 import { ComposerBox, Footer } from "../src/components.ts";
-import { AppShell } from "../src/components/AppShell.ts";
+import { AppShell, type ComposerBudget } from "../src/components/AppShell.ts";
 import { NowPlayingBar } from "../src/components/NowPlayingBar.ts";
 import { WorkspaceShell } from "../src/components/WorkspaceShell.ts";
 import { AnimationCoordinator } from "../src/design/motion.ts";
@@ -688,4 +688,43 @@ test("split mode pins the music bar to the chat column top, editor untouched", (
 	} finally {
 		teardown(h);
 	}
+});
+
+test("chrome rows are measured once per state key and the footer is never rendered", () => {
+	const term = mockTerminal(120, 40);
+	const tui = new TuiAltScreen(term);
+	const transcript = new Container();
+	transcript.addChild(new Text("chat", 0, 0));
+	let composerRenders = 0;
+	let composerRows: number | undefined;
+	const composer: Component & ComposerBudget = {
+		setMaxRows() {},
+		setDegradedMode() {},
+		measureRows() {
+			composerRows ??= this.render(0).length;
+			return composerRows;
+		},
+		render() {
+			composerRenders += 1;
+			return ["composer"];
+		},
+		invalidate() {},
+	};
+	let footerRenders = 0;
+	const footer = {
+		compact: false,
+		render() {
+			footerRenders += 1;
+			return ["footer"];
+		},
+		invalidate() {},
+	};
+	const shell = new AppShell(tui, transcript, composer, footer as unknown as Footer);
+	const first = shell.chromeRows();
+	assert.equal(shell.chromeRows(), first, "an unchanged key reuses the measured budget");
+	assert.equal(composerRenders, 1, "the composer renders once for measurement");
+	assert.equal(footerRenders, 0, "the footer is a known single row, never rendered for measurement");
+	shell.invalidateChrome();
+	assert.equal(shell.chromeRows(), first, "an explicit invalidation re-measures the same height");
+	assert.equal(composerRenders, 1, "the composer's own measurement cache survives a shell invalidation");
 });

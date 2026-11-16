@@ -103,6 +103,9 @@ export class ProblemsPane implements Component, Focusable {
 	private rowBudgetValue: number;
 	private selectionValue = 0;
 	private selectedRow: ProblemRow | undefined;
+	/** Model revision + rows: repeated reads inside one render are free. */
+	private rowsRevision = -1;
+	private cachedRows: ProblemRow[] = [];
 	/** Geometry from the last render, for mouse hit-testing. */
 	private lastStart = 0;
 	private lastShown = 0;
@@ -122,7 +125,12 @@ export class ProblemsPane implements Component, Focusable {
 
 	/** Follow the selected diagnostic when live updates reorder the list. */
 	private currentRows(): ProblemRow[] {
-		const rows = this.model.rows();
+		const revision = this.model.revision;
+		if (this.rowsRevision !== revision) {
+			this.cachedRows = this.model.rows();
+			this.rowsRevision = revision;
+		}
+		const rows = this.cachedRows;
 		const selected = this.selectedRow;
 		if (selected) {
 			const index = rows.findIndex((row) => row.uri === selected.uri
@@ -163,10 +171,11 @@ export class ProblemsPane implements Component, Focusable {
 
 	/** Move the selection by `delta` with clamping; returns the new index. */
 	moveSelection(delta: number): number {
-		const count = this.currentRows().length;
+		const rows = this.currentRows();
+		const count = rows.length;
 		const amount = Number.isFinite(delta) ? Math.floor(delta) : 0;
 		this.selectionValue = count === 0 ? 0 : Math.max(0, Math.min(count - 1, this.selectionValue + amount));
-		this.selectedRow = this.model.rows()[this.selectionValue];
+		this.selectedRow = rows[this.selectionValue];
 		this.requestRenderCallback?.();
 		return this.selectionValue;
 	}

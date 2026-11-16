@@ -60,6 +60,15 @@ export interface TextEdit {
 	text: string;
 }
 
+/** Last accepted single-edit transaction, for direct workspace sync ranges. */
+export interface RecordedEdit {
+	/** Document version before the transaction. */
+	fromVersion: number;
+	/** Document version after the transaction. */
+	toVersion: number;
+	edit: TextEdit;
+}
+
 export type ModelErrorCode =
 	| "not-found"
 	| "read-only"
@@ -338,6 +347,15 @@ function composeText(text: string, edits: NormalizedEdit[]): string {
 	return out;
 }
 
+/** True when a transaction could change the document's ending kind. */
+function editsTouchLineEndings(before: string, edits: NormalizedEdit[]): boolean {
+	for (const edit of edits) {
+		if (/[\r\n]/.test(edit.text)) return true;
+		if (/[\r\n]/.test(before.slice(edit.startOffset, edit.endOffset))) return true;
+	}
+	return false;
+}
+
 export class EditorStore {
 	private readonly totalTextBudget: number;
 	private readonly undoBudget: number;
@@ -348,6 +366,12 @@ export class EditorStore {
 	private readonly histories = new Map<string, DocHistory>();
 	private readonly pendingReload = new Map<string, string>();
 	private readonly acknowledgedVersion = new Map<string, number>();
+	/** Cached UTF-8 byte size per open document (no rescans on close/edits). */
+	private readonly textBytes = new Map<string, number>();
+	/** UTF-16 length of the last acknowledged save text, when one exists. */
+	private readonly savedTextLength = new Map<string, number>();
+	/** Last single-edit transaction, used to send the exact LSP range. */
+	private readonly lastEdits = new Map<string, RecordedEdit>();
 	private totalTextBytesValue = 0;
 	private undoBytesValue = 0;
 	private undoSeq = 0;
@@ -411,13 +435,15 @@ export class EditorStore {
 		});
 		this.histories.set(id, { undo: [], redo: [], trimmed: false });
 		this.totalTextBytesValue += bytes;
+		this.textBytes.set(id, bytes);
+		if (revision !== null) this.savedTextLength.set(id, options.text.length);
 		return { ok: true, created: true, document: record };
 	}
 
 	closeDocument(documentId: string): boolean {
 		const record = this.records.get(documentId);
 		if (!record) return false;
-		this.totalTextBytesValue -= utf8Length(record.text);
+		this.totalTextBytesValue -= this.textBytes.get(documentId) ?? utf8Length(record.text);
 		const history = this.histories.get(documentId);
 		if (history) {
 			for (const group of history.undo) this.undoBytesValue -= group.bytes;
@@ -431,6 +457,9 @@ export class EditorStore {
 		this.histories.delete(documentId);
 		this.pendingReload.delete(documentId);
 		this.acknowledgedVersion.delete(documentId);
+		this.textBytes.delete(documentId);
+		this.savedTextLength.delete(documentId);
+		this.lastEdits.delete(documentId);
 		return true;
 	}
 
@@ -563,12 +592,24 @@ export class EditorStore {
 		const requested = options.coalesce;
 		const extendsRun = this.runExtends(history, beforeText, normalized, requested);
 		const nextText = composeText(beforeText, normalized);
+		const beforeVersion = record.version;
 
 		record.text = nextText;
 		record.version += 1;
-		record.lineEnding = detectLineEnding(nextText);
-		this.trackTextBytesChange(beforeText, nextText);
-		this.recomputeDirty(record);
+		// Newline-free edits cannot change the document's ending kind, so the
+		// full scan only runs when an inserted/removed slice carries CR or LF.
+		if (editsTouchLineEndings(beforeText, normalized)) record.lineEnding = detectLineEnding(nextText);
+		this.trackEditBytes(record, normalized, beforeText);
+		this.markDirtyAfterChange(record);
+		this.lastEdits.delete(documentId);
+		const single = normalized.length === 1 ? normalized[0] : undefined;
+		if (single) {
+			this.lastEdits.set(documentId, {
+				fromVersion: beforeVersion,
+				toVersion: record.version,
+				edit: { range: { startOffset: single.startOffset, endOffset: single.endOffset }, text: single.text },
+			});
+		}
 		const primary = normalized[normalized.length - 1];
 		if (primary) {
 			// `primary` carries pre-transaction offsets; shift its end past the
@@ -623,8 +664,9 @@ export class EditorStore {
 		record.text = group.before.text;
 		record.version += 1;
 		record.lineEnding = detectLineEnding(record.text);
-		this.trackTextBytesChange(currentText, record.text);
-		this.recomputeDirty(record);
+		this.replaceTextBytes(documentId, record.text);
+		this.markDirtyAfterChange(record);
+		this.lastEdits.delete(documentId);
 		this.restoreSelection(view, group.before.selection, record.text.length);
 		this.trimUndoBudget();
 		return {
@@ -659,8 +701,9 @@ export class EditorStore {
 		record.text = entry.text;
 		record.version += 1;
 		record.lineEnding = detectLineEnding(record.text);
-		this.trackTextBytesChange(currentText, record.text);
-		this.recomputeDirty(record);
+		this.replaceTextBytes(documentId, record.text);
+		this.markDirtyAfterChange(record);
+		this.lastEdits.delete(documentId);
 		this.restoreSelection(view, entry.selection, record.text.length);
 		this.trimUndoBudget();
 		return {
@@ -785,6 +828,7 @@ export class EditorStore {
 			record.savedTextHash = tokenHash;
 			record.dirty = false;
 			record.conflict = undefined;
+			this.savedTextLength.set(documentId, token.text.length);
 			if (token.version > acknowledged) this.acknowledgedVersion.set(documentId, token.version);
 			return { ok: true, cleared: true, ignored: false, document: record };
 		}
@@ -795,6 +839,7 @@ export class EditorStore {
 		}
 		record.savedRevision = newRevision;
 		record.savedTextHash = tokenHash;
+		this.savedTextLength.set(documentId, token.text.length);
 		this.acknowledgedVersion.set(documentId, token.version);
 		this.recomputeDirty(record);
 		return { ok: true, cleared: false, ignored: false, document: record };
@@ -882,6 +927,20 @@ export class EditorStore {
 
 	// ------------------------------------------------------------- disclosure
 
+	/** Exact last single-edit transaction (undefined for atomic/multi-edit). */
+	lastEdit(documentId: string): RecordedEdit | undefined {
+		const recorded = this.lastEdits.get(documentId);
+		if (!recorded) return undefined;
+		return {
+			fromVersion: recorded.fromVersion,
+			toVersion: recorded.toVersion,
+			edit: {
+				range: { ...recorded.edit.range },
+				text: recorded.edit.text,
+			},
+		};
+	}
+
 	undoDepth(documentId: string): number {
 		return this.histories.get(documentId)?.undo.length ?? 0;
 	}
@@ -926,9 +985,42 @@ export class EditorStore {
 				: hashText(record.text) !== record.savedTextHash;
 	}
 
-	/** Keep the reported open-text total truthful; budgets are checked at open. */
-	private trackTextBytesChange(beforeText: string, afterText: string): void {
-		this.totalTextBytesValue += utf8Length(afterText) - utf8Length(beforeText);
+	/**
+	 * Dirty after an edit/undo. A length mismatch is definitive; only text
+	 * with the saved length needs the full SHA-256 comparison (typing almost
+	 * always changes length, so per-keystroke hashing disappears).
+	 */
+	private markDirtyAfterChange(record: DocumentRecord): void {
+		if (record.savedTextHash === null) {
+			record.dirty = record.text.length > 0;
+			return;
+		}
+		const savedLength = this.savedTextLength.get(record.id);
+		if (savedLength === undefined || record.text.length !== savedLength) {
+			record.dirty = true;
+			return;
+		}
+		record.dirty = hashText(record.text) !== record.savedTextHash;
+	}
+
+	/** Account one transaction from the edited slices, not the whole document. */
+	private trackEditBytes(record: DocumentRecord, edits: NormalizedEdit[], beforeText: string): void {
+		let delta = 0;
+		for (const edit of edits) {
+			delta += utf8Length(edit.text) - utf8Length(beforeText.slice(edit.startOffset, edit.endOffset));
+		}
+		const before = this.textBytes.get(record.id) ?? 0;
+		this.textBytes.set(record.id, before + delta);
+		this.totalTextBytesValue += delta;
+		if (this.totalTextBytesValue < 0) this.totalTextBytesValue = 0;
+	}
+
+	/** Replace one document's byte accounting from a whole new text (undo/reload). */
+	private replaceTextBytes(documentId: string, text: string): void {
+		const before = this.textBytes.get(documentId) ?? 0;
+		const bytes = utf8Length(text);
+		this.textBytes.set(documentId, bytes);
+		this.totalTextBytesValue += bytes - before;
 		if (this.totalTextBytesValue < 0) this.totalTextBytesValue = 0;
 	}
 
@@ -1051,14 +1143,16 @@ export class EditorStore {
 	}
 
 	private adoptDiskState(record: DocumentRecord, text: string, revision: string): void {
-		this.trackTextBytesChange(record.text, text);
+		this.replaceTextBytes(record.id, text);
 		record.text = text;
 		record.version += 1;
 		record.savedRevision = revision;
 		record.savedTextHash = hashText(text);
+		this.savedTextLength.set(record.id, text.length);
 		record.dirty = false;
 		record.lineEnding = detectLineEnding(text);
 		record.conflict = undefined;
+		this.lastEdits.delete(record.id);
 		this.pendingReload.delete(record.id);
 		const history = this.histories.get(record.id);
 		if (history) {

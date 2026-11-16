@@ -328,6 +328,8 @@ export class ComposerBox extends Box {
 	readonly editor: ComposerInput;
 	placeholder = COMPOSER_PLACEHOLDER;
 	private degradedMode = false;
+	/** Last measured chrome height, keyed by the inputs that can change it. */
+	private measuredRows: { width: number; text: string; windowRows: number; degraded: boolean; popupHeight: number; rows: number } | undefined;
 
 	constructor(tui: TUI, editorTheme: EditorTheme, options?: EditorOptions) {
 		super(0, 0, theme.userBg);
@@ -345,6 +347,24 @@ export class ComposerBox extends Box {
 		this.degradedMode = degraded;
 	}
 
+	/** Chrome height without a second full render when nothing changed. */
+	measureRows(width: number): number {
+		const text = this.editor.getText();
+		const popupHeight = (this.editor as unknown as EditorPopupLayout).renderedAutocompleteHeight ?? 0;
+		const cached = this.measuredRows;
+		if (
+			cached &&
+			cached.width === width &&
+			cached.text === text &&
+			cached.windowRows === this.editor.windowRows &&
+			cached.degraded === this.degradedMode &&
+			cached.popupHeight === popupHeight
+		) {
+			return cached.rows;
+		}
+		return this.render(width).length;
+	}
+
 	override render(width: number): string[] {
 		const inner = Math.max(1, width - 2);
 		// Fill via repairFill, not the naive Box fill: editor rows can carry
@@ -357,9 +377,11 @@ export class ComposerBox extends Box {
 		};
 		const bar = theme.accent(ICONS.composerBar);
 		if (this.degradedMode) {
-			return [`${bar} ${fill(theme.muted(truncateToWidth("Too small — resize to continue (draft kept)", inner)))}`].map(
+			const rows = [`${bar} ${fill(theme.muted(truncateToWidth("Too small — resize to continue (draft kept)", inner)))}`].map(
 				(line) => truncateToWidth(line, Math.max(0, width)),
 			);
+			this.rememberMeasurement(width, rows.length);
+			return rows;
 		}
 		// NOTE: the editor renders raw (unfilled) lines here on purpose —
 		// going through super.render would double-fill via the Box.
@@ -373,7 +395,20 @@ export class ComposerBox extends Box {
 			body = composerWindow(rendered, this.editor.windowRows, popupHeight).rows.map((line) => fill(line));
 		}
 		const total = Math.max(0, width);
-		return body.map((line) => truncateToWidth(`${bar} ${line}`, total));
+		const rows = body.map((line) => truncateToWidth(`${bar} ${line}`, total));
+		this.rememberMeasurement(width, rows.length);
+		return rows;
+	}
+
+	private rememberMeasurement(width: number, rows: number): void {
+		this.measuredRows = {
+			width,
+			text: this.editor.getText(),
+			windowRows: this.editor.windowRows,
+			degraded: this.degradedMode,
+			popupHeight: (this.editor as unknown as EditorPopupLayout).renderedAutocompleteHeight ?? 0,
+			rows,
+		};
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Box["handleMouse"]> {

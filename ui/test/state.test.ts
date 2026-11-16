@@ -691,10 +691,12 @@ const approvalEvent = (sessionId: string, turnId: string, requestId = "req-1") =
 		capabilities: ["exec"],
 	});
 
+function approvalDialogsOf<T>(app: App): Map<string, T> {
+	return (app as unknown as { turnSession: { approvalDialogs: Map<string, T> } }).turnSession.approvalDialogs;
+}
+
 function approvalCard(app: App): { handleInput(data: string): void } {
-	const entry = (
-		app as unknown as { approvalDialogs: Map<string, { card: { handleInput(data: string): void } }> }
-	).approvalDialogs.get("req-1");
+	const entry = approvalDialogsOf<{ card: { handleInput(data: string): void } }>(app).get("req-1");
 	assert.ok(entry, "approval dialog is open");
 	return entry.card;
 }
@@ -707,13 +709,13 @@ test("A03 session switch while approval is open sends no decision", async () => 
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
 	client.emit(approvalEvent(SESSION_A.id, "t"));
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		1,
 		"card opens for the visible bound session",
 	);
 	app.switchTo(SESSION_B, []);
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		0,
 		"switch invalidates the card",
 	);
@@ -730,7 +732,7 @@ test("A03 late approval request from another session never opens", async () => {
 	app.switchTo(SESSION_B, []);
 	client.emit(approvalEvent(SESSION_A.id, "t"));
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		0,
 		"no wrong-session dialog",
 	);
@@ -745,7 +747,7 @@ test("A03 returning to a session rebuilds its pending approval card (R15)", asyn
 	await submitTurn(app, "go");
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
 	client.emit(approvalEvent(SESSION_A.id, "t"));
-	const dialogs = (app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs;
+	const dialogs = approvalDialogsOf<unknown>(app);
 	const footer = (app as unknown as { footer: { status: string } }).footer;
 	assert.equal(dialogs.size, 1, "card opens for the visible bound session");
 	app.switchTo(SESSION_B, []);
@@ -765,7 +767,7 @@ test("A03 approval arriving while another session is visible is recovered on ret
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
 	app.switchTo(SESSION_B, []);
 	client.emit(approvalEvent(SESSION_A.id, "t"));
-	const dialogs = (app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs;
+	const dialogs = approvalDialogsOf<unknown>(app);
 	assert.equal(dialogs.size, 0, "a hidden frame never opens a wrong-session card");
 	app.switchTo(SESSION_A, []);
 	assert.equal(dialogs.size, 1, "the retained frame opens when its session returns");
@@ -783,7 +785,7 @@ test("A03 an approval resolved while hidden is not resurrected on return (R15)",
 	client.emit(ev(SESSION_A.id, "t", { type: "approval.resolved", requestId: "req-1", status: "approved" }));
 	app.switchTo(SESSION_A, []);
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		0,
 		"a decided approval stays retired",
 	);
@@ -802,7 +804,7 @@ test("A03 a turn completed while hidden retires its unconsumed approval evidence
 	client.emit(ev(SESSION_A.id, "t", { type: "message.complete", text: "done", tokens: 1, iterations: 1, toolCalls: 0, cancelled: false }));
 	app.switchTo(SESSION_A, []);
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		0,
 		"a completed turn shows no stale approval",
 	);
@@ -823,7 +825,7 @@ test("A03 F-30 returning to a session rehydrates approvals the UI never saw", as
 	client.autoSubmit = { turnId: "t" };
 	await submitTurn(app, "go");
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
-	const dialogs = (app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs;
+	const dialogs = approvalDialogsOf<unknown>(app);
 	// One approval is seen live (retained across navigation); one only exists
 	// server-side — the hidden frame never got its event.
 	client.emit(approvalEvent(SESSION_A.id, "t", "req-retained"));
@@ -852,11 +854,7 @@ test("A03 F-30 returning to a session rehydrates approvals the UI never saw", as
 	assert.equal(dialogs.size, 2, "the retained card and the rehydrated card are both open");
 	// The synthetic card is decision-capable: one deliberate resolve.
 	client.responses.set("approvals.resolve", {});
-	const entry = (
-		app as unknown as {
-			approvalDialogs: Map<string, { card: { handleInput(data: string): void } }>;
-		}
-	).approvalDialogs.get("req-hydrate");
+	const entry = approvalDialogsOf<{ card: { handleInput(data: string): void } }>(app).get("req-hydrate");
 	assert.ok(entry, "the rehydrated card is keyed by the row's request_id");
 	entry.card.handleInput("\x1b[A");
 	entry.card.handleInput("\x1b[A");
@@ -944,7 +942,7 @@ test("A04 rejected resolve keeps the card with a recoverable error", async () =>
 	await Promise.resolve();
 	await Promise.resolve();
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		1,
 		"rejection leaves the decision open, not a success state",
 	);
@@ -970,12 +968,12 @@ test("A03 disconnect retires the local prompt without resolving", async () => {
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
 	client.emit(approvalEvent(SESSION_A.id, "t"));
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		1,
 	);
 	client.onExit?.(1, ["boom"]);
 	assert.equal(
-		(app as unknown as { approvalDialogs: Map<string, unknown> }).approvalDialogs.size,
+		approvalDialogsOf<unknown>(app).size,
 		0,
 		"disconnect retires the prompt",
 	);

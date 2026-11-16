@@ -566,3 +566,23 @@ test("a stale load-more finisher cannot clear a newer spinner", async () => {
 	await second;
 	assert.equal(model.directory("")?.loadingMore, false);
 });
+
+test("visible nodes are walked once per mutation revision and hasMorePages reuses the walk", async () => {
+	let loads = 0;
+	const model = new ExplorerModel(async (path) => {
+		loads += 1;
+		if (path !== "") return page([]);
+		return page([entry("a.ts", "file"), entry("src", "directory")], { nextCursor: "next-1" });
+	});
+	await model.load();
+	const first = model.visibleNodes();
+	assert.equal(model.visibleNodes(), first, "an unchanged revision reuses the same node list");
+	assert.equal(model.hasMorePages(), true, "the paging flag derives from the cached walk");
+	assert.equal(model.hasMorePages(), true);
+	assert.equal(loads, 1, "reads never re-list");
+	// Selection changes are a model mutation; the next read rebuilds the walk.
+	model.select("src");
+	const second = model.visibleNodes();
+	assert.notEqual(second, first);
+	assert.deepEqual(second.map((node) => node.id), first.map((node) => node.id));
+});

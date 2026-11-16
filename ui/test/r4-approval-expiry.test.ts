@@ -172,11 +172,19 @@ function makeApp() {
 }
 
 function internals(app: App) {
-	return app as unknown as {
-		approvalDialogs: Map<string, unknown>;
-		pendingApprovals: Map<string, GatewayEvent>;
+	const state = app as unknown as {
+		turnSession: {
+			approvalDialogs: Map<string, unknown>;
+			pendingApprovals: Map<string, GatewayEvent>;
+		};
 		footer: { status: string };
 		submitTurn(text: string): Promise<void>;
+	};
+	return {
+		get approvalDialogs() { return state.turnSession.approvalDialogs; },
+		get pendingApprovals() { return state.turnSession.pendingApprovals; },
+		footer: state.footer,
+		submitTurn: state.submitTurn.bind(app),
 	};
 }
 

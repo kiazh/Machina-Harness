@@ -28,9 +28,8 @@ import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.t
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { ActivityBar, ActivityStore, activityEmptyGuidance, type SteeringItem, type ShellJob } from "./activity.ts";
-import { EditorPane, uriDisplayPath } from "./components/EditorPane.ts";
+import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
-import { ProblemsPane } from "./components/ProblemsPane.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
 import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides } from "./keybindings.ts";
@@ -43,7 +42,6 @@ import { sanitizePastedText } from "./design/text.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
-import type { WorkspaceAttachmentHost } from "./features/workspace.ts";
 import { guardSubmit } from "./commandDispatch.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
 import { FamilyStore, listFamilySessions } from "./family.ts";
@@ -63,53 +61,48 @@ import type {
 	SessionInfo,
 	SessionResult,
 } from "./protocol.ts";
-import { RpcError } from "./protocol.ts";
-import { EditorStore, type DocumentRecord } from "./editor/model.ts";
+import { type DocumentRecord } from "./editor/model.ts";
 import { sanitizeDisplay } from "./editor/display.ts";
-import { TabModel } from "./editor/tabs.ts";
-import { EditorView } from "./editor/view.ts";
 import { languageForId } from "./editor/syntax.ts";
-import { ExplorerModel, ExplorerPane } from "./editor/explorer.ts";
 import { QuickOpenPane } from "./editor/quickOpen.ts";
 import {
 	CompletionSession,
 	LocationPicker,
 	narrowLocationsPayload,
-	ProblemsModel,
 	RenameSession,
 	type IntelligenceRequest,
 	type LocationChoice,
 	type ProblemRow,
 } from "./editor/intelligence.ts";
 import { offsetToPosition, positionToOffset } from "./editor/positions.ts";
-import { SessionTailStore, tailEntries, trimSupersededHistory, type SessionTail, type TailBlock } from "./tail.ts";
+import { tailEntries, trimSupersededHistory, type TailBlock } from "./tail.ts";
+import { TurnSessionStore } from "./turnSessionStore.ts";
+
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
 import {
-	WorkspaceController,
 	type ConflictResolution,
 	type DirtyCloseChoice,
 	type IntelligenceOutcome,
 	type SaveConflictDescriptor,
-	type WorkspacePersistenceLike,
 } from "./workspace/controller.ts";
-import { WorkspaceGatewayAdapter, type WorkspaceRequestFn } from "./workspace/gateway.ts";
-import { WorkspacePersistence } from "./workspace/persistence.ts";
+import {
+	displayUriName,
+	WorkspaceSurface,
+	type WorkspaceIntegration,
+	type WorkspaceSurfaceHost,
+} from "./workspace/surface.ts";
 import {
 	defaultUiPreferences,
 	UiPreferencesPersistence,
 	type UiPreferences,
 } from "./workspace/preferences.ts";
-import { computeLayout, explorerTreeRowBudget } from "./workspace/layout.ts";
 import type {
 	FocusRegion,
-	LayoutInput,
 	LayoutResult,
-	WorkspacePersistedState,
 } from "./workspace/state.ts";
 import type {
 	LspPosition,
-	WorkspaceEvent,
 	WorkspaceQuickOpenResult,
 } from "./workspace/protocol.ts";
 
@@ -128,59 +121,6 @@ export function defaultProfileId(): string {
 		return "default";
 	}
 }
-
-/** Presentation record for one session's in-flight turn (section 4.2). */
-interface SessionTurn {
-	/** Accepted turn ID; undefined until the first bound event or submit result. */
-	turnId: string | undefined;
-	/** True while the binding is provisional (submit unresolved or start-only). */
-	provisional: boolean;
-	/** A message.start has been applied for the bound turn. */
-	started: boolean;
-	/** Any event has bound to this record (dispatch evidence). */
-	hadEvents: boolean;
-	/** The local watchdog has warned once for this turn. */
-	warnedSlow: boolean;
-	/** Latest cumulative usage for the active turn. */
-	usageLatest: number;
-	/** Bounded retired turn IDs; late duplicates are inert. */
-	retired: string[];
-}
-
-/**
- * Integrated workspace wiring (T3/T6/T12): the controller plus the retained
- * views/panes it drives. Constructed once at start() when the feature is
- * enabled; absent forever otherwise (chat-only behavior stays identical).
- */
-interface WorkspaceIntegration {
-	gateway: WorkspaceGatewayAdapter;
-	controller: WorkspaceController;
-	store: EditorStore;
-	tabs: TabModel;
-	view: EditorView;
-	pane: EditorPane;
-	explorerModel: ExplorerModel;
-	explorerPane: ExplorerPane;
-	problemsModel: ProblemsModel;
-	problemsPane: ProblemsPane;
-}
-
-/** Layout-intent + terminal identity for shell re-sync (cheap change key). */
-function workspaceShellKey(input: LayoutInput, columns: number, rows: number, chromeRows: number): string {
-	return [
-		input.requestedMode,
-		input.splitRatio,
-		input.explorerRequested ? 1 : 0,
-		input.preferredPane,
-		input.chatSide ?? "left",
-		columns,
-		rows,
-		chromeRows,
-	].join("|");
-}
-
-/** Workspace hint shown while a workspace identity is live. */
-const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+N then T/C/E/S panes";
 
 /**
  * Normalize modifier-arrow encodings used by Windows consoles.
@@ -216,13 +156,6 @@ function normalizeModifierArrow(data: string): string {
  */
 const SHORTCUTS_VISIBLE_ROWS = 14;
 
-/** Basename for notices (scheme-stripped, percent-decoded; never the raw URI). */
-function displayUriName(uri: string): string {
-	const path = uriDisplayPath(uri);
-	const parts = path.split("/").filter((segment) => segment.length > 0);
-	return parts[parts.length - 1] ?? path;
-}
-
 /** Inline-safe display text: one line, no controls or backticks (header/notice surfaces). */
 function inlineSafe(text: string): string {
 	return sanitizeDisplay(text).replace(/`+/g, "").trim();
@@ -252,20 +185,6 @@ function completionPrefixBefore(text: string, cursorOffset: number): string {
 	let start = offset;
 	while (start > 0 && COMPLETION_PREFIX_CHAR.test(text[start - 1] ?? "")) start -= 1;
 	return text.slice(start, offset);
-}
-
-/** True when an untrusted `workspace.open` payload carries a usable binding. */
-function isWorkspaceIdentity(value: unknown): boolean {
-	if (typeof value !== "object" || value === null) return false;
-	const identity = value as { workspaceId?: unknown; epoch?: unknown; resolvedRoot?: unknown };
-	return (
-		typeof identity.workspaceId === "string" &&
-		identity.workspaceId.length > 0 &&
-		typeof identity.epoch === "number" &&
-		Number.isFinite(identity.epoch) &&
-		typeof identity.resolvedRoot === "string" &&
-		identity.resolvedRoot.length > 0
-	);
 }
 
 /**
@@ -342,17 +261,6 @@ export class App implements FeatureHost {
 	private nowPlayingController: NowPlayingController | undefined;
 	private nowPlayingAnim: AnimationSubscription | undefined;
 	/**
-	 * Contract C3 / MCH-012: ONE authoritative workspace lifecycle fence.
-	 * `workspaceGeneration` is the app-side epoch; every lifecycle entry point
-	 * (background open, root switch, close, exit, gateway exit) bumps it, so a
-	 * continuation that captured the previous epoch publishes nothing.
-	 * `workspaceFenceController` is the controller generation that epoch is
-	 * bound to (`undefined` until a mounted controller is captured). A fence is
-	 * current only while BOTH sources agree: see `isWorkspaceCurrent`.
-	 */
-	private workspaceGeneration = 0;
-	private workspaceFenceController: number | undefined;
-	/**
 	 * The single caret-blink subscription (key `cursor.blink`). Present only
 	 * while a text surface owns the caret; its presence is the source of
 	 * truth for "blinking is active" so focus changes can never stack loops.
@@ -372,48 +280,29 @@ export class App implements FeatureHost {
 	private readonly defaultProfile = defaultProfileId();
 	private currentProfile: string = this.defaultProfile;
 	private running = false;
-	/** Session ids of turns that are still in flight (prompt submitted, no message.complete yet). */
-	private readonly inFlight = new Set<string>();
-	private readonly delegatedRunning = new Set<string>();
 	private readonly activity = new ActivityStore();
-	private readonly activeTools = new Map<string, Map<string, string>>();
-	private readonly nextSteering = new Map<string, string[]>();
-	private readonly steeringBusy = new Set<string>();
-	private readonly steeringFlushing = new Set<string>();
-	private readonly interruptedSteering = new Set<string>();
-	private readonly kiroFallbackSessions = new Set<string>();
-	private readonly delegatedText = new Map<string, string>();
-	/** Per-session turn binding, provisional pre-RPC state and retired IDs. */
-	private readonly turns = new Map<string, SessionTurn>();
-	/** Switch recency (oldest first) for bounded per-session state. */
-	private readonly sessionRecency: string[] = [];
-	/** Timers for the local watchdog (diagnostic deadline, not ownership). */
-	private readonly inFlightTimers = new Map<string, NodeJS.Timeout>();
-	private sessionTokens = 0;
-	/** Preserved token counts per session so switchTo does not lose them. */
-	private readonly sessionTokensById = new Map<string, number>();
-	/**
-	 * Hidden-session live tails: transcript work that arrived while a session
-	 * was not visible. switchTo merges them (buffered tail wins over the
-	 * fetched history) and consumes them. Bounded (see tail.ts).
-	 */
-	private readonly sessionTails = new SessionTailStore({
-		visible: () => this.current?.id,
-		running: (sessionId) => this.inFlight.has(sessionId) || this.delegatedRunning.has(sessionId),
-		retained: (sessionId) =>
-			sessionId === this.current?.id || this.inFlight.has(sessionId) || this.isFamilyMember(sessionId),
+	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
+	private readonly turnSession = new TurnSessionStore({
+		visibleSessionId: () => this.current?.id,
+		isFamilyMember: (sessionId) => this.isFamilyMember(sessionId),
+		onSlowTurn: () => {
+			this.transcript.addNotice("Taking longer than expected; waiting for completion.", "warning");
+			this.tui.requestRender();
+		},
+		onEvicted: (sessionId) => this.pruneSideSessionState(sessionId),
 	});
 	/** Family (agent family) state and actions; App owns rendering and keys. */
 	private readonly family = new FamilyStore({
 		current: () => this.current,
-		isRunning: (sessionId) => this.inFlight.has(sessionId) || this.delegatedRunning.has(sessionId),
+		isRunning: (sessionId) => this.turnSession.isRunning(sessionId),
 		request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params ?? {}),
 		switchTo: (session, history) => this.switchTo(session, history),
 		changed: () => {
-			this.pruneSessionTails();
+			this.turnSession.pruneSessionTails();
 			this.syncAgentCount();
 			this.tui.requestRender();
 		},
+		pruneSessionState: (sessionId) => this.pruneSessionState(sessionId),
 		report: (error) => {
 			this.transcript.addNotice(`Could not switch session: ${message(error)}`, "error");
 			this.tui.requestRender();
@@ -421,30 +310,6 @@ export class App implements FeatureHost {
 	});
 	/** Bounded retained tool outputs for /output inspection (all sessions). */
 	private readonly outputStore = new OutputStore();
-	/** Open approval reviews keyed by request ID (binding captured at open). */
-	private readonly approvalDialogs = new Map<
-		string,
-		{
-			requestId: string;
-			sessionId: string;
-			originTurnId: string | undefined;
-			transportTurnId: string;
-			card: ApprovalCard;
-			evidenceAdded: boolean;
-			close: () => void;
-			dialog: Promise<void | undefined>;
-		}
-	>();
-	/**
-	 * Per-request approval evidence retained across session navigation
-	 * (R15). The interactive card is presentation; this record survives
-	 * leaving a session so the paused backend's review can be rebuilt on
-	 * return, and is retired only by a decision or turn completion.
-	 */
-	private readonly pendingApprovals = new Map<
-		string,
-		Extract<GatewayEvent, { type: "needs_approval" | "permission.required" }>
-	>();
 	private readonly dialogs: Array<{ handle: OverlayHandle; cancel: () => void }> = [];
 	private exiting = false;
 	/** Gateway exit can arrive from both the error and exit events. */
@@ -469,39 +334,28 @@ export class App implements FeatureHost {
     private lastPromptSessionId: string | undefined;
 
 	// ─── integrated workspace (T3/T6/T12) ───────────────────────────────────
-	/** MACHINA_WORKSPACE gate; captured at start() so tests can set it late. */
-	private workspaceFlagOn = true;
-	/** The backend answered METHOD_NOT_FOUND for workspace.* exactly once. */
-	private workspaceUnsupported = false;
-	private integration: WorkspaceIntegration | undefined;
-	private workspaceHostSurface: WorkspaceHost | undefined;
-	/** True once a successful open pushed geometry to the shell. */
-	private workspaceLayoutActive = false;
-	/** Latest computed workspace geometry (drives focus regions + pane rows). */
-	private workspaceLayout: LayoutResult | undefined;
-	private lastWorkspaceShellKey = "";
+	/** Owns the controller wiring, lifecycle fence, events and shell sync. */
+	private workspaceSurface: WorkspaceSurface | undefined;
+	private get integration(): WorkspaceIntegration | undefined { return this.workspaceSurface?.integration; }
+	private get workspaceHostSurface(): WorkspaceHost | undefined { return this.workspaceSurface?.workspaceHost; }
+	private get workspaceUnsupported(): boolean { return this.workspaceSurface?.unsupported ?? false; }
+	private get workspaceLayoutActive(): boolean { return this.workspaceSurface?.layoutActive ?? false; }
+	private get workspaceLayout(): LayoutResult | undefined { return this.workspaceSurface?.layout; }
+	private get workspaceGeneration(): number { return this.workspaceSurface?.currentGeneration ?? 0; }
 	/** v1 focus router state (plan §8): the last meaningfully focused region. */
 	private activeRegion: FocusRegion = "chat-composer";
 	private problemsOpen = false;
 	private completionSession: CompletionSession | undefined;
 	/** Debounce automatic requests without blocking local edits. */
 	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
-	/** Deferred chrome-height reconciliation for the composer popup. */
-	private workspaceChromeTimer: ReturnType<typeof setTimeout> | undefined;
 	private quickOpenPane: QuickOpenPane | undefined;
 	private quickOpenHandle: OverlayHandle | undefined;
 	/** `/skills` Menu dialog (A5, spec §12.3): the mounted component (dedup + tests). */
 	private skillsMenu: SkillsMenu | undefined;
 	/** Re-entrancy guard for the dirty-exit review. */
 	private dirtyExitInProgress = false;
-	/** Stored workspace_ui_state captured BEFORE open (open overwrites it). */
-	private workspacePreOpenRaw: string | undefined;
-	private workspacePreOpenCaptured = false;
 	/** Global editor preferences (ui_preferences); defaults until loaded. */
 	private uiPrefs: UiPreferences = defaultUiPreferences();
-
-	// Diagnostic notice only; it never cancels the turn.
-	private static readonly IN_FLIGHT_TIMEOUT_MS = 300_000;
 
 	// Delegated runs settle when their work completes or the user cancels.
 	private static readonly DELEGATION_TIMEOUT_MS = 0;
@@ -512,13 +366,6 @@ export class App implements FeatureHost {
 	// adds this margin on top of that deadline so a late-but-successful run is
 	// never discarded (finding H22).
 	private static readonly HARNESS_RUN_GRACE_MS = 15_000;
-
-	/**
-	 * Dormant per-session state (turn binding + token totals) for the last N
-	 * sessions visited. Older sessions are forgotten so a long-lived UI with
-	 * many sessions cannot grow its maps without bound.
-	 */
-	private static readonly MAX_RETAINED_SESSIONS = 50;
 
 	constructor(tui: TUI, client: GatewayClient, options: AppOptions = {}) {
 		this.tui = tui;
@@ -543,6 +390,8 @@ export class App implements FeatureHost {
 		this.composer.editor.cursorBlockVisible = () => this.cursorBlinkOn();
 		this.composer.editor.onChange = () => {
 			this.syncCursorBlink();
+			// The draft height feeds chromeRows; drop the cached measurement.
+			this.shell.invalidateChrome();
 			this.scheduleWorkspaceChromeSync();
 		};
         this.composer.editor.onPaste = (text) => this.acceptImageDrop(text);
@@ -577,7 +426,7 @@ export class App implements FeatureHost {
 		// turns). Without this, filled rows linger as ghost bands behind
 		// newer output.
 		this.tui.setClearOnShrink(true);
-		this.workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
+		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
 		this.shell.sync();
 		if (isViewportTUI(this.tui)) {
 			this.tui.setLayoutRoot(this.shell.root);
@@ -699,14 +548,65 @@ export class App implements FeatureHost {
 		// launch directory (authenticated handshakes). The redacted basename is
 		// a display value and must never be treated as a root: when only that
 		// is available (older backend), stay chat-only.
-		if (this.workspaceFlagOn) {
+		if (workspaceFlagOn) {
 			const root = initializedCwdFull ?? (initializedCwd !== undefined && isAbsolute(initializedCwd) ? initializedCwd : undefined);
-			if (root !== undefined) this.startWorkspace(root);
+			if (root !== undefined) {
+				this.workspaceSurface = new WorkspaceSurface(this.workspaceSurfaceHost());
+				this.client.onWorkspaceEvent = (event) => this.workspaceSurface?.onEvent(event);
+				this.workspaceSurface.start(root);
+			}
 		}
 		// Join the background first-touch work now that the session is visible.
 		// Neither the profile row nor the music bar may block session creation.
 		await Promise.all([profileReady, nowPlayingReady]);
 		this.tui.requestRender();
+	}
+
+	/** UI seams the workspace surface calls back into (composition root). */
+	private workspaceSurfaceHost(): WorkspaceSurfaceHost {
+		return {
+			request: (method, params, timeoutMs) => this.client.request(method, params, timeoutMs),
+			requestRender: () => this.tui.requestRender(),
+			terminalSize: () => ({
+				columns: Math.max(0, this.tui.terminal.columns),
+				rows: Math.max(0, this.tui.terminal.rows),
+			}),
+			notify: (kind, text) => {
+				this.transcript.addNotice(text, kind);
+				this.tui.requestRender();
+			},
+			print: (text, kind) => this.print(text, kind),
+			shell: this.shell,
+			setWorkspaceHints: (hints) => { this.footer.workspaceHints = hints; },
+			setFocusForRegion: (region) => this.setFocusForRegion(region),
+			noteRegionFocus: (region) => this.noteRegionFocus(region),
+			focusRegions: () => this.focusRegions(),
+			activeRegion: () => this.activeRegion,
+			reconcileFocus: () => this.reconcileFocus(),
+			completionActive: () => this.completionSession !== undefined,
+			clearCompletion: () => this.clearCompletion(),
+			scheduleAutomaticCompletion: () => this.scheduleAutomaticCompletion(),
+			openProblems: () => this.openProblems(),
+			pauseEditorCursorBlink: () => this.pauseEditorCursorBlink(),
+			isCursorBlockVisible: () => this.cursorBlinkOn(),
+			syncCursorBlink: () => this.syncCursorBlink(),
+			refreshProblemsForActiveDocument: () => this.refreshProblemsForActiveDocument(),
+			refreshLspStatus: () => this.refreshLspStatus(),
+			lspStatusText: () => this.lspStatusText(),
+			closeWorkspaceTab: (documentId) => this.closeWorkspaceTab(documentId),
+			saveActiveDocument: () => this.saveActiveDocument(),
+			openWorkspacePath: (path, options) => this.openWorkspacePath(path, options),
+			openProblem: (row) => this.openProblem(row),
+			closeProblems: () => this.closeProblems(),
+			openQuickOpen: () => this.openQuickOpen(),
+			startCompletion: () => this.startCompletion(),
+			attachSelectionToDraft: () => this.attachSelectionToDraft(),
+			intelligenceRequest: () => this.intelligenceRequest(),
+			closeActiveWorkspaceTab: () => this.closeActiveWorkspaceTab(),
+			loadUiPreferences: () => { void this.loadUiPreferences(); },
+			applyUiPreferences: () => this.applyUiPreferences(this.uiPrefs),
+			isExiting: () => this.exiting,
+		};
 	}
 
 	// ─── FeatureHost ─────────────────────────────────────────────────────────
@@ -839,17 +739,7 @@ export class App implements FeatureHost {
 			setPreference: (key, value) => this.setUiPreference(key, value),
 			openWorkspaceFolder: (path) => this.switchWorkspaceRoot(path),
 			closeWorkspace: async () => {
-				const integration = this.integration;
-				if (!integration) return;
-				// MCH-012: the close supersedes any in-flight open/switch, and
-				// its own shell publish must not land on a newer workspace.
-				const gen = this.beginWorkspaceFence();
-				await integration.controller.closeWorkspace();
-				// C3: the close advanced the controller generation; rebind this
-				// epoch before publishing the shell state.
-				this.armWorkspaceFence(gen);
-				if (!this.isWorkspaceCurrent(gen)) return;
-				this.syncWorkspaceShell();
+				await this.workspaceSurface?.close();
 			},
 			lspRows: () => this.lspSettingsRows(),
 			refreshLsp: async () => {
@@ -1151,10 +1041,10 @@ export class App implements FeatureHost {
 	 * untouched draft never appears in history.
 	 */
 	private showNewChat(title?: string): void {
-		if (this.current) this.sessionTokensById.set(this.current.id, this.sessionTokens);
+		if (this.current) this.turnSession.saveSessionTokens(this.current.id);
 		this.current = undefined;
 		this.draftSessionTitle = title?.trim() || undefined;
-		this.sessionTokens = 0;
+		this.turnSession.resetSessionTokens();
 		this.clearImages();
 		this.editor.setText("");
 		this.transcript.clear();
@@ -1189,7 +1079,7 @@ export class App implements FeatureHost {
 					this.draftSessionTitle = undefined;
 					this.current = session;
 					this.rememberSession(session.id);
-					this.sessionTokens = 0;
+					this.turnSession.resetSessionTokens();
 					this.transcript.clear();
 					this.transcript.addComponent(header(this.version, this.headerInfo(session)));
 					this.footer.tokens = 0;
@@ -1218,7 +1108,7 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
-		if (this.current) this.sessionTokensById.set(this.current.id, this.sessionTokens);
+		if (this.current) this.turnSession.saveSessionTokens(this.current.id);
 		// Consume this session's hidden-session tail (buffered events that
 		// arrived while it was not visible). Merge rule (PINNED, tail.ts):
 		// the tail is the conversation suffix and WINS over the fetched
@@ -1227,17 +1117,17 @@ export class App implements FeatureHost {
 		// tail here is the documented "clear when history is fetched"
 		// boundary: the buffer only ever holds work from after the last
 		// switch, so it cannot duplicate earlier history.
-		const tail = this.takeSessionTail(session.id)?.blocks ?? [];
+		const tail = this.turnSession.takeSessionTail(session.id)?.blocks ?? [];
 		this.updateSession(session);
 		this.rememberSession(session.id);
 		this.transcript.clear();
 		this.transcript.addComponent(header(this.version, this.headerInfo(session)));
 		this.transcript.replay(trimSupersededHistory(history, tail));
 		this.replayTail(session, tail);
-		this.sessionTokens = this.sessionTokensById.get(session.id) ?? 0;
+		this.turnSession.restoreSessionTokens(session.id);
 		// Preserve the active turn's latest cumulative usage across switches
 		// without mixing turns: completed total plus this session's turn total.
-		this.footer.tokens = this.sessionTokens + (this.turns.get(session.id)?.usageLatest ?? 0);
+		this.footer.tokens = this.turnSession.displayTokens(session.id);
 		this.footer.contextTokens = 0;
 		this.footer.contextPercent = null;
 		// The backend stays paused for this session's approvals; rebuild the
@@ -1247,7 +1137,7 @@ export class App implements FeatureHost {
 		// permission store; re-read the target session's pending rows so the
 		// turn cannot sit stranded behind a card that was never re-opened.
 		void this.rehydrateApprovals(session.id);
-		this.setRunning(this.inFlight.has(session.id) || this.delegatedRunning.has(session.id));
+		this.setRunning(this.turnSession.isRunning(session.id));
 		// Family = current.parentSessionId ?? current.id plus that root's
 		// children; refresh after the local re-seed keeps the subagent count
 		// honest.
@@ -1284,25 +1174,22 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	/**
-	 * Mark a session as recently visited and prune dormant state once the
-	 * retained set exceeds MAX_RETAINED_SESSIONS. The visible session and any
-	 * session with a turn still in flight are never evicted: their events
-	 * still need to route.
-	 */
+	/** Mark a session visited; the store enforces its LRU bound and guards. */
 	private rememberSession(sessionId: string): void {
-		const index = this.sessionRecency.indexOf(sessionId);
-		if (index !== -1) this.sessionRecency.splice(index, 1);
-		this.sessionRecency.push(sessionId);
-		while (this.sessionRecency.length > App.MAX_RETAINED_SESSIONS) {
-			const candidate = this.sessionRecency.find(
-				(id) => id !== this.current?.id && !this.inFlight.has(id),
-			);
-			if (candidate === undefined) break;
-			this.sessionRecency.splice(this.sessionRecency.indexOf(candidate), 1);
-			this.turns.delete(candidate);
-			this.sessionTokensById.delete(candidate);
-		}
+		this.turnSession.rememberSession(sessionId);
+	}
+
+	/** Drop one dormant session from every per-session store. */
+	private pruneSessionState(sessionId: string): void {
+		if (!this.turnSession.pruneSessionIfDormant(sessionId)) return;
+		this.pruneSideSessionState(sessionId);
+	}
+
+	/** Non-turn session state owned by App (activity/output/family). */
+	private pruneSideSessionState(sessionId: string): void {
+		this.activity.pruneSession(sessionId);
+		this.outputStore.pruneSession(sessionId);
+		this.family.pruneSession(sessionId);
 	}
 
 	// ─── agent family (root + delegated subagents) ──────────────────────────
@@ -1315,17 +1202,16 @@ export class App implements FeatureHost {
 	private activitySummary(): string {
 		const session = this.current;
 		if (!session) return "";
-		const queued = this.activity.queue(session.id).length + (this.nextSteering.get(session.id)?.length ?? 0);
+		const queued = this.activity.queue(session.id).length + this.turnSession.queuedSteering(session.id).length;
 		const jobs = this.activity.listJobs(session.id);
 		const running = jobs.filter((job) => job.status === "running" || job.status === "stopping").length;
 		const agents = this.familyRows().filter((row) => !row.main && row.running).length;
-		const tools = this.activeTools.get(session.id);
-		const currentTool = tools?.values().next().value;
+		const currentTool = this.turnSession.activeToolLabel(session.id);
 		const failed = jobs.filter((job) => job.status === "failed").length;
 		const stopped = jobs.filter((job) => job.status === "stopped").length;
 		const finished = jobs.filter((job) => job.status === "exited").length;
 		const shell = [running ? `${running} shell running` : "", failed ? `${failed} failed` : "", finished ? `${finished} finished` : "", stopped ? `${stopped} stopped` : ""].filter(Boolean).join(" · ");
-		return [currentTool ? `${currentTool}${tools && tools.size > 1 ? ` +${tools.size - 1}` : ""}` : "", queued ? `${queued} queued` : "", shell, agents ? `${agents} agents working` : ""].filter(Boolean).join("  ·  ");
+		return [currentTool ?? "", queued ? `${queued} queued` : "", shell, agents ? `${agents} agents working` : ""].filter(Boolean).join("  ·  ");
 	}
 
 	private commandActions(): { label: string; run: () => void }[] {
@@ -1354,65 +1240,61 @@ export class App implements FeatureHost {
 
 	private async queueSteering(text: string): Promise<void> {
 		const session = this.current;
-		if (!session || this.steeringBusy.has(session.id)) return;
-		this.steeringBusy.add(session.id);
+		if (!session || this.turnSession.isSteeringBusy(session.id)) return;
+		this.turnSession.setSteeringBusy(session.id, true);
 		const version = this.activity.queueVersion(session.id);
 		try {
 			const result = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId: session.id, text });
 			if (result.queued) {
 				if (this.activity.queueVersion(session.id) === version) this.activity.setQueue(session.id, result.items ?? []);
 			}
-			else {
-				const pending = this.nextSteering.get(session.id) ?? [];
-				if (pending.length >= 32) throw new Error("The steering queue is full");
-				this.nextSteering.set(session.id, [...pending, text]);
-			}
+			else this.turnSession.pushSteering(session.id, text);
 			if (this.current?.id === session.id && this.editor.getExpandedText().trim() === text.trim()) this.editor.setText("");
-			if (!result.queued && !this.inFlight.has(session.id)) await this.flushSteering(session.id);
+			if (!result.queued && !this.turnSession.isInFlight(session.id)) await this.flushSteering(session.id);
 		} catch (error) {
 			this.print(`Could not queue steering: ${message(error)}. Your draft is retained.`, "error");
 		} finally {
-			this.steeringBusy.delete(session.id);
+			this.turnSession.setSteeringBusy(session.id, false);
 			this.tui.requestRender();
 		}
 	}
 
 	private async flushSteering(sessionId: string): Promise<void> {
-		if (this.current?.id !== sessionId || this.inFlight.has(sessionId) || this.exiting || this.steeringFlushing.has(sessionId) || this.interruptedSteering.has(sessionId)) return;
-		if (!this.activity.queue(sessionId).length && !this.nextSteering.get(sessionId)?.length) return;
-		this.steeringFlushing.add(sessionId);
+		if (this.current?.id !== sessionId || this.turnSession.isInFlight(sessionId) || this.exiting
+			|| this.turnSession.isSteeringFlushing(sessionId) || this.turnSession.isInterrupted(sessionId)) return;
+		if (!this.activity.queue(sessionId).length && this.turnSession.queuedSteering(sessionId).length === 0) return;
+		this.turnSession.setSteeringFlushing(sessionId, true);
 		let accepted = false;
 		try {
 			const version = this.activity.queueVersion(sessionId);
 			const result = await this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId });
 			if (this.activity.queueVersion(sessionId) === version) this.activity.setQueue(sessionId, result.items);
-			if (this.current?.id !== sessionId || this.inFlight.has(sessionId)) return;
-			const local = this.nextSteering.get(sessionId)?.[0];
+			if (this.current?.id !== sessionId || this.turnSession.isInFlight(sessionId)) return;
+			const local = this.turnSession.queuedSteering(sessionId)[0];
 			const remote = result.items[0];
 			if (local !== undefined) {
 				await this.submitTurn(local);
 				accepted = true;
-				const rest = (this.nextSteering.get(sessionId) ?? []).slice(1);
-				if (rest.length) this.nextSteering.set(sessionId, rest);
-				else this.nextSteering.delete(sessionId);
+				this.turnSession.shiftSteering(sessionId);
 			} else if (remote) {
 				await this.submitTurn(remote.text, [], remote.id);
 				accepted = true;
 				this.activity.setQueue(sessionId, this.activity.queue(sessionId).filter((item) => item.id !== remote.id));
 			}
-			while (this.inFlight.has(sessionId) && this.nextSteering.get(sessionId)?.length) {
-				const head = this.nextSteering.get(sessionId)![0]!;
+			while (this.turnSession.isInFlight(sessionId) && this.turnSession.queuedSteering(sessionId).length > 0) {
+				const head = this.turnSession.queuedSteering(sessionId)[0]!;
 				const queueVersion = this.activity.queueVersion(sessionId);
 				const queued = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId, text: head });
 				if (!queued.queued) break;
-				this.nextSteering.set(sessionId, (this.nextSteering.get(sessionId) ?? []).slice(1));
+				this.turnSession.shiftSteering(sessionId);
 				if (this.activity.queueVersion(sessionId) === queueVersion) this.activity.setQueue(sessionId, queued.items ?? []);
 			}
 		} catch (error) {
 			this.print(`Steering is retained. Open /activity to retry: ${message(error)}`, "warning");
 		} finally {
-			this.steeringFlushing.delete(sessionId);
-			if (accepted && this.nextSteering.get(sessionId)?.length && !this.inFlight.has(sessionId) && !this.interruptedSteering.has(sessionId) && !this.exiting) {
+			this.turnSession.setSteeringFlushing(sessionId, false);
+			if (accepted && this.turnSession.queuedSteering(sessionId).length > 0
+				&& !this.turnSession.isInFlight(sessionId) && !this.turnSession.isInterrupted(sessionId) && !this.exiting) {
 				setTimeout(() => { void this.flushSteering(sessionId); }, 25);
 			}
 		}
@@ -1438,20 +1320,20 @@ export class App implements FeatureHost {
 				...jobs.jobs.map((job) => ({ label: `${job.status} · ${sanitizeDisplay(job.command).slice(0, 75)}`, value: `j:${job.id}` })),
 				...this.familyRows().filter((row) => !row.main).map((row) => ({ label: `Agent ${row.running ? "working" : "idle"} · ${row.session.title}`, value: `a:${row.session.id}` })),
 			];
-			if (this.nextSteering.get(session.id)?.length) items.unshift({ label: "Retry retained steering", value: "retry" });
+			if (this.turnSession.queuedSteering(session.id).length > 0) items.unshift({ label: "Retry retained steering", value: "retry" });
 			if (!items.length) { this.print(activityEmptyGuidance(true), "guidance"); return; }
 			const selected = await this.pickCentered("Activity", items);
 			if (!selected || this.current?.id !== session.id) return;
-			if (selected.value === "retry") { this.interruptedSteering.delete(session.id); await this.flushSteering(session.id); return; }
+			if (selected.value === "retry") { this.turnSession.setInterrupted(session.id, false); await this.flushSteering(session.id); return; }
 			if (selected.value.startsWith("a:")) { await this.family.open(selected.value.slice(2)); return; }
 			if (selected.value.startsWith("q:")) {
 				const item = queued.items.find((value) => value.id === selected.value.slice(2));
 				if (!item) return;
 				const choice = await this.pickCentered("Queued steering", [
 					{ label: "Edit", value: "edit" }, { label: "Remove", value: "remove" },
-					...(!this.inFlight.has(session.id) ? [{ label: "Send queued prompts now", value: "send" }] : []),
+					...(!this.turnSession.isInFlight(session.id) ? [{ label: "Send queued prompts now", value: "send" }] : []),
 				]);
-				if (choice?.value === "send") { this.interruptedSteering.delete(session.id); await this.flushSteering(session.id); return; }
+				if (choice?.value === "send") { this.turnSession.setInterrupted(session.id, false); await this.flushSteering(session.id); return; }
 				if (choice?.value === "edit") {
 					const text = await this.askText({ title: "Edit queued steering", initial: item.text, maxLength: 20_000 });
 					if (!text) return;
@@ -1566,11 +1448,6 @@ export class App implements FeatureHost {
 
 	// ─── hidden-session live tails ──────────────────────────────────────────
 
-	/** Consume a session's buffered tail (see tail.ts for the merge rule). */
-	private takeSessionTail(sessionId: string): SessionTail | undefined {
-		return this.sessionTails.take(sessionId);
-	}
-
 	/**
 	 * Replay a consumed hidden-session tail in rendered order. Historical
 	 * blocks re-enter through the resume path; ACTIVE blocks (streaming text,
@@ -1604,16 +1481,6 @@ export class App implements FeatureHost {
 				this.transcript.replay(tailEntries([block]));
 			}
 		}
-	}
-
-	/** Drop tails that no longer route and cap the retained session count. */
-	private pruneSessionTails(): void {
-		this.sessionTails.prune();
-	}
-
-	/** Buffer one hidden-session event into its live tail (see tail.ts). */
-	private bufferHiddenEvent(event: GatewayEvent): void {
-		this.sessionTails.buffer(event);
 	}
 
 	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined> {
@@ -1836,7 +1703,7 @@ export class App implements FeatureHost {
 				dialog.handle.hide();
 				this.dialogs.splice(this.dialogs.indexOf(dialog), 1);
 				const previous = this.dialogs.at(-1);
-				if (this.approvalDialogs.size) this.showApprovalDock();
+				if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
 				else if (previous) { previous.handle.setHidden(false); previous.handle.focus(); }
 				// The composer owns focus after the last dialog (finding 3):
 				// route through the region router so activeRegion agrees, or the
@@ -1863,7 +1730,7 @@ export class App implements FeatureHost {
 			this.dialogs.push(dialog);
 			// Late management RPCs may finish after an approval arrives. Preserve
 			// their draft invisibly until the bound decision releases focus.
-			if (this.approvalDialogs.size) { handle.setHidden(true); this.showApprovalDock(); }
+			if (this.turnSession.approvalDialogCount()) { handle.setHidden(true); this.showApprovalDock(); }
 			this.syncCursorBlink();
 			this.tui.requestRender();
 		});
@@ -1891,8 +1758,8 @@ export class App implements FeatureHost {
 	}
 
 	private async switchKiroFallback(sessionId: string): Promise<void> {
-		if (this.kiroFallbackSessions.has(sessionId)) return;
-		this.kiroFallbackSessions.add(sessionId);
+		if (this.turnSession.hasKiroFallback(sessionId)) return;
+		this.turnSession.setKiroFallback(sessionId, true);
 		try {
 			const fallback = await this.request<KiroFallback>("auth.kiro.fallback", {});
 			if (!fallback.provider || !fallback.model) {
@@ -1901,7 +1768,7 @@ export class App implements FeatureHost {
 						"Kiro credits are exhausted and no fallback provider is available. Set MACHINA_KIRO_FALLBACK=provider:model.",
 					"warning",
 				);
-				this.kiroFallbackSessions.delete(sessionId);
+				this.turnSession.setKiroFallback(sessionId, false);
 				return;
 			}
 			await this.request("session.setModel", {
@@ -1919,7 +1786,7 @@ export class App implements FeatureHost {
 				"warning",
 			);
 		} catch (error) {
-			this.kiroFallbackSessions.delete(sessionId);
+			this.turnSession.setKiroFallback(sessionId, false);
 			this.print(`Could not switch the Kiro fallback: ${message(error)}`, "error");
 		} finally {
 			this.tui.requestRender();
@@ -1970,8 +1837,7 @@ export class App implements FeatureHost {
 		// the moment the app is leaving: it must publish nothing.
 		this.beginWorkspaceFence();
 		this.footer.dispose();
-		for (const timer of this.inFlightTimers.values()) clearTimeout(timer);
-		this.inFlightTimers.clear();
+		this.turnSession.clearInFlightTimers();
 		this.transcript.suspend();
 		this.invalidateApprovals();
 		this.nowPlayingController?.stop();
@@ -2094,7 +1960,7 @@ export class App implements FeatureHost {
 		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
 		this.pendingKeyLeaderTimer = undefined;
 		this.footer.keyHint = "";
-		if (this.dialogs.length || this.approvalDialogs.size || this.quickOpenPane) {
+		if (this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane) {
 			this.pendingKeyLeader = undefined;
 			return this.onKey(normalized);
 		}
@@ -2150,7 +2016,7 @@ export class App implements FeatureHost {
 		// input dispatch so the panes (including Problems) get the remaining
 		// rows instead of being clipped by the grown composer.
 		this.scheduleWorkspaceChromeSync();
-		if (this.dialogs.length || this.approvalDialogs.size) return undefined; // focused dialogs own their keys
+		if (this.dialogs.length || this.turnSession.approvalDialogCount()) return undefined; // focused dialogs own their keys
 
 		// ── integrated workspace (plan §8 focus priority) ────────────────────
 		// The Quick Open overlay owns every key except Esc/Ctrl+C (which would
@@ -2310,542 +2176,45 @@ export class App implements FeatureHost {
 
 	// ─── integrated workspace (T3/T6/T12) ───────────────────────────────────
 
-	/**
-	 * Construct the integration and open the workspace in the background.
-	 * Called once from start() after initialize + session setup. Nothing here
-	 * touches the shell until the open succeeds, so a failure leaves chat-only
-	 * behavior byte-identical.
-	 */
-	private startWorkspace(root: string): void {
-		const request: WorkspaceRequestFn = <T>(method: string, params: Record<string, unknown>) => {
-			if (this.workspaceUnsupported) {
-				return Promise.reject(new Error("workspace is unavailable on this backend"));
-			}
-			return this.client.request<T>(method, params, 120_000).then((result) => {
-				// Fail closed on a malformed open identity (a backend that does
-				// not really serve workspace.* answers `{}`): binding a bogus
-				// workspace would half-open the shell. One quiet disable notice.
-				if (method === "workspace.open" && !isWorkspaceIdentity(result)) {
-					this.noteWorkspaceUnsupported();
-					throw new Error("workspace.open returned an invalid identity");
-				}
-				return result;
-			}).catch((error: unknown) => {
-				// A backend without workspace.* fails every call closed with
-				// METHOD_NOT_FOUND: disable the feature once, quietly, and let
-				// the error surface normally for this call.
-				if (error instanceof RpcError && error.code === -32601) this.noteWorkspaceUnsupported();
-				throw error;
-			});
-		};
-		const gateway = new WorkspaceGatewayAdapter(request);
-		const store = new EditorStore();
-		const tabs = new TabModel({ isDirty: (documentId) => store.getDocument(documentId)?.dirty ?? false });
-		const view = new EditorView({
-			store,
-			view: { documentId: "", cursorOffset: 0, scrollLine: 0, horizontalCellOffset: 0 },
-			onChange: (documentId) => {
-				this.pauseEditorCursorBlink();
-				this.integration?.controller.noteEdit(documentId);
-				this.clearCompletion();
-				this.scheduleAutomaticCompletion();
-				this.tui.requestRender();
-			},
-			requestRender: () => this.tui.requestRender(),
-			onCursorMove: () => { if (this.completionSession) this.clearCompletion(); },
-			// Editor caret shares the app's single blink phase (coordinator).
-			isCursorBlockVisible: () => this.cursorBlinkOn(),
-			// The view's clipboard seam: copy through the real system clipboard
-			// (clipboard.ts), paste through the text reader (images.ts, "" when
-			// empty or unavailable → null so the view never inserts "").
-			clipboard: {
-				copy: (text) => copyClipboardText(text),
-				paste: async () => {
-					try {
-						const text = await clipboardText(process.platform);
-						return text.length > 0 ? text : null;
-					} catch {
-						return null;
-					}
-				},
-			},
-		});
-		view.onFocusRequested = () => this.noteRegionFocus("editor");
-		const pane = new EditorPane({
-			store,
-			tabModel: tabs,
-			view,
-			requestRender: () => this.tui.requestRender(),
-			onSelectTab: () => {
-				this.clearCompletion();
-				// Tab focus refreshes the Problems projection for the new active file.
-				void this.refreshProblemsForActiveDocument();
-				this.refreshLspStatus();
-				this.tui.requestRender();
-			},
-			onCloseTab: (documentId) => void this.closeWorkspaceTab(documentId),
-			// Fallback when the pane owns the key directly; the app's Ctrl+S
-			// handler runs first while the editor region is active.
-			onSave: () => void this.saveActiveDocument(),
-		});
-		const controller = new WorkspaceController({
-			gateway,
-			persistence: this.workspacePersistence(),
-			store,
-			tabs,
-			requestRender: () => this.tui.requestRender(),
-			notify: (kind, text) => {
-				// One quiet disable notice: the controller's own error for the
-				// METHOD_NOT_FOUND open is suppressed (the info notice covers it),
-				// and after that all controller errors stem from the same cause.
-				if (this.workspaceUnsupported && kind === "error") return;
-				this.transcript.addNotice(text, kind);
-				this.tui.requestRender();
-			},
-			focus: (region) => this.setFocusForRegion(region),
-			onDocumentReleased: (documentId) => view.releaseDocument(documentId),
-		});
-		const explorerModel = new ExplorerModel((path, cursor, listOptions) =>
-			gateway.list(path, cursor, listOptions),
-		);
-		const explorerPane = new ExplorerPane(explorerModel, { onChange: () => this.tui.requestRender() });
-		explorerPane.onFocusRequested = () => this.noteRegionFocus("explorer");
-		explorerPane.onOpenFile = (entry) => {
-			if (entry.kind === "file") void this.openWorkspacePath(entry.path, { preview: false });
-		};
-		explorerPane.onPreviewFile = (entry, focus = true) => {
-			if (entry.kind === "file") void this.openWorkspacePath(entry.path, { preview: true, focus });
-		};
-		const problemsModel = new ProblemsModel({ request: this.intelligenceRequest() });
-		const problemsPane = new ProblemsPane({
-			model: problemsModel,
-			requestRender: () => this.tui.requestRender(),
-			onOpen: (row) => void this.openProblem(row),
-			onClose: () => this.closeProblems(),
-		});
-		problemsPane.onFocusRequested = () => this.noteRegionFocus("problems");
-
-		this.integration = {
-			gateway,
-			controller,
-			store,
-			tabs,
-			view,
-			pane,
-			explorerModel,
-			explorerPane,
-			problemsModel,
-			problemsPane,
-		};
-		const workspaceHost: WorkspaceHost & WorkspaceAttachmentHost = {
-			controller,
-			controllerAvailable: () =>
-				this.workspaceFlagOn && !this.workspaceUnsupported && this.integration !== undefined,
-			setMode: (mode) => {
-				controller.setMode(mode);
-				this.syncWorkspaceShell();
-			},
-			toggleChatMaximize: () => {
-				controller.toggleChatMaximize();
-				this.syncWorkspaceShell();
-			},
-			toggleEditorMaximize: () => {
-				controller.toggleEditorMaximize();
-				this.syncWorkspaceShell();
-			},
-			restoreSplit: () => {
-				controller.restoreSplit();
-				this.syncWorkspaceShell();
-			},
-			setExplorer: (open) => this.setExplorerRequested(open),
-			closeActiveTab: () => this.closeActiveWorkspaceTab(),
-			setChatSide: (side) => {
-				controller.setChatSide(side);
-				this.syncWorkspaceShell();
-			},
-			layoutChanged: () => this.syncWorkspaceShell(),
-			openProblems: () => this.openProblems(),
-			openQuickOpen: () => void this.openQuickOpen(),
-			completeAtCursor: () => void this.startCompletion(),
-			openRoot: (path) => this.switchWorkspaceRoot(path),
-			// T10 explicit sharing: capture the editor selection into the
-			// composer draft (plan §20). Never called by open/view paths.
-			attachSelectionToDraft: () => this.attachSelectionToDraft(),
-			dirtyBuffers: () => {
-				const dirty = store.documents().filter((document) => document.dirty);
-				return {
-					count: dirty.length,
-					names: dirty.slice(0, 8).map((document) => displayUriName(document.uri)),
-				};
-			},
-		};
-		this.workspaceHostSurface = workspaceHost;
-		this.shell.setWorkspaceEditor(pane);
-		this.shell.setWorkspaceExplorer(explorerPane);
-		this.shell.onWorkspaceRatioChange = (ratio) => {
-			controller.setRatio(ratio);
-			this.syncWorkspaceShell();
-		};
-		// Far-right grip: flips the same explorer request the Ctrl+T / /explorer
-		// path uses, so the listing load and persistence stay single-sourced.
-		this.shell.onWorkspaceExplorerToggle = () => {
-			const explorer = this.integration?.controller.getLayoutInput().explorerRequested ?? false;
-			this.setExplorerRequested(!explorer);
-		};
-		this.client.onWorkspaceEvent = (event) => this.onWorkspaceEvent(event);
-		// Global editor preferences (ui_preferences): best-effort, non-blocking.
-		void this.loadUiPreferences();
-		void this.openWorkspaceBackground(root);
-	}
-
-	/**
-	 * Contract C3 / MCH-012: enter a new app-side lifecycle epoch. Call this
-	 * BEFORE the first await of any open/switch/close/exit entry point so
-	 * parked continuations of the previous epoch drop. The controller
-	 * generation is re-bound after the entry's own controller call returns
-	 * (`armWorkspaceFence`), because that call legitimately advances it.
-	 */
-	private beginWorkspaceFence(): number {
-		this.clearCompletion();
-		this.workspaceFenceController = undefined;
-		return ++this.workspaceGeneration;
-	}
-
-	/**
-	 * Capture the live fence before an await. When a controller is mounted its
-	 * generation is the authoritative half; during early startup/tests without
-	 * a controller the app epoch is the only source.
-	 */
-	private captureWorkspaceFence(): number {
-		this.workspaceFenceController = this.integration?.controller.generation;
-		return this.workspaceGeneration;
-	}
-
-	/**
-	 * Bind `gen` to the controller generation that exists now. Guarded so a
-	 * latched continuation can never rebind (or adopt) a retired/newer epoch.
-	 */
-	private armWorkspaceFence(gen: number): void {
-		if (gen !== this.workspaceGeneration || this.exiting) return;
-		this.workspaceFenceController = this.integration?.controller.generation;
-	}
-
-	/**
-	 * Contract C3 fence: true only while the captured epoch is still the live
-	 * one AND (once a controller was captured) that controller still reports
-	 * the captured generation current. A close/switch/dispose in EITHER source
-	 * therefore denies the continuation, which must publish nothing.
-	 */
-	private isWorkspaceCurrent(gen: number): boolean {
-		if (this.exiting || gen !== this.workspaceGeneration) return false;
-		const integration = this.integration;
-		if (this.workspaceFenceController === undefined) return true;
-		return integration !== undefined && integration.controller.isCurrent(this.workspaceFenceController);
-	}
-
-	/**
-	 * Background open. Failures notify once via the controller and leave the
-	 * shell chat-only. On success the restored layout (or the default split)
-	 * reaches the shell, remembered files reopen only when a stored state
-	 * existed, cursors are re-applied, and the LSP/Problems feeds start.
-	 */
-	private async openWorkspaceBackground(root: string): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		// MCH-012: bump BEFORE the first await so a superseding entry point
-		// (switch/close/exit) parked mid-flight drops this whole continuation.
-		const gen = this.beginWorkspaceFence();
-		// Capture the stored document BEFORE openWorkspace persists its own
-		// intent over it (see workspacePersistence).
-		// MCH-012: the snapshot itself is published state — a read that lands
-		// after a superseding entry must not overwrite the live path's capture.
-		let raw: string | undefined;
-		try {
-			raw = await this.readWorkspaceStateRaw();
-		} catch {
-			raw = undefined;
-		}
-		if (!this.isWorkspaceCurrent(gen)) return;
-		this.workspacePreOpenRaw = raw;
-		this.workspacePreOpenCaptured = false;
-		const identity = await integration.controller.openWorkspace(root);
-		if (!identity) return;
-		// C3: this open legitimately advanced the controller generation; bind
-		// the epoch to what it produced before the combined (both-source) check.
-		this.armWorkspaceFence(gen);
-		if (!this.isWorkspaceCurrent(gen)) return;
-		this.workspaceLayoutActive = true;
-		// Preferences are view-global; re-assert them once the editor exists so
-		// a prefs load racing the background open can never be lost.
-		this.applyUiPreferences(this.uiPrefs);
-		const restored = await integration.controller.restore(identity.resolvedRoot);
-		// MCH-012: restore can be slow; applying its layout/state after a
-		// supersede would publish a stale root into the live shell.
-		if (!this.isWorkspaceCurrent(gen)) return;
-		// The controller's default intent is already the split; only a stored
-		// state overrides it (and an explicit command issued during the open
-		// window is never clobbered).
-		if (restored) integration.controller.applyRestoredLayout(restored);
-		this.syncWorkspaceShell();
-		if (restored) {
-			await integration.controller.reopenRecent(restored);
-			if (!this.isWorkspaceCurrent(gen)) return;
-			this.restoreCursorState(restored);
-			const active = integration.tabs.activeDocumentId();
-			if (active) integration.view.setDocument(active);
-		}
-		if (integration.controller.getLayoutInput().explorerRequested) {
-			void integration.explorerModel.load();
-		}
-		integration.controller.setLspStatusListener(() => {
-			integration.pane.setLspStatus(this.lspStatusText());
-		});
-		void integration.controller.lspStatus().then(() => {
-			// MCH-012: a late status is only applied while this open is still
-			// the live one — a superseded root never writes the pane.
-			if (this.integration === integration && this.isWorkspaceCurrent(gen)) {
-				integration.pane.setLspStatus(this.lspStatusText());
-			}
-		});
-		void this.refreshProblemsForActiveDocument();
-		this.syncWorkspaceShell();
-	}
-
-	/**
-	 * Explicit user command to reopen the workspace at another folder
-	 * (`/workspace open <path>`). Clean documents from the previous root close
-	 * because the new workspace cannot save them (their URIs fall outside its
-	 * root); dirty buffers always stay, with the count reported. The new
-	 * root's persisted layout/files restore when a stored state exists.
-	 */
-	private async switchWorkspaceRoot(path: string): Promise<{ ok: boolean; message: string }> {
-		const integration = this.integration;
-		if (!integration) return { ok: false, message: "Workspace is not available." };
-		const trimmed = path.trim();
-		if (!trimmed) return { ok: false, message: "Usage: /workspace open <path>" };
-		// MCH-012: this switch is now the live lifecycle entry — bump BEFORE the
-		// first await so any in-flight open/switch continuation drops.
-		const gen = this.beginWorkspaceFence();
-		// Capture the stored document BEFORE open persists its intent (same
-		// one-shot snapshot rule as the boot path).
-		let raw: string | undefined;
-		try {
-			raw = await this.readWorkspaceStateRaw();
-		} catch {
-			raw = undefined;
-		}
-		if (!this.isWorkspaceCurrent(gen)) return { ok: false, message: "workspace switched" };
-		this.workspacePreOpenRaw = raw;
-		this.workspacePreOpenCaptured = false;
-		const identity = await integration.controller.openWorkspace(trimmed);
-		if (!identity) {
-			return { ok: false, message: "Could not open that folder (see the notice above)." };
-		}
-		// C3: bind the epoch to the generation this open produced, then check
-		// both sources (a concurrent close/switch/dispose still denies here).
-		this.armWorkspaceFence(gen);
-		if (!this.isWorkspaceCurrent(gen)) {
-			return { ok: true, message: "workspace switched" };
-		}
-		this.workspaceLayoutActive = true;
-		// The explorer tree belongs to the old root; root reload alone kept
-		// expanded child records from A visible under B (combined #28).
-		integration.explorerModel.reset();
-		let closed = 0;
-		let kept = 0;
-		for (const document of integration.store.documents()) {
-			if (document.dirty) {
-				kept += 1;
-				continue;
-			}
-			const outcome = await integration.controller.closeTab(document.id);
-			if (!this.isWorkspaceCurrent(gen)) return { ok: true, message: "workspace switched" };
-			if (outcome.status === "closed") closed += 1;
-			else kept += 1;
-		}
-		const restored = await integration.controller.restore(identity.resolvedRoot);
-		// MCH-012: never apply a restored layout to a root that has since lost
-		// the lifecycle race.
-		if (!this.isWorkspaceCurrent(gen)) return { ok: true, message: "workspace switched" };
-		if (restored) integration.controller.applyRestoredLayout(restored);
-		this.syncWorkspaceShell();
-		if (restored) {
-			await integration.controller.reopenRecent(restored);
-			if (!this.isWorkspaceCurrent(gen)) return { ok: true, message: "workspace switched" };
-			this.restoreCursorState(restored);
-			const active = integration.tabs.activeDocumentId();
-			if (active) integration.view.setDocument(active);
-		}
-		await integration.explorerModel.reload("");
-		// MCH-012: the reload preceded the final shell publish; drop it when
-		// another lifecycle entry took over while the read was parked.
-		if (!this.isWorkspaceCurrent(gen)) return { ok: true, message: "workspace switched" };
-		if (integration.controller.getLayoutInput().explorerRequested) void integration.explorerModel.load();
-		void integration.controller.lspStatus();
-		void this.refreshProblemsForActiveDocument();
-		this.syncWorkspaceShell();
-		const extras: string[] = [];
-		if (closed > 0) extras.push(`closed ${closed} clean tab(s)`);
-		if (kept > 0) extras.push(`kept ${kept} unsaved tab(s)`);
-		const suffix = extras.length > 0 ? ` · ${extras.join(" · ")}` : "";
-		return { ok: true, message: `workspace: ${identity.rootLabel} (${identity.resolvedRoot})${suffix}` };
-	}
-
-	/**
-	 * Persistence bridge over `config.get`/`config.set("workspace_ui_state")`
-	 * (plan §21). A one-shot snapshot captured before open serves the FIRST
-	 * load: the controller persists its default intent during openWorkspace,
-	 * which would otherwise overwrite the stored entry before `restore` reads
-	 * it (verified by a first-run probe). The snapshot is parsed through
-	 * WorkspacePersistence, so sanitization stays single-sourced.
-	 */
-	private workspacePersistence(): WorkspacePersistenceLike {
-		const live = new WorkspacePersistence({
-			get: () => this.readWorkspaceStateRaw(),
-			set: async (value) => {
-				await this.client.request("config.set", { key: "workspace_ui_state", value, persist: true }, 30_000);
-			},
-		});
-		return {
-			load: async (rootKey) => {
-				if (!this.workspacePreOpenCaptured) {
-					this.workspacePreOpenCaptured = true;
-					const raw = this.workspacePreOpenRaw;
-					if (raw !== undefined) {
-						const snapshot = new WorkspacePersistence({ get: async () => raw, set: async () => {} });
-						const parsed = await snapshot.load(rootKey);
-						if (parsed) return parsed.state;
-					}
-				}
-				return (await live.load(rootKey))?.state;
-			},
-			save: (rootKey, state) => live.save(rootKey, state),
-		};
-	}
-
-	/** Read the stored workspace document ("" and failures mean "nothing"). */
-	private async readWorkspaceStateRaw(): Promise<string | undefined> {
-		const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
-		const raw = config["workspace_ui_state"];
-		return typeof raw === "string" && raw.length > 0 ? raw : undefined;
-	}
-
-	/** Apply remembered cursor/scroll positions after a successful reopen. */
-	private restoreCursorState(state: WorkspacePersistedState): void {
-		const integration = this.integration;
-		if (!integration || !state.cursorByUri) return;
-		for (const [uri, cursor] of Object.entries(state.cursorByUri)) {
-			const document = integration.store.documents().find((candidate) => candidate.uri === uri);
-			if (!document) continue;
-			const offset = Math.max(0, Math.min(cursor.offset, document.text.length));
-			const anchor =
-				cursor.anchorOffset === undefined
-					? undefined
-					: Math.max(0, Math.min(cursor.anchorOffset, document.text.length));
-			integration.store.setSelection(document.id, {
-				cursorOffset: offset,
-				...(anchor !== undefined ? { anchorOffset: anchor } : {}),
-			});
-			if (document.id === integration.tabs.activeDocumentId()) {
-				integration.view.setView({
-					documentId: document.id,
-					cursorOffset: offset,
-					...(anchor !== undefined ? { selectionAnchorOffset: anchor } : {}),
-					scrollLine: cursor.scrollLine ?? 0,
-					horizontalCellOffset: 0,
-				});
-			}
-		}
-	}
-
-	/**
-	 * Push current layout intent to the shell and size the editor pane. The
-	 * split geometry itself always comes from computeLayout (single source);
-	 * only the shell's dock/composer/footer chrome (+ density gaps) is
-	 * subtracted before handing rows to the pane, so over-allocation can never
-	 * clip its status row.
-	 */
+	/** Delegate: workspace shell geometry lives on WorkspaceSurface. */
 	private syncWorkspaceShell(): void {
-		const integration = this.integration;
-		if (!integration || !this.workspaceLayoutActive) {
-			// No pane is composed: keys must belong to the composer, never to a
-			// component retained from a previous workspace/layout.
-			this.reconcileFocus();
-			return;
-		}
-		const input = integration.controller.getLayoutInput();
-		const columns = Math.max(0, this.tui.terminal.columns);
-		const rows = Math.max(0, this.tui.terminal.rows);
-		this.shell.setWorkspaceState(input);
-		// Breadcrumb root (finding 2): pushed here so open/switch/close all
-		// converge on the same single call site.
-		const root = integration.controller.identity?.resolvedRoot;
-		integration.pane.setWorkspaceRoot(root);
-		integration.problemsPane.setWorkspaceRoot(root);
-		// Footer workspace hints stay only while a workspace identity exists.
-		this.footer.workspaceHints = integration.controller.identity ? WORKSPACE_FOOTER_HINTS : "";
-		const layout = computeLayout({ ...input, columns, rows });
-		this.workspaceLayout = layout;
-		// Composer + optional approval dock + footer are full-width rows under
-		// the panes row; chromeRows sums their heights and gaps from the same
-		// budgets the root VStack uses.
-		const chrome = this.shell.chromeRows();
-		this.lastWorkspaceShellKey = workspaceShellKey(input, columns, rows, chrome);
-		if (layout.editor) integration.pane.layout(Math.max(1, layout.editor.rows - chrome));
-		if (layout.explorer) {
-			// The docked tree owns its own windowing inside a bounded panel:
-			// the drawer gets the rows the panes area can spare, capped so a
-			// long tree never paints a full-page surface rectangle. Keep the
-			// selection visible inside that budget.
-			integration.explorerPane.setRowBudget(explorerTreeRowBudget(layout.explorer.rows - chrome - 2));
-		}
-		// Focus reconciliation (finding 1): the recomposed geometry may have
-		// hidden the region that owns focus (e.g. chat maximized while the
-		// editor was active). pi-tui would keep delivering keys to the now
-		// unmounted pane — typing silently editing an invisible buffer — so
-		// retarget the composer, the only always-visible region. The nested
-		// sync from setFocusForRegion terminates immediately: the composer is
-		// always in focusRegions(), so this never re-enters the branch.
-		if (!this.focusRegions().includes(this.activeRegion)) {
-			this.setFocusForRegion("chat-composer");
-		}
-		// Re-assert the TUI's real focus against the composed geometry: pi-tui
-		// keeps delivering keys to a removed component, so a pane that was
-		// unmounted after the check above (or a focus cleared by an overlay)
-		// must be healed before the next keystroke, not on a focus shortcut.
-		this.reconcileFocus();
-		this.tui.requestRender();
+		this.workspaceSurface?.syncShell();
 	}
 
-	/**
-	 * Reconcile pane row allocation after the composer settles. The slash
-	 * autocomplete grows the composer during the key dispatch; scheduling this
-	 * as a task (not a microtask) lets the focused Editor finish its render
-	 * state before the shell measures the chrome.
-	 */
+	/** Delegate: deferred chrome sync lives on WorkspaceSurface. */
 	private scheduleWorkspaceChromeSync(): void {
-		if (!this.integration || !this.workspaceLayoutActive || this.exiting) return;
-		if (this.workspaceChromeTimer !== undefined) return;
-		this.workspaceChromeTimer = setTimeout(() => {
-			this.workspaceChromeTimer = undefined;
-			if (!this.exiting) this.syncWorkspaceShellIfChanged();
-		}, 0);
+		this.workspaceSurface?.scheduleChromeSync();
 	}
 
-	/** Cheap re-sync: only when the intent or terminal dimensions changed. */
+	/** Delegate: cheap geometry re-sync lives on WorkspaceSurface. */
 	private syncWorkspaceShellIfChanged(): void {
-		const integration = this.integration;
-		if (!integration || !this.workspaceLayoutActive) return;
-		const input = integration.controller.getLayoutInput();
-		const key = workspaceShellKey(
-			input,
-			Math.max(0, this.tui.terminal.columns),
-			Math.max(0, this.tui.terminal.rows),
-			this.shell.chromeRows(),
-		);
-		if (key === this.lastWorkspaceShellKey) return;
-		this.syncWorkspaceShell();
+		this.workspaceSurface?.syncShellIfChanged();
 	}
+
+	/** Delegate: explicit root switch lives on WorkspaceSurface. */
+	private switchWorkspaceRoot(path: string): Promise<{ ok: boolean; message: string }> {
+		return this.workspaceSurface?.switchRoot(path)
+			?? Promise.resolve({ ok: false, message: "Workspace is not available." });
+	}
+
+	// ─── workspace lifecycle fence (contract C3 / MCH-012) ──────────────────
+
+	/** Delegate: enter a new lifecycle epoch (workspace surface). */
+	private beginWorkspaceFence(): number {
+		return this.workspaceSurface?.beginFence() ?? this.workspaceGeneration;
+	}
+
+	/** Delegate: capture the live epoch + controller generation. */
+	private captureWorkspaceFence(): number {
+		return this.workspaceSurface?.captureFence() ?? this.workspaceGeneration;
+	}
+
+	/** Delegate: true only while the captured epoch/generation is live. */
+	private isWorkspaceCurrent(gen: number): boolean {
+		if (this.exiting) return false;
+		return this.workspaceSurface?.isCurrent(gen) ?? true;
+	}
+
 
 	// ─── workspace focus router (plan §8, v1) ───────────────────────────────
 
@@ -2895,7 +2264,7 @@ export class App implements FeatureHost {
 	 */
 	private reconcileFocus(): void {
 		if (this.exiting) return;
-		if (this.dialogs.length > 0 || this.approvalDialogs.size > 0 || this.quickOpenPane) return;
+		if (this.dialogs.length > 0 || this.turnSession.approvalDialogCount() > 0 || this.quickOpenPane) return;
 		const regions = this.focusRegions();
 		const probe = this.tui as TUI & { getFocusedComponent?(): Component | null; focused?: Component | null };
 		const current =
@@ -3016,7 +2385,7 @@ export class App implements FeatureHost {
 			this.keybindings.matches(data, "explorer") ||
 			this.keybindings.matches(data, "explorerAlt")
 		) {
-			this.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
+			this.workspaceSurface?.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };
 		}
 		// Ctrl+W — close the active editor tab (dirty → Save/Discard/Cancel).
@@ -3274,7 +2643,7 @@ export class App implements FeatureHost {
 		this.automaticCompletionTimer = setTimeout(() => {
 			this.automaticCompletionTimer = undefined;
 			if (this.exiting || !this.isWorkspaceCurrent(gen) || this.activeRegion !== "editor"
-				|| this.dialogs.length || this.approvalDialogs.size || this.quickOpenPane || this.completionSession) return;
+				|| this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane || this.completionSession) return;
 			const current = this.activeEditorContext();
 			if (current?.document.id !== id || current.document.version !== version
 				|| store.getViewState(id)?.cursorOffset !== cursor || this.lspStatusText() !== "ready"
@@ -3850,52 +3219,6 @@ export class App implements FeatureHost {
 		});
 	}
 
-	// ─── workspace events + toggles ─────────────────────────────────────────
-
-	/**
-	 * Workspace notifications (plan §19): a family separate from chat, never
-	 * entering turn bookkeeping. The controller identity/epoch-gates them;
-	 * diagnostics additionally feed the Problems projection.
-	 */
-	private onWorkspaceEvent(event: WorkspaceEvent): void {
-		if (this.exiting) return;
-		const integration = this.integration;
-		if (!integration) return;
-		integration.controller.handleEvent(event);
-		if (event.workspaceId !== integration.controller.identity?.workspaceId
-			|| event.epoch !== integration.controller.identity?.epoch) return;
-		if (event.type === "workspace.lspState" && event.state === "ready") this.scheduleAutomaticCompletion();
-		if (event.type === "workspace.diagnostics") {
-			integration.problemsModel.push({
-				uri: event.uri,
-				version: event.version,
-				source: event.source,
-				diagnostics: event.diagnostics,
-			});
-		}
-		this.syncWorkspaceShellIfChanged();
-		this.tui.requestRender();
-	}
-
-	/** Toggle/open/close the explorer column; loads the listing on open. */
-	private setExplorerRequested(open: boolean): void {
-		const integration = this.integration;
-		if (!integration) return;
-		if (integration.controller.getLayoutInput().explorerRequested !== open) {
-			integration.controller.toggleExplorer();
-		}
-		if (open) void integration.explorerModel.load();
-		this.syncWorkspaceShell();
-	}
-
-	/** METHOD_NOT_FOUND once: quiet disable, one info notice, no retry spam. */
-	private noteWorkspaceUnsupported(): void {
-		if (this.workspaceUnsupported) return;
-		this.workspaceUnsupported = true;
-		this.footer.workspaceHints = "";
-		this.print("workspace commands unavailable on this backend", "info");
-	}
-
 	private async submit(raw: string): Promise<void> {
         const waitingForImages = this.pendingImageLoads > 0;
         const epoch = this.imageEpoch;
@@ -3913,7 +3236,7 @@ export class App implements FeatureHost {
             this.print("Send image attachments with a message, rather than a slash command.", "warning");
             return;
         }
-		const inFlight = this.current && (this.inFlight.has(this.current.id) || this.delegatedRunning.has(this.current.id));
+		const inFlight = this.current !== undefined && this.turnSession.isRunning(this.current.id);
 		if (!command && this.current?.parentSessionId && !this.current.isFork) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
@@ -3986,12 +3309,12 @@ export class App implements FeatureHost {
 				// the failure preceded acceptance and retry is meaningful;
 				// when it is retained the dispatch outcome is unknown, so say
 				// so instead of implying a retry is safe.
-                const unknownDispatch = submittedSessionId ? this.inFlight.has(submittedSessionId) : false;
+                const unknownDispatch = submittedSessionId ? this.turnSession.isInFlight(submittedSessionId) : false;
                 if (!this.editor.getText() && !unknownDispatch && this.current?.id === submittedSessionId && this.imageEpoch === submittedEpoch) {
                     this.imageDraft = submittedImages;
                     this.editor.setText(text);
                 }
-				this.setRunning(this.current ? this.inFlight.has(this.current.id) : false);
+				this.setRunning(this.turnSession.visibleInFlight());
 				this.transcript.addNotice(
 					unknownDispatch
 						? `${message(error)} (dispatch state unknown; retry may duplicate work)`
@@ -4017,135 +3340,51 @@ export class App implements FeatureHost {
 			return;
 		}
 		const sessionId = this.current.id;
-		if (this.inFlight.has(sessionId)) {
+		if (this.turnSession.isInFlight(sessionId)) {
 			this.transcript.addNotice("The previous turn is still finishing. Try again shortly.", "warning");
 			this.tui.requestRender();
 			return;
 		}
-		this.interruptedSteering.delete(sessionId);
+		this.turnSession.setInterrupted(sessionId, false);
 		this.transcript.addUser(text);
 		this.setRunning(true);
-		this.inFlight.add(sessionId);
 		// Register the submitting record before dispatch: gateway work is
 		// asynchronous and events can arrive before the RPC result.
-		const record = this.turnRecord(sessionId);
-		record.turnId = undefined;
-		record.provisional = true;
-		record.started = false;
-		record.hadEvents = false;
-		record.warnedSlow = false;
-		record.usageLatest = 0;
-		this.startInFlightTimer(sessionId);
+		this.turnSession.beginTurn(sessionId);
 		this.tui.requestRender();
 		try {
             const result = await this.client.request<{ turnId?: string }>("prompt.submit", {
                 sessionId, text, ...(images.length ? { images } : {}), ...(steeringId ? { steeringId } : {}),
             });
-			this.confirmTurn(sessionId, result?.turnId);
+			if (this.turnSession.confirmTurn(sessionId, result?.turnId) === "mismatch") {
+				this.transcript.addNotice(
+					`Protocol error: turn ${result?.turnId?.slice(0, 8)} does not match the running turn. Keeping the current turn guard.`,
+					"error",
+				);
+				this.tui.requestRender();
+			}
 		} catch (error) {
 			// Rejection known to precede acceptance (no dispatch evidence)
 			// retires the submitting record. After possible dispatch the
 			// outcome is unknown: retain the guard, never auto-retry.
-			const seen = this.turns.get(sessionId);
-			if (!seen?.hadEvents) this.clearInFlight(sessionId);
-			this.setRunning(this.current ? this.inFlight.has(this.current.id) : false);
+			if (!this.turnSession.hadEvents(sessionId)) this.turnSession.clearInFlight(sessionId);
+			this.setRunning(this.turnSession.visibleInFlight());
 			throw error;
 		}
 	}
 
-	/** Confirm a provisional binding against the submit result. */
-	private confirmTurn(sessionId: string, turnId: string | undefined): void {
-		const record = this.turns.get(sessionId);
-		if (!record) return;
-		if (turnId === undefined) return; // keep the event-bound provisional ID
-		if (record.turnId === undefined) {
-			record.turnId = turnId;
-			record.provisional = false;
-			return;
-		}
-		if (record.turnId !== turnId) {
-			this.transcript.addNotice(
-				`Protocol error: turn ${turnId.slice(0, 8)} does not match the running turn. Keeping the current turn guard.`,
-				"error",
-			);
-			this.tui.requestRender();
-			return;
-		}
-		record.provisional = false;
-	}
-
-	private turnRecord(sessionId: string): SessionTurn {
-		let record = this.turns.get(sessionId);
-		if (!record) {
-			record = { turnId: undefined, provisional: true, started: false, hadEvents: false, warnedSlow: false, usageLatest: 0, retired: [] };
-			this.turns.set(sessionId, record);
-		}
-		return record;
-	}
-
-	/** Retire a turn: release the guard once, keep a bounded retired-ID set. */
-	private retireTurn(sessionId: string, turnId: string): void {
-		const record = this.turnRecord(sessionId);
-		if (!record.retired.includes(turnId)) {
-			record.retired.push(turnId);
-			if (record.retired.length > 20) record.retired.shift();
-		}
-		if (record.turnId === turnId) {
-			record.turnId = undefined;
-			record.provisional = true;
-			record.started = false;
-			record.hadEvents = false;
-			record.warnedSlow = false;
-			record.usageLatest = 0;
-		}
-		this.clearInFlight(sessionId);
-	}
-
-	/**
-	 * Local watchdog: a UI diagnostic deadline (900s, matching the server
-	 * turn timeout), never ownership authority. On expiry while connected it
-	 * warns once, retains the in-flight guard, and leaves inspection, cancel
-	 * and exit available. It never advertises resubmission.
-	 */
-	private startInFlightTimer(sessionId: string): void {
-		const previous = this.inFlightTimers.get(sessionId);
-		if (previous) clearTimeout(previous);
-		const timer = setTimeout(() => {
-			this.inFlightTimers.delete(sessionId);
-			const record = this.turns.get(sessionId);
-			if (this.inFlight.has(sessionId) && record && !record.warnedSlow) {
-				record.warnedSlow = true;
-				if (sessionId === this.current?.id) {
-					this.transcript.addNotice("Taking longer than expected; waiting for completion.", "warning");
-					this.tui.requestRender();
-				}
-			}
-		}, App.IN_FLIGHT_TIMEOUT_MS);
-		timer.unref();
-		this.inFlightTimers.set(sessionId, timer);
-	}
-
-	/** Remove a session from in-flight tracking and cancel its stale timer. */
-	private clearInFlight(sessionId: string): void {
-		this.inFlight.delete(sessionId);
-		const timer = this.inFlightTimers.get(sessionId);
-		if (timer) {
-			clearTimeout(timer);
-			this.inFlightTimers.delete(sessionId);
-		}
-	}
-
 	private cancel(): void {
-		if (this.inFlight.size === 0) return;
+		const inFlight = this.turnSession.inFlightSessions();
+		if (inFlight.length === 0) return;
 		// Cancel every in-flight turn, not just the most recent: two sessions
 		// can each have a turn running after a quick switch.
-		for (const sessionId of [...this.inFlight]) {
+		for (const sessionId of inFlight) {
 			this.client.request("prompt.cancel", { sessionId }).catch(() => {});
 		}
 		// Don't setRunning(false) while any session is still in inFlight —
 		// the completion event hasn't arrived yet and the guard will reject
 		// the next submit if we clear running now.
-		if (this.current && !this.inFlight.has(this.current.id)) {
+		if (!this.turnSession.visibleInFlight()) {
 			this.setRunning(false);
 		}
 	}
@@ -4168,28 +3407,25 @@ export class App implements FeatureHost {
 		const childId = event.childSessionId;
 		const turnId = `delegated:${event.turnId}`;
 		if (event.phase === "start") {
-			this.delegatedRunning.add(childId);
-			this.delegatedText.set(childId, "");
+			this.turnSession.startDelegated(childId);
 			this.refreshFamily();
 		} else if (event.phase === "text" || event.phase === "tool") {
 			const text = event.phase === "tool" ? `\n[using ${sanitizeDisplay(event.value).slice(0, 80)}]\n` : event.value;
-			this.delegatedText.set(childId, (this.delegatedText.get(childId) ?? "").concat(text).slice(-65_536));
+			this.turnSession.appendDelegated(childId, text);
 			const delta: GatewayEvent = {
 				protocolVersion: 2, sessionId: childId, turnId, type: "message.delta", text,
 			};
 			if (this.current?.id === childId) this.transcript.apply(delta);
-			else this.bufferHiddenEvent(delta);
+			else this.turnSession.bufferHiddenEvent(delta);
 		} else if (event.phase === "settled" || event.phase === "paused") {
-			this.delegatedRunning.delete(childId);
 			const complete: GatewayEvent = {
 				protocolVersion: 2, sessionId: childId, turnId, type: "message.complete",
-				text: this.delegatedText.get(childId) ?? "", tokens: 0, iterations: 0, toolCalls: 0, cancelled: false,
+				text: this.turnSession.finishDelegated(childId), tokens: 0, iterations: 0, toolCalls: 0, cancelled: false,
 			};
 			if (this.current?.id === childId) {
 				this.transcript.apply(complete);
 				this.setRunning(false);
-			} else this.bufferHiddenEvent(complete);
-			this.delegatedText.delete(childId);
+			} else this.turnSession.bufferHiddenEvent(complete);
 			if (event.phase === "settled") {
 				const main = this.familyRows().find((row) => row.main)?.session.id;
 				this.family.dismiss(childId);
@@ -4208,7 +3444,7 @@ export class App implements FeatureHost {
 			return;
 		}
 		if (event.type === "agent.child") {
-			const binding = this.turns.get(event.sessionId);
+			const binding = this.turnSession.turnBinding(event.sessionId);
 			if (binding && (binding.retired.includes(event.turnId) || binding.turnId !== undefined && binding.turnId !== event.turnId)) return;
 			this.onChildEvent(event);
 			return;
@@ -4243,46 +3479,21 @@ export class App implements FeatureHost {
 		} else if (hidden && !this.isFamilyMember(event.sessionId) && isTurnStart(event)) {
 			this.noteUnknownSession(event.sessionId);
 		}
-		if (!this.inFlight.has(event.sessionId)) {
+		if (!this.turnSession.isInFlight(event.sessionId)) {
 			// A session without a local turn binding (e.g. an in-flight turn
 			// from the server side): preview it in the hidden session's tail;
 			// terminal dedupe lives in the tail itself.
-			if (hidden) this.bufferHiddenEvent(event);
+			if (hidden) this.turnSession.bufferHiddenEvent(event);
 			return;
 		}
 		// A turn's events may arrive after the user switched sessions, so match
 		// against in-flight turns, not just the current session. Non-visible
 		// completion still retires and accounts; it never renders, opens
 		// dialogs, or disturbs the visible session.
-		const record = this.turns.get(event.sessionId);
+		const record = event.type === "message.start"
+			? this.turnSession.bindStart(event.sessionId, event.turnId)
+			: this.turnSession.bindEvent(event.sessionId, event);
 		if (!record) return;
-		const eventTurn = turnIdentity(event);
-		if (event.type === "message.start") {
-			// Late duplicates of a retired turn are inert. A start for the
-			// bound turn applies once (whether bound by an earlier start or
-			// confirmed by the submit result); repeats never reset it.
-			if (record.retired.includes(event.turnId)) return;
-			if (record.started) return;
-			if (record.turnId !== undefined && event.turnId !== record.turnId) return;
-			if (record.turnId === undefined) {
-				record.turnId = event.turnId;
-				record.provisional = true;
-			}
-			record.started = true;
-			record.hadEvents = true;
-		} else {
-			if (record.turnId === undefined) {
-				// Events arrived before any start: bind provisionally so
-				// pre-RPC output and completion are retained once.
-				record.turnId = eventTurn;
-				record.provisional = true;
-			} else if (eventTurn !== record.turnId && !this.approvalMatches(record, event)) {
-				return; // stale turn: no state, text or usage mutation
-			} else if (record.retired.includes(eventTurn)) {
-				return; // late duplicate of a retired turn
-			}
-			record.hadEvents = true;
-		}
 		// Activity updates obey the same turn binding as transcript frames.
 		if (event.type === "steering.update") {
 			this.activity.setQueue(event.sessionId, event.items as unknown as SteeringItem[]);
@@ -4293,16 +3504,13 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
-		if (event.type === "tool.start") {
-			const tools = this.activeTools.get(event.sessionId) ?? new Map<string, string>();
-			tools.set(event.id, event.name);
-			this.activeTools.set(event.sessionId, tools);
-		} else if (event.type === "tool.complete") this.activeTools.get(event.sessionId)?.delete(event.id);
-		else if (event.type === "message.complete") this.activeTools.delete(event.sessionId);
+		if (event.type === "tool.start") this.turnSession.noteToolStart(event.sessionId, event.id, event.name);
+		else if (event.type === "tool.complete") this.turnSession.noteToolComplete(event.sessionId, event.id);
+		else if (event.type === "message.complete") this.turnSession.clearActiveTools(event.sessionId);
 		// A hidden session keeps a live tail so switching back shows the work
 		// done while it was invisible (switchTo merges it
 		// with the fetched history — buffered tail wins, no duplicates).
-		if (hidden) this.bufferHiddenEvent(event);
+		if (hidden) this.turnSession.bufferHiddenEvent(event);
 		// Retain reported output for local inspection (visible or not, but
 		// only for the bound turn). Never refetched, never re-executed.
 		if (event.type === "tool.complete") {
@@ -4314,8 +3522,8 @@ export class App implements FeatureHost {
 			// That is a resolution, not a card: retire any open card and
 			// retained evidence without issuing a decision the record refuses.
 			if (event.status !== undefined && event.status !== "pending") {
-				this.pendingApprovals.delete(event.requestId);
-				const stale = this.approvalDialogs.get(event.requestId);
+				this.turnSession.deletePendingApproval(event.requestId);
+				const stale = this.turnSession.approvalDialog(event.requestId);
 				stale?.card.setRecorded(`approval ${event.status}`);
 				stale?.close();
 				if (event.sessionId === this.current?.id) {
@@ -4332,7 +3540,7 @@ export class App implements FeatureHost {
 			// and never carries a dialog into another session (T7 owns the
 			// review card/queue). A later return rebuilds it via
 			// restoreApprovals.
-			this.pendingApprovals.set(event.requestId, event);
+			this.turnSession.rememberPendingApproval(event);
 			if (event.sessionId !== this.current?.id) return;
 			// Approval card bound to this exact session/turn — switching
 			// sessions never approves the wrong session (Phase 5.6).
@@ -4342,9 +3550,9 @@ export class App implements FeatureHost {
 		}
 		if ((event.type === "approval.resolved" || event.type === "permission.resolved")) {
 			// The decision is durable regardless of which session is visible.
-			this.pendingApprovals.delete(event.requestId);
+			this.turnSession.deletePendingApproval(event.requestId);
 			if (event.sessionId !== this.current?.id) return;
-			const pending = this.approvalDialogs.get(event.requestId);
+			const pending = this.turnSession.approvalDialog(event.requestId);
 			pending?.card.setRecorded(`approval ${event.status}`);
 			pending?.close();
 			this.transcript.addNotice(
@@ -4357,17 +3565,10 @@ export class App implements FeatureHost {
 		if (event.type === "approval.resumed") {
 			// The review is no longer pending; the approved action continues
 			// under a fresh bound turn.
-			this.pendingApprovals.delete(event.requestId);
-			if (event.originTurnId === record.turnId) {
-				if (record.turnId && !record.retired.includes(record.turnId)) {
-					record.retired.push(record.turnId);
-					if (record.retired.length > 20) record.retired.shift();
-				}
-				record.turnId = event.turnId;
-				record.provisional = false;
-				record.started = true;
-				record.usageLatest = 0;
-				if (event.sessionId === this.current?.id) this.transcript.apply({ ...event, type: "message.start" });
+			this.turnSession.deletePendingApproval(event.requestId);
+			if (this.turnSession.applyApprovalResume(event.sessionId, event.originTurnId, event.turnId)
+				&& event.sessionId === this.current?.id) {
+				this.transcript.apply({ ...event, type: "message.start" });
 			}
 			if (event.sessionId !== this.current?.id) return;
 			this.transcript.addNotice(`Approval ${event.requestId.slice(0, 8)} resumed.`);
@@ -4389,9 +3590,9 @@ export class App implements FeatureHost {
 			return;
 		}
 		if (event.type === "usage") {
-			record.usageLatest = event.tokens;
+			this.turnSession.setUsageLatest(event.sessionId, event.tokens);
 			if (event.sessionId === this.current?.id) {
-				this.footer.tokens = this.sessionTokens + event.tokens;
+				this.footer.tokens = this.turnSession.sessionTokens + event.tokens;
 				this.footer.contextTokens = event.contextTokens ?? 0;
 				this.footer.contextPercent = event.contextPercent ?? null;
 			}
@@ -4400,14 +3601,14 @@ export class App implements FeatureHost {
 		}
 		if (event.sessionId !== this.current?.id) {
 			if (event.type === "message.complete") {
-				this.accountCompletion(event.sessionId, event.tokens);
-				this.retireTurn(event.sessionId, event.turnId);
+				this.turnSession.accountCompletion(event.sessionId, event.tokens);
+				this.turnSession.retireTurn(event.sessionId, event.turnId);
 				this.clearApprovals(event.sessionId);
 			}
 			// AH-032: never clear in-flight on "error" — the terminal
 			// message.complete still follows with final accounting and
 			// tool-card cleanup. Clearing early drops that completion.
-			this.setRunning(this.current ? this.inFlight.has(this.current.id) : false);
+			this.setRunning(this.turnSession.visibleInFlight());
 			this.tui.requestRender();
 			return;
 		}
@@ -4423,38 +3624,16 @@ export class App implements FeatureHost {
 				void this.switchKiroFallback(event.sessionId);
 			}
 		} else if (summary) {
-			if (event.type === "message.complete" && event.cancelled) this.interruptedSteering.add(event.sessionId);
-			this.accountCompletion(event.sessionId, summary.tokens);
-			this.retireTurn(event.sessionId, event.turnId);
-			this.footer.tokens = this.sessionTokens;
-			this.setRunning(this.inFlight.has(event.sessionId));
+			if (event.type === "message.complete" && event.cancelled) this.turnSession.setInterrupted(event.sessionId, true);
+			this.turnSession.accountCompletion(event.sessionId, summary.tokens);
+			this.turnSession.retireTurn(event.sessionId, event.turnId);
+			this.footer.tokens = this.turnSession.sessionTokens;
+			this.setRunning(this.turnSession.isInFlight(event.sessionId));
 			if (event.type === "message.complete" && !event.cancelled) {
 				setTimeout(() => { void this.flushSteering(event.sessionId); }, 0);
 			}
 		}
 		this.tui.requestRender();
-	}
-
-	/**
-	 * Approval events carry the reviewed origin turn alongside the transport
-	 * turn; either may identify the bound record. needs_approval has no
-	 * tool-call ID, so correlation stays at turn level only.
-	 */
-	private approvalMatches(record: SessionTurn, event: GatewayEvent): boolean {
-		if (event.type !== "needs_approval" && event.type !== "permission.required" &&
-			event.type !== "approval.resolved" && event.type !== "permission.resolved" && event.type !== "approval.resumed") return false;
-		const origin = (event as { originTurnId?: string }).originTurnId;
-		return origin !== undefined && origin === record.turnId;
-	}
-
-	/** Add a turn total once: duplicate or late completion adds zero. */
-	private accountCompletion(sessionId: string, tokens: number): void {
-		if (sessionId === this.current?.id) {
-			this.sessionTokens += tokens;
-			this.sessionTokensById.set(sessionId, this.sessionTokens);
-			return;
-		}
-		this.sessionTokensById.set(sessionId, (this.sessionTokensById.get(sessionId) ?? 0) + tokens);
 	}
 
 	/**
@@ -4471,7 +3650,7 @@ export class App implements FeatureHost {
 			originTurnId: event.originTurnId,
 			transportTurnId: event.turnId,
 		};
-		if (this.approvalDialogs.has(binding.requestId)) return;
+		if (this.turnSession.hasApprovalDialog(binding.requestId)) return;
 		const fileDiff = event.fileDiff && typeof event.fileDiff === "object"
 			? event.fileDiff as { diff?: unknown; truncated?: unknown }
 			: undefined;
@@ -4513,17 +3692,17 @@ export class App implements FeatureHost {
 		const close = () => {
 			if (settled) return;
 			settled = true;
-			this.approvalDialogs.delete(binding.requestId);
+			this.turnSession.deleteApprovalDialog(binding.requestId);
 			finish();
 			this.showApprovalDock();
 		};
-		this.approvalDialogs.set(binding.requestId, { ...binding, card, evidenceAdded: false, close, dialog });
+		this.turnSession.setApprovalDialog(binding.requestId, { ...binding, card, evidenceAdded: false, close, dialog });
 		this.showApprovalDock();
 		this.tui.requestRender();
 	}
 
 	private showApprovalDock(): void {
-		const next = this.approvalDialogs.values().next().value;
+		const next = this.turnSession.firstApprovalDialog();
 		if (next && !next.evidenceAdded) {
 			this.transcript.addComponent(next.card.evidence);
 			next.evidenceAdded = true;
@@ -4553,18 +3732,18 @@ export class App implements FeatureHost {
 
 	/** Dispatch one deliberate decision with the captured session binding. */
 	private async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
-		const entry = this.approvalDialogs.get(requestId);
+		const entry = this.turnSession.approvalDialog(requestId);
 		if (!entry) return;
 		// Revalidate immediately before dispatch: wrong-session, retired-turn
 		// and post-navigation decisions never leave this UI flow.
-		const record = this.turns.get(entry.sessionId);
+		const record = this.turnSession.turnBinding(entry.sessionId);
 		const bound = record !== undefined
-			&& this.inFlight.has(entry.sessionId)
+			&& this.turnSession.isInFlight(entry.sessionId)
 			&& entry.sessionId === this.current?.id
 			&& (record.turnId === entry.transportTurnId || (entry.originTurnId !== undefined && record.turnId === entry.originTurnId));
 		if (!bound) {
 			entry.close();
-			this.pendingApprovals.delete(requestId);
+			this.turnSession.deletePendingApproval(requestId);
 			return;
 		}
 		entry.card.setResolving(true);
@@ -4584,29 +3763,29 @@ export class App implements FeatureHost {
 		// Decision recorded; execution is proven only by later tool events.
 		entry.card.setRecorded(`approval ${decision.verdict}`);
 		entry.close();
-		this.pendingApprovals.delete(requestId);
+		this.turnSession.deletePendingApproval(requestId);
 		this.tui.requestRender();
 	}
 
 	/** Invalidate pending approval cards without resolving (navigation/exit/disconnect). */
 	private invalidateApprovals(sessionId?: string): void {
-		for (const [requestId, entry] of [...this.approvalDialogs]) {
+		for (const entry of this.turnSession.approvalDialogEntries()) {
 			if (sessionId === undefined || entry.sessionId !== sessionId) {
 				entry.close();
-				this.approvalDialogs.delete(requestId);
+				this.turnSession.deleteApprovalDialog(entry.requestId);
 			}
 		}
 		// Navigation retains evidence so the card can be rebuilt on return
 		// (R15); exit and disconnect drop it: nothing can be decided after.
-		if (sessionId === undefined) this.pendingApprovals.clear();
+		if (sessionId === undefined) this.turnSession.clearPendingApprovals();
 	}
 
 	/** Retire approval evidence and cards for a session whose turn ended. */
 	private clearApprovals(sessionId: string): void {
-		for (const [requestId, event] of [...this.pendingApprovals]) {
-			if (event.sessionId === sessionId) this.pendingApprovals.delete(requestId);
+		for (const [requestId, event] of this.turnSession.pendingApprovalEntries()) {
+			if (event.sessionId === sessionId) this.turnSession.deletePendingApproval(requestId);
 		}
-		for (const entry of [...this.approvalDialogs.values()]) {
+		for (const entry of this.turnSession.approvalDialogEntries()) {
 			if (entry.sessionId === sessionId) {
 				entry.card.setRecorded("request ended");
 				entry.close();
@@ -4616,9 +3795,9 @@ export class App implements FeatureHost {
 
 	/** Rebuild review cards retained while their session was hidden (R15). */
 	private restoreApprovals(sessionId: string): void {
-		if (!this.inFlight.has(sessionId)) return;
-		for (const [requestId, event] of [...this.pendingApprovals]) {
-			if (event.sessionId !== sessionId || this.approvalDialogs.has(requestId)) continue;
+		if (!this.turnSession.isInFlight(sessionId)) return;
+		for (const [requestId, event] of this.turnSession.pendingApprovalEntries()) {
+			if (event.sessionId !== sessionId || this.turnSession.hasApprovalDialog(requestId)) continue;
 			void this.promptApproval(event);
 		}
 	}
@@ -4634,21 +3813,21 @@ export class App implements FeatureHost {
 	 * anything by itself.
 	 */
 	private async rehydrateApprovals(sessionId: string): Promise<void> {
-		if (this.exiting || this.current?.id !== sessionId || !this.inFlight.has(sessionId)) return;
+		if (this.exiting || this.current?.id !== sessionId || !this.turnSession.isInFlight(sessionId)) return;
 		const result = await this.client
 			.request<{ approvals?: unknown }>("approvals.list", { sessionId })
 			.catch(() => undefined);
 		// Bind the answer to the session, not the moment the read started: a
 		// return that has since navigated away publishes nothing.
-		if (result === undefined || this.exiting || this.current?.id !== sessionId || !this.inFlight.has(sessionId)) return;
+		if (result === undefined || this.exiting || this.current?.id !== sessionId || !this.turnSession.isInFlight(sessionId)) return;
 		const rows = Array.isArray(result.approvals) ? result.approvals : [];
 		for (const row of rows) {
 			const event = approvalRowEvent(sessionId, row);
 			if (!event) continue;
 			// Already-live or retained prompts own their card; only rows this
 			// frame never saw need synthesis.
-			if (this.approvalDialogs.has(event.requestId) || this.pendingApprovals.has(event.requestId)) continue;
-			this.pendingApprovals.set(event.requestId, event);
+			if (this.turnSession.hasApprovalDialog(event.requestId) || this.turnSession.pendingApproval(event.requestId) !== undefined) continue;
+			this.turnSession.rememberPendingApproval(event);
 			this.promptApproval(event);
 		}
 	}
@@ -4662,10 +3841,7 @@ export class App implements FeatureHost {
 		this.nowPlayingController?.stop();
 		this.nowPlayingAnim?.stop();
 		this.nowPlayingAnim = undefined;
-		if (this.workspaceChromeTimer !== undefined) {
-			clearTimeout(this.workspaceChromeTimer);
-			this.workspaceChromeTimer = undefined;
-		}
+		this.workspaceSurface?.disposeTimer();
 		if (this.pendingKeyLeaderTimer !== undefined) {
 			clearTimeout(this.pendingKeyLeaderTimer);
 			this.pendingKeyLeaderTimer = undefined;
@@ -4686,9 +3862,7 @@ export class App implements FeatureHost {
 		// disconnect invalidation never issues surprise resolve RPCs.
 		this.invalidateApprovals();
 		// Clear all in-flight tracking so the session isn't permanently locked.
-		for (const sessionId of [...this.inFlight]) {
-			this.clearInFlight(sessionId);
-		}
+		this.turnSession.clearAllInFlight();
 		this.setRunning(false);
 		this.footer.status = "offline";
 		this.transcript.addNotice(`The gateway stopped${code === null ? "" : ` (exit code ${code})`}.`, "error");
@@ -4736,11 +3910,6 @@ export function commandCarriesSecret(command: ParsedCommand | undefined): boolea
 	const [sub, rest] = splitSub(command.args);
 	if (command.name === "keys") return sub === "set";
 	return command.name === "provider" && sub === "add" && rest.split(/\s+/).filter(Boolean).length > 2;
-}
-
-/** Routing identity for an event: the transport turn (origin for approvals is matched separately). */
-function turnIdentity(event: GatewayEvent): string {
-	return event.turnId;
 }
 
 /** Turn-start frames: the first event of a turn in a session's stream. */
