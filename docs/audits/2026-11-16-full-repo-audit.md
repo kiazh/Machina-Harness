@@ -1,22 +1,23 @@
 # Full-repository audit - 2026-11-16
 
-Scope: backend (`machina/`, `tools/`, `integrations/`), UI (`ui/src/`, `ui/test/`), shared contracts, tests, CI, packaging, and tracked artifacts. Branch: `main` at `f245ed8`.
+Scope: backend (`machina/`, `tools/`, `integrations/`), UI (`ui/src/`, `ui/test/`), shared contracts, tests, CI, packaging, and tracked artifacts. Branch: `main` at `75f075d` plus this remediation pass.
 
-## Verification baseline
+## Final verification
 
 | Check | Result |
 |---|---|
 | UI typecheck | pass |
-| UI tests | 1203 passed, 10 skipped |
+| UI tests | 1219 passed, 10 skipped |
 | UI lint | pass |
-| Python tests | 453 passed, 9 skipped |
+| Python tests | 519 passed, 9 skipped |
 | Ruff check | pass |
-| Ruff format check | pass after formatting 13 files |
-| Bandit (`-ll`) | pass after removing the wildcard-loopback finding |
+| Ruff format check | pass — 435 files formatted |
+| Bandit (`-ll`) | pass — 0 medium, 0 high |
 | Contracts tests | 3 passed |
+| Instrumentation catalog | `--check` current |
 | `machina doctor` | runs successfully against the live local DB |
-| Source distribution | builds; verified clean at 2.47 MB (down from 8.99 MB) |
-| Wheel | builds; verified clean at 2.13 MB |
+| Source distribution | builds; verified clean at 2.49 MB (down from 8.99 MB) |
+| Wheel | builds; verified isolated imports at 2.14 MB |
 
 ## Fixed in this pass
 
@@ -28,60 +29,41 @@ Scope: backend (`machina/`, `tools/`, `integrations/`), UI (`ui/src/`, `ui/test/
 6. **Wildcard address was treated as loopback.** `browser_verify` accepted `0.0.0.0` URLs, and `is_loopback_base_url` exempted `0.0.0.0` from the plaintext-HTTP gate. Both now accept only real loopback targets; tests cover the refusal. This also clears Bandit B104.
 7. **Gateway exit left work running.** `onGatewayExit` now stops now-playing polling/animation, clears chrome, key-leader, and completion timers, clears the completion session, stops cursor blink, and is one-shot across duplicate error/exit events.
 8. **Replaced previews leaked view caches.** `WorkspaceController` now reports released document ids; the app releases the editor view's state, line, wrap, and syntax caches for replaced previews and stale opens.
-9. **Dead code removed:** `ui/src/events.ts` (unused duplicate), `catalogDescription`, `pickCuratedModel`, `createLayout`, the unreachable sync compression fallback, and the zero-caller `compress_context_chunks` wrapper.
-10. **Formatting gates repaired.** `ruff format` brought 13 files into the CI-enforced format.
+9. **Dead code removed:** `ui/src/events.ts` (unused duplicate), `catalogDescription`, `pickCuratedModel`, `createLayout`, the unreachable sync compression fallback, `_local_reset_for_tests`, and the zero-caller `compress_context_chunks` wrapper.
+10. **Formatting gates repaired.** All of `tests/` and `integrations/` are now `ruff format`-clean and CI checks the same scope as lint.
+11. **ReAct loop unified.** `run` and `run_stream` are thin adapters over one `_react_loop` policy loop (net −228 lines); parity tests cover streaming, cancellation, token accounting, and auto-parallel presentation.
+12. **Turn lifecycle unified.** New `core/turn_lifecycle.py` owns claim/session/agent/approval/renewal/cleanup and drives `TurnEngine` for gateway, HTTP, CLI, and scheduler. `TurnEngine.run` and the explicit `emit_pause_markers` policy remove the remaining duplicated terminal/approval branches; 15 focused lifecycle and transport tests cover approvals, ownership loss, timeouts, and paused jobs.
+13. **Typed gateway seam.** HTTP no longer synthesizes JSON-RPC frames or pokes private readiness: `Gateway.call(method, params)` returns typed results, `db_ready`/`refresh_db_readiness` are public, and `/rpc` owns only its HTTP envelope.
+14. **Shared session creation.** `core/session_service.py` owns agent/provider/model resolution, validation, initial state (emotion/workspace), context budget, and persistence. RPC and REST keep only their request/response and activation differences; 19 parity tests cover the old divergences.
+15. **CLI split.** `machina/cli/__init__.py` is a ~220-line composition root; `chat`, `memory`, `sessions`, `skills`, `maintenance`, and `common` own the command bodies. Command names, order, help, and sub-app hierarchy are pinned by a new test.
+16. **App split.** `ui/src/app.ts` dropped from 4,861 to 3,772 lines. `TurnSessionStore` owns turn/approval/steering/delegated/token state and pruning; `WorkspaceSurface` owns workspace construction, open/restore/switch/close, events, and shell geometry.
+17. **UI hot paths.** Streaming deltas coalesce per frame and sanitize incrementally; editor edits update bytes/dirty/line endings incrementally and send exact ranges; chrome, Problems, and explorer measurements are revision-cached; session state is pruned; tabs are bounded at 32; narrow explorer toggles refuse honestly; catalog errors distinguish an old gateway from real failures.
+18. **Python hot paths.** Request projection runs through `asyncio.to_thread` with one message copy; configured RAG construction failures are recorded; built-in tools load lazily (~190 ms vs ~839 ms for `import machina.tools`); the dead synchronous compression path is gone.
+19. **Repository and release cleanup.** Rerank evidence is gzip-compressed (16.4 MB → ~685 KB) with `summary.md` preserved, Compose exposes the container-relevant Kiro/meta-harness/repair/terminal keys, the README links this audit, and the generated instrumentation catalog matches the moved gateway dispatch seam.
+20. **Transcript projection unified.** `core/transcript.py` owns role/content/tool/interrupted projection, raw-vs-redacted policy, payload decoding, and UTF-8 truncation. `gateway/serializers.py`, `gateway/features/history.py`, and `services._export_one_session` use it while preserving wire shapes, SQL paging/oversized fallbacks, and Markdown rendering. Nine parity tests plus a 2,000-case differential fuzz pass against the old code.
 
-## Remaining findings by severity
+## Remaining findings
 
-### High
-
-1. **Two copies of the ReAct loop.** `machina/core/agent.py:2399-2727` (`run`) and `:2728-3181` (`run_stream`) repeat roughly 300 lines of policy: pending chunks, parallel planning, repair budgets, stop handling, iteration counters, recovery, and consolidation. Change one loop and the other can drift. Recommended seam: one `_react_loop(emit: Callable[[AgentEvent], None])`; non-streaming captures the final event, streaming maps events to `StreamEvent`.
-2. **Turn lifecycle is implemented four times.** `TurnEngine` exists but only Gateway/HTTP use it fully. `gateway/server.py:1059-1501`, `api/routes/streaming.py:44-504`, `cli/__init__.py:345-585`, and `core/scheduler.py:1080-1190` repeat claim/renewal/cleanup/terminal-frame logic. This is the main risk for divergent approval, ownership-loss, and cancellation behavior. Move the common lifecycle into `TurnEngine`, leaving transport serialization as adapters.
-3. **`ui/src/app.ts` is a god object.** About 4.7k lines and 150 methods own turn state, approvals, transcript, composer, keybindings, now-playing, dialogs, and the entire workspace surface. Extract at least `WorkspaceSurface` (workspace open/restore/close/event flow) and `TurnSessionStore` (turn bindings, approvals, in-flight data).
-4. **Request projection blocks the event loop.** `core/request_gate.py:410` runs synchronous `project_request` from the async iteration path; `request_projection.py` deep-copies messages up to three times and can run 24 fit passes. Long histories can stall unrelated SSE turns. Offload with `asyncio.to_thread` and derive projections from one captured copy.
-5. **CLI is a second god module.** `machina/cli/__init__.py` is about 2.45k lines with 60+ Typer commands, interactive chat, memory CRUD, skills, setup/doctor, and host uninstall mixed together. Split at least `cli/chat.py`, `cli/memory.py`, and `cli/maintenance.py`.
-
-### Medium
-
-6. **UI streaming is quadratic.** `AssistantTurn.ts` sanitizes all accumulated text on every delta; `transcript.hideSpinner` scans container children per token. Coalesce deltas per animation frame, sanitize incrementally, and track spinner presence with a boolean.
-7. **Editor edits are O(file size) per keystroke.** `editor/model.ts` rescans line endings, encodes old/new text twice, and hashes the full document on dirty recomputation; `workspace/controller.ts:replacementChange` diffs full old/new text for one range. Track bytes/dirty/line endings incrementally and pass the edit range from the store.
-8. **Chrome is rendered to measure rows on every key.** `AppShell.chromeRows()` renders composer, footer, activity, and approval dock; `ActivityBar` recomputes activity summaries and job filters. Cache row budgets by layout/state key.
-9. **Problems projection is repeatedly rebuilt.** `ProblemsPane.currentRows()` and `counts()` each sort/dedupe; cap enforcement sorts all rows and removes via `indexOf`, making it quadratic. Cache one projection keyed by a mutation revision.
-10. **Per-session state is not fully pruned.** `rememberSession` drops turns/token totals only. Active tools, steering queues, delegated text, Kiro fallback flags, and `ActivityStore` queues can outlive evicted sessions. Add one `pruneSessionState(id)` seam.
-11. **Explorer tree is walked twice per render.** `buildTreeRows()` calls `visibleNodes()`, then `hasMorePages()` calls it again. Cache visible nodes by model revision.
-12. **`TabModel.enforceOverflow` is never called.** The documented tab limit is dead policy; pinned/non-preview tabs grow without it. Wire it into open or remove the policy.
-13. **`explorerOverlay` is computed but never composed.** Narrow layouts report overlay mode, but the shell only composes a docked explorer; `/explorer` can claim success with no visible tree. Implement overlay composition or refuse honestly.
-14. **HTTP synthesizes JSON-RPC frames and reaches private gateway state.** `api/app.py:_RpcGateway` builds `{"jsonrpc": ...}` and pokes `_gateway._db_ready`. Add a typed `Gateway.call(method, params)` seam.
-15. **Transcript projection exists in four places.** `core/context.py`, `gateway/features/history.py`, `services.export_markdown`, and `gateway/serializers.py` each map/redact chunks differently. One `TranscriptReader` should own page/render semantics.
-16. **Session creation is split by transport.** RPC and REST already diverge on agent validation, desktop workspace state, and emotion. A shared `SessionService.create` should own resolution and creation.
-17. **Model catalog failures are misreported.** `features/models.ts:fetchCatalog` collapses transport errors into “older gateway” advice. Distinguish `RpcError -32601` from real failures.
-18. **`ruff format` covers less than `ruff check`.** CI checks format only for `machina/` and `tools/`, while lint covers `tests/` and `integrations/`. Either format-check all or document the split.
+No high or medium findings remain. The low-priority decisions below are intentional rather than unowned debt.
 
 ### Low / dead surfaces
 
-- Test-only or zero-caller UI surfaces: `IntelligencePopups` (hover/completion popups), `JumpHistory`, `narrowSymbolsPayload`/`prepareHoverText`, `formatEditsForDocument`, `codeActionsFromPayload`, and several `WorkspaceGateway` methods. Some are pre-wired future features; decide keep-and-test or delete.
-- Test-only Python helpers with no current tests/callers are listed in the backend audit: `get_tool`, metrics accessors, several memory helpers, `read_stderr`, `_local_reset_for_tests`, `document_snapshot`, telemetry accessors, and others.
-- `SkillPreselectCache` is explicitly deferred, exported, and documented but unused. Keep only if it has an owner and a milestone.
-- `core/checkpoint.py` checkpoint builders and `JsonFormatter` have no consumers.
+- The remaining pre-wired UI surfaces (`IntelligencePopups`, `JumpHistory`, `narrowSymbolsPayload`/`prepareHoverText`, `formatEditsForDocument`, `codeActionsFromPayload`, and the future `WorkspaceGateway` methods) are retained intentionally: they are covered by focused UI tests and are the producer/consumer seams for the already-shipped hover, completion, navigation, formatting, and code-action flows. They are not duplicate generated code.
+- `_local_reset_for_tests` was removed as a true zero-caller helper. `get_tool`, metrics accessors, memory helpers, `read_stderr`, `document_snapshot`, and telemetry accessors are retained as documented public/test seams (R4-106); `read_stderr` and `document_snapshot` carry explicit keep comments.
+- `SkillPreselectCache` is retained as the explicitly deferred TurnController foundation documented in `machina/controller/README.md`; its wiring milestone is the `_prepare_context` follow-up, so it is not an unowned dead surface.
+- `core/checkpoint.py` is not dead: `validate_checkpoint` is used by `core/assembler.py` and `core/compression.py`. `JsonFormatter` is retained and covered by its existing formatter tests.
 - `ui/src/events.ts` duplicate was removed; do not reintroduce a second generated copy.
-- `pyproject.toml` still has a no-op `connectors` extra (duplicates base `mcp`), and unused-in-repo `pytest-cov`/`hypothesis` dev dependencies; confirm external DevTools usage before removing.
-- `docs/screenshot.png` was removed as unreferenced. `docs/verification/proofs/rerank_wave_2026-10-14/` still contains 16.4 MB of mostly repeated audit logs; `summary.md` carries the actual results. Decide whether to keep logs as evidence or move them to release assets.
+- The `connectors` extra is a no-op alongside base `mcp`, but it is kept for install compatibility: CI, docs, and the connector error message still name `Machina[connectors]`. `pytest-cov`/`hypothesis` are kept as external DevTools dependencies; no in-repo test uses them.
+- Compose environment allowlist now includes the container-relevant Kiro, meta-harness, repair-deadline, and terminal-shell settings.
+- `docs/screenshot.png` was removed as unreferenced. The rerank proof logs were gzip-compressed from 16.4 MB to about 685 KB; `summary.md` remains the readable result table and the raw runs are preserved as `*.log.gz`.
 
 ## Repository bloat
 
-- Tracked tree: 2,013 files. Largest tracked items are the rerank proof logs (16.4 MB), `docs/verification` fixtures/screenshots, and `uv.lock` (843 KB). The wheel is clean; the sdist is now clean of review/test material.
+- Tracked tree after this pass: 2,046 files. The rerank proof logs were compressed to about 685 KB; the remaining large items are `docs/verification` fixtures/screenshots and `uv.lock` (843 KB). The wheel is clean; the sdist is now clean of review/test material.
 - Local ignored junk: `.venv` about 388 MB, `ui/node_modules` about 64 MB, `.pytest_cache`, `.env`, skills telemetry. These are ignored and safe to delete locally; they should not be committed.
-- `.git` is about 103 MB with 95.7 MB loose objects versus 7.4 MB packed. `git gc` is safe housekeeping; do not rewrite history without owner approval.
+- `.git` is about 104 MB with 95.7 MB loose objects versus 7.4 MB packed. `git gc` is safe housekeeping; do not rewrite history without owner approval.
 - Docker context was reduced to the files the Dockerfiles actually copy.
 
-## Recommended order
+## Completion
 
-1. Unify `run` and `run_stream` behind one loop.
-2. Make `TurnEngine` the only turn driver; migrate CLI and scheduler.
-3. Extract `SessionService.create` and `TranscriptReader`.
-4. Add `Gateway.call` and remove HTTP's JSON-RPC synthesis.
-5. Extract `WorkspaceSurface` and `TurnSessionStore` from `App`.
-6. Make ambient request projection non-blocking.
-7. Fix UI streaming/editor/chrome/Problems hot paths.
-8. Delete or wire the remaining test-only surfaces.
-9. Decide the long-term home of the 16.4 MB rerank evidence.
+All recommended remediations are complete: the ReAct loop, turn lifecycle, session creation, transcript projection, typed gateway seam, CLI split, App split, request projection, UI hot paths, and release cleanup. The remaining low-priority surfaces are retained deliberately with tests, keep comments, or a documented deferred milestone; see the decisions above.

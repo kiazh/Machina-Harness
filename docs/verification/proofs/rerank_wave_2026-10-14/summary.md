@@ -3,20 +3,20 @@
 Tree: HEAD fdb83e5 + this wave's working-tree changes (not committed).
 Harness: `python -m machina.research.benchmark --section locomo --locomo-db [--locomo-rerank]`
 Data: `~/.machina/locomo/locomo10.json` (10 conversations, 1986 questions, 1977 with evidence).
-DB: local PostgreSQL/pgvector. All runs sequential; logs in this directory.
+DB: local PostgreSQL/pgvector. All runs sequential; raw logs are gzip-compressed in this directory (decompress with `gzip -d`).
 
 ## Configurations (env overrides; `.env` pins MACHINA_EMBEDDING_BACKEND=local by default)
 
 | Log | Embedding | RRF weights (kw/dense) | Rerank | search_mode |
 |---|---|---|---|---|
-| A_kwonly_rerank_off.log | off | 1.0 / 1.0 | off | keyword-only x1982 |
-| B_kwonly_rerank_on.log | off | 1.0 / 1.0 | local ONNX | keyword-only x1982 |
-| C_bgesmall_rerank_off.log | onnx (bge-small-en-v1.5) | 1.0 / 1.0 | off | hybrid x1982 |
-| D_onnx_w1_rerank_on.log | onnx | 1.0 / 1.0 | local ONNX | hybrid x1982 |
-| E_potion_rerank_on.log | local (potion-base-8M) | 1.0 / 1.0 | local ONNX | hybrid x1982 |
-| F1_fusion_only_prebug.log | onnx | 1.0 / 0.25 | off (pre-fix fusion only) | hybrid x1982 |
-| F1b_onnx_dw0.25_rerank_on.log | onnx | 1.0 / 0.25 | local ONNX | hybrid x1982 |
-| F2_fusion_only_prebug.log | onnx | 1.0 / 0.5 | off (pre-fix fusion only) | hybrid x1982 |
+| A_kwonly_rerank_off.log.gz | off | 1.0 / 1.0 | off | keyword-only x1982 |
+| B_kwonly_rerank_on.log.gz | off | 1.0 / 1.0 | local ONNX | keyword-only x1982 |
+| C_bgesmall_rerank_off.log.gz | onnx (bge-small-en-v1.5) | 1.0 / 1.0 | off | hybrid x1982 |
+| D_onnx_w1_rerank_on.log.gz | onnx | 1.0 / 1.0 | local ONNX | hybrid x1982 |
+| E_potion_rerank_on.log.gz | local (potion-base-8M) | 1.0 / 1.0 | local ONNX | hybrid x1982 |
+| F1_fusion_only_prebug.log.gz | onnx | 1.0 / 0.25 | off (pre-fix fusion only) | hybrid x1982 |
+| F1b_onnx_dw0.25_rerank_on.log.gz | onnx | 1.0 / 0.25 | local ONNX | hybrid x1982 |
+| F2_fusion_only_prebug.log.gz | onnx | 1.0 / 0.5 | off (pre-fix fusion only) | hybrid x1982 |
 
 ## Results (archive replay; headline = post-rerank when rerank ran)
 
@@ -54,6 +54,9 @@ Session recall unchanged everywhere (0.425 / 0.461 / 0.345, ~9–13 ms; no reran
 - Hybrid query latencies (DB retrieval only): 15–22 ms; session recall 9–13 ms.
 
 ## Provenance notes
+
+- The raw `*.log.gz` files preserve the original run output; this summary is the readable result table.
+
 
 - F1/F2 logs were produced before a harness fix (`_rerank_ids` assumed tuple candidates while the
   hybrid path passes `SearchResult`); their rerank phase was SKIPPED. Fusion numbers remain valid;

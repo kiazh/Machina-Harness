@@ -80,7 +80,7 @@ jobs:
         run: python -m ruff check machina/ tools/ tests/ integrations/
 
       - name: Run ruff format check
-        run: python -m ruff format --check machina/ tools/
+        run: python -m ruff format --check machina/ tools/ tests/ integrations/
 
       - name: Run bandit security scan
         # F-16: CLI process-spawning/token code and build tooling are in scope;

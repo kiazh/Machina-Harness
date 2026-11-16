@@ -1878,6 +1878,7 @@ scripts/            Operator script mount point and setup guidance
 |---|---|
 | [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, artifacts, reducers, projection, recovery, accounting |
 | [Connected-model routing](docs/ROUTING.md) | Modes, role selection, transports, cost tiers, route explanation |
+| [Full repository audit](docs/audits/2026-11-16-full-repo-audit.md) | Dead code, performance, bloat, CI and release hardening |
 | [TaskRun controller](docs/TASK_RUN_CONTROLLER.md) | Repair phases, caps, evidence, and verification gates |
 | [Memory digest](docs/MEMORY_DIGEST.md) | Query-conditioned multi-fact memory selection |
 | [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, shortcuts |
