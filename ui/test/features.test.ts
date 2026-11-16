@@ -1274,11 +1274,17 @@ test("/routing mode can switch to Single Model", async () => {
 	assert.match(host.last().text, /Routing: Single Model/);
 });
 
-test("/models lists only concrete models, not routing mode", async () => {
+test("/models keeps one routing-mode shortcut instead of mode rows", async () => {
 	const host = new FakeHost();
 	host.responses["providers.list"] = {
 		selected: "deepseek",
 		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+		routing: {
+			mode: "multi_auto",
+			modelSelection: "auto",
+			autoParallel: true,
+			singleModelAutoParallel: false,
+		},
 	};
 	host.responses["models.list"] = {
 		provider: "deepseek",
@@ -1294,6 +1300,67 @@ test("/models lists only concrete models, not routing mode", async () => {
 	assert.ok(rows.some((row) => row.value === "deepseek::deepseek-v4-flash"));
 	assert.ok(rows.every((row) => !row.value.startsWith("__mode__")));
 	assert.ok(rows.every((row) => row.value !== "__section__::routing"));
+	assert.equal(rows.at(-1)!.value, "__routing__");
+	assert.equal(rows.at(-1)!.label, "Routing mode: Multi Auto / Single Model");
+});
+
+test("/models routing shortcut opens /routing mode", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+		routing: {
+			mode: "multi_auto",
+			modelSelection: "auto",
+			autoParallel: true,
+			singleModelAutoParallel: false,
+		},
+	};
+	host.responses["models.list"] = {
+		provider: "deepseek",
+		source: "none",
+		models: [{ id: "deepseek-v4-flash" }],
+		fetchError: null,
+	};
+	host.responses["config.set"] = (p: Record<string, unknown>) => ({
+		model: "deepseek-v4-flash",
+		provider: "deepseek",
+		key: p.key,
+		value: p.value,
+	});
+	host.picks = ["__routing__", "single"];
+
+	await run("/models", host);
+
+	assert.deepEqual(host.pickTitles, ["Models (Enter to apply)", "Routing mode: Multi Auto"]);
+	assert.deepEqual(
+		host.calls
+			.filter((call) => call.method === "config.set")
+			.map((call) => [call.params.key, call.params.value, call.params.persist]),
+		[
+			["orchestration_mode", "single_model", true],
+			["model_selection", "auto", true],
+		],
+	);
+	assert.match(host.last().text, /Routing: Single Model/);
+});
+
+test("bare /routing opens the routing-mode picker", async () => {
+	const host = new FakeHost();
+	host.responses["providers.list"] = {
+		selected: "deepseek",
+		providers: [{ name: "deepseek", kind: "builtin", selected: true }],
+		routing: {
+			mode: "multi_auto",
+			modelSelection: "auto",
+			autoParallel: true,
+			singleModelAutoParallel: false,
+		},
+	};
+	host.picks = [undefined];
+	await run("/routing", host);
+	assert.equal(host.pickTitles[0], "Routing mode: Multi Auto");
+	assert.deepEqual(host.pickItems[0]!.map((row) => row.value), ["multi_auto", "single"]);
 });
 
 test("/routing <prompt> still explains a route without switching modes", async () => {

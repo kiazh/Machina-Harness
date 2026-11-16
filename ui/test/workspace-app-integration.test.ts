@@ -338,7 +338,7 @@ async function waitForWorkspace(app: App): Promise<void> {
 test("MACHINA_WORKSPACE=0 disables the workspace entirely (no RPCs, chat-only shell)", async () => {
 	const previous = process.env.MACHINA_WORKSPACE;
 	process.env.MACHINA_WORKSPACE = "0";
-	const { app, client } = makeApp();
+	const { app, client, tui } = makeApp();
 	try {
 		await app.start();
 		await settle();
@@ -355,6 +355,8 @@ test("MACHINA_WORKSPACE=0 disables the workspace entirely (no RPCs, chat-only sh
 		(app as unknown as { print(text: string): void }).print = (text: string) => notices.push(text);
 		await runCommand({ name: "workspace", args: "status" }, app);
 		assert.deepEqual(notices, ["Workspace is not available."]);
+		tui.press("\x14");
+		assert.deepEqual(notices.at(-1), "Open a workspace first: /workspace open .");
 
 		// Chat still works.
 		client.responses.set("prompt.submit", { turnId: "t" });
@@ -874,11 +876,16 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	internals(app).shell.onWorkspaceExplorerToggle?.();
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the grip reopens it");
 	assert.ok(internals(app).workspaceLayout?.explorer, "the drawer docks again");
-	// Ctrl+T keeps its behavior alongside the grip.
+	// Ctrl+T keeps its behavior alongside the grip; Ctrl+N then T is the
+	// fallback when a terminal captures Ctrl+T.
 	tui.press("\x14");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+T still toggles");
 	tui.press("\x14");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true);
+	pressGuide(tui, "t");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+N T toggles");
+	pressGuide(tui, "t");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "Ctrl+N T reopens it");
 	await app.exit();
 });
 
@@ -1712,7 +1719,7 @@ test("footer workspace hints appear with a live workspace and clear on close", a
 	await app.start();
 	await waitForWorkspace(app);
 	const footer = (app as unknown as { footer: { workspaceHints: string } }).footer;
-	assert.equal(footer.workspaceHints, "Ctrl+T explorer · Ctrl+N then C/E/S panes");
+	assert.equal(footer.workspaceHints, "Ctrl+T explorer · Ctrl+N then T/C/E/S panes");
 	await runCommand({ name: "workspace", args: "close" }, app);
 	assert.equal(footer.workspaceHints, "", "closed workspace clears the hints");
 	await app.exit();

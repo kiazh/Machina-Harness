@@ -20,6 +20,7 @@ import type { SelectItem } from "@earendil-works/pi-tui";
 import { keyValues, table } from "../format.ts";
 import type { ConfigSetResult, ModelsListResult, ProvidersListResult } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
+import { pickRoutingMode } from "./routing.ts";
 import { type Command, type FeatureHost } from "./types.ts";
 
 export interface ModelEntry {
@@ -406,6 +407,7 @@ export async function openGroupedModelPicker(
 	host: FeatureHost,
 	grouped: GroupedModels,
 	warnMissingCurrent = true,
+	showRoutingShortcut = true,
 ): Promise<void> {
 	const currentGroup = grouped.groups.find((group) => group.provider === grouped.current);
 	if (warnMissingCurrent && (!currentGroup || !currentGroup.entries.length)) {
@@ -420,8 +422,19 @@ export async function openGroupedModelPicker(
 		host.print("No models available from any provider right now.", "warning");
 		return;
 	}
+	if (showRoutingShortcut) {
+		rows.push({
+			value: "__routing__",
+			label: "Routing mode: Multi Auto / Single Model",
+			description: "Multi Auto is the default. Choose either mode in /routing mode.",
+		});
+	}
 	const choice = await host.pick("Models (Enter to apply)", rows);
 	if (!choice) return;
+	if (choice.value === "__routing__") {
+		await pickRoutingMode(host);
+		return;
+	}
 	const applied = await applyGroupedPick(host, grouped, choice.value);
 	if (!applied) return;
 	const hints: Array<[string, unknown]> = [];
@@ -495,6 +508,6 @@ export const modelsCommand: Command = {
 			host.print(`No model matches "${args.trim()}" across providers.`, "warning");
 			return;
 		}
-		await openGroupedModelPicker(host, { current: grouped.current, groups: matches }, false);
+		await openGroupedModelPicker(host, { current: grouped.current, groups: matches }, false, false);
 	},
 };

@@ -49,7 +49,7 @@ async function currentRoutingMode(host: FeatureHost): Promise<RoutingMode | unde
 	}
 }
 
-async function pickRoutingMode(host: FeatureHost): Promise<void> {
+export async function pickRoutingMode(host: FeatureHost): Promise<void> {
 	const current = await currentRoutingMode(host);
 	const title = current ? `Routing mode: ${MODE_LABELS[current]}` : "Routing mode";
 	const choice = await host.pick(title, [
@@ -78,13 +78,12 @@ export const routingCommand: Command = {
 	getArgumentCompletions: options([["mode", "Choose Multi Auto or Single Model"]]),
 	async run(args, host) {
 		const [sub, rest] = splitSub(args);
-		if (sub === "mode") {
+		if (!sub || sub === "mode") {
 			if (rest) throw new Error("Usage: /routing mode");
 			await pickRoutingMode(host);
 			return;
 		}
 		const prompt = args.trim();
-		if (!prompt) throw new Error("Usage: /routing mode | /routing <prompt>");
 		const session = host.session();
 		const result = await host.request<{ explanation: string }>("model.route", {
 			prompt,

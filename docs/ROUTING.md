@@ -14,8 +14,8 @@ machina route "..." --json
 ```
 
 Inside chat, use `route_explain` for one prompt and `model_inventory` for the
-connected catalog. The terminal UI exposes `/routing mode` for the mode switch
-and `/routing <prompt>` for route explanation.
+connected catalog. The terminal UI exposes `/routing` (or `/routing mode`) for
+the mode switch and `/routing <prompt>` for route explanation.
 
 ## Modes
 

@@ -1149,7 +1149,7 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Open a project | `/workspace open <path>` |
 | Find a file | `Ctrl+P` or `/quickopen` |
 | Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
-| Show or hide the file explorer | `Ctrl+T` or `/explorer` |
+| Show or hide the file explorer | `Ctrl+T`, `Ctrl+N` then `T`, or `/explorer` |
 | Change pane focus | `Ctrl+N`, then `N` / `P` |
 | Rename symbol | `Ctrl+N`, then `M` |
 | Show code completion | `Ctrl+Space` or `/editor complete` |

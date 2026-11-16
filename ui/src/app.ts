@@ -180,7 +180,7 @@ function workspaceShellKey(input: LayoutInput, columns: number, rows: number, ch
 }
 
 /** Workspace hint shown while a workspace identity is live. */
-const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+N then C/E/S panes";
+const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+N then T/C/E/S panes";
 
 /**
  * Normalize modifier-arrow encodings used by Windows consoles.
@@ -2162,6 +2162,17 @@ export class App implements FeatureHost {
 			return undefined;
 		}
 		const integration = this.integration;
+		const explorerKey =
+			this.keybindings.matches(data, "explorer") || this.keybindings.matches(data, "explorerAlt");
+		if (explorerKey && (!integration || this.workspaceUnsupported || !this.workspaceLayoutActive)) {
+			this.print(
+				this.workspaceUnsupported
+					? "The file explorer is unavailable on this backend."
+					: "Open a workspace first: /workspace open .",
+				"warning",
+			);
+			return { consume: true };
+		}
 		if (integration && !this.workspaceUnsupported) {
 			// Ghost text owns only Tab and Escape; Enter and arrows keep editing.
 			if (this.completionSession && this.activeRegion === "editor") {
@@ -2996,9 +3007,12 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 		if (!this.workspaceLayoutActive) return undefined;
-		// Ctrl+T — explorer toggle (terminal new-tab risk documented; /explorer
-		// and the palette remain the fallback).
-		if (this.keybindings.matches(data, "explorer")) {
+		// Ctrl+T / Ctrl+N then T - explorer toggle (terminal new-tab risk
+		// documented; /explorer and the palette remain the fallback).
+		if (
+			this.keybindings.matches(data, "explorer") ||
+			this.keybindings.matches(data, "explorerAlt")
+		) {
 			this.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };
 		}

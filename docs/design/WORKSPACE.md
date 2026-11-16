@@ -41,7 +41,7 @@ language servers.
 | Ctrl+N, then M | Rename preview (only where the server supports it; otherwise an honest notice) | — |
 | Ctrl+N, then N / P | Cycle focus: chat → editor → explorer → problems | commands |
 | Ctrl+N, then C / E / S | Maximize chat / maximize editor / restore the 50/50 split | `/workspace chat\|editor\|split` |
-| Ctrl+T | Toggle explorer (some terminals use this for a new tab) | `/explorer` |
+| Ctrl+T / Ctrl+N then T | Toggle explorer (some terminals use Ctrl+T for a new tab; Ctrl+N then T is the fallback) | `/explorer` |
 | Ctrl+W | Close the active editor tab (dirty → Save/Discard/Cancel). **Not** bound in the chat composer, where it remains delete-word-backward | `/editor close` |
 | Esc | Dismisses the top editor popup first; a second Esc stops a running turn | — |
 
