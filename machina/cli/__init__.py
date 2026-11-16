@@ -1482,7 +1482,7 @@ def doctor():
     import importlib.util
     import sys
 
-    from machina.cli.launcher import MIN_NODE_VERSION, _node_version, ui_dir
+    from machina.ui_launcher import MIN_NODE_VERSION, _node_version, ui_dir
 
     console.print("[bold]Machina Doctor[/bold]\n")
 

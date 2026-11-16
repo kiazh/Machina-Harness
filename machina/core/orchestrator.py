@@ -395,8 +395,7 @@ class Orchestrator:
                 and not getattr(definition, "provider", None)
                 and not getattr(definition, "model", None)
                 and str(config.get("model_selection") or "auto").lower() == "auto"
-                and str(config.get("orchestration_mode") or "single_model").lower()
-                == "multi_model"
+                and str(config.get("orchestration_mode") or "single_model").lower() == "multi_model"
             ):
                 # Let the connected-model router choose the worker route for a
                 # multi-model delegation. A definition pin still wins. MCP

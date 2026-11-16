@@ -82,9 +82,7 @@ class PlanResult:
     def summary(self) -> str:
         completed = sum(1 for outcome in self.outcomes if outcome.completed)
         awaiting = sum(
-            1
-            for outcome in self.outcomes
-            if outcome.status in {"waiting_approval", "paused"}
+            1 for outcome in self.outcomes if outcome.status in {"waiting_approval", "paused"}
         )
         failed = sum(
             1
@@ -96,9 +94,7 @@ class PlanResult:
             details.append(f"{awaiting} awaiting approval")
         if failed:
             details.append(f"{failed} failed")
-        lines = [
-            f"Parallel plan: {len(self.outcomes)} track(s), " + ", ".join(details) + "."
-        ]
+        lines = [f"Parallel plan: {len(self.outcomes)} track(s), " + ", ".join(details) + "."]
         for outcome in self.outcomes:
             if outcome.completed:
                 state = "completed"
@@ -246,9 +242,7 @@ async def run_plan(
     async def run_task(task: WorkerTask) -> TaskOutcome:
         task_started = time.monotonic()
         missing = [dep for dep in task.depends_on if dep not in outcomes]
-        blocked = [
-            dep for dep in task.depends_on if dep in outcomes and outcomes[dep].failed
-        ]
+        blocked = [dep for dep in task.depends_on if dep in outcomes and outcomes[dep].failed]
         if missing or blocked:
             reason = "missing dependency" if missing else "dependency failed"
             return TaskOutcome(

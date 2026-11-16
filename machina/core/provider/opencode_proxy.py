@@ -114,6 +114,7 @@ def create_app() -> FastAPI:
         response_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         created = int(time.time())
         if bool(payload.get("stream")):
+
             async def stream():
                 first = {
                     "id": response_id,

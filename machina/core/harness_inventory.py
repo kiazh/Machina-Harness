@@ -142,7 +142,11 @@ def _probe(binary: str, args: tuple[str, ...], *, timeout: float = 10.0) -> inte
     else:
         key = "opencode"
     spec = interop.PLATFORMS.get(key)
-    env = interop._child_env(spec) if spec is not None else interop._child_process().sanitized_env(None)
+    env = (
+        interop._child_env(spec)
+        if spec is not None
+        else interop._child_process().sanitized_env(None)
+    )
     env["NO_COLOR"] = "1"
     return interop._run([binary, *args], env=env, timeout=timeout)
 

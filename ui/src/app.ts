@@ -447,6 +447,8 @@ export class App implements FeatureHost {
 	>();
 	private readonly dialogs: Array<{ handle: OverlayHandle; cancel: () => void }> = [];
 	private exiting = false;
+	/** Gateway exit can arrive from both the error and exit events. */
+	private gatewayExitHandled = false;
 	/** Re-entrancy guard: a Down pressed while the subagent list is still
 	 *  being fetched must not stack a second picker (review round 4, F1). */
 	private agentMenuOpening = false;
@@ -2401,6 +2403,7 @@ export class App implements FeatureHost {
 				this.tui.requestRender();
 			},
 			focus: (region) => this.setFocusForRegion(region),
+			onDocumentReleased: (documentId) => view.releaseDocument(documentId),
 		});
 		const explorerModel = new ExplorerModel((path, cursor, listOptions) =>
 			gateway.list(path, cursor, listOptions),
@@ -4651,10 +4654,29 @@ export class App implements FeatureHost {
 	}
 
 	private onGatewayExit(code: number | null, stderr: string[]): void {
-		if (this.exiting) return;
-		// MCH-012: the transport is gone — in-flight workspace opens publish
+		if (this.exiting || this.gatewayExitHandled) return;
+		this.gatewayExitHandled = true;
+		// MCH-012: the transport is gone - in-flight workspace opens publish
 		// nothing (their teardown RPCs cannot be trusted either).
 		this.beginWorkspaceFence();
+		this.nowPlayingController?.stop();
+		this.nowPlayingAnim?.stop();
+		this.nowPlayingAnim = undefined;
+		if (this.workspaceChromeTimer !== undefined) {
+			clearTimeout(this.workspaceChromeTimer);
+			this.workspaceChromeTimer = undefined;
+		}
+		if (this.pendingKeyLeaderTimer !== undefined) {
+			clearTimeout(this.pendingKeyLeaderTimer);
+			this.pendingKeyLeaderTimer = undefined;
+		}
+		if (this.automaticCompletionTimer !== undefined) {
+			clearTimeout(this.automaticCompletionTimer);
+			this.automaticCompletionTimer = undefined;
+		}
+		this.completionSession = undefined;
+		this.cursorBlinkSub?.stop();
+		this.cursorBlinkSub = undefined;
 		this.footer.dispose();
 		this.transcript.suspend();
 		// The gateway is gone: clear workspace timers/mirrors without RPC

@@ -10,7 +10,6 @@ import {
     matchesKey,
 	type EditorOptions,
 	type EditorTheme,
-	ScrollView,
 	type SelectItem,
 	truncateToWidth,
 	type TuiMouseEvent,
@@ -318,19 +317,6 @@ export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
  * area (opencode's composer is flexShrink=0 too).
  */
 export type LayoutRoot = VStack;
-
-export function createLayout(transcript: Component, composer: Component, footer: Component): LayoutRoot {
-	// One blank row between chrome sections so the last response box never
-	// touches the composer corners, and the input block stands off the footer.
-	return new VStack(
-		[
-			{ component: new ScrollView(transcript, { follow: "end" }), grow: 1 },
-			{ component: composer, shrink: 0 },
-			{ component: footer, shrink: 0 },
-		],
-		{ gap: 1 },
-	);
-}
 
 /**
  * Codex-style composer: a filled input block with a left accent bar. Wraps

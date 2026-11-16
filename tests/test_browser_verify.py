@@ -13,6 +13,8 @@ from machina.tools import browser
 def test_browser_verify_is_loopback_only() -> None:
     with pytest.raises(ToolError, match="loopback"):
         browser._validate_url("https://example.com")
+    with pytest.raises(ToolError, match="loopback"):
+        browser._validate_url("http://0.0.0.0:8000")
     assert browser._validate_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000"
     assert browser._validate_url("http://localhost:3000/app") == "http://localhost:3000/app"
 

@@ -182,7 +182,38 @@ exclude = [
 # wheel target's list. Local/learned skills intentionally stay out; runtime
 # learning defaults to ~/.machina/skills, not the checkout.
 [tool.hatch.build.targets.sdist]
+# Source distributions are for building the package, not shipping the review
+# archive. Keep the UI sources (including the shared contracts package), but
+# leave local evidence, tests, and agent/CI metadata out.
+include = [
+    "machina/**",
+    "skills/**",
+    "package.json",
+    "package-lock.json",
+    "ui/package.json",
+    "ui/package-lock.json",
+    "ui/tsconfig.json",
+    "ui/.eslintrc.json",
+    "ui/src/**",
+    "packages/contracts/src/**",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "docker-compose.yml",
+    "uv.lock",
+]
 exclude = [
+    "docs/verification/**",
+    "docs/archive/**",
+    "docs/HANDOFF.md",
+    "FEATURE_LEDGER.md",
+    ".agents/**",
+    ".github/**",
+    "integrations/**",
+    "research/**",
+    "tests/**",
+    "ui/test/**",
     "skills/*",
     "!skills/alembic-migrations/",
     "!skills/background-jobs/",
@@ -257,6 +288,13 @@ exclude = [
     "!skills/web-search/**",
     "!skills/yaml-agent-config/**",
 ]
+
+# npm workspaces expose packages/contracts through node_modules as a junction;
+# hatchling otherwise prunes the real source directory. The UI source imports
+# these files directly, so a source archive without them is unusable.
+[tool.hatch.build.targets.sdist.force-include]
+"packages/contracts/src" = "packages/contracts/src"
+"packages/contracts/package.json" = "packages/contracts/package.json"
 
 [tool.ruff]
 line-length = 100

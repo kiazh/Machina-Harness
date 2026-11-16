@@ -102,10 +102,9 @@ class ModelProfile:
             return 0.0
         if self.input_cost_per_mtok is None or self.output_cost_per_mtok is None:
             return None
-        return (
-            (max(0, input_tokens) / 1_000_000.0) * self.input_cost_per_mtok
-            + (max(0, output_tokens) / 1_000_000.0) * self.output_cost_per_mtok
-        )
+        return (max(0, input_tokens) / 1_000_000.0) * self.input_cost_per_mtok + (
+            max(0, output_tokens) / 1_000_000.0
+        ) * self.output_cost_per_mtok
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -249,8 +248,7 @@ class RouteDecision:
                 for role, rows in self.candidates.items()
             },
             "fallbacks": {
-                role: [route.to_dict() for route in rows]
-                for role, rows in self.fallbacks.items()
+                role: [route.to_dict() for route in rows] for role, rows in self.fallbacks.items()
             },
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),

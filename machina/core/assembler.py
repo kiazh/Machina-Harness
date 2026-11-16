@@ -15,7 +15,6 @@ __all__ = [
     "PromptAssembler",
     "get_token_count",
     "truncate_to_tokens",
-    "compress_context_chunks",
 ]
 
 try:
@@ -696,31 +695,3 @@ class PromptAssembler:
     def _estimate_tokens(self, text: str) -> int:
         """Accurate token count via tiktoken (documented fallback if absent)."""
         return get_token_count(text)
-
-
-def compress_context_chunks(
-    chunks: list[ContextChunk],
-    session_id: Any,
-    agent_id: str,
-    llm_provider: Any = None,
-    config: Any = None,
-) -> Any:
-    """Compress context chunks using the ContextCompressor.
-
-    This is a convenience function that creates a ContextCompressor and
-    compresses the given chunks.
-
-    Args:
-        chunks: The context chunks to compress (newest first).
-        session_id: The session ID.
-        agent_id: The agent ID.
-        llm_provider: Optional LLM provider for summarization.
-        config: Optional CompressionConfig.
-
-    Returns:
-        CompressionResult with compressed chunks and metadata.
-    """
-    from machina.core.compression import ContextCompressor
-
-    compressor = ContextCompressor(config=config)
-    return compressor.compress(chunks, session_id, agent_id, llm_provider=llm_provider)

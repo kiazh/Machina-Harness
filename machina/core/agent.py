@@ -1935,9 +1935,7 @@ class BaseReActAgent:
                 "role": "user",
                 "content": (
                     f"The task was:\n{user_message[:4000]}\n\n"
-                    "Tool results so far:\n"
-                    + "\n".join(result_lines)
-                    + "\n\nContinue the task."
+                    "Tool results so far:\n" + "\n".join(result_lines) + "\n\nContinue the task."
                 ),
             },
         ]
@@ -2611,10 +2609,12 @@ class ReActAgent(BaseReActAgent):
                     if not response.tool_calls:
                         content = response.content or ""
                         if not content and tool_calls_made and empty_recoveries < 8:
-                            recovery, recovery_messages, recovery_tokens = (
-                                await self._continue_after_empty_tool_turn(
-                                    session_id, user_message, tool_calls_made, tool_defs
-                                )
+                            (
+                                recovery,
+                                recovery_messages,
+                                recovery_tokens,
+                            ) = await self._continue_after_empty_tool_turn(
+                                session_id, user_message, tool_calls_made, tool_defs
                             )
                             empty_recoveries += 1
                             total_tokens += recovery_tokens
@@ -3039,10 +3039,12 @@ class ReActAgent(BaseReActAgent):
                     if not response.tool_calls:
                         content = response.content or ""
                         if not content and tool_calls_made and empty_recoveries < 8:
-                            recovery, recovery_messages, recovery_tokens = (
-                                await self._continue_after_empty_tool_turn(
-                                    session_id, user_message, tool_calls_made, tool_defs
-                                )
+                            (
+                                recovery,
+                                recovery_messages,
+                                recovery_tokens,
+                            ) = await self._continue_after_empty_tool_turn(
+                                session_id, user_message, tool_calls_made, tool_defs
                             )
                             empty_recoveries += 1
                             total_tokens += recovery_tokens

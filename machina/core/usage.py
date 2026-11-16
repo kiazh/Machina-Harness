@@ -738,9 +738,7 @@ class UsageStore:
             try:
                 from machina.core.provider.prompt_cache import cache_status
 
-                cache_capability = cache_status(
-                    str(route["provider"]), str(route["model"] or "")
-                )
+                cache_capability = cache_status(str(route["provider"]), str(route["model"] or ""))
             except Exception:
                 cache_capability = None
 

@@ -157,16 +157,6 @@ export function formatContextWindow(tokens: number | null | undefined): string {
 	return String(tokens);
 }
 
-/** Human description for a catalog row (efforts + context when known). */
-export function catalogDescription(entry: ModelsListResult["models"][number]): string {
-	const bits: string[] = [];
-	if (entry.efforts?.length) bits.push(`effort: ${entry.efforts.join("/")}`);
-	const window = formatContextWindow(entry.contextWindow);
-	if (window !== "—") bits.push(`ctx ${window}`);
-	if (entry.description) bits.push(entry.description);
-	return bits.join(" · ") || "provider catalog";
-}
-
 /** Ask the gateway for the request session's models; undefined when the
  *  gateway cannot answer (older server or transport error) so callers can
  *  fall back to the curated list. Session identity lets a resumed session
@@ -357,16 +347,6 @@ export function filterModelGroups(groups: ModelGroup[], query: string): ModelGro
 			),
 		}))
 		.filter((group) => group.entries.length > 0);
-}
-
-/** Open the curated-model picker; returns the chosen entry (or undefined). */
-export async function pickCuratedModel(host: FeatureHost, entries: ModelEntry[]): Promise<ModelEntry | undefined> {
-	const choice = await host.pick(
-		"Models (Enter to apply)",
-		entries.map(toSelectItem),
-	);
-	if (!choice) return undefined;
-	return entries.find((e) => `${e.provider}::${e.model}` === choice.value);
 }
 
 export function filterCuratedModels(query: string): ModelEntry[] {

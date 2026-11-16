@@ -330,9 +330,7 @@ class OpenCodeSessionProvider(LLMProvider):
             json={"text": prompt, "delivery": "queue"},
         )
         if response.status_code != 200:
-            raise OpenCodeBridgeError(
-                f"OpenCode prompt failed (HTTP {response.status_code})"
-            )
+            raise OpenCodeBridgeError(f"OpenCode prompt failed (HTTP {response.status_code})")
 
     async def _wait_for_assistant(self, session_id: str) -> dict[str, Any]:
         deadline = time.monotonic() + self.timeout
@@ -348,14 +346,18 @@ class OpenCodeSessionProvider(LLMProvider):
                 )
             data = response.json().get("data") or []
             assistants = [
-                message for message in data if isinstance(message, dict) and message.get("type") == "assistant"
+                message
+                for message in data
+                if isinstance(message, dict) and message.get("type") == "assistant"
             ]
             if assistants:
                 latest = assistants[-1]
                 if latest.get("time", {}).get("completed") or latest.get("finish"):
                     return latest
             idle = [
-                message for message in data if isinstance(message, dict) and message.get("type") == "idle"
+                message
+                for message in data
+                if isinstance(message, dict) and message.get("type") == "idle"
             ]
             if idle:
                 if assistants:

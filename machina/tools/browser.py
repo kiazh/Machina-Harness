@@ -20,7 +20,7 @@ from machina.core.exceptions import ToolError
 from machina.observability.diagnostics import record_failure
 from machina.tools.base import registry
 
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _validate_url(url: str) -> str:
@@ -170,9 +170,7 @@ async def _run_checks(page, checks: list[dict[str, Any]], timeout_ms: int) -> li
                 if not selector or not attribute:
                     raise ValueError("assert_attribute requires selector and attribute")
                 actual = await page.get_attribute(selector, attribute)
-                results.append(
-                    _check_result(name, actual == expected, f"{attribute}={actual!r}")
-                )
+                results.append(_check_result(name, actual == expected, f"{attribute}={actual!r}"))
             elif action in {"assert_local_storage", "expect_local_storage"}:
                 key = str(raw.get("key") or raw.get("name") or "")
                 expected = str(raw.get("expected") or raw.get("value") or "")
@@ -224,18 +222,18 @@ async def _verify(
         page = await browser.new_page(viewport=viewport or {"width": 1280, "height": 800})
         page.on(
             "console",
-            lambda message: raw_console_errors.append(message.text)
-            if message.type == "error"
-            else None,
+            lambda message: (
+                raw_console_errors.append(message.text) if message.type == "error" else None
+            ),
         )
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.on(
             "response",
-            lambda response: failed_responses.append(
-                f"{response.status} {response.url}"
-            )
-            if response.status >= 400 and "favicon.ico" not in response.url
-            else None,
+            lambda response: (
+                failed_responses.append(f"{response.status} {response.url}")
+                if response.status >= 400 and "favicon.ico" not in response.url
+                else None
+            ),
         )
         await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
         body = (await page.inner_text("body")).strip()

@@ -76,10 +76,7 @@ skills/telemetry.json
 skills/telemetry.json.lock
 .skill-hub/
 .hypothesis/
-.pytest_cache/
 .ruff_cache/
-__pycache__/
-*.egg-info/
 
 # Keep the public wire contract; other communications remain internal.
 !communications/

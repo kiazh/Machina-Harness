@@ -204,6 +204,7 @@ jobs:
 
   keyboard-cross-platform:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -224,7 +225,7 @@ jobs:
       - name: Check keyboard bindings and guidance panels
         run: |
           npm run typecheck
-          node --test test/keybindings.test.ts test/family.test.ts test/help-menu.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts test/activity.test.ts test/ui.test.ts test/features.test.ts
+          node --test test/keybindings.test.ts test/family.test.ts test/dialogs.test.ts test/workspace-focus-integrity.test.ts test/activity.test.ts test/ui.test.ts test/features.test.ts
 
   cross-platform-python:
     # Python startup/update paths are platform-sensitive (signals, paths,

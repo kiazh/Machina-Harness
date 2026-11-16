@@ -100,17 +100,23 @@ async def model_inventory(json_output: bool = False) -> str:
     if json_output:
         return json.dumps(inventory.to_dict(), ensure_ascii=False, separators=(",", ":"))
     lines = []
-    for route in sorted(inventory.routes, key=lambda item: (item.profile.provider, item.profile.model)):
+    for route in sorted(
+        inventory.routes, key=lambda item: (item.profile.provider, item.profile.model)
+    ):
         profile = route.profile
         roles = ",".join(
             f"{role}:{profile.role_scores.get(role, 0):.2f}"
             for role in ("planner", "supervisor", "worker", "utility")
         )
-        cost = "free" if profile.free else (
-            f"${profile.input_cost_per_mtok:g}/${profile.output_cost_per_mtok:g}"
-            if profile.input_cost_per_mtok is not None
-            and profile.output_cost_per_mtok is not None
-            else "cost?"
+        cost = (
+            "free"
+            if profile.free
+            else (
+                f"${profile.input_cost_per_mtok:g}/${profile.output_cost_per_mtok:g}"
+                if profile.input_cost_per_mtok is not None
+                and profile.output_cost_per_mtok is not None
+                else "cost?"
+            )
         )
         lines.append(
             f"- {profile.provider}/{profile.model} [{route.transport}] "

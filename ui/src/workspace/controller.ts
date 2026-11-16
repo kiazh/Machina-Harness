@@ -75,6 +75,8 @@ export interface WorkspaceControllerOptions {
 	notify(kind: NoticeKind, text: string): void;
 	/** Ask the UI to move focus to a region (called after an open succeeds). */
 	focus(region: FocusRegion): void;
+	/** Drop view caches for a document that is no longer open. */
+	onDocumentReleased?(documentId: string): void;
 	/** Per-document edit-sync debounce; tests shrink it. Default 150 ms. */
 	editDebounceMs?: number;
 	/** Trailing persistence debounce; tests shrink it. Default 250 ms. */
@@ -352,6 +354,7 @@ export class WorkspaceController {
 	private readonly requestRenderCallback: () => void;
 	private readonly notifyCallback: (kind: NoticeKind, text: string) => void;
 	private readonly focusCallback: (region: FocusRegion) => void;
+	private readonly documentReleasedCallback: ((documentId: string) => void) | undefined;
 	private readonly editDebounceMs: number;
 	private readonly persistDebounceMs: number;
 
@@ -417,6 +420,7 @@ export class WorkspaceController {
 		this.requestRenderCallback = options.requestRender;
 		this.notifyCallback = options.notify;
 		this.focusCallback = options.focus;
+		this.documentReleasedCallback = options.onDocumentReleased;
 		this.editDebounceMs = options.editDebounceMs ?? DEFAULT_EDIT_DEBOUNCE_MS;
 		this.persistDebounceMs = options.persistDebounceMs ?? DEFAULT_PERSIST_DEBOUNCE_MS;
 	}
@@ -1357,6 +1361,7 @@ export class WorkspaceController {
 		}
 		this.conflicts.delete(documentId);
 		this.externalNotices.delete(documentId);
+		this.documentReleasedCallback?.(documentId);
 	}
 
 	private async evictReplaced(documentId: string): Promise<void> {

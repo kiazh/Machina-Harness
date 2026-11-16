@@ -88,11 +88,19 @@ def build_task_profile(
     complexity = score_complexity(prompt)
     text = prompt or ""
     capabilities = tuple(descriptor.requested_capabilities)
-    risk = "high" if _RISK_CUE.search(text) or {
-        "security",
-        "payments",
-        "authentication",
-    } & set(capabilities) else "medium" if complexity["score"] >= 5 else "low"
+    risk = (
+        "high"
+        if _RISK_CUE.search(text)
+        or {
+            "security",
+            "payments",
+            "authentication",
+        }
+        & set(capabilities)
+        else "medium"
+        if complexity["score"] >= 5
+        else "low"
+    )
     needs_tools = descriptor.operation_scope == "mutating" or descriptor.task_class in {
         "implement",
         "debug",
@@ -125,7 +133,9 @@ def build_task_profile(
 
 def _task_family_score(profile: ModelProfile, task: TaskRouteProfile) -> float:
     keys = [task.family, task.task_class, *task.task_families]
-    values = [profile.task_scores.get(key) for key in keys if profile.task_scores.get(key) is not None]
+    values = [
+        profile.task_scores.get(key) for key in keys if profile.task_scores.get(key) is not None
+    ]
     if values:
         return float(max(values))
     return float(profile.task_scores.get("coding", 0.6))

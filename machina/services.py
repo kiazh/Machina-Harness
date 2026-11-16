@@ -255,23 +255,13 @@ async def compress_session_with_status(
 
         # AH-011: await summarization directly instead of blocking the event loop
         # via Future.result() on a worker thread.
-        from machina.core.compression import ContextCompressor as _CC
-
-        compressor = _CC(config=comp_config)
-        if hasattr(compressor, "acompress"):
-            result = await compressor.acompress(
-                chunks=chunks,
-                session_id=session.id,
-                agent_id=session.agent_id,
-                llm_provider=llm_provider,
-            )
-        else:
-            result = ContextCompressor(config=comp_config).compress(
-                chunks=chunks,
-                session_id=session.id,
-                agent_id=session.agent_id,
-                llm_provider=llm_provider,
-            )
+        compressor = ContextCompressor(config=comp_config)
+        result = await compressor.acompress(
+            chunks=chunks,
+            session_id=session.id,
+            agent_id=session.agent_id,
+            llm_provider=llm_provider,
+        )
         if result.original_count == 0:
             return CompressOutcome(status="no_op", result=result)
         # AH-AUDIT-014/015: the live mutation token travels INTO the

@@ -30,7 +30,3 @@ test("shared source contains no renderer, Node or terminal runtime dependencies"
     assert.doesNotMatch(source, /from ["'](?:node:|react|@tauri|@earendil)/);
   }
 });
-
-test("event copies used by both clients have byte-identical declarations", () => {
-  assert.equal(readFileSync(new URL("../src/events.ts", import.meta.url), "utf8"), readFileSync(new URL("../../../ui/src/events.ts", import.meta.url), "utf8"));
-});

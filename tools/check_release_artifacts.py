@@ -28,10 +28,15 @@ def check_source(archive_path: Path) -> None:
             "docker-compose.yml",
             "ui/package-lock.json",
             "ui/src/main.ts",
+            "packages/contracts/src/rpc.ts",
             "machina/connectors/execution.py",
         }
         if missing := required - names:
             raise ValueError(f"Missing source resources: {sorted(missing)}")
+        forbidden_prefixes = ("docs/verification/", "docs/archive/", "tests/", ".agents/")
+        shipped = sorted(name for name in names if name.startswith(forbidden_prefixes))
+        if shipped:
+            raise ValueError(f"Source archive contains review/test bloat: {shipped[:5]}")
         if any(
             any(
                 part == "node_modules"

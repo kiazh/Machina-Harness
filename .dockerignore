@@ -55,6 +55,18 @@ Thumbs.db
 # Project specific
 *.log
 
+# Build context only needs pyproject.toml, uv.lock, README.md, machina/ and
+# skills/. Keep review archives, tests, UI, and agent/CI metadata out.
+docs/
+tests/
+ui/
+packages/
+research/
+integrations/
+communications/
+.agents/
+.github/
+
 # Exclude local state, credentials and dependency caches from build context
 .venv.*/
 .env.*
