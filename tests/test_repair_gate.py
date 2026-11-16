@@ -51,7 +51,9 @@ def test_non_repair_prompt_and_second_nudge_do_not_loop(tmp_path) -> None:
     root = _git_workspace(tmp_path)
 
     assert should_nudge_repair("hello", workspace=root) is False
-    assert should_nudge_repair("Fix the failing test in src/app.py", workspace=root, nudges=1) is False
+    assert (
+        should_nudge_repair("Fix the failing test in src/app.py", workspace=root, nudges=1) is False
+    )
 
 
 def test_non_git_workspace_fails_safe(tmp_path) -> None:
@@ -89,10 +91,7 @@ def test_direct_behavior_check_counts_as_verification() -> None:
         "tool": "terminal",
         "args": {
             "command": (
-                "python - <<'EOF'\n"
-                "from app import callequal\n"
-                "assert callequal(1, 1) == []\n"
-                "EOF"
+                "python - <<'EOF'\nfrom app import callequal\nassert callequal(1, 1) == []\nEOF"
             )
         },
         "result_preview": "",
@@ -146,9 +145,7 @@ async def test_agent_guard_appends_nudge_and_persists_content(monkeypatch) -> No
         _append_assistant_content=append,
         _flush_pending_chunks=flush,
     )
-    agent._append_repair_nudge = MethodType(
-        module.BaseReActAgent._append_repair_nudge, agent
-    )
+    agent._append_repair_nudge = MethodType(module.BaseReActAgent._append_repair_nudge, agent)
     messages: list[dict[str, str]] = []
 
     continued = await module.BaseReActAgent._maybe_continue_unchanged_repair(

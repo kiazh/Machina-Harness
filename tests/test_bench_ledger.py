@@ -141,9 +141,7 @@ def test_lockbox_detects_missing_and_extra_tasks(tmp_path) -> None:
     lockbox.freeze([_task("task-1")])
 
     assert lockbox.verify([]) == ["missing task: task-1"]
-    assert lockbox.verify([_task("task-1"), _task("task-2")]) == [
-        "unexpected task: task-2"
-    ]
+    assert lockbox.verify([_task("task-1"), _task("task-2")]) == ["unexpected task: task-2"]
 
 
 def test_lockbox_is_json_and_does_not_contain_prompt_body(tmp_path) -> None:

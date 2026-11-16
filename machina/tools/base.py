@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib as _importlib
 import inspect
 import sys as _sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, get_type_hints
@@ -59,11 +60,45 @@ class Tool:
 
 
 class ToolRegistry:
-    """Global tool registry — register tools with decorator."""
+    """Global tool registry — register tools with decorator.
+
+    Built-in tool modules register lazily: a package that imports only
+    ``machina.tools`` stays lightweight, and the first registry access runs
+    the configured loader once. Direct ``ToolRegistry()`` instances keep the
+    historical empty-registry behavior.
+    """
 
     def __init__(self) -> None:
-        self._tools: dict[str, Tool] = {}
+        self._registered_tools: dict[str, Tool] = {}
         self._definitions_cache: list[ToolDefinition] | None = None
+        self._loader: Callable[[], None] | None = None
+        self._loader_modules: frozenset[str] = frozenset()
+        self._loader_lock = threading.RLock()
+        self._loading = False
+        self._tools_loaded = False
+
+    def _ensure_tools_loaded(self) -> None:
+        """Run the lazy built-in loader once (recursion-safe)."""
+        loader = self._loader
+        if loader is None or self._tools_loaded:
+            return
+        with self._loader_lock:
+            # Another thread may have completed the load while we waited, and
+            # registrations performed by the loader itself must not recurse.
+            if self._tools_loaded or self._loading:
+                return
+            self._loading = True
+            try:
+                loader()
+                self._tools_loaded = True
+            finally:
+                self._loading = False
+
+    @property
+    def _tools(self) -> dict[str, Tool]:
+        """Registered tools; touching this mapping triggers lazy registration."""
+        self._ensure_tools_loaded()
+        return self._registered_tools
 
     def register(
         self,
@@ -82,13 +117,19 @@ class ToolRegistry:
         declared = tuple(effects or ())
 
         def decorator(func: Callable) -> Callable:
+            # Built-ins load before an external registration so an override of
+            # a built-in name keeps the historical "custom wins" precedence.
+            # Registrations from a built-in module itself must not recurse into
+            # the loader (a direct `import machina.tools.builtins` is legal).
+            if getattr(func, "__module__", "") not in self._loader_modules:
+                self._ensure_tools_loaded()
             tool_name = name or func.__name__
             if tool_name == "__no_tools__":
                 raise ValueError("__no_tools__ is reserved for an empty tool allowlist")
             tool_desc = description or (func.__doc__ or "").strip().split("\n")[0]
             tool_params = parameters or self._infer_schema(func)
             is_async = inspect.iscoroutinefunction(func)
-            self._tools[tool_name] = Tool(
+            self._registered_tools[tool_name] = Tool(
                 name=tool_name,
                 description=tool_desc,
                 parameters=tool_params,
@@ -110,7 +151,7 @@ class ToolRegistry:
         through to approval instead of silent in-process execution.
         """
         for name, eff in effects.items():
-            tool = self._tools.get(name)
+            tool = self._registered_tools.get(name)
             if tool is not None:
                 tool.effects = tuple(eff)
         self._definitions_cache = None
@@ -164,6 +205,7 @@ class ToolRegistry:
         default of allowing extras. An explicit ``true`` is preserved for
         tools that deliberately opt in.
         """
+        self._ensure_tools_loaded()
         if self._definitions_cache is None:
             self._definitions_cache = [
                 _core_symbol("machina.core.models", "ToolDefinition")(
@@ -171,7 +213,7 @@ class ToolRegistry:
                     description=t.description,
                     parameters=self._declared_parameters(t.parameters),
                 )
-                for t in self._tools.values()
+                for t in self._registered_tools.values()
             ]
         return self._definitions_cache
 
@@ -269,6 +311,7 @@ class ToolRegistry:
         file while executing in workspace B; R4-096 removed the cache —
         all shipped tools declare broker effects instead).
         """
+        self._ensure_tools_loaded()
         arg_keys = sorted(str(key) for key in kwargs)
         result: Any = None
         with instrument(
@@ -278,7 +321,7 @@ class ToolRegistry:
             arg_keys=arg_keys,
             arg_count=len(kwargs),
         ) as span:
-            if name not in self._tools:
+            if name not in self._registered_tools:
                 _core_symbol("machina.core.provider", "audit_log")(
                     "tool_execution_error", tool_name=name, error="not_registered"
                 )
@@ -286,7 +329,7 @@ class ToolRegistry:
                     f"Tool '{name}' not registered"
                 )
 
-            tool = self._tools[name]
+            tool = self._registered_tools[name]
 
             # Input validation
             try:
@@ -306,20 +349,39 @@ class ToolRegistry:
         return result
 
     def list_tools(self) -> list[str]:
-        """List all registered tool names."""
-        return list(self._tools.keys())
+        """List all registered tool names (loading built-ins on first use)."""
+        self._ensure_tools_loaded()
+        return list(self._registered_tools.keys())
 
     # Public registry lookup; tool tests read it back, no production caller. Kept (R4-106).
     def get_tool(self, name: str) -> Tool | None:
         """Get a tool by name."""
-        return self._tools.get(name)
+        self._ensure_tools_loaded()
+        return self._registered_tools.get(name)
 
     @classmethod
     def reset(cls) -> None:
         """Reset the global ToolRegistry singleton to a fresh instance."""
         global registry
+        loader = registry._loader
+        loader_modules = registry._loader_modules
         registry = cls()
+        registry._loader = loader
+        registry._loader_modules = loader_modules
 
 
 # Global registry
 registry = ToolRegistry()
+
+
+def set_tool_loader(
+    loader: Callable[[], None] | None,
+    modules: tuple[str, ...] = (),
+) -> None:
+    """Install the built-in module loader used by the global registry.
+
+    ``modules`` names the modules whose own registrations must not trigger the
+    loader, which keeps direct submodule imports cycle-free.
+    """
+    registry._loader = loader
+    registry._loader_modules = frozenset(modules)

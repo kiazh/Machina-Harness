@@ -12,11 +12,14 @@ from machina.api.auth import require_api_key
 from machina.api.routes.models import CreateSessionRequest, PromptRequest, UpdateSessionRequest
 from machina.api.routes.shared import _redact_value
 from machina.api.routes.streaming import _stream_session
-from machina.core.config import config
 from machina.core.context import context_manager
 from machina.core.session import session_manager
+from machina.core.session_service import (
+    SessionCreateError,
+    SessionCreateSpec,
+    session_service,
+)
 from machina.gateway.serializers import chunk_preview, history_from_chunks, session_to_dict
-from machina.gateway.server import PROVIDERS
 from machina.memory.redaction import redact_secrets
 from machina.observability.diagnostics import record_failure
 from machina.services import session_context_window
@@ -88,32 +91,19 @@ async def delete_session(session_id: uuid.UUID) -> dict[str, bool]:
 @router.post("/sessions", dependencies=[Depends(require_api_key)])
 async def create_session(req: CreateSessionRequest) -> dict[str, Any]:
     """Create a new session."""
-    from machina.core.agent_def import agent_registry
-    from machina.core.agent_factory import resolve_provider_model
-    from machina.memory.persona import EmotionTopology
-
-    if req.emotion and req.emotion not in EmotionTopology.EMOTION_PROFILES:
-        raise HTTPException(400, "unknown emotion")
-    if req.provider is not None and req.provider not in PROVIDERS:
-        raise HTTPException(400, f"unknown provider: {req.provider}")
-    if req.model is not None and not req.model.strip():
-        raise HTTPException(400, "model must be a non-empty string")
     try:
-        definition = await agent_registry.get("harness")
-    except Exception:
-        # The default agent shares the factory's permitted registry fallback.
-        definition = None
-    provider, model = resolve_provider_model(
-        definition=definition, provider_override=req.provider, model_override=req.model
-    )
-    session = await session_manager.create(
-        title=req.title,
-        model=model,
-        provider=provider,
-        goal=req.goal,
-        context_budget=config.get("context_budget"),
-        state={"emotion": req.emotion} if req.emotion else None,
-    )
+        session = await session_service.create(
+            SessionCreateSpec(
+                title=req.title,
+                agent_id="harness",
+                model=req.model,
+                provider=req.provider,
+                goal=req.goal,
+                emotion=req.emotion,
+            )
+        )
+    except SessionCreateError as error:
+        raise HTTPException(400, error.message) from None
     try:
         from machina.gateway.features.mode import grant_full_default
 

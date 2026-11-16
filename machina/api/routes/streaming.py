@@ -25,8 +25,7 @@ from machina.core.config import config
 from machina.core.exceptions import StaleOwnershipError
 from machina.core.execution_context import begin_turn_scope, end_turn_scope
 from machina.core.models import StreamEvent
-from machina.core.session import session_manager
-from machina.core.turn_engine import TurnEngine, TurnSpec
+from machina.core.turn_lifecycle import ApprovalPolicy, TurnLifecycle, TurnStepSupervisor
 from machina.observability.diagnostics import record_failure
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ async def _stream_session(
     except ValueError:
         raise HTTPException(400, "invalid session ID") from None
     # AH-AUDIT-019: execution-critical read bypasses the display cache.
-    session = await session_manager.get_fresh(sid)
+    session = await TurnLifecycle.load_session(sid)
     if session is None:
         raise HTTPException(404, "session not found")
     # Shared coordinator: owner-token claim BEFORE SSE headers so a
@@ -60,10 +59,8 @@ async def _stream_session(
     # the stdio gateway generates, ``uuid4().hex[:12]``) so transports can
     # correlate one turn; the internal owner token ("turn:<id>:<nonce>")
     # never leaves this module.
-    from machina.core.turns import try_begin_turn as _try_begin
-
     turn_id = uuid.uuid4().hex[:12]
-    turn_token = await _try_begin(sid, turn_id=turn_id)
+    turn_token = await TurnLifecycle.acquire_claim(sid, turn_id=turn_id)
     if not turn_token:
         raise HTTPException(409, "a turn is already running for this session")
 
@@ -72,18 +69,6 @@ async def _stream_session(
     # approval accounting is needed on this path). Created lazily on
     # first iteration so an unconsumed stream never renews forever;
     # stopped when the generator exits; crash expiry recovery preserved.
-    _renew_state: dict[str, Any] = {}
-    # F07: one shared execution Context for the whole turn's step tasks. The
-    # agent sets growth-episode / RSI ContextVars while preparing the turn
-    # (inside the first step's task); because asyncio Tasks copy the creator's
-    # context, a fresh task+context per `__anext__` hid those writes from later
-    # steps and from the done handler that runs `_complete_growth` — growth
-    # episodes never completed. Driving every step task in one shared Context
-    # keeps the writes visible for the rest of the turn. Same principle as
-    # R4-010: the driver that creates the step tasks owns the ContextVar
-    # lifetime. Armed per-turn (empty until the drive loop starts).
-    _step_context: dict[str, contextvars.Context] = {}
-    _ownership_lost = asyncio.Event()
     # The renewal interval is owned by machina.api.app (kept there as a
     # patch target). Read it off the loaded app module instead of
     # importing it: a function-level import would add a deferred-import
@@ -93,34 +78,9 @@ async def _stream_session(
     _app_module = sys.modules.get("machina.api.app")
     _renew_interval = getattr(_app_module, "CLAIM_RENEW_INTERVAL_SECONDS", 30.0)
 
-    async def _owned_step(awaitable, timeout: float):
-        # F07: run steps in the turn's shared Context once armed so ContextVars
-        # the agent writes during preparation survive across steps. Before the
-        # drive loop arms it (the agent build step) keeps the default per-task
-        # context copy.
-        context = _step_context.get("ctx")
-        if context is None:
-            task = asyncio.ensure_future(awaitable)
-        else:
-            task = asyncio.get_running_loop().create_task(awaitable, context=context)
-        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-        _renew_state["active"] = task
-        lost = asyncio.create_task(_ownership_lost.wait())
-        try:
-            done, _ = await asyncio.wait(
-                {task, lost}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
-            )
-            if _ownership_lost.is_set():
-                task.cancel()
-                raise StaleOwnershipError("REST turn ownership lost")
-            if task not in done:
-                task.cancel()
-                raise TimeoutError("turn timed out")
-            return task.result()
-        finally:
-            lost.cancel()
-            if task.done():
-                _renew_state.pop("active", None)
+    # Shared per-step supervisor: owns the F07 step Context, the active task
+    # handoff used by quarantine cleanup, and the ownership-loss/deadline race.
+    supervisor = TurnStepSupervisor()
 
     async def approval_data(request_id: str) -> dict[str, Any]:
         """Return a redacted approval event, raising if the stored proposal is unavailable."""
@@ -140,8 +100,6 @@ async def _stream_session(
         return f"data: {json.dumps(data)}\n\n"
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        agent = None
-        stream = None
         terminal_data = None
         resume_token = None
         _stream_cancelled = False
@@ -160,54 +118,49 @@ async def _stream_session(
                 _record_stage(stage)
 
             def on_ownership_lost(_self, reason: str) -> None:
-                active = _renew_state.get("active")
-                if active is not None:
-                    active.cancel()
+                supervisor.cancel_active()
 
-        # W2: the shared engine owns boundary-safe streaming redaction (the
-        # withheld tail flushes exactly once before the terminal), tool
-        # pairing (stable id, FIFO fallback, 4000-char truncation), token
-        # accounting, final capture, the renewal loop, and the bounded
-        # cleanup tail; this generator only serializes semantic events.
+        # W2: the shared lifecycle owns claim/session/agent/approval/renewal
+        # and the bounded cleanup tail; the engine owns boundary-safe streaming
+        # redaction (the withheld tail flushes exactly once before the
+        # terminal), tool pairing (stable id, FIFO fallback, 4000-char
+        # truncation), token accounting and final capture. This generator only
+        # serializes semantic events.
         # Renewal starts here — on first iteration, not at response
         # construction — so an unconsumed stream never renews forever; crash
         # expiry recovery is preserved.
-        engine = TurnEngine(
-            TurnSpec(
-                session_id=sid,
-                turn_id=turn_id,
-                token=turn_token,
-                text=req.text,
-                verbose=req.verbose,
-                resume=resume,
-            ),
-            _TurnHooks(),
+        lifecycle = TurnLifecycle(
+            session_id=sid,
+            turn_id=turn_id,
+            token=turn_token,
+            text=req.text,
+            verbose=req.verbose,
+            resume=resume,
             boundary="app.create_app",
             renew_interval_s=_renew_interval,
             source_close_timeout_s=RETIRE_JOIN_TIMEOUT_SECONDS,
+            approval=ApprovalPolicy(mode="headless", principal="http"),
+            hooks=_TurnHooks(),
         )
 
-        async def close_turn(
-            *, driver_settled: bool = True, retirement_task: asyncio.Task | None = None
-        ):
-            """Close the stream and the engine; ``driver_settled=False`` when the
-            stream's step task was quarantined (its own unwind owns the stream
-            close — an ``aclose`` on a still-running generator would raise)."""
+        async def close_turn(*, retirement_task: asyncio.Task | None = None):
+            """Close the turn; a quarantined step defers release until it ends.
+
+            The engine's source close owns the driver barrier: when the active
+            step is still running, cleanup returns a pending outcome and the
+            claim/provider stay owned until retirement.
+            """
             from machina.core.background_tasks import await_joined
 
             async def finish():
-                try:
-                    if stream is not None and driver_settled:
-                        await stream.aclose()
-                finally:
-                    closed = await engine.close(
-                        cancelled=_stream_cancelled, retirement_task=retirement_task
-                    )
-                return closed
+                return await lifecycle.close(
+                    cancelled=_stream_cancelled,
+                    retirement_task=retirement_task,
+                )
 
             return await await_joined(finish())
 
-        engine.start_renewal(ownership_lost=_ownership_lost)
+        lifecycle.start(ownership_lost=supervisor.ownership_lost)
         # R4-010: driver-owned turn scope — every `_owned_step` task runs in a
         # context that carries this scope (the stream steps share the armed
         # context below; the agent-build step copies this one), so the scope is
@@ -225,9 +178,6 @@ async def _stream_session(
         # R4-063_064_observability.md.
         turn_scope_token = begin_turn_scope()
         try:
-            from machina.permissions.broker import set_approval_handler
-
-            set_approval_handler(None, principal="http", turn_id=turn_id)
             yield frame({"type": "turn.started", "sessionId": session_id, "turnId": turn_id})
             # AH-022: definition-aware factory so specialist sessions
             # cannot bypass allowed_tools/persona via direct HTTP.
@@ -236,13 +186,16 @@ async def _stream_session(
             _record_stage("building_agent")
 
             async def build_owned_agent():
-                built = await build_agent_for_session(session)
                 # Adoption belongs to the build task: even a build that resists
                 # cancellation must hand its resources to deferred engine close.
-                engine.attach(built)
+                built = await build_agent_for_session(session)
+                lifecycle.engine.attach(built)
                 return built
 
-            agent = await _owned_step(build_owned_agent(), 300)
+            await lifecycle.prepare(
+                session,
+                builder=lambda _session: supervisor.run(build_owned_agent(), 300),
+            )
             _record_stage("waiting_for_provider")
             # An explicit positive turn_timeout remains available; zero lets
             # per-operation guards and ownership checks govern long work.
@@ -253,25 +206,24 @@ async def _stream_session(
             deadline = asyncio.get_running_loop().time() + timeout
             if resume is not None:
                 # Transport-owned resume contextvar (the engine does not own
-                # it): set in THIS context so every `_owned_step` task copies
+                # it): set in THIS context so every supervised step task copies
                 # the value into the step that executes the reviewed action.
                 from machina.permissions.broker import resume_approval_var
 
                 resume_token = resume_approval_var.set(str(resume[0].get("request_id", "")))
-            engine.attach(agent)
             # F07: arm the shared step Context after the transport-owned resume
             # ContextVar is set, so every agent step (and the done handler) sees
             # it together with the growth/RSI state the agent writes while
             # preparing. Copied from THIS driver context, which already owns the
             # turn scope entered above.
-            _step_context["ctx"] = contextvars.copy_context()
-            stream = engine.stream()
+            supervisor.arm(contextvars.copy_context())
+            stream = lifecycle.stream()
             while True:
                 remaining = deadline - asyncio.get_running_loop().time() if timeout > 0 else None
                 if remaining is not None and remaining <= 0:
                     raise TimeoutError("turn timed out")
                 try:
-                    turn_event = await _owned_step(stream.__anext__(), remaining)
+                    turn_event = await supervisor.run(stream.__anext__(), remaining)
                 except StopAsyncIteration:
                     break
                 if turn_event.kind == "delta":
@@ -356,7 +308,7 @@ async def _stream_session(
                         )
                     )
                 elif turn_event.kind == "done":
-                    if engine.final is None:
+                    if lifecycle.final is None:
                         # Defensive parity: a done without a response still
                         # terminates the stream with the bare done frame.
                         terminal_data = {"type": "done"}
@@ -365,7 +317,7 @@ async def _stream_session(
                     # as a delta before the terminal; the done payload carries
                     # the canonical fully-redacted concatenation, never a raw
                     # tail.
-                    tail = engine.flush_tail()
+                    tail = lifecycle.flush_tail()
                     if tail:
                         data = _serialize_event(
                             StreamEvent(type="text", content=tail),
@@ -377,7 +329,7 @@ async def _stream_session(
                     # A pause is actionable and distinct from failure; resume
                     # revalidates under a fresh fenced claim (never by
                     # continuing stale generator state).
-                    for pause in engine.pauses:
+                    for pause in lifecycle.pauses:
                         pause_id = str(pause.get("requestId", ""))
                         if pause_id and pause_id in _emitted_approvals:
                             # The live turn event already emitted this card;
@@ -400,7 +352,7 @@ async def _stream_session(
                         if req.protocolVersion == 2:
                             data = await approval_data(str(pause["requestId"]))
                         yield frame(data)
-                    terminal_payload = engine.build_terminal(cancelled=False)
+                    terminal_payload = lifecycle.build_terminal(cancelled=False)
                     terminal_data = {
                         "type": "done",
                         "content": terminal_payload["text"],
@@ -455,7 +407,7 @@ async def _stream_session(
             from machina.core.background_tasks import await_joined, await_joined_bounded
 
             async def cleanup():
-                active = _renew_state.get("active")
+                active = supervisor.active
                 if active is not None and not active.done():
                     active.cancel()
                     await asyncio.wait({active}, timeout=0.1)
@@ -482,11 +434,11 @@ async def _stream_session(
                             pass
                         except Exception as error:
                             record_failure("app.retire_execution", error)
-                        # A quarantined driver is still executing the stream
-                        # generator (``aclose`` would raise); its own unwind
-                        # closes it, exactly like the engine's H01 rule. Only
-                        # a settled driver lets the stream close here.
-                        await close_turn(driver_settled=active.done(), retirement_task=active)
+                        # The engine's source close treats a still-running step
+                        # as its driver barrier: until it retires, provider and
+                        # claim stay owned (deferred cleanup). Only a settled
+                        # driver lets this close settle now.
+                        await close_turn(retirement_task=active)
 
                     runtime_services.track(active)
                     runtime_services.track(asyncio.create_task(retire_execution()))
@@ -511,7 +463,7 @@ async def _stream_session(
                 # shutdown joining before DB closure.
                 if not _stream_cancelled and not _release_failed:
                     _record_stage("compaction_maintenance")
-                    engine.schedule_auto_compact()
+                    lifecycle.schedule_auto_compact()
                 if not _stream_cancelled:
                     if _release_failed:
                         yield frame(

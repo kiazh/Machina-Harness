@@ -107,8 +107,6 @@ async def test_models_list_fast_is_cache_only_and_explicit_refresh_wins(monkeypa
     monkeypatch.setattr(feature, "_named_models", fake_named)
 
     await feature.models_list(_Gateway(), {"provider": "acme", "fast": True})
-    await feature.models_list(
-        _Gateway(), {"provider": "acme", "fast": True, "refresh": True}
-    )
+    await feature.models_list(_Gateway(), {"provider": "acme", "fast": True, "refresh": True})
 
     assert seen == [True, False]

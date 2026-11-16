@@ -64,8 +64,6 @@ def test_hidden_legacy_config_warns_once(monkeypatch, tmp_path: Path, caplog) ->
         Config.load()
 
     messages = [
-        record.getMessage()
-        for record in caplog.records
-        if record.name == "machina.core.config"
+        record.getMessage() for record in caplog.records if record.name == "machina.core.config"
     ]
     assert sum("older config exists" in message for message in messages) == 1

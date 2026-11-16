@@ -105,45 +105,26 @@ def test_login_detection_uses_only_the_credential_file_presence(tmp_path, monkey
 
 
 def test_profile_arn_uses_explicit_env_first(monkeypatch) -> None:
-    monkeypatch.setenv(
-        "PROFILE_ARN", "arn:aws:codewhisperer:us-east-1:111111111111:profile/env"
-    )
+    monkeypatch.setenv("PROFILE_ARN", "arn:aws:codewhisperer:us-east-1:111111111111:profile/env")
 
-    assert (
-        kiro_gateway.profile_arn()
-        == "arn:aws:codewhisperer:us-east-1:111111111111:profile/env"
-    )
+    assert kiro_gateway.profile_arn() == "arn:aws:codewhisperer:us-east-1:111111111111:profile/env"
 
 
 def test_profile_arn_is_read_from_kiro_ide_state(tmp_path, monkeypatch) -> None:
     app_data = tmp_path / "AppData"
-    profile = (
-        app_data
-        / "Kiro"
-        / "User"
-        / "globalStorage"
-        / "kiro.kiroagent"
-        / "profile.json"
-    )
+    profile = app_data / "Kiro" / "User" / "globalStorage" / "kiro.kiroagent" / "profile.json"
     profile.parent.mkdir(parents=True)
     profile.write_text(
-        json.dumps(
-            {"arn": "arn:aws:codewhisperer:us-east-1:222222222222:profile/ide"}
-        ),
+        json.dumps({"arn": "arn:aws:codewhisperer:us-east-1:222222222222:profile/ide"}),
         encoding="utf-8",
     )
     monkeypatch.setenv("APPDATA", str(app_data))
 
-    assert (
-        kiro_gateway.profile_arn()
-        == "arn:aws:codewhisperer:us-east-1:222222222222:profile/ide"
-    )
+    assert kiro_gateway.profile_arn() == "arn:aws:codewhisperer:us-east-1:222222222222:profile/ide"
 
 
 def test_spawn_injects_utf8_and_profile_environment(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv(
-        "PROFILE_ARN", "arn:aws:codewhisperer:us-east-1:333333333333:profile/spawn"
-    )
+    monkeypatch.setenv("PROFILE_ARN", "arn:aws:codewhisperer:us-east-1:333333333333:profile/spawn")
     captured: dict[str, Any] = {}
 
     class _CapturePopen(_FakeProcess):
@@ -233,7 +214,9 @@ def test_status_is_fast_and_does_not_run_the_cli(tmp_path, monkeypatch) -> None:
 
 def test_fallback_route_honors_explicit_configuration(monkeypatch) -> None:
     _set_config(monkeypatch, "kiro_fallback", "deepseek:deepseek-v4-flash")
-    monkeypatch.setattr(kiro_gateway, "_provider_available", lambda provider: provider == "deepseek")
+    monkeypatch.setattr(
+        kiro_gateway, "_provider_available", lambda provider: provider == "deepseek"
+    )
 
     assert kiro_gateway.fallback_route() == {
         "provider": "deepseek",
@@ -384,9 +367,7 @@ def test_stop_only_stops_a_managed_child(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(kiro_gateway, "gateway_reachable", lambda *_a, **_k: False)
     if os.name != "nt":
         monkeypatch.setattr(kiro_gateway.os, "getpgid", lambda pid: pid)
-        monkeypatch.setattr(
-            kiro_gateway.os, "killpg", lambda _pid, _signal: process.terminate()
-        )
+        monkeypatch.setattr(kiro_gateway.os, "killpg", lambda _pid, _signal: process.terminate())
     stopped = kiro_gateway.stop()
 
     assert stopped["stopped"] is True
@@ -522,7 +503,7 @@ async def test_real_process_start_and_stop(tmp_path, monkeypatch) -> None:
                 "from http.server import BaseHTTPRequestHandler, HTTPServer",
                 "class Handler(BaseHTTPRequestHandler):",
                 "    def do_GET(self):",
-                "        body = b'{\"object\":\"list\",\"data\":[{\"id\":\"auto\"}]}'",
+                '        body = b\'{"object":"list","data":[{"id":"auto"}]}\'',
                 "        self.send_response(200)",
                 "        self.send_header('Content-Type', 'application/json')",
                 "        self.send_header('Content-Length', str(len(body)))",

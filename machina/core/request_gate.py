@@ -38,6 +38,7 @@ stagnation-stop record, the only failed-attempt marker the runtime persists.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Mapping, Sequence
@@ -353,7 +354,9 @@ async def _shadow_note(
             agent_id=agent_id,
             user_message=user_message,
         )
-        report = shadow_report(inp, baseline=messages)
+        # Fit search tokenizes the plan up to MAX_FIT_PASSES times; keep it off
+        # the event loop so a long history cannot stall unrelated turns.
+        report = await asyncio.to_thread(shadow_report, inp, baseline=messages)
     except Exception as error:
         record_failure("request_gate.shadow", error)
         return None
@@ -407,7 +410,9 @@ async def _wired_gate(
             agent_id=agent_id,
             user_message=user_message,
         )
-        result = project_request(inp)
+        # project_request is pure but CPU-bound (bounded fit passes through
+        # the token counter); run it off the event loop.
+        result = await asyncio.to_thread(project_request, inp)
     except Exception as error:
         record_failure("request_gate.wired", error)
         _audit_decision(

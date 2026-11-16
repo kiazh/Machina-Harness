@@ -15,7 +15,10 @@ module attributes) because tests and callers address them as
 ``machina.api.app.<name>`` — ``db`` / ``Gateway`` / ``session_manager`` /
 ``context_manager`` (patch targets), ``StreamEvent``, ``PromptRequest`` and
 the other request models, ``_serialize_event`` / ``_redact_value``,
-``CLAIM_RENEW_INTERVAL_SECONDS``, ``_RpcGateway``, and ``lifespan``.
+``CLAIM_RENEW_INTERVAL_SECONDS``, and ``lifespan``.
+
+The shared JSON-RPC gateway lives on ``app.state.gateway``; HTTP dispatch uses
+the typed ``Gateway.call`` seam rather than synthesizing JSON-RPC frames.
 """
 
 from __future__ import annotations
@@ -49,7 +52,6 @@ from machina.core.context import context_manager  # re-exported (patch target)
 from machina.core.models import StreamEvent  # re-exported (test attribute)
 from machina.core.session import session_manager  # re-exported (patch target)
 from machina.db.connection import db
-from machina.gateway.errors import RpcError
 from machina.gateway.server import Gateway
 from machina.observability.diagnostics import record_failure
 from machina.observability.instrumentation import warm
@@ -70,7 +72,6 @@ __all__ = [
     "RpcRequest",
     "StreamEvent",
     "UpdateSessionRequest",
-    "_RpcGateway",
     "_redact_value",
     "_serialize_event",
     "context_manager",
@@ -84,69 +85,14 @@ __all__ = [
 # ─── gateway helper ────────────────────────────────────────────────────────
 
 
-class _RpcGateway:
-    """Minimal Gateway wrapper that captures the JSON-RPC response.
+def _discard_gateway_frame(frame: dict[str, Any]) -> None:
+    """Discard gateway notifications on the HTTP transport.
 
-    The Gateway class expects a ``write`` callable that receives response
-    frames. We capture the last frame with a matching ``id`` so the HTTP
-    layer can return it to the client.
-
-    Thread safety: an ``asyncio.Lock`` guards ``_next_id`` assignment so
-    concurrent HTTP requests each get a unique id and receive only their
-    own response.
-
-    No TTL bookkeeping: ``call()`` pops its own response synchronously
-    after ``handle_line`` returns, so ``_responses`` is empty whenever no
-    call is in flight and cannot grow (R4-096 removed the dead TTL sweep).
+    ``Gateway.call`` returns request results directly; streamed events use the
+    SSE transport instead of gateway frames. The writer is still required by
+    the Gateway constructor (shell job listeners and turn tasks may emit).
     """
-
-    def __init__(self) -> None:
-        self._responses: dict[int, dict[str, Any]] = {}
-        self._next_id = 0
-        self._lock = asyncio.Lock()
-        # W8: explicit embedded-gateway signal — never inherit the stdio
-        # MACHINA_GATEWAY_TOKEN. The HTTP boundary already enforces API-key
-        # auth; inheriting the token would 401 every /api/v1/rpc call.
-        self._gateway = Gateway(self._capture, owns_db=False, inherit_env_token=False)
-        self._gateway._db_ready = db.connected
-
-    def _capture(self, frame: dict[str, Any]) -> None:
-        rid = frame.get("id")
-        if rid is not None:
-            self._responses[rid] = frame
-
-    async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Call a gateway method via JSON-RPC and return the result.
-
-        Args:
-            method: The JSON-RPC method name to call.
-            params: The parameters to pass to the method.
-
-        Returns:
-            The result dict from the gateway response.
-
-        Raises:
-            RpcError: If no response is received or the response contains an error.
-        """
-        async with self._lock:
-            self._next_id += 1
-            rid = self._next_id
-        # The snapshot taken in __init__ goes stale across (re)connects;
-        # refresh from the live connection state on every call.
-        self._gateway._db_ready = db.connected
-        frame = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
-        await self._gateway.handle_message(frame)
-        response = self._responses.pop(rid, None)
-        if response is None:
-            raise RpcError(-32603, "no response from gateway")
-        if "error" in response:
-            err = response["error"]
-            raise RpcError(err.get("code", -32603), err.get("message", "unknown error"))
-        return response.get("result", {})
-
-    async def close(self) -> None:
-        """Close the underlying gateway connection."""
-        await self._gateway.close()
+    del frame
 
 
 # ─── lifespan ──────────────────────────────────────────────────────────────
@@ -167,7 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     runner = None
     warmers_task = None
-    rpc_gw = None
+    gateway = None
     primary_error: BaseException | None = None
     try:
         try:
@@ -185,9 +131,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     provider=config_module.config.get("provider"),
                     model=config_module.config.get("model"),
                 )
-            # Create a single _RpcGateway for all RPC dispatches
-            rpc_gw = _RpcGateway()
-            app.state._rpc_gateway = rpc_gw
+            # One embedded gateway for all /rpc dispatches. It borrows the
+            # application's runtime/DB (owns_db=False) and exposes the typed
+            # Gateway.call seam; streamed events stay on the SSE transport.
+            # W8: never inherit the stdio MACHINA_GATEWAY_TOKEN — the HTTP
+            # boundary already enforces API-key auth.
+            gateway = Gateway(
+                _discard_gateway_frame,
+                owns_db=False,
+                inherit_env_token=False,
+            )
+            app.state.gateway = gateway
         except Exception as e:
             logger.warning("Runtime startup degraded: %s", e, exc_info=True)
         yield
@@ -228,8 +182,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _cleanup_stage("optimization_shadow_drain", shadow_module.drain_shadow_tasks, 2)
         except Exception:
             pass
-        if rpc_gw is not None:
-            await _cleanup_stage("gateway_close", rpc_gw.close, 10)
+        if gateway is not None:
+            await _cleanup_stage("gateway_close", gateway.close, 10)
         await _cleanup_stage("runtime_shutdown", runtime_services.shutdown, 15)
         if cleanup_cancelled is not None and primary_error is None:
             raise cleanup_cancelled

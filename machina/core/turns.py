@@ -106,11 +106,6 @@ def _local_owner(session_id: object) -> dict | None:
         return dict(rec) if rec is not None else None
 
 
-def _local_reset_for_tests() -> None:
-    with _guard:
-        _local_claims.clear()
-
-
 def _note_lock_contention(site: str) -> None:
     """Observe a stale-mutex release race (control flow unchanged).
 

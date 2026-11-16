@@ -18,6 +18,7 @@ from __future__ import annotations
 from contextvars import ContextVar as _ContextVar
 
 from machina.core.models import Session
+from machina.observability.diagnostics import record_failure
 
 # Inherited authority for the currently executing (parent) agent, set by the
 # orchestrator around delegated child runs and read by the broker at the
@@ -58,7 +59,11 @@ async def _shared_rag_pipeline():
         from machina.tools.rag import acquire_rag_pipeline
 
         return await acquire_rag_pipeline()
-    except Exception:
+    except Exception as error:
+        # Disabled RAG is an intentional quiet path (returned above); a
+        # configured failure is not. Report it through the standard sanitized
+        # diagnostics boundary and keep the honest keyword-only fallback.
+        record_failure("agent_factory.rag_pipeline", error)
         return None
 
 

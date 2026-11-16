@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from machina.core.background_tasks import join_agent_background_tasks
 from machina.core.cron import next_cron_time
 from machina.core.optimization.policy import OptimizationMode, effective_mode
 from machina.core.optimization.semantic_cache import SemanticCache
@@ -913,48 +912,6 @@ class JobRunner:
                     ownership_lost.set()
                 return
 
-    def _start_claim_renewal(
-        self,
-        job: Job,
-        token: str,
-        ownership_lost: asyncio.Event | None,
-    ) -> asyncio.Task | None:
-        """Renew this run's session-turn claim for as long as effects live.
-
-        R12: effects can outlive the session claim's TTL — most importantly
-        the cancellation-resistant work retained by quarantine — so the claim
-        is renewed for the whole ``_execute`` lifetime on the job-lease
-        cadence (``RUN_LEASE_SECONDS / 3``, capped by the shared primitive at
-        one third of the turn TTL). The shared renewal primitive reports loss
-        on the first failed renewal; loss fences the effects (cancel of the
-        owning task) and, when supervised by ``run_due_once``, also sets its
-        ``ownership_lost`` event so that run follows its normal loss path.
-        DB-less local claims never expire, so renewal is only armed for
-        DB-backed claims. Like the job lease, the task is runner-owned so
-        shutdown stops it even while a quarantined effect resists
-        cancellation.
-        """
-        from machina.core.turns import renewal_loop as _renew_session_claim
-        from machina.db.connection import db
-
-        if not db.connected:
-            return None
-        effects_task = asyncio.current_task()
-        lost = ownership_lost if ownership_lost is not None else asyncio.Event()
-        task = asyncio.create_task(
-            _renew_session_claim(
-                job.session_id,
-                token,
-                interval_s=RUN_LEASE_SECONDS / 3,
-                ownership_lost=lost,
-                on_lost=lambda: self._fence_effects(effects_task),
-            ),
-            name=f"job-session-claim-{job.id}",
-        )
-        self._claim_leases.add(task)
-        task.add_done_callback(self._claim_leases.discard)
-        return task
-
     @staticmethod
     def _fence_effects(task: asyncio.Task | None) -> None:
         """Cancel the run whose session claim is no longer provably owned."""
@@ -1069,95 +1026,109 @@ class JobRunner:
 
     @instrumented("scheduler", "execute")
     async def _execute(self, job: Job, ownership_lost: asyncio.Event | None = None) -> None:
+        """Run one job through the shared transport-neutral turn lifecycle.
+
+        The lifecycle owns claim acquisition, renewal, agent construction,
+        approval policy, provider/background cleanup and owner-matched claim
+        release. Job-specific concerns stay here: identity reconciliation,
+        typed pause/outcome handling, and the job lease supervision above.
+        """
         if job.session_id is None:
             raise RuntimeError("job has no session")
         if ownership_lost is not None and ownership_lost.is_set():
             raise RuntimeError("job ownership lost before execution")
+        from machina.core.turn_lifecycle import ApprovalPolicy, TurnLifecycle
+
         # Coordinate with user turns: claim the session turn so a scheduled
         # run never interleaves with an active user turn (fresh fenced claim;
         # busy sessions reschedule via finish()).
-        from machina.core.turns import end_turn as _end_job_turn
-        from machina.core.turns import try_begin_turn as _begin_job_turn
-
-        job_turn = await _begin_job_turn(job.session_id)
+        turn_id = f"job-{job.id}"
+        job_turn = await TurnLifecycle.acquire_claim(job.session_id, turn_id=turn_id)
         if not job_turn:
             raise RuntimeError("session turn busy; job rescheduled")
-        claim_renewal: asyncio.Task | None = None
-        previous_owner: str | None = None
-        try:
-            # R12: keep the session claim alive for the whole effect lifetime
-            # (quarantine included), so a long or resistant run cannot outlive
-            # its claim while another turn starts on the same session.
-            claim_renewal = self._start_claim_renewal(job, job_turn, ownership_lost)
-            if getattr(job, "no_agent", False):
-                await self._execute_no_agent_job(job)
-                return
-            prompt = job.prompt or DEFAULT_HEARTBEAT_PROMPT
-            agent = await self._build_agent(
+        effects_task = asyncio.current_task()
+        runner = self
+
+        class _JobTurnHooks:
+            def on_stage(_self, stage: str) -> None:
+                return None
+
+            def on_ownership_lost(_self, reason: str) -> None:
+                # R12: loss fences effects immediately, including a
+                # cancellation-resistant run, while the claim is released
+                # only after it retires.
+                runner._fence_effects(effects_task)
+
+        lifecycle = TurnLifecycle(
+            session_id=job.session_id,
+            turn_id=turn_id,
+            token=job_turn,
+            text=job.prompt or DEFAULT_HEARTBEAT_PROMPT,
+            boundary="scheduler._execute",
+            renew_interval_s=RUN_LEASE_SECONDS / 3,
+            join_timeout=2.0,
+            settle_grace=1.0,
+            approval=ApprovalPolicy(mode="headless", principal="job"),
+            hooks=_JobTurnHooks(),
+            agent_builder=lambda _session: self._build_agent(
                 job.agent_name,
                 model=getattr(job, "model", None),
                 provider=getattr(job, "provider", None),
                 session_id=job.session_id,
-            )
-            # AH-023: close owned providers in finally; injected test factories
-            # manage their own lifecycle.
-            owns_provider = self._agent_factory is None
-            try:
-                # Check ownership loss before the (potentially long) agent run.
-                if ownership_lost is not None and ownership_lost.is_set():
-                    raise RuntimeError("job ownership lost")
-                # H03: persist the job's selected identity before the run so
-                # the agent's durable ownership check accepts it. The original
-                # owner is restored in the finally block; this is a run-scoped
-                # override, never a permanent session mutation.
-                previous_owner = await self._reconcile_session_owner(job)
-                response = await agent.run(job.session_id, prompt, verbose=False)
-                # Headless jobs never hang on hidden prompts (Phase E):
-                # AH-AUDIT-022: pause detection uses the typed
-                # AgentResponse.needs_approval outcome — never prose
-                # matching. A benign answer merely discussing approvals
-                # stays a success; a structured pause (even with arbitrary
-                # or empty text) pauses durably and frees worker/lease.
-                pauses = list(getattr(response, "needs_approval", None) or [])
-                if pauses:
-                    first = pauses[0] if isinstance(pauses[0], dict) else {}
-                    err = PermissionError(
-                        "needs_approval: job paused awaiting human approval; "
-                        f"request {first.get('request_id', '')} "
-                        f"({first.get('operation', '')}); resolve via approvals "
-                        "then resume (fresh claim revalidates)."
-                    )
-                    err.approval_request_id = first.get("request_id", "")  # type: ignore[attr-defined]
-                    raise err
-                # A terminal non-completed typed outcome is a job failure, not
-                # an idle success: surface the outcome in the recorded error.
-                # Typed pauses are handled above and keep parking behavior.
-                outcome = str(getattr(response, "outcome", "completed") or "completed")
-                if outcome != "completed":
-                    raise RuntimeError(f"agent outcome: {outcome}")
-            finally:
-                # AH-AUDIT-026: shared owner-aware cleanup contract —
-                # bounded join, never closes injected/shared clients, never
-                # masks the primary outcome. Claim release runs in the
-                # outer run_due_once finally regardless.
-                # Consolidation shares the agent provider; join it (bounded)
-                # before any close so extraction never calls a closed client.
-                if agent is not None:
-                    try:
-                        await join_agent_background_tasks(agent)
-                    except Exception as _boundary_error:
-                        # Optional fallback preserves the primary outcome; report no payload.
-                        record_failure("scheduler._execute", _boundary_error)
-                if owns_provider:
-                    try:
-                        from machina.core.agent_factory import close_agent_provider
-
-                        await close_agent_provider(agent)
-                    except Exception as _boundary_error:
-                        # Optional fallback preserves the primary outcome; report no payload.
-                        record_failure("scheduler._execute", _boundary_error)
+            ),
+        )
+        # R12: keep the session claim alive for the whole effect lifetime
+        # (quarantine included), so a long or resistant run cannot outlive
+        # its claim while another turn starts on the same session. DB-less
+        # local claims never expire, so renewal is only armed for DB-backed
+        # claims (preserved from the former scheduler loop).
+        renewal = lifecycle.start(ownership_lost=ownership_lost, renew=db.connected)
+        if renewal is not None:
+            self._claim_leases.add(renewal)
+            renewal.add_done_callback(self._claim_leases.discard)
+        previous_owner: str | None = None
+        cancelled_while_joining = False
+        try:
+            if getattr(job, "no_agent", False):
+                await self._execute_no_agent_job(job)
+                return
+            prompt = job.prompt or DEFAULT_HEARTBEAT_PROMPT
+            # Build before the ownership re-check (mirrors the former order):
+            # a build that races loss is still closed by the same lifecycle.
+            await lifecycle.prepare(None)
+            # Check ownership loss before the (potentially long) agent run.
+            if ownership_lost is not None and ownership_lost.is_set():
+                raise RuntimeError("job ownership lost")
+            # H03: persist the job's selected identity before the run so
+            # the agent's durable ownership check accepts it. The original
+            # owner is restored in the finally block; this is a run-scoped
+            # override, never a permanent session mutation.
+            previous_owner = await self._reconcile_session_owner(job)
+            response = await lifecycle.run(prompt=prompt)
+            # Headless jobs never hang on hidden prompts (Phase E):
+            # AH-AUDIT-022: pause detection uses the typed
+            # AgentResponse.needs_approval outcome — never prose
+            # matching. A benign answer merely discussing approvals
+            # stays a success; a structured pause (even with arbitrary
+            # or empty text) pauses durably and frees worker/lease.
+            pauses = list(getattr(response, "needs_approval", None) or [])
+            if pauses:
+                first = pauses[0] if isinstance(pauses[0], dict) else {}
+                err = PermissionError(
+                    "needs_approval: job paused awaiting human approval; "
+                    f"request {first.get('request_id', '')} "
+                    f"({first.get('operation', '')}); resolve via approvals "
+                    "then resume (fresh claim revalidates)."
+                )
+                err.approval_request_id = first.get("request_id", "")  # type: ignore[attr-defined]
+                raise err
+            # A terminal non-completed typed outcome is a job failure, not
+            # an idle success: surface the outcome in the recorded error.
+            # Typed pauses are handled above and keep parking behavior.
+            outcome = str(getattr(response, "outcome", "completed") or "completed")
+            if outcome != "completed":
+                raise RuntimeError(f"agent outcome: {outcome}")
         finally:
-            cancelled_while_joining = False
             if previous_owner is not None:
                 try:
                     await self._restore_session_owner(job, previous_owner)
@@ -1165,24 +1136,19 @@ class JobRunner:
                     # The durable run already finished; report restoration
                     # failure without masking the primary outcome.
                     record_failure("scheduler.restore_session_owner", _boundary_error)
-            if claim_renewal is not None:
-                # Stop/join the claim renewal before releasing the claim itself
-                # (order mirrors the transports' engine cleanup).
-                claim_renewal.cancel()
-                try:
-                    await asyncio.gather(claim_renewal, return_exceptions=True)
-                except asyncio.CancelledError:
-                    # Cancelled while joining: no failure to report, and the
-                    # job-turn release below must still settle first.
-                    cancelled_while_joining = True
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("scheduler._execute", _boundary_error)
+            # AH-AUDIT-026: shared owner-aware cleanup — bounded join, never
+            # closes injected/shared clients, never masks the primary outcome.
+            # Claim release is part of the same engine tail and runs even when
+            # cancellation interrupts the join.
             try:
-                await _end_job_turn(job.session_id, job_turn)
-            except Exception as _boundary_error:
-                # Optional fallback preserves the primary outcome; report no payload.
-                record_failure("scheduler._execute", _boundary_error)
+                await lifecycle.close(
+                    cancelled=bool(ownership_lost is not None and ownership_lost.is_set())
+                )
+            except asyncio.CancelledError:
+                # Cancelled while joining: the release above already settled
+                # (engine close releases before joining renewal), so propagate
+                # only after the job bookkeeping is done.
+                cancelled_while_joining = True
             if cancelled_while_joining:
                 raise asyncio.CancelledError
 

@@ -248,11 +248,7 @@ def test_parse_plan_rejects_cycles_and_serial_parallel_plans() -> None:
             )
         )
     with pytest.raises(PlanError, match="fewer than two"):
-        parse_plan(
-            json.dumps(
-                {"tasks": [{"id": "only", "agent": "coder", "task": "do it"}]}
-            )
-        )
+        parse_plan(json.dumps({"tasks": [{"id": "only", "agent": "coder", "task": "do it"}]}))
 
 
 def test_fallback_plan_only_splits_clear_named_tracks() -> None:
@@ -369,7 +365,6 @@ async def test_auto_parallel_gate_plans_and_executes_without_model_tool_calls(mo
     assert captured["outcome"] == "completed"
     assert len(captured["tool_calls"]) == 2
     assert all(call["tool"] == "delegate" for call in captured["tool_calls"])
-
 
 
 @pytest.mark.asyncio

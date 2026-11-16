@@ -100,8 +100,8 @@ class Machina(BaseInstalledAgent):
             command=(
                 "set -e; "
                 "service postgresql start || pg_ctlcluster 16 main start; "
-                "su postgres -c \"psql -v ON_ERROR_STOP=1 -c "
-                "\\\"ALTER USER postgres PASSWORD 'postgres';\\\"\"; "
+                'su postgres -c "psql -v ON_ERROR_STOP=1 -c '
+                '\\"ALTER USER postgres PASSWORD \'postgres\';\\""; '
                 "su postgres -c 'createdb machina' 2>/dev/null || true"
             ),
             timeout_sec=300,

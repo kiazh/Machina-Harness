@@ -30,7 +30,7 @@ async def test_runtime_capabilities_are_available_before_database_initialization
         assert "workspace.documentChange" in result["methods"]
         assert result["engineVersion"]
         assert "desktop-test-token" not in json.dumps(result)
-        assert not gateway._db_ready
+        assert not gateway.db_ready
     finally:
         shell_jobs.listeners.discard(gateway._shell_listener)
 
@@ -49,6 +49,6 @@ async def test_runtime_capabilities_rejects_unauthenticated_requests(monkeypatch
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "runtime.capabilities", "params": {}})
         )
         assert frames[-1]["error"]["code"] == UNAUTHORIZED
-        assert not gateway._db_ready
+        assert not gateway.db_ready
     finally:
         shell_jobs.listeners.discard(gateway._shell_listener)

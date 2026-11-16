@@ -6,6 +6,7 @@ import base64
 from typing import Any
 
 from machina.core.models import ContextChunk, Session
+from machina.core.transcript import TranscriptProjector
 
 
 def json_safe_payload(value: Any) -> Any:
@@ -51,26 +52,19 @@ def session_to_dict(session: Session) -> dict[str, Any]:
 
 def history_from_chunks(chunks: list[ContextChunk]) -> list[dict[str, Any]]:
     """Turn stored context chunks (newest first) into a chronological transcript."""
+    projector = TranscriptProjector()
     history: list[dict[str, Any]] = []
     for chunk in reversed(chunks):
-        payload = chunk.payload
-        if chunk.chunk_type == "user_message":
-            history.append({"role": "user", "content": str(payload.get("content", ""))})
-        elif chunk.chunk_type == "assistant_message":
-            content = str(payload.get("content", ""))
-            if payload.get("interrupted"):
-                content += "\n[Interrupted reply]"
-            history.append({"role": "assistant", "content": content})
-        elif chunk.chunk_type == "tool_call":
-            history.append(
-                {
-                    "role": "tool",
-                    "tool": str(payload.get("tool", "")),
-                    "content": str(payload.get("result_preview", "")),
-                }
-            )
-        elif chunk.chunk_type == "compression_summary":
-            history.append({"role": "system", "content": str(payload.get("content", ""))})
+        turn = projector.chunk(chunk)
+        if turn is None:
+            continue
+        entry: dict[str, Any] = {
+            "role": turn.role,
+            "content": turn.render_content(),
+        }
+        if turn.tool is not None:
+            entry["tool"] = turn.tool.name
+        history.append(entry)
     return history
 
 

@@ -22,9 +22,7 @@ def test_directory_is_reported_as_not_a_file(tmp_path) -> None:
         loader.load(tmp_path)
 
 
-def test_fallback_permission_error_for_a_directory_is_not_a_file(
-    monkeypatch, tmp_path
-) -> None:
+def test_fallback_permission_error_for_a_directory_is_not_a_file(monkeypatch, tmp_path) -> None:
     directory = tmp_path / "directory"
     directory.mkdir()
     loader = FileLoader(base_dir=tmp_path)
@@ -35,9 +33,7 @@ def test_fallback_permission_error_for_a_directory_is_not_a_file(
         loader.load(directory)
 
 
-def test_fallback_permission_error_for_a_file_is_not_accessible(
-    monkeypatch, tmp_path
-) -> None:
+def test_fallback_permission_error_for_a_file_is_not_accessible(monkeypatch, tmp_path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("content", encoding="utf-8")
     loader = FileLoader(base_dir=tmp_path)

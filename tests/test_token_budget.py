@@ -102,9 +102,7 @@ async def test_agent_stops_before_a_continuation_after_budget(monkeypatch) -> No
         _schedule_memory_consolidation=lambda *args: None,
     )
 
-    response = await module.ReActAgent.run.__wrapped__(
-        agent, session.id, REPAIR, False
-    )
+    response = await module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
 
     assert response.outcome == "failed"
     assert "token budget" in response.content.lower()

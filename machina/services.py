@@ -83,19 +83,20 @@ async def _export_one_session(session: Session) -> str:
     replaced before rendering so raw transcripts never leak via
     session.export / /rpc. The stored chunks are unchanged.
     """
-    from machina.memory.redaction import redact_secrets as _redact
+    from machina.core.transcript import TranscriptProjector
 
+    projector = TranscriptProjector(redact=True, tool_name_default="unknown")
     chunks = await context_manager.get_transcript_chunks(session.id, include_embedding=False)
     # AH-AUDIT-012: title/goal are outward-facing export fields subject to
     # the same structured redaction policy as message content. Raw stored
     # conversation (DB chunks) is intentionally untouched.
     lines = [
-        f"# Session: {_redact(str(session.title or '(untitled)')).text}",
+        f"# Session: {projector.display(session.title or '(untitled)')}",
         "",
         f"**ID:** {session.id}",
         f"**Status:** {session.status}",
         f"**Agent:** {session.agent_id}",
-        f"**Goal:** {_redact(str(session.goal or '(none)')).text}",
+        f"**Goal:** {projector.display(session.goal or '(none)')}",
         f"**Created:** {session.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
         f"**Last Activity:** {session.last_activity.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
@@ -103,31 +104,25 @@ async def _export_one_session(session: Session) -> str:
         "",
     ]
     for chunk in reversed(chunks):
-        payload = chunk.payload
-        if chunk.chunk_type == "user_message":
-            lines += ["### User", "", _redact(str(payload.get("content", ""))).text, ""]
-        elif chunk.chunk_type == "assistant_message":
-            heading = (
-                "### Assistant (interrupted)" if payload.get("interrupted") else "### Assistant"
-            )
-            lines += [heading, "", _redact(str(payload.get("content", ""))).text, ""]
-        elif chunk.chunk_type == "compression_summary":
-            lines += [
-                "### Summary of earlier context",
-                "",
-                _redact(str(payload.get("content", ""))).text,
-                "",
-            ]
-        elif chunk.chunk_type == "tool_call":
-            lines.append(
-                f"**Tool:** `{_redact(str(payload.get('tool', 'unknown'))).text}({_redact(str(payload.get('args', {}))).text})`"
-            )
-            result = payload.get("result", payload.get("result_preview", ""))
-            if result:
-                lines.append(f"**Result:** {_redact(str(result)).text}")
-            if "result" not in payload:
+        turn = projector.chunk(chunk)
+        if turn is None:
+            continue
+        if turn.role == "user":
+            lines += ["### User", "", turn.content, ""]
+        elif turn.role == "assistant":
+            heading = "### Assistant (interrupted)" if turn.interrupted else "### Assistant"
+            lines += [heading, "", turn.content, ""]
+        elif turn.role == "system":
+            lines += ["### Summary of earlier context", "", turn.content, ""]
+        elif turn.role == "tool" and turn.tool is not None:
+            tool = turn.tool
+            detail = projector.tool_detail(chunk.payload)
+            lines.append(f"**Tool:** `{tool.name}({detail.args})`")
+            if detail.has_result:
+                lines.append(f"**Result:** {detail.result}")
+            if tool.preview_only:
                 lines.append("[Historical tool output: only a preview was stored.]")
-            elif payload.get("result_truncated"):
+            elif tool.truncated:
                 lines.append("[Tool output truncated at the storage limit of 65,536 characters.]")
             lines.append("")
     return "\n".join(lines)

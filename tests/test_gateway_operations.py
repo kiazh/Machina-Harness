@@ -25,7 +25,7 @@ async def gateway(monkeypatch):
     monkeypatch.setattr(session_manager, "get", get_session)
     frames = []
     gw = Gateway(frames.append, owns_db=False, runtime=RuntimeServices(), inherit_env_token=False)
-    gw._db_ready = True
+    gw.db_ready = True
     gw.test_sessions = sessions
     gw.test_frames = frames
     try:

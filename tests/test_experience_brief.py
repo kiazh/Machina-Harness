@@ -65,5 +65,9 @@ def test_aggregate_keeps_domain_counts_and_failure_evidence() -> None:
     assert coding["tool_failures"]["web_search"] == 1
     assert coding["strategies"]["verify"] > 1.0
     assert "Domain experience: coding; 2 observed episodes" in strategy_context(
-        {"domain": "coding", "strategy": "verify", "experience": build_experience_brief("coding", coding)}
+        {
+            "domain": "coding",
+            "strategy": "verify",
+            "experience": build_experience_brief("coding", coding),
+        }
     )

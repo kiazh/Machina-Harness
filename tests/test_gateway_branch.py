@@ -8,9 +8,7 @@ from machina.gateway.server import _git_branch
 def test_git_branch_reads_head_without_spawning_git(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / ".git" / "refs" / "heads").mkdir(parents=True)
-    (root / ".git" / "HEAD").write_text(
-        "ref: refs/heads/feature/instant-start\n", encoding="utf-8"
-    )
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/feature/instant-start\n", encoding="utf-8")
     monkeypatch.chdir(root)
 
     assert _git_branch() == "feature/instant-start"

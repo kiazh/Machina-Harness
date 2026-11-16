@@ -29,13 +29,15 @@ from machina.core.optimization.warmers.startup import schedule_startup_warmers
 from machina.core.provider import PROVIDERS
 from machina.core.runtime import RuntimeServices, runtime_services
 from machina.core.session import session_manager
+from machina.core.session_service import (
+    SessionCreateError,
+    SessionCreateSpec,
+    session_service,
+)
 from machina.core.turn_engine import (
     MAX_TOOL_RESULT_CHARS as MAX_TOOL_RESULT_CHARS,
 )
-from machina.core.turn_engine import (
-    TurnEngine,
-    TurnSpec,
-)
+from machina.core.turn_lifecycle import ApprovalPolicy, TurnLifecycle
 from machina.db.connection import db
 from machina.gateway import features
 from machina.gateway.errors import (  # noqa: F401 — re-exported for clients and tests
@@ -229,6 +231,9 @@ class Gateway:
         self._opened_session_id: uuid.UUID | None = None
         self.closing = False
         self._db_ready = False
+        # An explicit public readiness write opts an embedded gateway out of
+        # following the shared pool; callers that own no lifecycle use this.
+        self._db_ready_explicit = False
         self._job_runner = None
         self._warmers_task = None
         self._kiro_task = None
@@ -388,22 +393,58 @@ class Gateway:
             self._send_error(rid, INVALID_PARAMS, "params must be an object")
             return
 
+        method = message["method"]
+        logger.debug("→ %s (id=%s)", method, rid)
+        try:
+            result = await self._dispatch(method, params)
+        except RpcError as e:
+            logger.warning("← %s error %d (id=%s)", method, e.code, rid)
+            self._send_error(rid, e.code, e.message)
+            return
+        except Exception:  # defensive: _dispatch converts handler failures
+            logger.exception("Gateway method %s failed", method)
+            self._send_error(rid, INTERNAL_ERROR, "internal error")
+            return
+
+        logger.debug("← %s ok (id=%s)", method, rid)
+        if rid is not None:
+            self._write({"jsonrpc": "2.0", "id": rid, "result": result})
+
+    async def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        """Dispatch one method and return its real result.
+
+        This is the typed seam for in-process transports (the HTTP API) that
+        need the handler's result and typed ``RpcError`` failures without
+        synthesizing a JSON-RPC frame or capturing a response write.
+
+        The stdio transport keeps using :meth:`handle_message`; both paths
+        share :meth:`_dispatch` so auth, method lookup, instrumentation, and
+        error conversion cannot drift.
+        """
+        if not isinstance(method, str) or not method:
+            raise RpcError(INVALID_REQUEST, "invalid request")
+        call_params = {} if params is None else params
+        if not isinstance(call_params, dict):
+            raise RpcError(INVALID_PARAMS, "params must be an object")
+        # An embedded gateway borrows the application's pool; refresh from the
+        # live connection instead of trusting a construction-time snapshot.
+        self.refresh_db_readiness()
+        return await self._dispatch(method, call_params)
+
+    async def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        """Run one method, raising typed ``RpcError`` failures."""
         # Token-based authentication: reject all methods except initialize
         # if the gateway has a token set and the caller hasn't authenticated.
-        method = message["method"]
         if self._auth_token is not None and method != "initialize":
             if not self._token_ok(params.get("token")):
                 logger.warning("Unauthorized attempt: method=%s", method)
-                self._send_error(rid, UNAUTHORIZED, "unauthorized")
-                return
+                raise RpcError(UNAUTHORIZED, "unauthorized")
 
         handler = self._methods.get(method)
         if handler is None:
             logger.warning("Unknown method: %s", method)
-            self._send_error(rid, METHOD_NOT_FOUND, f"unknown method: {method}")
-            return
+            raise RpcError(METHOD_NOT_FOUND, f"unknown method: {method}")
 
-        logger.debug("→ %s (id=%s)", method, rid)
         raw_session_id = params.get("session_id") or params.get("sessionId")
         session_id = raw_session_id if isinstance(raw_session_id, str) else None
         try:
@@ -414,19 +455,13 @@ class Gateway:
                 transport=self._transport_label,
                 session_id=session_id,
             ):
-                result = await handler(params)
-        except RpcError as e:
-            logger.warning("← %s error %d (id=%s)", method, e.code, rid)
-            self._send_error(rid, e.code, e.message)
-            return
-        except Exception:  # never let a handler crash the gateway
+                return await handler(params)
+        except RpcError:
+            raise
+        except Exception as exc:  # never let a handler crash the gateway
             logger.exception("Gateway method %s failed", method)
-            self._send_error(rid, INTERNAL_ERROR, "internal error")
-            return
-
-        logger.debug("← %s ok (id=%s)", method, rid)
-        if rid is not None:
-            self._write({"jsonrpc": "2.0", "id": rid, "result": result})
+            # Sanitized client text: handler payloads stay in the server log.
+            raise RpcError(INTERNAL_ERROR, "internal error") from exc
 
     async def close(self, timeout: float = 10.0) -> None:
         """Cancel running turns, stop the job runner, release the DB pool.
@@ -540,6 +575,7 @@ class Gateway:
                 # Optional fallback preserves the primary outcome; report no payload.
                 record_failure("server.close", _boundary_error)
         self._db_ready = False
+        self._db_ready_explicit = False
 
     def _start_job_runner(self) -> None:
         """Run scheduled jobs in the background while the gateway is up.
@@ -571,8 +607,31 @@ class Gateway:
             return False
 
     # ─── helpers ─────────────────────────────────────────────────────────────
+    @property
+    def db_ready(self) -> bool:
+        """Whether database-backed methods may run (public readiness accessor)."""
+        return self._db_ready
+
+    @db_ready.setter
+    def db_ready(self, ready: bool) -> None:
+        self._db_ready = bool(ready)
+        self._db_ready_explicit = True
+
+    def refresh_db_readiness(self) -> bool:
+        """Refresh borrowed-DB readiness from the shared connection pool.
+
+        A gateway constructed with ``owns_db=False`` borrows the application's
+        pool. Its readiness must follow the live connection rather than a
+        construction-time snapshot. Owned gateways become ready through
+        ``initialize`` only, and an explicit public readiness write is left
+        untouched.
+        """
+        if not self._owns_db and not self._db_ready_explicit:
+            self._db_ready = db.connected
+        return self._db_ready
+
     def require_db(self) -> None:
-        if not self._db_ready:
+        if not self.db_ready:
             raise RpcError(DATABASE_UNAVAILABLE, "database not connected; call initialize first")
 
     async def get_session(self, params: dict[str, Any]) -> Session:
@@ -737,41 +796,20 @@ class Gateway:
         self.require_db()
         title = str(params.get("title") or "").strip()[:80] or "New session"
         agent_id = str(params.get("agent") or "harness").strip()[:100] or "harness"
-        from machina.core.agent_def import agent_registry
-        from machina.core.agent_factory import resolve_provider_model
-
-        definition = None
-        if agent_id != "harness":
-            # Fail fast on unknown agents (including profile scopes without
-            # a profile); the turn factory would otherwise fail closed later.
-            try:
-                definition = await agent_registry.get(agent_id)
-            except Exception as exc:
-                raise RpcError(INVALID_PARAMS, f"unknown agent: {agent_id}") from exc
-            if definition is None:
-                raise RpcError(INVALID_PARAMS, f"unknown agent: {agent_id}")
         async with self._config_lock:
             model, provider = self.model, self.provider
-        if agent_id == "harness":
-            try:
-                definition = await agent_registry.get(agent_id)
-            except Exception:
-                definition = None
-        provider, model = resolve_provider_model(
-            definition=definition, default_provider=provider, default_model=model
-        )
-        session = await session_manager.create(
-            title=title,
-            agent_id=agent_id,
-            model=model,
-            provider=provider,
-            context_budget=config.get("context_budget"),
-            **(
-                {"state": {"desktop_workspace_root": self._desktop_workspace_root}}
-                if getattr(self, "_desktop_workspace_root", None)
-                else {}
-            ),
-        )
+        try:
+            session = await session_service.create(
+                SessionCreateSpec(
+                    title=title,
+                    agent_id=agent_id,
+                    desktop_workspace_root=getattr(self, "_desktop_workspace_root", None),
+                    default_provider=provider,
+                    default_model=model,
+                )
+            )
+        except SessionCreateError as error:
+            raise RpcError(INVALID_PARAMS, error.message) from error
         self._opened_session_id = session.id
         try:
             from machina.gateway.features.mode import grant_full_default
@@ -870,11 +908,9 @@ class Gateway:
         # Shared coordinator claim (cross-transport owner token). The DB claim
         # fences same-process and REST/scheduler workers alike (N3, final pass:
         # the former `_turn_locks` in-process lock was declared but never
-        # acquired — removed). Fails closed on claim errors.
-        from machina.core.turns import try_begin_turn
-
+        # acquired - removed). Fails closed on claim errors.
         turn_id = uuid.uuid4().hex[:12]
-        token = await try_begin_turn(session.id, turn_id=turn_id)
+        token = await TurnLifecycle.acquire_claim(session.id, turn_id=turn_id)
         if not token:
             raise RpcError(TURN_IN_PROGRESS, "a turn is already running for this session")
         running = self._turns.get(key)
@@ -1064,7 +1100,7 @@ class Gateway:
         *,
         images: list[dict[str, str]] | None = None,
     ) -> None:
-        """Run one agent turn, translating agent stream events into protocol events."""
+        """Run one agent turn through the shared transport-neutral lifecycle."""
         sid = str(session_id)
         owned_token = self._turn_tokens.get(sid)
         registered_turn = self._turns.get(sid)
@@ -1106,59 +1142,9 @@ class Gateway:
                     _owned_task.cancel()
                 emit("turn.ownership_lost", reason=reason)
 
-        engine = TurnEngine(
-            TurnSpec(
-                session_id=session_id,
-                turn_id=turn_id,
-                token=owned_token,
-                text=text,
-                images=images,
-            ),
-            _TurnHooks(),
-            boundary="server._run_turn",
-            renew_interval_s=CLAIM_RENEW_INTERVAL_SECONDS,
-        )
-
-        def complete(cancelled: bool = False) -> None:
-            cancelled = cancelled or turn_id in self._cancel_requested
-            # AH-AUDIT-027: message.complete.text is the canonical complete
-            # answer — the fully-redacted final content exactly once (the
-            # engine owns the exactly-once withheld-tail flush and the token
-            # accounting; see TurnEngine.build_terminal).
-            # Exactly-once guard: quarantined timeout paths may emit a
-            # fallback completion; a late genuine completion is then a
-            # duplicate and is suppressed (first terminal event wins).
-            if turn_id in self._turn_finished:
-                return
-            self._turn_finished.add(turn_id)
-            final = engine.final
-            # S2 observe-only hook: close the turn span (never gates execution).
-            try:
-                from machina.observability.traces import end_turn as _trace_end_turn
-
-                if cancelled:
-                    _trace_end_turn(turn_id, status="cancelled", stop_reason="cancelled")
-                elif final is None:
-                    _trace_end_turn(turn_id, status="error", stop_reason="error")
-                else:
-                    _trace_end_turn(
-                        turn_id,
-                        status="ok",
-                        stop_reason=str(getattr(final, "outcome", "") or "completed"),
-                    )
-            except Exception:
-                pass
-            emit("message.complete", **engine.build_terminal(cancelled=cancelled))
-
-        emit("message.start")
-        agent = None
-        _cancelled = False
-        _release_failed = False
         # Phase E: human approval handler for this turn. Emits
         # permission.required and awaits the UI/HTTP resolve without holding
         # DB transactions — logical turn ownership is retained.
-        from machina.permissions.broker import set_approval_handler as _set_handler
-
         async def _turn_approver(card: dict) -> str:
             loop = asyncio.get_running_loop()
             fut: asyncio.Future[str] = loop.create_future()
@@ -1225,9 +1211,62 @@ class Gateway:
                 status=str(card.get("status") or "expired"),
             )
 
-        _set_handler(
-            _turn_approver, principal="tui", turn_id=turn_id, on_resolved=_approval_resolved
+        # The lifecycle owns approval registration, row construction, renewal,
+        # stream relay and the bounded cleanup/release tail. The gateway keeps
+        # only JSON-RPC serialization, the interactive approval card body, the
+        # loss frame, and terminal frame mapping.
+        lifecycle = TurnLifecycle(
+            session_id=session_id,
+            turn_id=turn_id,
+            token=owned_token,
+            text=text,
+            images=images,
+            boundary="server._run_turn",
+            renew_interval_s=CLAIM_RENEW_INTERVAL_SECONDS,
+            hooks=_TurnHooks(),
+            approval=ApprovalPolicy(
+                mode="interactive",
+                handler=_turn_approver,
+                principal="tui",
+                on_resolved=_approval_resolved,
+            ),
         )
+        engine = lifecycle.engine
+
+        def complete(cancelled: bool = False) -> None:
+            cancelled = cancelled or turn_id in self._cancel_requested
+            # AH-AUDIT-027: message.complete.text is the canonical complete
+            # answer — the fully-redacted final content exactly once (the
+            # engine owns the exactly-once withheld-tail flush and the token
+            # accounting; see TurnEngine.build_terminal).
+            # Exactly-once guard: quarantined timeout paths may emit a
+            # fallback completion; a late genuine completion is then a
+            # duplicate and is suppressed (first terminal event wins).
+            if turn_id in self._turn_finished:
+                return
+            self._turn_finished.add(turn_id)
+            final = lifecycle.final
+            # S2 observe-only hook: close the turn span (never gates execution).
+            try:
+                from machina.observability.traces import end_turn as _trace_end_turn
+
+                if cancelled:
+                    _trace_end_turn(turn_id, status="cancelled", stop_reason="cancelled")
+                elif final is None:
+                    _trace_end_turn(turn_id, status="error", stop_reason="error")
+                else:
+                    _trace_end_turn(
+                        turn_id,
+                        status="ok",
+                        stop_reason=str(getattr(final, "outcome", "") or "completed"),
+                    )
+            except Exception:
+                pass
+            emit("message.complete", **lifecycle.build_terminal(cancelled=cancelled))
+
+        emit("message.start")
+        _cancelled = False
+        _release_failed = False
         # Growth indicator: background training (consolidation wins, staged
         # reviews) surfaces as growth.status events on this turn's stream.
         from machina.core.agent import add_growth_listener, remove_growth_listener
@@ -1266,7 +1305,7 @@ class Gateway:
         # W2: the engine owns the renewal loop (shared W3 primitive) and adopts
         # this transport's loss event so readers here and the renewal primitive
         # share ONE signal; on_lost cancels owned work via _TurnHooks.
-        engine.start_renewal(ownership_lost=_ownership_lost)
+        lifecycle.start(ownership_lost=_ownership_lost)
         try:
             turn_scope_token = None
             try:
@@ -1277,7 +1316,7 @@ class Gateway:
                 # of a specialist child can no longer bypass its restrictions.
                 # AH-AUDIT-019: execution-critical read bypasses the display
                 # cache so resumed sessions run with current durable settings.
-                session = await session_manager.get_fresh(session_id)
+                session = await lifecycle.load_session(session_id)
                 if session is None:
                     # W1: no terminal here — the single outer finally below runs
                     # cleanup and emits message.complete after release.
@@ -1302,16 +1341,18 @@ class Gateway:
                     return
                 self._record_stage(turn_id, "building_agent", session_id=sid)
                 if self._agent_factory is _default_agent_factory:
-                    agent = await build_agent_for_session(session)
+                    agent = await lifecycle.prepare(session, builder=build_agent_for_session)
                 else:
                     # Explicit in-process dependency injection is trusted code,
                     # never a fallback after a default factory failure. Resolve
                     # stored session settings on this path too.
-                    agent = self._agent_factory(
-                        session.model or self.model, session.provider or self.provider
-                    )
+                    async def _build_injected(_session: Any) -> Any:
+                        return self._agent_factory(
+                            session.model or self.model, session.provider or self.provider
+                        )
+
+                    agent = await lifecycle.prepare(session, builder=_build_injected)
                 self._record_stage(turn_id, "waiting_for_provider", session_id=sid)
-                engine.attach(agent)
                 # R4-010: driver-owned turn scope — the context must be set
                 # before per-step tasks are created (see TurnEngine.stream).
                 turn_scope_token = begin_turn_scope()
@@ -1326,7 +1367,7 @@ class Gateway:
                     # W2: the shared engine owns boundary-safe streaming redaction,
                     # tool-call pairing/truncation, token accounting and final
                     # capture; this loop only serializes semantic events.
-                    async with aclosing(engine.stream()) as events:
+                    async with aclosing(lifecycle.stream()) as events:
                         async for turn_event in events:
                             if turn_event.kind == "delta":
                                 emit("message.delta", text=turn_event.payload["text"])
@@ -1359,9 +1400,8 @@ class Gateway:
                                     ),
                                 )
                             elif turn_event.kind == "needs_approval":
-                                # Stream pause markers are surfaced by SSE as typed
-                                # frames; the gateway emits approval cards through the
-                                # broker handler only (never twice).
+                                # The lifecycle's interactive policy suppresses
+                                # these markers; the broker handler emits the card.
                                 continue
                             elif turn_event.kind == "usage":
                                 self._turn_progress[turn_id] = {
@@ -1381,7 +1421,7 @@ class Gateway:
                                     usage_payload["creditsUsed"] = credits_used
                                 emit("usage", **usage_payload)
                             elif turn_event.kind == "done":
-                                final_response = engine.final
+                                final_response = lifecycle.final
                                 self._turn_progress[turn_id] = {
                                     "tokens": (
                                         getattr(final_response, "tokens_used", 0) or engine.tokens
@@ -1420,22 +1460,16 @@ class Gateway:
             finally:
                 if turn_scope_token is not None:
                     end_turn_scope(turn_scope_token)
-                # Release the approval handler and cancel any still-pending
-                # approval waits (cancellation stops owned waits, not siblings).
-                try:
-                    from machina.permissions.broker import set_approval_handler as _clear
-
-                    _clear(None)
-                except Exception as _boundary_error:
-                    # Optional fallback preserves the primary outcome; report no payload.
-                    record_failure("server._run_turn", _boundary_error)
-                self.cancel_turn_approvals(turn_id)
                 # H-01/H-02: the bounded cleanup contract is owned by the
-                # engine: join optional work -> provider close -> stop renewal
-                # -> shielded bounded claim release -> join renewal. Ordinary
-                # failures are reported inside close() and returned here.
+                # lifecycle/engine: clear the approval handler (and cancel any
+                # still-pending approval waits), join optional work -> provider
+                # close -> stop renewal -> shielded bounded claim release ->
+                # join renewal. Ordinary failures are reported inside close().
                 try:
-                    close = await engine.close(cancelled=_cancelled)
+                    close = await lifecycle.close(
+                        cancelled=_cancelled,
+                        on_closing=lambda: self.cancel_turn_approvals(turn_id),
+                    )
                     _release_failed = close.release_failed
                 finally:
                     # Owner-token bookkeeping stays adapter-side: clear it only
@@ -1469,7 +1503,7 @@ class Gateway:
                     # exactly once (also when prior deltas were emitted and
                     # when the whole answer was withheld).
                     try:
-                        _tail = engine.flush_tail()
+                        _tail = lifecycle.flush_tail()
                         if _tail:
                             emit("message.delta", text=_tail)
                     except Exception as _boundary_error:
@@ -1497,7 +1531,7 @@ class Gateway:
         # with the shared runtime so shutdown cancels/joins it before DB
         # closure instead of leaking a use-after-close call.
         self._record_stage(turn_id, "compaction_maintenance", session_id=sid)
-        engine.schedule_auto_compact()
+        lifecycle.schedule_auto_compact()
 
     async def _run_turn_with_timeout(
         self,

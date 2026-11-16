@@ -46,8 +46,7 @@ def test_concurrent_state_writers_keep_all_keys(monkeypatch, tmp_path) -> None:
             errors.append(exc)
 
     threads = [
-        threading.Thread(target=writer, args=(key,))
-        for key in ("opencode", "codex", "hermes")
+        threading.Thread(target=writer, args=(key,)) for key in ("opencode", "codex", "hermes")
     ]
     for thread in threads:
         thread.start()
@@ -95,9 +94,7 @@ def test_sentinel_write_race_is_tolerated_when_the_byte_exists(monkeypatch, tmp_
 def test_sentinel_race_reraises_when_the_byte_is_absent(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(interop.STATE_ENV_OVERRIDE, str(tmp_path / "interop.json"))
 
-    monkeypatch.setattr(
-        interop.os, "fstat", lambda fd: types.SimpleNamespace(st_size=0)
-    )
+    monkeypatch.setattr(interop.os, "fstat", lambda fd: types.SimpleNamespace(st_size=0))
     monkeypatch.setattr(
         interop.os,
         "write",

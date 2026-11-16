@@ -20,13 +20,20 @@ delegate to:
   resistant work defers resource/claim release until retirement), join
   optional background work, close the owned provider, stop renewal, shielded
   bounded claim release, join renewal.
+- :meth:`TurnEngine.run` drives the attached agent's non-streaming ``run``
+  (scheduler jobs), capturing the terminal response in the same slot as a
+  stream ``done`` event.
 
-What deliberately stays in the transports: claim *begin* (timing and error
-surfaces differ), frame serialization (JSON-RPC notifications vs SSE data
-lines), the approval policy (interactive handler vs headless resume), the
-cancel/timeout supervisors, tracing, and growth listeners. Transport-specific
-effects plug in through :class:`TurnHooks`; diagnostics keys are namespaced by
-the ``boundary`` string passed at construction (e.g. ``server._run_turn`` or
+The transport-neutral lifecycle around this engine lives in
+:mod:`machina.core.turn_lifecycle` (claim, session load, agent build, approval
+handler, renewal, relay, cleanup). What deliberately stays in the transports:
+frame serialization (JSON-RPC notifications vs SSE data lines), terminal frame
+mapping, the cancel/timeout supervisors, tracing, and growth listeners.
+``emit_pause_markers`` keeps the one legitimate approval divergence explicit:
+interactive transports surface cards through their approval handler, headless
+transports relay the typed stream marker. Transport-specific effects plug in
+through :class:`TurnHooks`; diagnostics keys are namespaced by the ``boundary``
+string passed at construction (e.g. ``server._run_turn`` or
 ``app.create_app``) and are never hardcoded here.
 
 Deliberate semantics mirrored from the audited transports:
@@ -173,6 +180,7 @@ class TurnEngine:
         renewal_join_timeout_s: float = 5.0,
         source_close_timeout_s: float = 5.0,
         max_tool_result_chars: int = MAX_TOOL_RESULT_CHARS,
+        emit_pause_markers: bool = True,
     ) -> None:
         self.spec = spec
         self._hooks: TurnHooks = hooks if hooks is not None else _NullHooks()
@@ -184,6 +192,7 @@ class TurnEngine:
         self._renewal_join_timeout_s = renewal_join_timeout_s
         self._source_close_timeout_s = source_close_timeout_s
         self._max_tool_result_chars = max_tool_result_chars
+        self._emit_pause_markers = emit_pause_markers
         self._agent: Any | None = None
         self._source: Any | None = None
         self._source_task: asyncio.Task | None = None
@@ -341,6 +350,23 @@ class TurnEngine:
         finally:
             await self._close_source()
 
+    async def run(self, *, prompt: str | None = None) -> Any:
+        """Drive the attached agent's non-streaming ``run`` and capture it.
+
+        Scheduler jobs use this path: same claim/renewal/cleanup/terminal
+        accounting as the streaming transports, without a synthetic stream.
+        Cancellation and timeouts remain the caller's supervisor concern.
+        """
+        agent = self._agent
+        if agent is None:
+            raise RuntimeError("TurnEngine.attach(agent) must be called before run()")
+        self._final = await agent.run(
+            self.spec.session_id,
+            self.spec.text if prompt is None else prompt,
+            verbose=self.spec.verbose,
+        )
+        return self._final
+
     async def _close_source(self) -> bool:
         """Bound the caller's wait without treating cancellation as retirement.
 
@@ -488,9 +514,12 @@ class TurnEngine:
                 },
             )
         if event_type == "needs_approval":
-            # Typed pause marker (AH-AUDIT-030). SSE forwards it as a typed
-            # frame; the gateway surfaces pauses through its approval handler
-            # and ignores these stream markers.
+            # Typed pause marker (AH-AUDIT-030). Headless transports forward
+            # it as a typed frame; interactive transports surface pauses
+            # through their approval handler instead, so the marker is
+            # suppressed here (one explicit policy, never two mappings).
+            if not self._emit_pause_markers:
+                return None
             return TurnEvent(
                 "needs_approval",
                 {

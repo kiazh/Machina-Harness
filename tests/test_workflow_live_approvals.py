@@ -167,7 +167,7 @@ async def workflow(monkeypatch, tmp_path):
     gateway = Gateway(
         frames.append, owns_db=False, runtime=RuntimeServices(), inherit_env_token=False
     )
-    gateway._db_ready = True
+    gateway.db_ready = True
     fixture = SimpleNamespace(
         gateway=gateway,
         parent=parent,
@@ -422,8 +422,7 @@ async def test_parallel_review_budget_counts_escaped_wire_bytes_and_rejects_only
     waiting = await snapshot_until(
         workflow,
         operation,
-        lambda value: len(store._mem.approvals) == 2
-        and len(value.get("approvals", [])) == 1,
+        lambda value: len(store._mem.approvals) == 2 and len(value.get("approvals", [])) == 1,
     )
     assert len(waiting.get("approvals", [])) == 1
     assert (

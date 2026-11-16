@@ -273,9 +273,7 @@ async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
         _schedule_memory_consolidation=lambda *args: None,
     )
 
-    response = await module.ReActAgent.run.__wrapped__(
-        agent, session.id, REPAIR, False
-    )
+    response = await module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
 
     assert response.outcome == "failed"
     assert "turn limit" in response.content.lower()

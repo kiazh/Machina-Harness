@@ -1,9 +1,9 @@
-"""Generic JSON-RPC dispatch endpoint (moved verbatim from app.py).
+"""Generic JSON-RPC dispatch endpoint.
 
-The only change from the original is mechanical: the handler reads the
-shared ``_RpcGateway`` from ``request.app.state`` instead of the ``create_app``
-closure, so the route can live on an APIRouter. Path, auth, and shapes are
-unchanged.
+The handler reads the shared embedded ``Gateway`` from ``request.app.state``
+and calls its typed ``Gateway.call`` seam. The route owns the HTTP envelope
+(auth, response shape, error mapping) only; it never parses or synthesizes
+JSON-RPC frames.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ async def rpc_dispatch(req: RpcRequest, request: Request) -> dict[str, Any]:
     """
     if req.method in {"prompt.submit", "prompt.cancel", "shutdown"}:
         raise HTTPException(400, "use the session prompt stream for turns")
-    gw = getattr(request.app.state, "_rpc_gateway", None)
+    gw = getattr(request.app.state, "gateway", None)
     if gw is None:
         raise HTTPException(503, "RPC gateway not initialized")
     try:

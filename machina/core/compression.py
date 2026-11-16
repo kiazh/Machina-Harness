@@ -9,8 +9,6 @@ Automatic compaction triggers live in machina.services.maybe_auto_compact.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import copy
 import logging
 import uuid
@@ -92,24 +90,6 @@ def _checkpoint_chunk(
     )
 
 
-def _run_awaitable(awaitable: Any) -> Any:
-    """Run *awaitable* to completion from synchronous code.
-
-    ``ContextCompressor.compress`` is synchronous, but its optional LLM
-    summarization step is a coroutine. A bare ``asyncio.run`` raises
-    "asyncio.run() cannot be called from a running event loop" whenever
-    ``compress()`` is invoked from async code (the CLI does exactly that).
-    Use ``asyncio.run`` when no loop is running; otherwise execute the
-    coroutine on a dedicated worker thread that owns its own event loop.
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(awaitable)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(asyncio.run, awaitable).result()
-
-
 @dataclass
 class CompressionConfig:
     """Configuration for context compression.
@@ -166,7 +146,7 @@ class ContextCompressor:
         chunks: list[ContextChunk],
         checkpoint: dict[str, Any] | None,
     ) -> CompressionResult | tuple[list[ContextChunk], list[ContextChunk], dict | None, int]:
-        """Shared preamble of :meth:`compress` and :meth:`acompress`.
+        """Shared preamble of :meth:`acompress`.
 
         Returns a short-circuit :class:`CompressionResult` for the empty and
         nothing-to-compress cases, else the ``(recent, old, checkpoint,
@@ -206,34 +186,6 @@ class ContextCompressor:
         recent_chunks, old_chunks = self._split_preserve_recent(chunks, preserve_count)
         return (recent_chunks, old_chunks, checked_checkpoint, original_tokens)
 
-    def _compress_old(
-        self,
-        old_chunks: list[ContextChunk],
-        session_id: uuid.UUID,
-        agent_id: str,
-        summarizer: Any,
-    ) -> tuple[list[ContextChunk], str]:
-        """Compress *old_chunks* via the sync path (LLM + fallback ladder).
-
-        *summarizer* is a zero-arg callable running ``_llm_summarize``
-        through the thread-pool bridge; on failure the shared
-        :meth:`_truncate_old` ladder below applies.
-        """
-        try:
-            compressed = summarizer()
-            method = "llm_summarize"
-        except Exception as exc:
-            record_failure("compression.llm_summarize", exc)
-            try:
-                compressed = self._truncate_compress(old_chunks, session_id, agent_id)
-                method = "truncate"
-            except Exception as exc:
-                # If all compression fails, preserve original chunks to avoid context loss
-                record_failure("compression.truncate", exc)
-                compressed = old_chunks
-                method = "none"
-        return compressed, method
-
     def _truncate_old(
         self,
         old_chunks: list[ContextChunk],
@@ -251,61 +203,6 @@ class ContextCompressor:
             method = "none"
         return compressed, method
 
-    def compress(
-        self,
-        chunks: list[ContextChunk],
-        session_id: uuid.UUID,
-        agent_id: str,
-        llm_provider: Any = None,
-        checkpoint: dict[str, Any] | None = None,
-    ) -> CompressionResult:
-        """Compress a list of context chunks.
-
-        Strategy:
-        1. Identify tool_call/result pairs and keep them together
-        2. Preserve the most recent N chunks uncompressed
-        3. Compress older chunks using LLM summarization or truncation
-        4. Return the compressed chunk list
-
-        Sync compatibility: when called without a running event loop this
-        runs summarization inline; when called from async code prefer
-        :meth:`acompress` which awaits directly without blocking the loop
-        (AH-011).
-
-        When *checkpoint* is given it is validated (incomplete rejected)
-        and persisted alongside the free-form summary.
-        """
-        plan = self._plan_compression(chunks, checkpoint)
-        if isinstance(plan, CompressionResult):
-            return plan
-        recent_chunks, old_chunks, checked_checkpoint, original_tokens = plan
-
-        # Compress old chunks
-        if self.config.llm_summarize and llm_provider is not None:
-            compressed, method = self._compress_old(
-                old_chunks,
-                session_id,
-                agent_id,
-                lambda: _run_awaitable(
-                    self._llm_summarize(
-                        old_chunks, session_id, agent_id, llm_provider, checked_checkpoint
-                    )
-                ),
-            )
-        else:
-            compressed, method = self._truncate_old(old_chunks, session_id, agent_id)
-
-        return self._finalize_result(
-            compressed,
-            recent_chunks,
-            old_chunks,
-            session_id,
-            agent_id,
-            checked_checkpoint,
-            method,
-            original_tokens,
-        )
-
     async def acompress(
         self,
         chunks: list[ContextChunk],
@@ -314,10 +211,17 @@ class ContextCompressor:
         llm_provider: Any = None,
         checkpoint: dict[str, Any] | None = None,
     ) -> CompressionResult:
-        """Async compression (AH-011): awaits LLM summarization directly.
+        """Compress a list of context chunks (AH-011).
 
-        Same contract as :meth:`compress` but never blocks the event loop
-        with ``Future.result()`` on a worker thread.
+        Strategy:
+        1. Identify tool_call/result pairs and keep them together
+        2. Preserve the most recent N chunks uncompressed
+        3. Compress older chunks using LLM summarization or truncation
+        4. Return the compressed chunk list
+
+        Awaits LLM summarization directly and never blocks the event loop.
+        When *checkpoint* is given it is validated (incomplete rejected)
+        and persisted alongside the free-form summary.
         """
         plan = self._plan_compression(chunks, checkpoint)
         if isinstance(plan, CompressionResult):
@@ -358,9 +262,9 @@ class ContextCompressor:
     ) -> CompressionResult:
         """Combine compressed old chunks with preserved recent chunks.
 
-        Shared tail of :meth:`compress` and :meth:`acompress`: prepends the
-        validated checkpoint chunk on non-LLM paths, then computes token totals
-        and the compression ratio.
+        Shared tail of :meth:`acompress`: prepends the validated checkpoint
+        chunk on non-LLM paths, then computes token totals and the compression
+        ratio.
         """
         all_compressed = compressed + recent_chunks
         if checked_checkpoint is not None and method != "llm_summarize":

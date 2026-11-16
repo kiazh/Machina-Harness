@@ -29,7 +29,7 @@ SEAMS: tuple[tuple[str, str, str, str, str], ...] = (
         "gateway",
         "rpc",
         "machina.gateway.server",
-        "Gateway.handle_message",
+        "Gateway._dispatch",
         "instrument",
     ),
     (
@@ -63,6 +63,13 @@ SEAMS: tuple[tuple[str, str, str, str, str], ...] = (
     (
         "memory",
         "retrieve_by_embedding",
+        "machina.memory.retriever",
+        "MemoryRetriever",
+        "instrumented",
+    ),
+    (
+        "memory",
+        "retrieve_digest",
         "machina.memory.retriever",
         "MemoryRetriever",
         "instrumented",

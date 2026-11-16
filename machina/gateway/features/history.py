@@ -21,12 +21,11 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-import msgpack
-
+from machina.core.transcript import TranscriptProjector, decode_payload, truncate_utf8
 from machina.db.lazy import LazyDb
 from machina.gateway.errors import INVALID_PARAMS, RpcError
 from machina.gateway.features._common import _int, _uuid
-from machina.memory.redaction import StreamingSecretRedactor, redact_secrets
+from machina.memory.redaction import StreamingSecretRedactor
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -40,12 +39,7 @@ MAX_CONTENT_BYTES = 32 * 1024
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_CURSOR_CHARS = 2048
 _CURSOR_KEY = secrets.token_bytes(32)
-_ROLES = {
-    "user_message": "user",
-    "assistant_message": "assistant",
-    "tool_call": "tool",
-    "compression_summary": "system",
-}
+_PROJECTOR = TranscriptProjector()
 
 # Dedupe only metadata before LIMIT. Payloads (and never embeddings) are
 # fetched for at most MAX_BATCH_ROWS + 1 candidates, each capped in SQL.
@@ -168,20 +162,15 @@ def _entry(row: Any) -> tuple[dict[str, Any], str, bool]:
     truncated = bool(row["oversized"])
     payload: dict[str, Any] = {}
     if not truncated:
-        try:
-            decoded = msgpack.unpackb(row["payload_msgpack"], raw=False)
-            if not isinstance(decoded, dict):
-                raise ValueError
-            payload = decoded
-        except (ValueError, TypeError, msgpack.UnpackException):
+        decoded = decode_payload(row["payload_msgpack"])
+        if decoded is None:
             truncated = True
+        else:
+            payload = decoded
     kind = row["chunk_type"]
-    content = str(
-        payload.get("result_preview", "") if kind == "tool_call" else payload.get("content", "")
-    )
-    if kind == "assistant_message" and payload.get("interrupted"):
-        content += "\n[Interrupted reply]"
-    tool = str(payload.get("tool", "")) if kind == "tool_call" else None
+    turn = _PROJECTOR.turn(kind, payload)
+    content = turn.render_content()
+    tool = turn.tool.name if turn.tool is not None else None
     search = "\n".join(part for part in (tool, content) if part).lower()
     search_complete = not truncated
     if truncated:
@@ -197,19 +186,17 @@ def _entry(row: Any) -> tuple[dict[str, Any], str, bool]:
             content = (
                 "[Message too large to display]" if row["oversized"] else "[Message unavailable]"
             )
-    content = redact_secrets(content).text
-    encoded = content.encode("utf-8")
-    if len(encoded) > MAX_CONTENT_BYTES:
-        content = encoded[:MAX_CONTENT_BYTES].decode("utf-8", errors="ignore")
-        truncated = True
+    content = _PROJECTOR.redacted(content)
+    content, capped = truncate_utf8(content, MAX_CONTENT_BYTES)
+    truncated = truncated or capped
     entry: dict[str, Any] = {
         "id": str(row["id"]),
-        "role": _ROLES[kind],
+        "role": turn.role,
         "content": content,
         "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
     }
     if tool is not None:
-        entry["tool"] = redact_secrets(tool).text[:256]
+        entry["tool"] = _PROJECTOR.redacted(tool)[:256]
     if truncated:
         entry["truncated"] = True
     return entry, search, search_complete

@@ -91,9 +91,7 @@ async def test_opencode_session_models_use_entitlement_list(monkeypatch) -> None
         "available_models",
         lambda force=False: ("opencode/big-pickle", "deepseek/deepseek-flash"),
     )
-    payload = await providers_feature._opencode_session_models(
-        "opencode_session", False
-    )
+    payload = await providers_feature._opencode_session_models("opencode_session", False)
 
     assert payload["source"] == "opencode-models"
     assert [model["id"] for model in payload["models"]] == [

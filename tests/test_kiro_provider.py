@@ -387,6 +387,7 @@ def test_readiness_checks_the_proxy_not_a_kiro_api_key(monkeypatch) -> None:
     assert up["chat_provider"] == "ready"
     assert up["chat_provider_reason"] == ""
 
+
 @pytest.mark.asyncio
 async def test_kiro_402_is_a_typed_usage_limit_error(monkeypatch) -> None:
     def respond(_request: httpx.Request) -> httpx.Response:
@@ -415,6 +416,7 @@ async def test_kiro_402_is_a_typed_usage_limit_error(monkeypatch) -> None:
         await provider.close()
 
     assert "Kiro usage limit reached" in str(caught.value)
+
 
 def test_turn_usage_event_carries_kiro_context_fields() -> None:
     from machina.core.models import StreamEvent

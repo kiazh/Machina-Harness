@@ -1127,10 +1127,11 @@ def provider_messages_to_units(
     Unit ids are ``m{index}`` over the absolute message position, so
     append-only history keeps stable identities between candidate and final
     projections. Callers annotate protection, artifact handles, kinds and
-    retrieval priorities by index. Each unit also captures its original
-    mapping (deep-copied) as ``unit.raw``, so a fitting plan replays
-    unmodified messages verbatim and nothing outside the modeled fields is
-    erased (MCH-004).
+    retrieval priorities by index. Each unit captures its original mapping as
+    ``unit.raw`` with one deep copy per message; ``tool_calls`` and
+    ``native_blocks`` are derived from that captured copy, so a fitting plan
+    replays unmodified messages verbatim and nothing outside the modeled
+    fields is erased (MCH-004) without copying the same payload three times.
     """
     protected = set(protected_indexes)
     handles = artifact_handles or {}
@@ -1138,24 +1139,27 @@ def provider_messages_to_units(
     priority_map = priorities or {}
     units: list[ProjectionMessage] = []
     for index, message in enumerate(messages):
-        call_payload = message.get("tool_calls") or ()
-        has_native = bool(native_key) and message.get(native_key) is not None
+        # Capture the whole canonical mapping verbatim (deep-copied at capture
+        # time) so rendering can replay it unchanged (MCH-004). Everything
+        # else is derived from this isolated copy; callers' payloads are never
+        # aliased (C16).
+        raw = copy.deepcopy(dict(message))
+        call_payload = raw.get("tool_calls") or ()
+        has_native = bool(native_key) and raw.get(native_key) is not None
         units.append(
             ProjectionMessage(
                 unit_id=f"m{index}",
-                role=str(message.get("role") or ""),
-                content=message.get("content", ""),
-                tool_calls=tuple(copy.deepcopy(dict(tool_call)) for tool_call in call_payload),
-                tool_call_id=message.get("tool_call_id"),
+                role=str(raw.get("role") or ""),
+                content=raw.get("content", ""),
+                tool_calls=tuple(call_payload),
+                tool_call_id=raw.get("tool_call_id"),
                 protected=index in protected,
                 kind=str(kind_map.get(index, "history")),
                 artifact_handle=handles.get(index),
                 priority=int(priority_map.get(index, 0)),
-                native_blocks=copy.deepcopy(message.get(native_key)) if has_native else None,
+                native_blocks=raw.get(native_key) if has_native else None,
                 native_key=str(native_key) if has_native else None,
-                # Capture the whole canonical mapping verbatim (deep-copied at
-                # capture time) so rendering can replay it unchanged (MCH-004).
-                raw=copy.deepcopy(dict(message)),
+                raw=raw,
             )
         )
     return tuple(units)

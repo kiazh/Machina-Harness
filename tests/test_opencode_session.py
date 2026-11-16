@@ -56,9 +56,7 @@ def test_available_models_uses_entitlement_list(monkeypatch) -> None:
     monkeypatch.setattr(
         bridge.subprocess,
         "run",
-        lambda *a, **k: SimpleNamespace(
-            stdout="deepseek/deepseek-flash\nopencode/big-pickle\n"
-        ),
+        lambda *a, **k: SimpleNamespace(stdout="deepseek/deepseek-flash\nopencode/big-pickle\n"),
     )
 
     assert bridge.available_models(force=True) == (
