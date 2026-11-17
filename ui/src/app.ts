@@ -2037,7 +2037,9 @@ export class App implements FeatureHost {
 		}
 		const integration = this.integration;
 		const explorerKey =
-			this.keybindings.matches(data, "explorer") || this.keybindings.matches(data, "explorerAlt");
+			this.keybindings.matches(data, "explorer") ||
+			this.keybindings.matches(data, "explorerAlt") ||
+			this.keybindings.matches(data, "explorerSafe");
 		if (explorerKey && (!integration || this.workspaceUnsupported || !this.workspaceLayoutActive)) {
 			this.print(
 				this.workspaceUnsupported
@@ -2389,7 +2391,8 @@ export class App implements FeatureHost {
 		// documented; /explorer and the palette remain the fallback).
 		if (
 			this.keybindings.matches(data, "explorer") ||
-			this.keybindings.matches(data, "explorerAlt")
+			this.keybindings.matches(data, "explorerAlt") ||
+			this.keybindings.matches(data, "explorerSafe")
 		) {
 			this.workspaceSurface?.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };

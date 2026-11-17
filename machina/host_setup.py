@@ -99,6 +99,9 @@ class _SetupOperation:
 
 _operations: dict[str, _SetupOperation] = {}
 _operations_lock = threading.Lock()
+_ssh_firewall_cache: tuple[float, bool] | None = None
+_ssh_firewall_lock = threading.Lock()
+_SSH_FIREWALL_CACHE_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -1178,20 +1181,28 @@ def _ensure_serve(op: _SetupOperation, port: int) -> None:
     )
 
 
-def _ssh_firewall_ready() -> bool:
+def _ssh_firewall_ready(*, refresh: bool = False) -> bool:
+    global _ssh_firewall_cache
+    now = time.monotonic()
+    with _ssh_firewall_lock:
+        cached = _ssh_firewall_cache
+    if not refresh and cached is not None and now - cached[0] < _SSH_FIREWALL_CACHE_SECONDS:
+        return cached[1]
     powershell = _powershell_exe()
     if not powershell:
         return False
     script = (
         "$sshd = (Get-Service sshd -ErrorAction SilentlyContinue).Status; "
-        "$broad = (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' "
-        "-ErrorAction SilentlyContinue).Enabled; "
-        "$other = @(Get-NetFirewallRule -DisplayName 'OpenSSH' -ErrorAction SilentlyContinue "
-        "| Where-Object { $_.Enabled -eq 'True' }).Count; "
-        "$tail = (Get-NetFirewallRule -Name 'sshd-tailscale' "
-        "-ErrorAction SilentlyContinue).Enabled; "
-        "$ts = @(Get-NetFirewallRule -DisplayName 'Tailscale-In*' "
-        "-ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' }).Count; "
+        "$named = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP','sshd-tailscale' "
+        "-ErrorAction SilentlyContinue; "
+        "$displayed = Get-NetFirewallRule -DisplayName 'OpenSSH','Tailscale-In*' "
+        "-ErrorAction SilentlyContinue; "
+        "$broad = ($named | Where-Object Name -eq 'OpenSSH-Server-In-TCP').Enabled; "
+        "$tail = ($named | Where-Object Name -eq 'sshd-tailscale').Enabled; "
+        "$other = @($displayed | Where-Object DisplayName -eq 'OpenSSH' "
+        "| Where-Object Enabled -eq 'True').Count; "
+        "$ts = @($displayed | Where-Object DisplayName -like 'Tailscale-In*' "
+        "| Where-Object Enabled -eq 'True').Count; "
         "if ($sshd -eq 'Running' -and $broad -ne 'True' -and $other -eq 0 "
         "-and ($tail -eq 'True' -or $ts -gt 0)) "
         "{ 'ready' } else { 'not-ready' }"
@@ -1199,8 +1210,19 @@ def _ssh_firewall_ready() -> bool:
     try:
         completed = _run([powershell, "-NoProfile", "-Command", script], timeout=20)
     except HostSetupError:
+        with _ssh_firewall_lock:
+            _ssh_firewall_cache = (time.monotonic(), False)
         return False
-    return completed.returncode == 0 and "ready" in completed.stdout.split()
+    value = completed.returncode == 0 and "ready" in completed.stdout.split()
+    with _ssh_firewall_lock:
+        _ssh_firewall_cache = (time.monotonic(), value)
+    return value
+
+
+def _invalidate_ssh_firewall_cache() -> None:
+    global _ssh_firewall_cache
+    with _ssh_firewall_lock:
+        _ssh_firewall_cache = None
 
 
 def _ensure_ssh(op: _SetupOperation) -> None:
@@ -1236,6 +1258,7 @@ Set-NetFirewallRule -Name 'sshd' -Enabled False -ErrorAction SilentlyContinue
 """,
         timeout=300,
     )
+    _invalidate_ssh_firewall_cache()
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if op.cancelled.is_set():

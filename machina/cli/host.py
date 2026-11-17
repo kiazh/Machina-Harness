@@ -195,7 +195,7 @@ def attach() -> None:
         output.error("tmux is not installed.", "Install tmux, then run `machina host start`.")
         raise typer.Exit(1)
     completed = subprocess.run(
-        [tmux, "has-session", "-t", session],
+        [tmux, "has-session", "-t", f"={session}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -206,7 +206,7 @@ def attach() -> None:
             "Run `machina host start` first.",
         )
         raise typer.Exit(1)
-    os.execvp(tmux, [tmux, "attach-session", "-t", session])
+    os.execvp(tmux, [tmux, "attach-session", "-t", f"={session}"])
 
 
 @host_app.command("stop")

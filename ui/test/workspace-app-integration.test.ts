@@ -876,8 +876,8 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	internals(app).shell.onWorkspaceExplorerToggle?.();
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the grip reopens it");
 	assert.ok(internals(app).workspaceLayout?.explorer, "the drawer docks again");
-	// Ctrl+T keeps its behavior alongside the grip; Ctrl+N then T is the
-	// fallback when a terminal captures Ctrl+T.
+	// Ctrl+T keeps its behavior alongside the grip; Ctrl+Shift+E is the
+	// browser-safe alias and Ctrl+N then T the terminal fallback.
 	tui.press("\x14");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+T still toggles");
 	tui.press("\x14");
@@ -886,6 +886,12 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+N T toggles");
 	pressGuide(tui, "t");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "Ctrl+N T reopens it");
+	// Ctrl+Shift+E is the browser-safe alias: Chrome/Edge reserve Ctrl+T
+	// before the page can forward it. It arrives as a Kitty CSI-u sequence.
+	tui.press("\x1b[69;6u");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+Shift+E toggles");
+	tui.press("\x1b[69;6u");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true);
 	await app.exit();
 });
 
@@ -1742,7 +1748,7 @@ test("footer workspace hints appear with a live workspace and clear on close", a
 	await app.start();
 	await waitForWorkspace(app);
 	const footer = (app as unknown as { footer: { workspaceHints: string } }).footer;
-	assert.equal(footer.workspaceHints, "Ctrl+T explorer · Ctrl+N then T/C/E/S panes");
+	assert.equal(footer.workspaceHints, "Ctrl+T / Ctrl+Shift+E explorer · Ctrl+N then T/C/E/S panes");
 	await runCommand({ name: "workspace", args: "close" }, app);
 	assert.equal(footer.workspaceHints, "", "closed workspace clears the hints");
 	await app.exit();

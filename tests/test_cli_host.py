@@ -290,6 +290,31 @@ def test_cli_status_reports_not_running(monkeypatch):
     assert "not running" in result.output
 
 
+def test_cli_attach_uses_an_exact_tmux_target(monkeypatch):
+    from machina.cli import host as host_cli
+
+    state = _state()
+    monkeypatch.setattr(host_mod, "load_state", lambda: state)
+    monkeypatch.setattr(host_cli.shutil, "which", lambda _name: "/usr/bin/tmux")
+    calls: list[list[str]] = []
+
+    class _Done:
+        returncode = 0
+
+    monkeypatch.setattr(
+        host_cli.subprocess,
+        "run",
+        lambda command, **_kwargs: calls.append(command) or _Done(),
+    )
+    monkeypatch.setattr(host_cli.os, "execvp", lambda _file, args: calls.append(args))
+
+    result = CliRunner().invoke(app, ["host", "attach"])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][-2:] == ["-t", "=machina"]
+    assert calls[-1][-2:] == ["-t", "=machina"]
+
+
 def test_cli_start_prints_browser_and_ssh_paths(monkeypatch):
     state = _state()
     monkeypatch.setattr(host_mod, "start_host", lambda **_kwargs: (state, True))

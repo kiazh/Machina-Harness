@@ -96,7 +96,7 @@ export function workspaceShellKey(input: LayoutInput, columns: number, rows: num
 }
 
 /** Workspace hint shown while a workspace identity is live. */
-const WORKSPACE_FOOTER_HINTS = "Ctrl+T explorer · Ctrl+N then T/C/E/S panes";
+const WORKSPACE_FOOTER_HINTS = "Ctrl+T / Ctrl+Shift+E explorer · Ctrl+N then T/C/E/S panes";
 
 /** Basename for notices (scheme-stripped, percent-decoded; never the raw URI). */
 export function displayUriName(uri: string): string {
