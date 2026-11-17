@@ -2,11 +2,20 @@
 
 **A self-hosted AI agent harness where context, memory, and model routing are engineered, not improvised.**
 
-Machina is a terminal-first AI workspace: chat beside your code, route work across every model you have actually connected, delegate to specialist agents in parallel, automate recurring work, and return to the same conversations after a restart. It runs on your machine and your PostgreSQL database, and it can talk to cloud providers, subscription accounts, or local models.
+Machina is a terminal-first AI workspace that runs entirely on your own machine and your own PostgreSQL database. You chat beside your code, and the agent reads files, runs commands, searches the web, and calls tools to get real work done. It can drive cloud APIs, your existing subscription accounts (ChatGPT, Grok, Copilot, Kiro), or local models, and you return to the same conversations after a restart.
 
-During a reply, **Enter queues steering** and **Escape interrupts**. Queued messages are applied at the next safe tool boundary so the agent can reconsider its next action. **Ctrl+N then A** or `/activity` opens pending prompts, background commands, and agent views. Queued text can be edited or removed before delivery. Slow shell commands can run with `terminal(background=true)`; the agent uses `terminal_job` to inspect output, wait for completion, or stop them while doing other work. Background commands remain visible after a turn ends, and stop when the gateway closes. Text steering and background job handles are session-local to the running gateway; delivered messages remain in the saved conversation.
+### Why it is different from other harnesses
 
-Running commands show **Background**, **Output**, and **Stop** controls above the composer. Background releases the agent to continue without rerunning the command; a foreground command keeps its original execution deadline. Commands started with `background=true` have no execution deadline. The same controls are available by keyboard through **Ctrl+N then A** or `/activity`.
+Most agent tools are a thin wrapper around a chat API: they resend the transcript until it overflows, keep no durable memory, pick one hard-coded model, and treat a tool's name as its security boundary. Machina treats the hard parts as first-class systems:
+
+- **Context is engineered, not dumped.** It stores typed events and builds a budgeted working set for every request, compacting at safe boundaries and spilling large results to recoverable artifacts, so the model stays focused and cheap instead of drowning in its own transcript.
+- **Memory that survives the session.** Durable claims are extracted, scored, deduplicated, redacted, given provenance, and retrieved by relevance, so the agent remembers what matters across restarts without flooding the current task.
+- **Routing across the models you actually have.** It builds a live inventory from your connected credentials and picks a model per role (planner, supervisor, worker, utility) by fit and cost, instead of overpaying for simple work or underpowering hard work.
+- **A real permission kernel.** Every approval binds to a SHA-256 digest of the exact action and is revalidated at execution and consumed once, so a tool name can never stand in for a security boundary.
+- **One core, many surfaces.** The same engine runs behind a terminal UI, a CLI, an HTTP API with SSE, and an MCP server, with parity tested between them, so you are not maintaining four slightly different agents.
+- **Built to survive interruptions.** Turn leases with fencing, durable jobs, resumable approvals, and explicit pause states mean a crash, a slow approval, or a restarted scheduled job does not corrupt state.
+
+The core design claim: an agent harness is a **state-management system**, not a prompt-engineering trick. The model is the only stateless part; everything else exists to give it a bounded, governed, auditable view of durable state.
 
 **In one sentence:** Machina keeps the model's working set small, its long-term memory governed, its route across connected models explicit, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
 
