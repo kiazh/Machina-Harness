@@ -307,7 +307,7 @@ async function openMenu(host: FeatureHost): Promise<void> {
 		? [{ value: "resume", label: "Resume setup", description: "Continue the setup that needed a Windows restart" }]
 		: [];
 	const start = { value: "start", label: "Start host", description: "Start the existing persistent shell and browser bridge" };
-	const setup = { value: "setup", label: "Set up this computer", description: "Install or repair the host runtime and access" };
+	const setup = { value: "setup", label: "Set up this computer", description: "Choose access, then host this conversation or start a fresh one" };
 	const readyToStart = status.configured && status.runtime_ready;
 	const actions = status.running
 		? [
@@ -318,7 +318,7 @@ async function openMenu(host: FeatureHost): Promise<void> {
 			{ value: "add-key", label: "Add a client SSH key", description: "Install another device's public key" },
 			{ value: "restart", label: "Restart host", description: "Restart the tmux shell and browser bridge" },
 			{ value: "stop", label: "Stop host", description: "Stop the persistent shell and browser bridge" },
-			{ value: "setup", label: "Repair / change setup", description: "Re-run the simple host setup flow" },
+			{ value: "setup", label: "Repair / change setup", description: "Choose a new hosted session, access path, or runtime setting" },
 			{ value: "advanced", label: "Advanced setup", description: "Choose the port, session name, or full mode" },
 		]
 		: [
