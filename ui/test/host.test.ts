@@ -223,7 +223,7 @@ test("/host advanced passes custom port, session, and full mode", async () => {
 		result: { status: RUNNING, instructions: "MacBook instructions" },
 		log: [],
 	};
-	host.picks.push("both", "macos", "full", "yes");
+	host.picks.push("both", "macos", "current", "full", "yes");
 	host.textQueue.push("C:\\work", "9000", "remote", "");
 	await run("/host advanced", host);
 	assert.deepEqual(host.calls.at(-2), {
@@ -237,6 +237,7 @@ test("/host advanced passes custom port, session, and full mode", async () => {
 			port: 9000,
 			session: "remote",
 			allow_full: true,
+			machina_session: SESSION.id,
 		},
 	});
 });
@@ -258,7 +259,7 @@ test("/host setup runs the wizard and prints client instructions", async () => {
 		result: { status: RUNNING, instructions: "MacBook instructions" },
 		log: [],
 	};
-	host.picks.push("setup", "both", "macos", "ask", "yes");
+	host.picks.push("setup", "both", "macos", "current", "ask", "yes");
 	host.textQueue.push("C:\\work", "");
 	await run("/host", host);
 	assert.deepEqual(host.calls.at(-2), {
@@ -271,8 +272,44 @@ test("/host setup runs the wizard and prints client instructions", async () => {
 			public_key: "",
 			port: 7681,
 			session: "machina",
+			machina_session: SESSION.id,
 		},
 	});
 	assert.deepEqual(host.calls.at(-1), { method: "host.setup.status", params: { operationId: "op-1" } });
 	assert.match(host.last().text, /MacBook instructions/);
+});
+
+test("/host can start a fresh hosted Machina session", async () => {
+	const host = new FakeHost();
+	host.responses["host.status"] = { status: { ...RUNNING, running: false } };
+	host.responses["host.plan"] = { status: { ...RUNNING, running: false }, steps: [] };
+	host.responses["host.setup.start"] = { operationId: "op-4" };
+	host.responses["host.setup.status"] = {
+		id: "op-4",
+		state: "done",
+		step: "done",
+		message: "Machina host is ready.",
+		url: "",
+		error: "",
+		restart_required: false,
+		done: true,
+		result: { status: RUNNING, instructions: "MacBook instructions" },
+		log: [],
+	};
+	host.picks.push("setup", "both", "macos", "new", "ask", "yes");
+	host.textQueue.push("C:\\work", "");
+	await run("/host", host);
+	assert.deepEqual(host.calls.at(-2), {
+		method: "host.setup.start",
+		params: {
+			workspace: "C:\\work",
+			mode: "ask",
+			access: "both",
+			client: "macos",
+			public_key: "",
+			port: 7681,
+			session: "machina",
+			machina_session: "",
+		},
+	});
 });

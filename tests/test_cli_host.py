@@ -69,6 +69,17 @@ def test_tmux_command_runs_the_tui_in_the_workspace(monkeypatch):
     assert command[-4:] == ["-m", "machina", "--mode", "ask"][-4:]
 
 
+def test_tmux_command_resumes_a_machina_session():
+    session_id = "11111111-2222-3333-4444-555555555555"
+    command = host_mod.build_tmux_command(
+        "/usr/bin/tmux", "machina", "/srv/work", "ask", session_id
+    )
+    assert "chat" in command
+    assert "--interactive" in command
+    assert command[command.index("--session") + 1] == session_id
+    assert command[-2:] == ["--mode", "ask"]
+
+
 def test_start_refuses_non_loopback_bind(tmp_path, monkeypatch):
     monkeypatch.setattr(host_mod, "_ensure_supported", lambda: None)
     with pytest.raises(host_mod.HostError, match="loopback"):
@@ -162,6 +173,35 @@ def test_start_attaches_to_an_existing_tmux_session_without_owning_it(tmp_path, 
     assert state.session == "dev"
     assert state.owns_session is False
     assert calls == []
+
+
+def test_start_resumes_a_machina_session_in_a_new_tmux(tmp_path, monkeypatch):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(host_mod, "_ensure_supported", lambda: None)
+    monkeypatch.setattr(
+        host_mod,
+        "_which",
+        lambda name: {"tmux": "/usr/bin/tmux", "ttyd": "/usr/bin/ttyd"}.get(name),
+    )
+    monkeypatch.setattr(host_mod, "_tmux_session_alive", lambda _tmux, _session: False)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        host_mod,
+        "_run",
+        lambda command, **_kwargs: calls.append(command)
+        or subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(host_mod, "_popen", lambda _command, **_kwargs: _Process())
+    monkeypatch.setattr(host_mod.time, "sleep", lambda _seconds: None)
+    session_id = "11111111-2222-3333-4444-555555555555"
+
+    state, _created = host_mod.start_host(
+        workspace=tmp_path, session="machina", machina_session=session_id
+    )
+
+    assert state.machina_session == session_id
+    assert calls and "chat" in calls[0]
+    assert calls[0][calls[0].index("--session") + 1] == session_id
 
 
 def test_load_state_accepts_old_files_without_owns_session(tmp_path, monkeypatch):

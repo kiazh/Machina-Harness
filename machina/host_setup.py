@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import uuid
 import webbrowser
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -76,6 +77,8 @@ class SetupOptions:
     port: int = 7681
     session: str = "machina"
     allow_full: bool = False
+    # Empty means a fresh Machina conversation; otherwise resume this UUID.
+    machina_session: str = ""
 
 
 @dataclass
@@ -120,6 +123,7 @@ class HostStatus:
     browser_ready: bool
     ssh_ready: bool
     missing: list[str] = field(default_factory=list)
+    machina_session: str = ""
 
     def public(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -396,6 +400,7 @@ def _status_native() -> HostStatus:
     mode = state.mode if state else local_host.DEFAULT_MODE
     bind = state.bind if state else local_host.DEFAULT_BIND
     port = state.port if state else _DEFAULT_PORT
+    machina_session = state.machina_session if state else ""
     running = bool(state and tmux_alive and ttyd_alive)
     local_url = f"http://127.0.0.1:{port}"
     status = HostStatus(
@@ -419,6 +424,7 @@ def _status_native() -> HostStatus:
         browser_ready=running,
         ssh_ready=sshd and running,
         missing=[],
+        machina_session=machina_session,
     )
     missing: list[str] = []
     if state is None:
@@ -440,6 +446,7 @@ def _status_wsl_guest() -> HostStatus:
     mode = state.mode if state else local_host.DEFAULT_MODE
     bind = state.bind if state else local_host.DEFAULT_BIND
     port = state.port if state else _DEFAULT_PORT
+    machina_session = state.machina_session if state else ""
     running = bool(state and tmux_alive and ttyd_alive)
     local_url = f"http://127.0.0.1:{port}"
     status = HostStatus(
@@ -463,6 +470,7 @@ def _status_wsl_guest() -> HostStatus:
         browser_ready=running,
         ssh_ready=sshd and running,
         missing=[],
+        machina_session=machina_session,
     )
     missing: list[str] = []
     if state is None:
@@ -502,6 +510,7 @@ def status() -> HostStatus:
                 browser_ready=False,
                 ssh_ready=False,
                 missing=["WSL runtime", "ttyd", "Tailscale", "SSH server"],
+                machina_session="",
             )
         state = _read_state(distro, user)
         runtime_ready, ttyd_ready = _wsl_runtime_ready(distro, user)
@@ -525,6 +534,7 @@ def status() -> HostStatus:
             str(state.get("bind") or local_host.DEFAULT_BIND) if state else local_host.DEFAULT_BIND
         )
         port = int(state.get("port") or _DEFAULT_PORT) if state else _DEFAULT_PORT
+        machina_session = str(state.get("machina_session") or "") if state else ""
         local_url = f"http://127.0.0.1:{port}"
         status = HostStatus(
             platform="windows",
@@ -547,6 +557,7 @@ def status() -> HostStatus:
             browser_ready=running,
             ssh_ready=sshd and running,
             missing=[],
+            machina_session=machina_session,
         )
         missing: list[str] = []
         if not runtime_ready:
@@ -617,6 +628,7 @@ def start() -> HostStatus:
             workspace=Path(current.workspace or Path.cwd()),
             mode=current.execution_mode,
             session=current.session,
+            machina_session=current.machina_session or None,
         )
     return status()
 
@@ -750,11 +762,15 @@ def _setup_windows(
     port: int = _DEFAULT_PORT,
     session: str = _DEFAULT_SESSION,
     allow_full: bool = False,
+    machina_session: str = "",
 ) -> None:
     repo = shlex.quote(_wsl_path(_repo_root()))
     workspace_wsl = shlex.quote(_wsl_path(Path(workspace).expanduser()))
     env_file = shlex.quote(_env_file_wsl())
     allow_flag = " --allow-full" if allow_full and mode == "full" else ""
+    session_flag = (
+        f" --machina-session {shlex.quote(machina_session)}" if machina_session else ""
+    )
     script = f"""
 set -euo pipefail
 mkdir -p "$HOME/.local/bin" "$HOME/.machina-host"
@@ -799,7 +815,7 @@ set -euo pipefail
 export MACHINA_ENV_FILE={env_file}
 export MACHINA_DB_MANAGE=0
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
-exec "$HOME/.machina-host/venv/bin/machina" host start --workspace {workspace_wsl} --mode {shlex.quote(mode)} --port {int(port)} --session {shlex.quote(session)}{allow_flag} "$@"
+exec "$HOME/.machina-host/venv/bin/machina" host start --workspace {workspace_wsl} --mode {shlex.quote(mode)} --port {int(port)} --session {shlex.quote(session)}{allow_flag}{session_flag} "$@"
 START
 cat > "$HOME/.machina-host/status.sh" <<'STATUS'
 #!/usr/bin/env bash
@@ -1421,6 +1437,19 @@ def _execute_setup(op: _SetupOperation) -> None:
             raise HostSetupError(f"workspace is not a directory: {target}")
         desired_workspace = _wsl_path(target_path) if _is_windows() else str(target_path)
 
+        machina_session = options.machina_session.strip()
+        if machina_session:
+            try:
+                uuid.UUID(machina_session)
+            except ValueError:
+                raise HostSetupError("machina_session must be a Machina session UUID.") from None
+        target_session = options.session
+        current_tmux = _current_tmux_session()
+        if machina_session and current_tmux:
+            # "Host current session" from inside tmux means a true terminal
+            # mirror: attach the bridge to the session we are already in.
+            target_session = current_tmux
+
         _step(op, "plan", "Checking this computer…")
         if _cancel_requested(op):
             raise HostSetupError("Setup was cancelled.")
@@ -1429,12 +1458,15 @@ def _execute_setup(op: _SetupOperation) -> None:
             changes: list[str] = []
             if int(current.port) != int(options.port):
                 changes.append("port")
-            if current.session != options.session:
+            if current.session != target_session:
                 changes.append("session")
             if current.execution_mode != options.mode:
                 changes.append("mode")
             if current.workspace and desired_workspace and current.workspace != desired_workspace:
                 changes.append("workspace")
+            same_live_tmux = bool(current_tmux and current.session == current_tmux)
+            if current.machina_session != machina_session and not same_live_tmux:
+                changes.append("Machina session")
             if changes:
                 _step(op, "restart", "Restarting the host to apply " + ", ".join(changes) + "…")
                 stop()
@@ -1451,8 +1483,9 @@ def _execute_setup(op: _SetupOperation) -> None:
                 str(target_path),
                 options.mode,
                 options.port,
-                options.session,
+                target_session,
                 options.allow_full,
+                machina_session,
             )
         elif _is_wsl():
             _step(op, "runtime", "Refreshing the host runtime and start scripts…")
@@ -1462,8 +1495,9 @@ def _execute_setup(op: _SetupOperation) -> None:
                 str(target_path),
                 options.mode,
                 options.port,
-                options.session,
+                target_session,
                 options.allow_full,
+                machina_session,
             )
         else:
             if not shutil.which("tmux"):
@@ -1474,7 +1508,8 @@ def _execute_setup(op: _SetupOperation) -> None:
                 local_host.start_host(
                     workspace=target_path,
                     mode=options.mode,
-                    session=options.session,
+                    session=target_session,
+                    machina_session=machina_session or None,
                 )
 
         if _cancel_requested(op):
@@ -1696,6 +1731,7 @@ def setup(
     port: int = _DEFAULT_PORT,
     session: str = _DEFAULT_SESSION,
     allow_full: bool = False,
+    machina_session: str = "",
 ) -> HostStatus:
     """Synchronous setup for CLI/tests; `/host` uses start_setup + polling."""
     options = SetupOptions(
@@ -1707,6 +1743,7 @@ def setup(
         port=port,
         session=session,
         allow_full=allow_full,
+        machina_session=machina_session,
     )
     operation = _SetupOperation(id=secrets.token_hex(8), options=options)
     _execute_setup(operation)

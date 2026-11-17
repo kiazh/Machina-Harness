@@ -493,6 +493,8 @@ export interface HostStatusView {
 	missing: string[];
 	/** True when a setup is waiting for a Windows restart. */
 	pending_setup?: boolean;
+	/** Machina conversation resumed by the hosted shell, when configured. */
+	machina_session?: string;
 }
 
 /** One missing setup step from `host.plan`. */

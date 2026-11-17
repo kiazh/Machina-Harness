@@ -16,7 +16,13 @@ default path is a short wizard:
 
 1. Choose **Browser + SSH**, **Browser only**, or **SSH only**.
 2. Choose the device you will connect from (macOS, Windows, or Linux).
-3. Accept the default execution mode, workspace, and optional client SSH key.
+3. Choose the hosted shell:
+   - **Host this Machina session** keeps the conversation you are using. If this
+     terminal is already inside tmux, the browser mirrors it exactly; otherwise
+     the hosted shell resumes the same conversation in the host tmux session.
+   - **Start a new Machina session** gives the hosted shell a fresh
+     conversation.
+4. Accept the default execution mode, workspace, and optional client SSH key.
 
 To find the client public key, run `cat ~/.ssh/id_ed25519.pub` on macOS or Linux,
 or `Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub` in Windows PowerShell. If
@@ -184,7 +190,9 @@ so `machina host stop` stops `ttyd` but leaves your tmux session running.
 
 When a new host is configured from inside a tmux session, `/host` uses the
 current tmux session name by default. A terminal that is not inside tmux cannot
-be handed to `ttyd` retroactively; start that TUI inside tmux first.
+be handed to `ttyd` retroactively; start that TUI inside tmux first. The
+**Host this Machina session** option in `/host` resumes the current conversation
+in the hosted tmux session when a true terminal mirror is not possible.
 
 `--mode full` is refused unless you pass `--allow-full`. A remote shell already
 has the same authority as your host user; do not make that the default.

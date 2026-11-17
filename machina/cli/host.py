@@ -33,6 +33,8 @@ def _print_started(state: host_mod.HostState, created: bool) -> None:
     else:
         output.success("Machina host is already running.")
     output.status_line("Session", state.session)
+    if state.machina_session:
+        output.status_line("Machina session", state.machina_session)
     output.status_line("Browser", _browser_url(state))
     output.status_line("Workspace", state.workspace)
     output.status_line("Mode", state.mode)
@@ -82,7 +84,12 @@ def start(
     session: str = typer.Option(
         host_mod.DEFAULT_SESSION,
         "--session",
-        help="tmux session name.",
+        help="tmux session name; an existing session is reused.",
+    ),
+    machina_session: str = typer.Option(
+        None,
+        "--machina-session",
+        help="Machina conversation UUID to resume in a newly created tmux shell.",
     ),
     username: str = typer.Option(
         host_mod.DEFAULT_USER,
@@ -106,6 +113,7 @@ def start(
             session=session,
             username=username,
             allow_full=allow_full,
+            machina_session=machina_session,
         )
     except host_mod.HostError as error:
         output.error(str(error))

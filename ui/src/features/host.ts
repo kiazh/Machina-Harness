@@ -24,6 +24,19 @@ const MODES = [
 	{ value: "sandbox", label: "Sandbox", description: "Contained execution where supported" },
 ];
 
+const HOSTED_SESSIONS = [
+	{
+		value: "current",
+		label: "Host this Machina session",
+		description: "Keep the conversation you are using. Inside tmux, the browser mirrors this terminal exactly.",
+	},
+	{
+		value: "new",
+		label: "Start a new Machina session",
+		description: "The hosted shell starts with a fresh conversation.",
+	},
+];
+
 function line(label: string, value: string | null | undefined): string {
 	return `${label}: ${value && value.trim() ? sanitizeDisplay(value) : "not configured"}`;
 }
@@ -146,6 +159,13 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 	if (!access) return;
 	const client = await host.pick("Where will you connect from?", CLIENTS.slice(0, 3));
 	if (!client) return;
+	const hosted = await host.pick("Hosted shell", HOSTED_SESSIONS);
+	if (!hosted) return;
+	const currentSession = host.session();
+	if (hosted.value === "current" && !currentSession) {
+		host.print("No active Machina session yet; the host will start a new one.", "warning");
+	}
+	const machinaSession = hosted.value === "current" && currentSession ? currentSession.id : "";
 	const modes = advanced
 		? [
 			...MODES,
@@ -207,6 +227,7 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		public_key: publicKey,
 		port,
 		session,
+		machina_session: machinaSession,
 	};
 	if (advanced && mode.value === "full") request.allow_full = true;
 	host.print("Checking the host setup…", "info");
@@ -218,6 +239,7 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		"Set up this computer as a Machina host?",
 		`Access: ${access.label}`,
 		`Client: ${client.label}`,
+		`Hosted shell: ${hosted.label}`,
 		`Mode: ${mode.label}`,
 		`Workspace: ${workspace.trim() || "~"}`,
 	];

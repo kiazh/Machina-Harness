@@ -97,6 +97,7 @@ def test_credentials_are_only_returned_on_explicit_request(monkeypatch):
 
 def test_setup_runs_every_windows_step_in_order(tmp_path, monkeypatch):
     calls: list[str] = []
+    session_ids: list[str] = []
     running = False
     monkeypatch.setattr(host_setup, "_is_windows", lambda: True)
     monkeypatch.setattr(host_setup, "_select_distro", lambda preferred="Ubuntu": "Ubuntu")
@@ -105,8 +106,11 @@ def test_setup_runs_every_windows_step_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(host_setup, "_ensure_wsl_packages", lambda distro: None)
     monkeypatch.setattr(host_setup, "status", lambda: _status(running=running, runtime_ready=False))
 
-    def fake_setup(distro, workspace, mode, port, session, allow_full=False):
+    def fake_setup(
+        distro, workspace, mode, port, session, allow_full=False, machina_session=""
+    ):
         calls.append("runtime")
+        session_ids.append(machina_session)
 
     def fake_start():
         nonlocal running
@@ -122,10 +126,15 @@ def test_setup_runs_every_windows_step_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(host_setup, "_configure_autostart", lambda op: calls.append("autostart"))
     monkeypatch.setattr(host_setup, "_ssh_firewall_ready", lambda: True)
 
-    result = host_setup.setup(workspace=str(tmp_path), mode="ask")
+    result = host_setup.setup(
+        workspace=str(tmp_path),
+        mode="ask",
+        machina_session="11111111-2222-3333-4444-555555555555",
+    )
 
     assert result.running is True
     assert calls == ["runtime", "tailscale", "start", "autostart", "serve", "ssh"]
+    assert session_ids == ["11111111-2222-3333-4444-555555555555"]
 
 
 def test_setup_refuses_full_mode(monkeypatch):

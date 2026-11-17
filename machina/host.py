@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import MISSING, asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -75,6 +76,8 @@ class HostState:
     # False when the host attached ttyd to a tmux session it did not create.
     # Stopping the host must not kill a session owned by the operator.
     owns_session: bool = True
+    # Optional Machina conversation to resume in a newly created tmux shell.
+    machina_session: str = ""
 
 
 def host_home() -> Path:
@@ -146,11 +149,21 @@ def is_loopback(bind: str) -> bool:
     return bind.strip().lower() in {"127.0.0.1", "localhost", "::1"}
 
 
-def build_machina_command(mode: str) -> list[str]:
-    return [sys.executable, "-m", "machina", "--mode", mode]
+def build_machina_command(mode: str, session_id: str | None = None) -> list[str]:
+    command = [sys.executable, "-m", "machina"]
+    if session_id:
+        command += ["chat", "--interactive", "--session", session_id]
+    command += ["--mode", mode]
+    return command
 
 
-def build_tmux_command(tmux: str, session: str, workspace: str, mode: str) -> list[str]:
+def build_tmux_command(
+    tmux: str,
+    session: str,
+    workspace: str,
+    mode: str,
+    session_id: str | None = None,
+) -> list[str]:
     """Create the detached tmux session that owns the persistent TUI."""
     # tmux starts the new session from the server's environment, not this
     # process's. Pass the host-relevant values explicitly so a WSL host can
@@ -182,7 +195,7 @@ def build_tmux_command(tmux: str, session: str, workspace: str, mode: str) -> li
         "env",
         "MACHINA_AUTO_UPDATE=0",
         *inherited,
-        *build_machina_command(mode),
+        *build_machina_command(mode, session_id),
     ]
 
 
@@ -329,6 +342,7 @@ def start_host(
     session: str = DEFAULT_SESSION,
     username: str = DEFAULT_USER,
     allow_full: bool = False,
+    machina_session: str | None = None,
 ) -> tuple[HostState, bool]:
     """Create or reuse the host shell; return (state, created)."""
     _ensure_supported()
@@ -341,6 +355,11 @@ def start_host(
         workspace=workspace,
         allow_full=allow_full,
     )
+    if machina_session:
+        try:
+            uuid.UUID(machina_session)
+        except ValueError:
+            raise HostError("machina session must be a session UUID") from None
     tmux = _which("tmux")
     ttyd = _which("ttyd")
     if not tmux:
@@ -365,7 +384,7 @@ def start_host(
     created_session = False
     if not _tmux_session_alive(tmux, session):
         completed = _run(
-            build_tmux_command(tmux, session, str(workspace), mode),
+            build_tmux_command(tmux, session, str(workspace), mode, machina_session),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -392,6 +411,7 @@ def start_host(
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
         ttyd_log=str(log),
         owns_session=owns_session,
+        machina_session=machina_session or "",
     )
     try:
         with log.open("ab") as output:

@@ -43,6 +43,7 @@ def _options(params: dict[str, Any]) -> SetupOptions:
         port=port,
         session=_str(params, "session", required=False, max_len=64) or "machina",
         allow_full=params.get("allow_full") is True,
+        machina_session=_str(params, "machina_session", required=False, max_len=64),
     )
 
 
