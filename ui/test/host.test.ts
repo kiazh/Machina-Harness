@@ -153,6 +153,16 @@ test("bare /host with a running host opens the management menu", async () => {
 	assert.deepEqual(host.calls.at(-1), { method: "host.stop", params: {} });
 });
 
+test("bare /host on an unconfigured host offers setup first", async () => {
+	const host = new FakeHost();
+	host.responses["host.status"] = {
+		status: { ...RUNNING, configured: false, running: false, runtime_ready: false },
+	};
+	host.picks.push(undefined);
+	await run("/host", host);
+	assert.equal(host.pickItems[0]?.[0]?.value, "setup");
+});
+
 test("/host add-key installs a client public key", async () => {
 	const host = new FakeHost();
 	host.responses["host.addKey"] = { status: RUNNING };

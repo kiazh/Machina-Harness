@@ -284,6 +284,9 @@ async function openMenu(host: FeatureHost): Promise<void> {
 	const resume = status.pending_setup
 		? [{ value: "resume", label: "Resume setup", description: "Continue the setup that needed a Windows restart" }]
 		: [];
+	const start = { value: "start", label: "Start host", description: "Start the existing persistent shell and browser bridge" };
+	const setup = { value: "setup", label: "Set up this computer", description: "Install or repair the host runtime and access" };
+	const readyToStart = status.configured && status.runtime_ready;
 	const actions = status.running
 		? [
 			...resume,
@@ -298,8 +301,7 @@ async function openMenu(host: FeatureHost): Promise<void> {
 		]
 		: [
 			...resume,
-			{ value: "start", label: "Start host", description: "Start the existing persistent shell and browser bridge" },
-			{ value: "setup", label: "Set up this computer", description: "Install or repair the host runtime and access" },
+			...(readyToStart ? [start, setup] : [setup, start]),
 			{ value: "advanced", label: "Advanced setup", description: "Choose the port, session name, or full mode" },
 			{ value: "clients", label: "Client setup instructions", description: "What to run on the connecting device" },
 			{ value: "access", label: "Access info", description: "Show the configured browser and SSH paths" },
