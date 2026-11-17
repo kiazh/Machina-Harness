@@ -240,11 +240,11 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		mode: mode.value,
 		access: access.value,
 		client: client.value,
-		public_key: publicKey,
+		publicKey: publicKey,
 		port,
 		session,
 	};
-	if (advanced && mode.value === "full") request.allow_full = true;
+	if (advanced && mode.value === "full") request.allowFull = true;
 	host.print("Checking the host setup…", "info");
 	const plan = await host.request<HostPlanResult>("host.plan", request);
 	const planned = plan.steps.length

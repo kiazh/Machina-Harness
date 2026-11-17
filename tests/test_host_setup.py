@@ -281,6 +281,27 @@ def test_ensure_ssh_skips_elevation_when_the_tailnet_rule_is_ready(monkeypatch):
     host_setup._ensure_ssh(operation)
 
 
+def test_windows_key_install_disables_password_auth(tmp_path, monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: True)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_windows_admin", lambda: True)
+    monkeypatch.setattr(host_setup, "_windows_temp_dir", lambda: tmp_path)
+    payloads: list[str] = []
+    monkeypatch.setattr(
+        host_setup,
+        "_run_elevated_powershell",
+        lambda payload, timeout=300: payloads.append(payload),
+    )
+    operation = host_setup._SetupOperation(id="test", options=host_setup.SetupOptions())
+
+    host_setup._install_ssh_key(
+        operation, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest machina-client"
+    )
+
+    assert "PasswordAuthentication no" in payloads[0]
+    assert "administrators_authorized_keys" in payloads[0]
+
+
 def test_native_key_install_appends_and_locks_down_the_file(tmp_path, monkeypatch):
     monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
     monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
@@ -363,6 +384,8 @@ def test_start_uses_the_current_tmux_and_session(monkeypatch):
     )
     assert captured["session"] == "dev"
     assert captured["machina_session"] == "11111111-2222-3333-4444-555555555555"
+    assert captured["port"] == 7681
+    assert captured["allow_full"] is False
 
 
 def test_start_can_force_a_fresh_session(monkeypatch):
@@ -392,9 +415,41 @@ def test_start_refuses_a_new_session_from_inside_the_hosted_tmux(monkeypatch):
         "status",
         lambda: _status(runtime="native", distro="", running=True, session="machina"),
     )
-    with pytest.raises(host_setup.HostSetupError, match="inside the hosted"):
+    with pytest.raises(host_setup.HostSetupError, match="inside the"):
         host_setup.start(machina_session="")
 
 
+def test_start_refuses_a_new_session_inside_tmux_when_stopped(monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_current_tmux_session", lambda: "machina")
+    monkeypatch.setattr(
+        host_setup,
+        "status",
+        lambda: _status(runtime="native", distro="", running=False, session="machina"),
+    )
+    with pytest.raises(host_setup.HostSetupError, match="inside the requested"):
+        host_setup.start(machina_session="")
 
 
+def test_ensure_serve_replaces_a_stale_port(monkeypatch):
+    monkeypatch.setattr(host_setup, "_tailscale_exe", lambda: "tailscale")
+    monkeypatch.setattr(
+        host_setup,
+        "_tailscale_status",
+        lambda: (True, "host.ts.net", "https://host.ts.net"),
+    )
+    monkeypatch.setattr(host_setup, "_tailscale_serve_port", lambda _exe: 9999)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        host_setup,
+        "_capture",
+        lambda command, timeout: calls.append(command) or (0, ""),
+    )
+    monkeypatch.setattr(host_setup.time, "sleep", lambda _seconds: None)
+    operation = host_setup._SetupOperation(id="test", options=host_setup.SetupOptions())
+
+    host_setup._ensure_serve(operation, 7681)
+
+    assert calls and calls[0][:3] == ["tailscale", "serve", "reset"]
+    assert calls[1][:3] == ["tailscale", "serve", "--bg"]

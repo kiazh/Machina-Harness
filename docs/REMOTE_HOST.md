@@ -33,7 +33,8 @@ The setup then installs and verifies the pieces it needs:
 - Tailscale, including the private HTTPS URL from `tailscale serve --bg`;
 - Windows OpenSSH Server with a firewall rule restricted to the Tailscale
   address range, while broad OpenSSH/LAN rules are disabled;
-- an optional client SSH public key;
+- an optional client SSH public key (installing one also disables SSH password
+  authentication, so keep the browser path available as a fallback);
 - a Windows logon entry that starts the host after a reboot.
 
 Windows may ask for administrator approval (UAC) while installing WSL,
@@ -129,6 +130,11 @@ New-NetFirewallRule -Name 'sshd-tailscale' `
   -DisplayName 'OpenSSH Server (Tailscale)' `
   -Enabled True -Direction Inbound -Protocol TCP -Action Allow `
   -LocalPort 22 -RemoteAddress 100.64.0.0/10 -Profile Any
+Remove-NetFirewallRule -Name 'sshd-tailscale-v6' -ErrorAction SilentlyContinue
+New-NetFirewallRule -Name 'sshd-tailscale-v6' `
+  -DisplayName 'OpenSSH Server (Tailscale IPv6)' `
+  -Enabled True -Direction Inbound -Protocol TCP -Action Allow `
+  -LocalPort 22 -RemoteAddress fd7a:115c:a1e0::/48 -Profile Any
 Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Enabled False
 ```
 
@@ -251,22 +257,29 @@ Open the HTTPS URL Tailscale prints. Traffic stays on your tailnet.
 
 ### Cloudflare Tunnel
 
-Use Cloudflare Tunnel when the school device cannot install a VPN or SSH client.
-Put Cloudflare Access in front of the hostname, or use another identity-aware
-proxy. Do not expose the `ttyd` port directly.
+Use a **named** Cloudflare Tunnel with Cloudflare Access when the school device
+cannot install a VPN or SSH client. Do not use a public quick tunnel
+(`cloudflared tunnel --url`) for Machina, and do not expose the `ttyd` port
+directly.
+
+Create a named tunnel, route a hostname to `http://127.0.0.1:7681`, and protect
+that hostname with Cloudflare Access before starting the tunnel:
 
 ```bash
-cloudflared tunnel --url http://127.0.0.1:7681
+cloudflared tunnel create machina-host
+cloudflared tunnel route dns machina-host machina.example.com
+cloudflared tunnel run machina-host
 ```
 
-Then protect the generated hostname with Cloudflare Access. The basic-auth
-credential from `machina host` is a second layer, not a replacement for
-identity-aware access.
+The basic-auth credential from `machina host` is a second layer, not a
+replacement for identity-aware access.
 
 ## Security notes
 
 - `machina host start` defaults to `ask` mode. The browser terminal can control
   the host through the normal approval flow.
+- SSH is key-based: installing a client key sets `PasswordAuthentication no` on
+  Windows OpenSSH. Make sure the key works before relying on SSH alone.
 - `ttyd` receives the browser credential on its command line, so a local user
   who can inspect the host process table can read it. The credential file is
   `0600`; use a private tunnel and a dedicated host user.

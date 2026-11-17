@@ -253,10 +253,10 @@ test("/host advanced passes custom port, session, and full mode", async () => {
 			mode: "full",
 			access: "both",
 			client: "macos",
-			public_key: "",
+			publicKey: "",
 			port: 9000,
 			session: "remote",
-			allow_full: true,
+			allowFull: true,
 		},
 	});
 });
@@ -288,7 +288,7 @@ test("/host setup runs the wizard and prints client instructions", async () => {
 			mode: "ask",
 			access: "both",
 			client: "macos",
-			public_key: "",
+			publicKey: "",
 			port: 7681,
 			session: "machina",
 		},

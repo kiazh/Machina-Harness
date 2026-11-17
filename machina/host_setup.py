@@ -304,6 +304,20 @@ def _tailscale_exe() -> str | None:
     return shutil.which("tailscale")
 
 
+def _tailscale_serve_port(executable: str) -> int | None:
+    try:
+        completed = _run([executable, "serve", "status"], timeout=15)
+    except HostSetupError:
+        return None
+    if completed.returncode != 0:
+        return None
+    for line in completed.stdout.splitlines():
+        match = re.search(r"proxy http://(?:127\.0\.0\.1|localhost):(\d+)", line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def _tailscale_status() -> tuple[bool, str | None, str | None]:
     """Return (connected, dns_name, serve_url)."""
     executable = _tailscale_exe()
@@ -520,13 +534,17 @@ def status() -> HostStatus:
             )
         state = _read_state(distro, user)
         runtime_ready, ttyd_ready = _wsl_runtime_ready(distro, user)
+        try:
+            state_pid = int(state.get("ttyd_pid") or 0) if state else 0
+        except (TypeError, ValueError):
+            state_pid = 0
         running = bool(
             state
             and ttyd_ready
             and _wsl_session_alive(
                 distro,
                 str(state.get("session") or _DEFAULT_SESSION),
-                int(state.get("ttyd_pid") or 0),
+                state_pid,
             )
         )
         connected, dns_name, serve_url = _tailscale_status()
@@ -539,7 +557,10 @@ def status() -> HostStatus:
         bind = (
             str(state.get("bind") or local_host.DEFAULT_BIND) if state else local_host.DEFAULT_BIND
         )
-        port = int(state.get("port") or _DEFAULT_PORT) if state else _DEFAULT_PORT
+        try:
+            port = int(state.get("port") or _DEFAULT_PORT) if state else _DEFAULT_PORT
+        except (TypeError, ValueError):
+            port = _DEFAULT_PORT
         machina_session = str(state.get("machina_session") or "") if state else ""
         local_url = f"http://127.0.0.1:{port}"
         status = HostStatus(
@@ -667,6 +688,13 @@ def start(
     target_mode = current.execution_mode or local_host.DEFAULT_MODE
     target_port = current.port or _DEFAULT_PORT
     allow_full = target_mode == "full"
+    inside_current_tmux = bool(current_tmux and target_session == current_tmux)
+    if inside_current_tmux and not machina_session:
+        raise HostSetupError(
+            "This Machina window is inside the requested tmux session. Start a "
+            "new session from a local Machina window so stopping the host does "
+            "not close this one."
+        )
 
     if current.running:
         if machina_session and current_tmux and current.session == current_tmux:
@@ -696,6 +724,7 @@ def start(
         local_host.start_host(
             workspace=Path(target_workspace),
             mode=target_mode,
+            port=target_port,
             session=target_session,
             allow_full=allow_full,
             machina_session=machina_session or None,
@@ -1154,12 +1183,15 @@ def _ensure_tailscale(op: _SetupOperation) -> None:
 
 def _ensure_serve(op: _SetupOperation, port: int) -> None:
     _step(op, "serve", "Checking Tailscale Serve…")
-    _connected, _dns, serve_url = _tailscale_status()
-    if serve_url:
-        return
     executable = _tailscale_exe()
     if not executable:
         raise HostSetupError("Tailscale Serve needs Tailscale installed and signed in.")
+    _connected, _dns, serve_url = _tailscale_status()
+    if serve_url:
+        if _tailscale_serve_port(executable) == int(port):
+            return
+        _step(op, "serve", "Replacing the old Tailscale Serve target…")
+        _capture([executable, "serve", "reset"], timeout=15)
     _step(op, "serve", "Opening the Tailscale Serve setup page…")
     _code, output = _capture([executable, "serve", "--bg", str(port)], timeout=30)
     match = re.search(r"https://login\.tailscale\.com/[^\s)]+", output)
@@ -1248,6 +1280,10 @@ Remove-NetFirewallRule -Name 'sshd-tailscale' -ErrorAction SilentlyContinue
 New-NetFirewallRule -Name 'sshd-tailscale' -DisplayName 'OpenSSH Server (Tailscale)' `
   -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 `
   -RemoteAddress 100.64.0.0/10 -Profile Any | Out-Null
+Remove-NetFirewallRule -Name 'sshd-tailscale-v6' -ErrorAction SilentlyContinue
+New-NetFirewallRule -Name 'sshd-tailscale-v6' -DisplayName 'OpenSSH Server (Tailscale IPv6)' `
+  -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 `
+  -RemoteAddress fd7a:115c:a1e0::/48 -Profile Any | Out-Null
 Set-NetFirewallRule -Name 'sshd-tailscale' -Enabled True -ErrorAction SilentlyContinue
 Get-NetFirewallRule -DisplayName 'OpenSSH' -ErrorAction SilentlyContinue |
   Set-NetFirewallRule -Enabled False -ErrorAction SilentlyContinue
@@ -1300,6 +1336,17 @@ if (-not (Select-String -Path $path -SimpleMatch $key -Quiet)) {{
 icacls $path /inheritance:r | Out-Null
 icacls $path /grant '*S-1-5-32-544:F' | Out-Null
 icacls $path /grant '*S-1-5-18:F' | Out-Null
+$cfg = "$env:ProgramData\\ssh\\sshd_config"
+if (-not (Test-Path "$cfg.machina-bak")) {{ Copy-Item -Path $cfg -Destination "$cfg.machina-bak" -Force }}
+$config = Get-Content -Path $cfg -Raw
+$updated = [regex]::Replace($config, '(?m)^\\s*#?\\s*PasswordAuthentication\\s+.*$', 'PasswordAuthentication no')
+if ($updated -eq $config -and $config -notmatch '(?m)^\\s*PasswordAuthentication\\s+no\\s*$') {{
+  $updated = $config.TrimEnd() + "`r`nPasswordAuthentication no`r`n"
+}}
+if ($updated -ne $config) {{
+  [System.IO.File]::WriteAllText($cfg, $updated, [System.Text.Encoding]::ASCII)
+  $added = $true
+}}
 if ($added) {{ Restart-Service -Name sshd -ErrorAction SilentlyContinue }}
 """,
                     timeout=180,
@@ -1558,6 +1605,12 @@ def _execute_setup(op: _SetupOperation) -> None:
             if current.machina_session != machina_session and not same_live_tmux:
                 changes.append("Machina session")
             if changes:
+                if same_live_tmux:
+                    raise HostSetupError(
+                        "This Machina window is inside the hosted tmux session. Change "
+                        "the host from a local Machina window so stopping it does not "
+                        "close this one."
+                    )
                 _step(op, "restart", "Restarting the host to apply " + ", ".join(changes) + "…")
                 stop()
                 current = status()
@@ -1598,7 +1651,9 @@ def _execute_setup(op: _SetupOperation) -> None:
                 local_host.start_host(
                     workspace=target_path,
                     mode=options.mode,
+                    port=options.port,
                     session=target_session,
+                    allow_full=options.allow_full,
                     machina_session=machina_session or None,
                 )
 
@@ -1694,6 +1749,10 @@ def start_setup(options: SetupOptions) -> str:
     with _operations_lock:
         for operation in _operations.values():
             if operation.state == "running":
+                if operation.options != options:
+                    raise HostSetupError(
+                        "Another host setup is already running. Wait for it or cancel it first."
+                    )
                 return operation.id
         operation = _SetupOperation(id=secrets.token_hex(8), options=options)
         _clear_pending()

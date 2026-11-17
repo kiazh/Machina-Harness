@@ -2036,10 +2036,7 @@ export class App implements FeatureHost {
 			return undefined;
 		}
 		const integration = this.integration;
-		const explorerKey =
-			this.keybindings.matches(data, "explorer") ||
-			this.keybindings.matches(data, "explorerAlt") ||
-			this.keybindings.matches(data, "explorerSafe");
+		const explorerKey = this.matchesExplorerKey(data);
 		if (explorerKey && (!integration || this.workspaceUnsupported || !this.workspaceLayoutActive)) {
 			this.print(
 				this.workspaceUnsupported
@@ -2370,6 +2367,18 @@ export class App implements FeatureHost {
 	// ─── workspace keys (plan §8) ───────────────────────────────────────────
 
 	/**
+	 * Ctrl+T / Ctrl+Shift+E / Ctrl+N then T. Ctrl+Shift+E is the browser-safe
+	 * alias because Chrome/Edge reserve Ctrl+T before the page sees it.
+	 */
+	private matchesExplorerKey(data: string): boolean {
+		return (
+			this.keybindings.matches(data, "explorer") ||
+			this.keybindings.matches(data, "explorerAlt") ||
+			this.keybindings.matches(data, "explorerSafe")
+		);
+	}
+
+	/**
 	 * Global workspace key routing. Keys are consumed only while the workspace
 	 * is live and the feature was not disabled; editor-scoped keys additionally
 	 * require the editor region so they can never fire while the composer (or a
@@ -2387,13 +2396,8 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 		if (!this.workspaceLayoutActive) return undefined;
-		// Ctrl+T / Ctrl+N then T - explorer toggle (terminal new-tab risk
-		// documented; /explorer and the palette remain the fallback).
-		if (
-			this.keybindings.matches(data, "explorer") ||
-			this.keybindings.matches(data, "explorerAlt") ||
-			this.keybindings.matches(data, "explorerSafe")
-		) {
+		// Ctrl+T / Ctrl+Shift+E / Ctrl+N then T - explorer toggle.
+		if (this.matchesExplorerKey(data)) {
 			this.workspaceSurface?.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };
 		}

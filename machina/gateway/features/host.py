@@ -34,16 +34,22 @@ def _options(params: dict[str, Any]) -> SetupOptions:
     access = _str(params, "access", required=False, max_len=16) or "both"
     if access not in {"both", "browser", "ssh"}:
         raise RpcError(INVALID_PARAMS, "access must be both, browser, or ssh")
+    public_key = _str(params, "publicKey", required=False, max_len=4096) or _str(
+        params, "public_key", required=False, max_len=4096
+    )
+    machina_session = _str(params, "machinaSession", required=False, max_len=64) or _str(
+        params, "machina_session", required=False, max_len=64
+    )
     return SetupOptions(
         workspace=_str(params, "workspace", required=False, max_len=4096),
         mode=_str(params, "mode", required=False, max_len=32) or "ask",
         access=access,
         client=_str(params, "client", required=False, max_len=32) or "macos",
-        public_key=_str(params, "public_key", required=False, max_len=4096),
+        public_key=public_key,
         port=port,
         session=_str(params, "session", required=False, max_len=64) or "machina",
-        allow_full=params.get("allow_full") is True,
-        machina_session=_str(params, "machina_session", required=False, max_len=64),
+        allow_full=params.get("allowFull") is True or params.get("allow_full") is True,
+        machina_session=machina_session,
     )
 
 
@@ -93,7 +99,9 @@ async def host_setup_resume(gw: Gateway, params: dict[str, Any]) -> dict[str, An
 
 async def host_add_key(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     del gw
-    public_key = _str(params, "publicKey", max_len=4096)
+    public_key = _str(params, "publicKey", max_len=4096) or _str(
+        params, "public_key", max_len=4096
+    )
     try:
         status = await asyncio.to_thread(_setuper().add_key, public_key)
     except HostSetupError as error:
@@ -110,10 +118,20 @@ async def host_open_url(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
 async def host_setup(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     del gw
-    workspace = _str(params, "workspace", required=False, max_len=4096)
-    mode = _str(params, "mode", required=False, max_len=32) or "ask"
+    options = _options(params)
     try:
-        status = await asyncio.to_thread(_setuper().setup, workspace=workspace, mode=mode)
+        status = await asyncio.to_thread(
+            _setuper().setup,
+            workspace=options.workspace,
+            mode=options.mode,
+            access=options.access,
+            client=options.client,
+            public_key=options.public_key,
+            port=options.port,
+            session=options.session,
+            allow_full=options.allow_full,
+            machina_session=options.machina_session,
+        )
     except HostSetupError as error:
         raise RpcError(OPERATION_FAILED, str(error)) from None
     return {"status": status.public()}
@@ -121,9 +139,12 @@ async def host_setup(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
 async def host_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     del gw
-    reconfigure = "machinaSession" in params or "session" in params
+    reconfigure = "machinaSession" in params or "machina_session" in params or "session" in params
     machina_session = (
-        _str(params, "machinaSession", required=False, max_len=64) if reconfigure else None
+        _str(params, "machinaSession", required=False, max_len=64)
+        or _str(params, "machina_session", required=False, max_len=64)
+        if reconfigure
+        else None
     )
     session = (
         _str(params, "session", required=False, max_len=64) if "session" in params else None

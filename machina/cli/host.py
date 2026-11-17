@@ -51,8 +51,10 @@ def _print_started(state: host_mod.HostState, created: bool) -> None:
     output.console.print(f"  then open {_browser_url(state)}", style="dim")
     output.muted("Keep it private on your tailnet:")
     output.console.print(f"  tailscale serve --bg {state.port}", style="dim")
-    output.muted("Or expose it through a Cloudflare Tunnel with Cloudflare Access in front:")
-    output.console.print(f"  cloudflared tunnel --url http://127.0.0.1:{state.port}", style="dim")
+    output.muted(
+        "For a non-tailnet client, use a named Cloudflare Tunnel with Access; "
+        "never a public quick tunnel without an identity-aware proxy."
+    )
 
 
 @host_app.command("start")
