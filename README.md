@@ -2,22 +2,23 @@
 
 **A self-hosted AI agent harness where context, memory, and model routing are engineered, not improvised.**
 
-Machina is a terminal-first AI workspace that runs entirely on your own machine and your own PostgreSQL database. You chat beside your code, and the agent reads files, runs commands, searches the web, and calls tools to get real work done. It can drive cloud APIs, your existing subscription accounts (ChatGPT, Grok, Copilot, Kiro), or local models, and you return to the same conversations after a restart.
+Machina is a terminal-first coding agent that runs entirely on your own machine and your own PostgreSQL database. You chat beside your code; the agent reads and writes files, runs commands, searches and verifies the web in a real browser, indexes documents, and delegates to specialist sub-agents in parallel. It drives cloud APIs, your existing subscription accounts (ChatGPT, Grok, GitHub Copilot, Kiro), or local models, and you come back to the same conversations after a restart.
 
-### Why it is different from other harnesses
+### Why Machina, and not another terminal agent
 
-Most agent tools are a thin wrapper around a chat API: they resend the transcript until it overflows, keep no durable memory, pick one hard-coded model, and treat a tool's name as its security boundary. Machina treats the hard parts as first-class systems:
+Most terminal agents are a loop around a chat API. They resend the transcript until it overflows, forget everything when the session ends, run whatever model you hard-coded, and treat a tool's name as its security boundary. That is fine for a quick one-off. It falls apart on long tasks, across days, and on actions you cannot undo.
 
-- **Context is engineered, not dumped.** It stores typed events and builds a budgeted working set for every request, compacting at safe boundaries and spilling large results to recoverable artifacts, so the model stays focused and cheap instead of drowning in its own transcript.
-- **Memory that survives the session.** Durable claims are extracted, scored, deduplicated, redacted, given provenance, and retrieved by relevance, so the agent remembers what matters across restarts without flooding the current task.
-- **Routing across the models you actually have.** It builds a live inventory from your connected credentials and picks a model per role (planner, supervisor, worker, utility) by fit and cost, instead of overpaying for simple work or underpowering hard work.
-- **A real permission kernel.** Every approval binds to a SHA-256 digest of the exact action and is revalidated at execution and consumed once, so a tool name can never stand in for a security boundary.
-- **One core, many surfaces.** The same engine runs behind a terminal UI, a CLI, an HTTP API with SSE, and an MCP server, with parity tested between them, so you are not maintaining four slightly different agents.
-- **Built to survive interruptions.** Turn leases with fencing, durable jobs, resumable approvals, and explicit pause states mean a crash, a slow approval, or a restarted scheduled job does not corrupt state.
+Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (28 tables) is the source of truth, and five subsystems give the model a bounded, governed, auditable view of it:
 
-The core design claim: an agent harness is a **state-management system**, not a prompt-engineering trick. The model is the only stateless part; everything else exists to give it a bounded, governed, auditable view of durable state.
+- **Context is engineered, not dumped.** The transcript is a typed event log; the prompt is a *projection* of it, fitted to each model's token budget. Machina compacts at safe boundaries and spills large tool results (a 1.2 MB `pytest` run) to recoverable artifacts with a paged read handle, so the window stays small and cheap instead of drowning in its own history.
+- **Memory that outlives the session.** Decisions, preferences, and lessons are extracted into durable claims that are scored, deduplicated, redacted, given provenance, and retrieved by relevance. Ask "which database did we choose?" a week later and it answers from memory, not by replaying the transcript.
+- **A real permission kernel.** Every risky action is canonicalized and bound to a SHA-256 digest of its exact arguments; approval is revalidated at execution and consumed once. A tool name can never stand in for a security boundary, and a reviewed action cannot be swapped out after you approve it.
+- **Routing across the models you actually have.** Machina builds a live inventory from your connected credentials and picks a model per role — planner, supervisor, worker, utility — by fit and cost, deterministically, with no extra model call to make the choice. No overpaying for trivial work, no underpowering the hard parts.
+- **One core, four surfaces.** The same engine runs behind the terminal UI, a CLI, an HTTP API with SSE, and an MCP server, with parity tested between them. Other harnesses (OpenCode, Codex, Hermes) can use Machina as an MCP tool server, and Machina can delegate out to them.
 
-**In one sentence:** Machina keeps the model's working set small, its long-term memory governed, its route across connected models explicit, and its actions auditable — across a terminal UI, a CLI, an HTTP API, and MCP.
+It survives interruptions the way a database does: turn leases with fencing, durable jobs, and resumable approvals mean a crash, a slow human approval, or a restarted cron job never corrupts a conversation.
+
+**At a glance:** ~124,000 lines of Python backed by 6,487 passing tests on real PostgreSQL · 18 provider types · 74 agent definitions · 77 skill packages · 44 built-in tools · 151 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
