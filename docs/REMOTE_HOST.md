@@ -28,7 +28,8 @@ You can also leave the key empty and run `/host add-key` later.
 
 The setup then installs and verifies the pieces it needs:
 
-- a WSL2 Ubuntu runtime on Windows, or native `tmux`/`ttyd` on Linux/macOS;
+- a WSL2 Ubuntu runtime on Windows; on Linux/macOS it uses native
+  `tmux`/`ttyd` (install those first; the systemd example below covers autostart);
 - the Machina host runtime and a hidden `ttyd` bridge on `127.0.0.1`;
 - Tailscale, including the private HTTPS URL from `tailscale serve --bg`;
 - Windows OpenSSH Server with a firewall rule restricted to the Tailscale
@@ -42,7 +43,8 @@ Tailscale, OpenSSH, or the firewall rule. Approve the prompt on the host. If a
 Windows feature needs a restart, `/host` saves the setup and shows
 **Resume setup** the next time you open it. After the restart, open Machina on
 the host (or use the browser path if it is already running) and choose
-**Resume setup**.
+**Resume setup**. Cancelling takes effect after any blocking download or
+administrator prompt returns.
 
 Use `/host advanced` when you need a custom browser port, tmux session name,
 or the deliberately unguarded `full` mode. Use `/host add-key` to install
