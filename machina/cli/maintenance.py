@@ -658,7 +658,18 @@ def stop_all() -> None:
     import time
     from contextlib import suppress
 
+    from machina import host as host_mod
     from machina.db import lifecycle
+
+    try:
+        host_state = host_mod.stop_host()
+    except host_mod.HostError as error:
+        console.print(
+            f"[yellow]Could not stop the Machina host shell: {escape(str(error))}[/yellow]"
+        )
+    else:
+        if host_state is not None:
+            console.print(f"Stopped Machina host and tmux session {escape(host_state.session)}.")
 
     me = os.getpid()
     clients = [item for item in lifecycle.live_clients() if int(item["pid"]) != me]

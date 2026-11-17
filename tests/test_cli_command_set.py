@@ -59,6 +59,7 @@ COMMANDS = (
 GROUPS = (
     "auth",
     "growth",
+    "host",
     "harnesses",
     "interop",
     "providers",

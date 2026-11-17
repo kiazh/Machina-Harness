@@ -339,7 +339,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 44 built-in tools; 39 top-level CLI commands (80 paths); 52 slash commands |
+| Tools and commands | 44 built-in tools; 40 top-level CLI commands (85 paths); 53 slash commands |
 | Protocol and API | 151 RPC methods (13 core + 138 feature); 33 REST routes; 24 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 28 tables |
@@ -1486,11 +1486,11 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 ### Commands
 
-Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 52 slash commands.
+Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 53 slash commands.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
-The CLI mirrors these capabilities with 39 top-level commands and 80 invocable paths once grouped subcommands are counted. The main groups are:
+The CLI mirrors these capabilities with 40 top-level commands and 85 invocable paths once grouped subcommands are counted. The main groups are:
 
 | Group | Commands |
 |---|---|
@@ -1498,10 +1498,10 @@ The CLI mirrors these capabilities with 39 top-level commands and 80 invocable p
 | **Routing and providers** | `route`, `routes`, `providers`, `auth`, `opencode-proxy` |
 | **Memory and identity** | `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `memory-approve-all`, `memory-reject-all`, `memory-stats`, `user-profile`, `user-profile-update`, `user-profile-list`, `growth` |
 | **Skills and learning** | `skills`, `learn`, `curator`, `hub` |
-| **Operations** | `setup`, `init`, `doctor`, `serve`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
+| **Operations** | `setup`, `init`, `doctor`, `serve`, `host`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
 
 <details>
-<summary>All 39 top-level CLI commands</summary>
+<summary>All 40 top-level CLI commands</summary>
 
 | Command | Purpose |
 |---|---|
@@ -1515,6 +1515,7 @@ The CLI mirrors these capabilities with 39 top-level commands and 80 invocable p
 | `doctor` | Check Machina dependencies and configuration. |
 | `export` | Export a conversation as markdown. |
 | `fork` | Fork a session — create a new session with copied state and context. |
+| `host` | Run a persistent tmux shell with an optional ttyd browser bridge. |
 | `hub` | Skill hub — community-curated skill sharing. |
 | `init` | Initialize Machina — create the database schema. |
 | `learn` | Learn a new skill from a source (file, URL, or existing skill). |
@@ -1548,7 +1549,7 @@ The CLI mirrors these capabilities with 39 top-level commands and 80 invocable p
 </details>
 
 <details>
-<summary>All 80 invocable CLI paths, including grouped subcommands</summary>
+<summary>All 85 invocable CLI paths, including grouped subcommands</summary>
 
 | Command path | Purpose |
 |---|---|
@@ -1591,6 +1592,11 @@ The CLI mirrors these capabilities with 39 top-level commands and 80 invocable p
 | `harnesses run` | Delegate a task to an installed harness headlessly and print the result. |
 | `harnesses setup` | Detect harnesses and register Machina's MCP server (best-effort). |
 | `harnesses status` | Show which harnesses are installed, running, registered, and enabled. |
+| `host attach` | Attach this terminal to the persistent tmux session. |
+| `host start` | Create or reuse the persistent shell and browser bridge. |
+| `host status` | Show whether the persistent shell and browser bridge are alive. |
+| `host stop` | Stop the browser bridge and, unless asked, the tmux shell. |
+| `host url` | Print the local URL and SSH access command. |
 | `hub` | Skill hub — community-curated skill sharing. |
 | `init` | Initialize Machina — create the database schema. |
 | `interop disable` | Remove Machina's MCP server registration (manual where unsupported). |
@@ -1789,6 +1795,19 @@ Gateway methods are also available through `POST /rpc`; `prompt.submit`, `prompt
 
 See [the gateway protocol](communications/ui-gateway-protocol.md), [event definitions](machina/protocol/events.json), and [HTTP routes](machina/api/routes/).
 
+### Remote host shell
+
+`machina host` keeps the terminal UI in a persistent `tmux` session and serves a token-protected `ttyd` browser bridge on loopback. It does not introduce a new network protocol; the gateway stays local to the host.
+
+```bash
+machina host start --workspace ~/work --mode ask
+machina host status
+machina host attach
+machina host stop
+```
+
+Reach it through an SSH port forward, Tailscale, or Cloudflare Access. Do not expose the bridge port directly. In the TUI, `/host` runs the guided one-shot setup, including Tailscale Serve, OpenSSH restricted to the tailnet, client-key onboarding, and restart-safe resume; `/host advanced` exposes the port, session, and full-mode options. See [docs/REMOTE_HOST.md](docs/REMOTE_HOST.md) for setup, security notes, and troubleshooting.
+
 ### Shutdown
 
 ```bash
@@ -1926,7 +1945,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 | [J](#appendix-j-extension-points) | How to extend each surface |
 | [K](#appendix-k-glossary) | 42 terms |
 | [L](#appendix-l-http-route-catalog) | 33 HTTP routes |
-| [M](#appendix-m-slash-command-catalog) | 52 slash commands |
+| [M](#appendix-m-slash-command-catalog) | 53 slash commands |
 
 ### Appendix A: RPC method catalog
 
@@ -2906,6 +2925,7 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 | `/growth` | `/growth [show\|teach\|feedback\|forget\|rollback]` | Manage learned personality, feedback, and reversible improvement |
 | `/harnesses` | `/harnesses [<harness>]` | List external agent harnesses; register, unregister or run a task |
 | `/help` | `/help` | List every command with its description |
+| `/host` | `/host [status \| setup \| advanced \| resume \| add-key \| access \| clients \| credentials \| start \| stop \| restart]` | Set up and manage remote access to this Machina host |
 | `/init` | `/init` | Create an AGENTS.md file with instructions for the agent |
 | `/interop` | `/interop [status \| enable <platform> [--scope global\|project] [--dry-run] \| disable <platform>]` | Register Machina's MCP server with OpenCode, Codex or Hermes |
 | `/jobs` | `/jobs [list\|add\|script\|heartbeat\|cron\|on\|off\|delete]` | Scheduled jobs: list, add, script, heartbeat, cron, on, off, delete |

@@ -36,6 +36,7 @@ from machina.cli.common import (
     _sync_env_shadow,
 )
 from machina.cli.growth import app as growth_app
+from machina.cli.host import host_app
 from machina.cli.interop import app as harnesses_app
 from machina.cli.maintenance import (
     config_set,
@@ -118,6 +119,7 @@ __all__ = [
     "doctor",
     "export",
     "fork",
+    "host_app",
     "hub",
     "init",
     "interop_mod",
@@ -163,6 +165,7 @@ app = typer.Typer(
 )
 app.add_typer(auth_app, name="auth")
 app.add_typer(growth_app, name="growth")
+app.add_typer(host_app, name="host")
 # Primary name is ``harnesses``; ``interop`` stays registered as a kept alias
 # of the same app so existing scripts, the installer and docs keep working.
 app.add_typer(harnesses_app, name="harnesses")

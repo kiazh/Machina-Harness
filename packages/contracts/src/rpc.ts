@@ -469,6 +469,66 @@ export interface MCPServerView {
  error?: string | null;
 }
 
+/** One hosted-shell inspection result from `host.status`. */
+export interface HostStatusView {
+	platform: string;
+	runtime: "wsl" | "native";
+	distro: string;
+	configured: boolean;
+	running: boolean;
+	session: string;
+	workspace: string;
+	execution_mode: string;
+	bind: string;
+	port: number;
+	browser_url: string;
+	tailnet_url: string | null;
+	tailnet_name: string | null;
+	tailscale_connected: boolean;
+	sshd_running: boolean;
+	ssh_command: string | null;
+	runtime_ready: boolean;
+	browser_ready: boolean;
+	ssh_ready: boolean;
+	missing: string[];
+	/** True when a setup is waiting for a Windows restart. */
+	pending_setup?: boolean;
+}
+
+/** One missing setup step from `host.plan`. */
+export interface HostPlanStep {
+	id: string;
+	label: string;
+	detail: string;
+}
+
+/** A setup saved after asking for a Windows restart. */
+export interface HostPendingSetup {
+	reason: string;
+	options: Record<string, unknown>;
+	updated_at?: string;
+}
+
+export interface HostPlanResult {
+	status: HostStatusView;
+	steps: HostPlanStep[];
+	pending?: HostPendingSetup | null;
+}
+
+/** Polled state for one background `/host setup` operation. */
+export interface HostSetupStatus {
+	id: string;
+	state: "running" | "done" | "error" | "cancelled" | "restart_required";
+	step: string;
+	message: string;
+	url: string;
+	error: string;
+	restart_required: boolean;
+	done: boolean;
+	result: { status: HostStatusView; instructions: string } | null;
+	log: string[];
+}
+
 /** One built-in, non-secret MCP setup starter from `mcp.catalog`. */
 export interface MCPCatalogEntry {
 	id: string;

@@ -4,6 +4,19 @@ Current release evidence and open gates are in [RELEASE_READINESS.md](docs/verif
 
 Checked matrix: implementation → entry points → dependency → trigger → config → fallback → lifecycle → proof test. Statuses: automatic (every turn), conditional (when triggered/material exists), degraded (fallback reported), optional (explicit), offline (research-only).
 
+## Persistent remote host shell (2026-11-17, CLI)
+
+`machina host` keeps the terminal UI in a detached tmux session and serves the
+same shell through a loopback-only, token-protected ttyd browser bridge. The
+gateway and agent stay local to the host; reachability is SSH forwarding,
+Tailscale, or Cloudflare Access. This is the first remote slice; a bundled
+browser terminal and WebSocket remote TUI remain later work.
+
+| Item | Location | Change | Proof |
+|---|---|---|---|
+| RH-01 | `machina/host.py`, `machina/cli/host.py` | `start`, `status`, `url`, `attach`, `stop`; loopback-only bind; generated browser credential in `~/.machina/host.json` (0600); `ask` default and `full` refused unless `--allow-full`; stale state repair; restarts reuse the browser credential; tmux/ttyd dependency errors | `tests/test_cli_host.py`, command-surface lock in `tests/test_cli_command_set.py`, setup/security guide `docs/REMOTE_HOST.md`; live Linux VPS validation is the first deployment gate |
+| RH-02 | `machina/host_setup.py`, `machina/gateway/features/host.py`, `ui/src/features/host.ts` | One-shot `/host` menu plus `status`, `setup`, `advanced`, `resume`, `add-key`, `access`, `clients`, `credentials`, `start`, `stop`, `restart`; Windows/WSL and WSL-guest detection; background setup operations with live progress, Tailscale install/sign-in and Serve, Windows OpenSSH install with tailnet-only firewall rules, client-key onboarding, logon autostart, saved setup resume after a restart, and macOS/Windows/Linux client instructions; setup is idempotent and access-mode aware | `tests/test_host_setup.py`, `ui/test/host.test.ts`, live WSL host plus Tailscale/SSH browser and terminal validation |
+
 ## Pinned now-playing bar (2026-10-16, TUI)
 
 Shows whatever is playing on this computer (browser video, Spotify, Music,
