@@ -210,6 +210,8 @@ export interface OAuthProgressOptions {
 	onOpen(): void;
 	onCopy?(): void;
 	onCancel(): void;
+	/** Hint shown while there is no login URL to act on. */
+	idleHint?: string;
 }
 
 export interface OAuthProgressHandle {

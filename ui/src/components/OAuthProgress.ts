@@ -1,6 +1,6 @@
-// Cancellable transient overlay for OAuth browser authorization.
-// Status updates and the login link live only in the overlay: they never
-// reach the transcript, history, or notices. Escape triggers onCancel.
+// Cancellable transient overlay for OAuth browser authorization and long
+// host setup. Status updates and the login link live only in the overlay: they
+// never reach the transcript, history, or notices. Escape triggers onCancel.
 
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import { sanitizeDisplay } from "../design/text.ts";
@@ -10,6 +10,8 @@ export interface OAuthProgressCallbacks {
 	onOpen(): void;
 	onCopy?(): void;
 	onCancel(): void;
+	/** Hint shown while there is no login URL to act on. */
+	idleHint?: string;
 }
 
 const MAX_STATUS_CHARS = 500;
@@ -94,7 +96,7 @@ export class OAuthProgress implements Component {
 		out.push(truncateToWidth(this.status, content));
 		const hint = this.loginUrl
 			? `o open/retry${this.callbacks.onCopy ? " · y copy link" : ""} · c/esc cancel`
-			: "waiting for browser authorization · c/esc cancel";
+			: this.callbacks.idleHint ?? "waiting for browser authorization · c/esc cancel";
 		const controls = wrapTextWithAnsi(theme.dim(hint), content);
 		if (this.loginUrl) {
 			controls.push(truncateToWidth(theme.dim("↑↓ scroll · home/end"), content));

@@ -108,6 +108,7 @@ async function followSetup(host: FeatureHost, operationId: string, title: string
 			cancelled = true;
 			void host.request("host.setup.cancel", { operationId }).catch(() => undefined);
 		},
+		idleHint: "setup running · c/esc cancel",
 	});
 	try {
 		while (!cancelled) {

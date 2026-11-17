@@ -1602,6 +1602,7 @@ export class App implements FeatureHost {
 					options.onCancel();
 					close("cancel");
 				},
+				idleHint: options.idleHint,
             }, options.loginUrl, this.tui);
 			return component;
 		}).then(() => {
