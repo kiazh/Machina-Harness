@@ -1170,13 +1170,15 @@ def _install_ssh_key(op: _SetupOperation, public_key: str) -> None:
 New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
 if (-not (Test-Path $path)) {{ New-Item -ItemType File -Path $path | Out-Null }}
 $key = (Get-Content -Raw -Path {_ps_quote(_powershell_path(key_file))}).Trim()
+$added = $false
 if (-not (Select-String -Path $path -SimpleMatch $key -Quiet)) {{
   Add-Content -Path $path -Value $key
+  $added = $true
 }}
 icacls $path /inheritance:r | Out-Null
 icacls $path /grant '*S-1-5-32-544:F' | Out-Null
 icacls $path /grant '*S-1-5-18:F' | Out-Null
-Restart-Service -Name sshd -ErrorAction SilentlyContinue
+if ($added) {{ Restart-Service -Name sshd -ErrorAction SilentlyContinue }}
 """,
                     timeout=180,
                 )
