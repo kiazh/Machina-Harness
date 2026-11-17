@@ -1806,7 +1806,7 @@ machina host attach
 machina host stop
 ```
 
-Reach it through an SSH port forward, Tailscale, or Cloudflare Access. Do not expose the bridge port directly. In the TUI, `/host` runs the guided one-shot setup, including Tailscale Serve, OpenSSH restricted to the tailnet, client-key onboarding, and restart-safe resume; `/host advanced` exposes the port, session, and full-mode options. The setup asks whether to **host the current Machina session** (keeping the conversation; a true terminal mirror when already in tmux) or **start a new Machina session**. `machina host stop` leaves a borrowed tmux session running. See [docs/REMOTE_HOST.md](docs/REMOTE_HOST.md) for setup, security notes, and troubleshooting.
+Reach it through an SSH port forward, Tailscale, or Cloudflare Access. Do not expose the bridge port directly. In the TUI, `/host` runs the guided one-shot setup, including Tailscale Serve, OpenSSH restricted to the tailnet, client-key onboarding, and restart-safe resume; `/host advanced` exposes the port, session, and full-mode options. Starting the host asks whether to **host the current Machina session** (keeping the conversation; a true terminal mirror when already in tmux) or **start a new Machina session**, and you can switch on the next start without rerunning setup. `machina host stop` leaves a borrowed tmux session running. See [docs/REMOTE_HOST.md](docs/REMOTE_HOST.md) for setup, security notes, and troubleshooting.
 
 ### Shutdown
 

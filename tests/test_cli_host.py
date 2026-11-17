@@ -58,7 +58,7 @@ def test_ttyd_command_is_loopback_and_writable():
     assert "-W" in command
     assert "-O" in command
     assert command[command.index("-c") + 1] == "machina:secret-token"
-    assert command[-4:] == ["/usr/bin/tmux", "attach-session", "-t", "machina"]
+    assert command[-4:] == ["/usr/bin/tmux", "attach-session", "-t", "=machina"]
 
 
 def test_tmux_command_runs_the_tui_in_the_workspace(monkeypatch):
@@ -173,6 +173,35 @@ def test_start_attaches_to_an_existing_tmux_session_without_owning_it(tmp_path, 
     assert state.session == "dev"
     assert state.owns_session is False
     assert calls == []
+
+
+def test_start_borrows_a_different_existing_session_even_with_old_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path / "home"))
+    host_mod.save_state(_state(session="machina", owns_session=True))
+    monkeypatch.setattr(host_mod, "_ensure_supported", lambda: None)
+    monkeypatch.setattr(
+        host_mod,
+        "_which",
+        lambda name: {"tmux": "/usr/bin/tmux", "ttyd": "/usr/bin/ttyd"}.get(name),
+    )
+    monkeypatch.setattr(
+        host_mod,
+        "_tmux_session_alive",
+        lambda _tmux, session: session == "dev",
+    )
+    monkeypatch.setattr(host_mod, "process_alive", lambda _pid: False)
+    killed: list[str] = []
+    monkeypatch.setattr(host_mod, "_tmux_kill", lambda _tmux, session: killed.append(session))
+    monkeypatch.setattr(host_mod, "_terminate_ttyd", lambda _pid: None)
+    monkeypatch.setattr(host_mod, "_run", lambda _command, **_kwargs: pytest.fail("no new session"))
+    monkeypatch.setattr(host_mod, "_popen", lambda _command, **_kwargs: _Process())
+    monkeypatch.setattr(host_mod.time, "sleep", lambda _seconds: None)
+
+    state, _created = host_mod.start_host(workspace=tmp_path, session="dev")
+
+    assert killed == ["machina"]
+    assert state.session == "dev"
+    assert state.owns_session is False
 
 
 def test_start_resumes_a_machina_session_in_a_new_tmux(tmp_path, monkeypatch):

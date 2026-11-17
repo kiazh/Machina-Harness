@@ -104,6 +104,29 @@ async function runLifecycle(host: FeatureHost, method: "host.start" | "host.stop
 	host.print(statusText(status), status.running ? "success" : "warning");
 }
 
+async function startHost(host: FeatureHost, hosted: string): Promise<void> {
+	const currentSession = host.session();
+	if (hosted === "current" && !currentSession) {
+		host.print("No active Machina session yet; starting a new one.", "warning");
+		hosted = "new";
+	}
+	const machinaSession = hosted === "current" && currentSession ? currentSession.id : "";
+	const label = hosted === "current" ? "this Machina session" : "a new Machina session";
+	host.print(`Starting the host with ${label}…`, "info");
+	try {
+		const { status } = await host.request<{ status: HostStatusView }>("host.start", { machinaSession });
+		host.print(statusText(status), status.running ? "success" : "warning");
+	} catch (error) {
+		host.print(error instanceof Error ? error.message : String(error), "error");
+	}
+}
+
+async function startFlow(host: FeatureHost): Promise<void> {
+	const choice = await host.pick("Start the host with", HOSTED_SESSIONS);
+	if (!choice) return;
+	await startHost(host, choice.value);
+}
+
 async function followSetup(host: FeatureHost, operationId: string, title: string): Promise<void> {
 	let currentUrl = "";
 	let cancelled = false;
@@ -159,13 +182,6 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 	if (!access) return;
 	const client = await host.pick("Where will you connect from?", CLIENTS.slice(0, 3));
 	if (!client) return;
-	const hosted = await host.pick("Hosted shell", HOSTED_SESSIONS);
-	if (!hosted) return;
-	const currentSession = host.session();
-	if (hosted.value === "current" && !currentSession) {
-		host.print("No active Machina session yet; the host will start a new one.", "warning");
-	}
-	const machinaSession = hosted.value === "current" && currentSession ? currentSession.id : "";
 	const modes = advanced
 		? [
 			...MODES,
@@ -227,7 +243,6 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		public_key: publicKey,
 		port,
 		session,
-		machina_session: machinaSession,
 	};
 	if (advanced && mode.value === "full") request.allow_full = true;
 	host.print("Checking the host setup…", "info");
@@ -239,7 +254,6 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		"Set up this computer as a Machina host?",
 		`Access: ${access.label}`,
 		`Client: ${client.label}`,
-		`Hosted shell: ${hosted.label}`,
 		`Mode: ${mode.label}`,
 		`Workspace: ${workspace.trim() || "~"}`,
 	];
@@ -306,9 +320,14 @@ async function openMenu(host: FeatureHost): Promise<void> {
 	const resume = status.pending_setup
 		? [{ value: "resume", label: "Resume setup", description: "Continue the setup that needed a Windows restart" }]
 		: [];
-	const start = { value: "start", label: "Start host", description: "Start the existing persistent shell and browser bridge" };
 	const setup = { value: "setup", label: "Set up this computer", description: "Choose access, then host this conversation or start a fresh one" };
 	const readyToStart = status.configured && status.runtime_ready;
+	const startChoices = readyToStart
+		? [
+			{ value: "start-current", label: "Host this Machina session", description: "Mirror this terminal in tmux, otherwise resume this conversation" },
+			{ value: "start-new", label: "Start a new Machina session", description: "Give the hosted shell a fresh conversation" },
+		]
+		: [];
 	const actions = status.running
 		? [
 			...resume,
@@ -316,14 +335,16 @@ async function openMenu(host: FeatureHost): Promise<void> {
 			{ value: "credentials", label: "Show browser credentials", description: "Reveal the generated username and password" },
 			{ value: "clients", label: "Client setup instructions", description: "What to run on the MacBook or another laptop" },
 			{ value: "add-key", label: "Add a client SSH key", description: "Install another device's public key" },
-			{ value: "restart", label: "Restart host", description: "Restart the tmux shell and browser bridge" },
+			{ value: "switch-session", label: "Switch hosted session", description: "Restart with this conversation or a fresh one" },
+			{ value: "restart", label: "Restart host", description: "Restart the saved hosted session and browser bridge" },
 			{ value: "stop", label: "Stop host", description: "Stop the persistent shell and browser bridge" },
-			{ value: "setup", label: "Repair / change setup", description: "Choose a new hosted session, access path, or runtime setting" },
+			{ value: "setup", label: "Repair / change setup", description: "Choose a new access path or runtime setting" },
 			{ value: "advanced", label: "Advanced setup", description: "Choose the port, session name, or full mode" },
 		]
 		: [
 			...resume,
-			...(readyToStart ? [start, setup] : [setup, start]),
+			...startChoices,
+			setup,
 			{ value: "advanced", label: "Advanced setup", description: "Choose the port, session name, or full mode" },
 			{ value: "clients", label: "Client setup instructions", description: "What to run on the connecting device" },
 			{ value: "access", label: "Access info", description: "Show the configured browser and SSH paths" },
@@ -335,7 +356,9 @@ async function openMenu(host: FeatureHost): Promise<void> {
 	else if (choice.value === "credentials") await showCredentials(host);
 	else if (choice.value === "clients") await showClients(host);
 	else if (choice.value === "add-key") await addKey(host);
-	else if (choice.value === "start") await runLifecycle(host, "host.start");
+	else if (choice.value === "start-current") await startHost(host, "current");
+	else if (choice.value === "start-new") await startHost(host, "new");
+	else if (choice.value === "switch-session") await startFlow(host);
 	else if (choice.value === "stop") await runLifecycle(host, "host.stop");
 	else if (choice.value === "restart") await runLifecycle(host, "host.restart");
 	else if (choice.value === "setup") await setupFlow(host);
@@ -345,7 +368,7 @@ async function openMenu(host: FeatureHost): Promise<void> {
 export const hostCommand: Command = {
 	name: "host",
 	description: "Set up and manage remote access to this Machina host",
-	argumentHint: "[status | setup | advanced | resume | add-key | access | clients | credentials | start | stop | restart]",
+	argumentHint: "[status | setup | advanced | resume | add-key | access | clients | credentials | start [current|new] | stop | restart]",
 	getArgumentCompletions: options([
 		["status", "Show host state and access paths"],
 		["setup", "Install or repair the host runtime"],
@@ -355,9 +378,9 @@ export const hostCommand: Command = {
 		["access", "Show browser and SSH access"],
 		["clients", "Instructions for another device"],
 		["credentials", "Show the browser username and password"],
-		["start", "Start the host"],
+		["start", "Start with this session or a new one"],
 		["stop", "Stop the host"],
-		["restart", "Restart the host"],
+		["restart", "Restart the saved hosted session"],
 	]),
 	async run(args, host) {
 		const words = args.trim().split(/\s+/).filter(Boolean);
@@ -370,8 +393,12 @@ export const hostCommand: Command = {
 		else if (sub === "access") await showAccess(host);
 		else if (sub === "clients") await showClients(host);
 		else if (sub === "credentials") await showCredentials(host);
-		else if (sub === "start" || sub === "stop" || sub === "restart") await runLifecycle(host, `host.${sub}`);
-		else if (sub) host.print("Usage: /host [status | setup | advanced | resume | add-key | access | clients | credentials | start | stop | restart]", "warning");
+		else if (sub === "start") {
+			if (words[1] === "current" || words[1] === "new") await startHost(host, words[1]);
+			else await startFlow(host);
+		}
+		else if (sub === "stop" || sub === "restart") await runLifecycle(host, `host.${sub}`);
+		else if (sub) host.print("Usage: /host [status | setup | advanced | resume | add-key | access | clients | credentials | start [current|new] | stop | restart]", "warning");
 		else await openMenu(host);
 	},
 };

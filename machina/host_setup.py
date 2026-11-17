@@ -268,7 +268,10 @@ def _wsl_runtime_ready(distro: str, user: str) -> tuple[bool, bool]:
 
 
 def _wsl_session_alive(distro: str, session: str, pid: int) -> bool:
-    script = f"tmux has-session -t {shlex.quote(session)} >/dev/null 2>&1 && kill -0 {int(pid)} >/dev/null 2>&1"
+    script = (
+        f"tmux has-session -t {shlex.quote('=' + session)} >/dev/null 2>&1 "
+        f"&& kill -0 {int(pid)} >/dev/null 2>&1"
+    )
     completed = _wsl(distro, script, timeout=15)
     return completed.returncode == 0
 
@@ -386,9 +389,9 @@ def _ssh_command(status: HostStatus) -> str | None:
     if status.runtime == "wsl":
         return (
             f"ssh -i ~/.ssh/id_ed25519 {_windows_user()}@{target} -t "
-            f'"wsl -d {status.distro} -- tmux attach -t {status.session}"'
+            f'"wsl -d {status.distro} -- tmux attach -t ={status.session}"'
         )
-    return f"ssh {os.environ.get('USER') or 'user'}@{target} -t 'tmux attach -t {status.session}'"
+    return f"ssh {os.environ.get('USER') or 'user'}@{target} -t 'tmux attach -t ={status.session}'"
 
 
 def _status_native() -> HostStatus:
@@ -612,23 +615,87 @@ def _run_script(distro: str, script: str, *, timeout: float = 60.0) -> None:
         raise HostSetupError(detail or f"host command failed in {distro}.")
 
 
-def start() -> HostStatus:
-    """Start an already-installed host."""
+def start(
+    *, machina_session: str | None = None, session: str | None = None
+) -> HostStatus:
+    """Start the installed host, optionally choosing the hosted conversation.
+
+    No arguments preserve the last start script/state. Passing
+    ``machina_session`` or ``session`` reconfigures the host first:
+    ``machina_session=""`` starts a fresh conversation and a UUID resumes that
+    existing Machina session. When the caller is already inside tmux, the host
+    attaches to that tmux session for a true terminal mirror.
+    """
+    reconfigure = machina_session is not None or session is not None
     current = status()
+    current_tmux = _current_tmux_session() if reconfigure else None
+
+    if not reconfigure:
+        if current.running:
+            return current
+        if current.runtime == "wsl":
+            _run_script(
+                current.distro,
+                "$HOME/.machina-host/start.sh",
+                timeout=120,
+            )
+        else:
+            local_host.start_host(
+                workspace=Path(current.workspace or Path.cwd()),
+                mode=current.execution_mode,
+                session=current.session,
+                machina_session=current.machina_session or None,
+            )
+        return status()
+
+    if machina_session:
+        try:
+            uuid.UUID(machina_session)
+        except ValueError:
+            raise HostSetupError("machina_session must be a Machina session UUID.") from None
+    target_session = session or current.session or _DEFAULT_SESSION
+    if machina_session and current_tmux:
+        target_session = current_tmux
+    if not re.fullmatch(r"^[A-Za-z0-9_-]{1,64}$", target_session):
+        raise HostSetupError(
+            "session must contain only letters, numbers, dashes, and underscores."
+        )
+    target_workspace = current.workspace or str(Path.cwd())
+    target_mode = current.execution_mode or local_host.DEFAULT_MODE
+    target_port = current.port or _DEFAULT_PORT
+    allow_full = target_mode == "full"
+
     if current.running:
-        return current
+        if machina_session and current_tmux and current.session == current_tmux:
+            # Already broadcasting this exact tmux terminal.
+            return current
+        if current_tmux and current.session == current_tmux:
+            raise HostSetupError(
+                "This Machina window is inside the hosted tmux session. Start a "
+                "different session from a local Machina window so stopping the "
+                "host does not close this one."
+            )
+        stop()
+        current = status()
+
     if current.runtime == "wsl":
-        _run_script(
-            current.distro,
-            "$HOME/.machina-host/start.sh",
-            timeout=120,
+        distro = current.distro or os.environ.get("WSL_DISTRO_NAME") or DEFAULT_WSL_DISTRO
+        _setup_windows(
+            distro,
+            target_workspace,
+            target_mode,
+            target_port,
+            target_session,
+            allow_full,
+            machina_session or "",
         )
     else:
         local_host.start_host(
-            workspace=Path(current.workspace or Path.cwd()),
-            mode=current.execution_mode,
-            session=current.session,
-            machina_session=current.machina_session or None,
+            workspace=Path(target_workspace),
+            mode=target_mode,
+            session=target_session,
+            allow_full=allow_full,
+            machina_session=machina_session or None,
         )
     return status()
 

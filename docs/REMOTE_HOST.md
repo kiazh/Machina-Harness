@@ -16,13 +16,10 @@ default path is a short wizard:
 
 1. Choose **Browser + SSH**, **Browser only**, or **SSH only**.
 2. Choose the device you will connect from (macOS, Windows, or Linux).
-3. Choose the hosted shell:
-   - **Host this Machina session** keeps the conversation you are using. If this
-     terminal is already inside tmux, the browser mirrors it exactly; otherwise
-     the hosted shell resumes the same conversation in the host tmux session.
-   - **Start a new Machina session** gives the hosted shell a fresh
-     conversation.
-4. Accept the default execution mode, workspace, and optional client SSH key.
+3. Accept the default execution mode, workspace, and optional client SSH key.
+
+Setup installs/repairs the host. The hosted conversation is chosen when you
+start the host, so you can change it later without rerunning setup.
 
 To find the client public key, run `cat ~/.ssh/id_ed25519.pub` on macOS or Linux,
 or `Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub` in Windows PowerShell. If
@@ -138,7 +135,7 @@ Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Enabled False
 Then connect from another machine and attach to the WSL tmux session:
 
 ```bash
-ssh <windows-user>@<host> -t "wsl -d Ubuntu -- tmux attach -t machina"
+ssh <windows-user>@<host> -t "wsl -d Ubuntu -- tmux attach -t =machina"
 ```
 
 `/host setup` performs these steps for you. Do not expose port 22 directly to
@@ -149,6 +146,18 @@ the internet. Use Tailscale SSH or a private tunnel.
 ```bash
 machina host start --workspace ~/work --mode ask
 ```
+
+Or use `/host` → **Host this Machina session** / **Start a new Machina session**,
+or `/host start`. The choice is made at start time, not during setup:
+
+- **Host this Machina session** keeps the conversation you are using now. If
+  this terminal is already inside tmux, the browser mirrors it exactly;
+  otherwise the hosted shell resumes the same conversation in the host tmux
+  session.
+- **Start a new Machina session** gives the hosted shell a fresh conversation.
+
+The last start choice is what the autostart entry resumes after a reboot.
+Running `/host start` again lets you switch.
 
 By default this:
 

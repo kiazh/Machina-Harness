@@ -214,7 +214,7 @@ def build_ttyd_command(ttyd: str, tmux: str, state: HostState) -> list[str]:
         tmux,
         "attach-session",
         "-t",
-        state.session,
+        f"={state.session}",
     ]
 
 
@@ -242,7 +242,7 @@ def _tmux_session_alive(tmux: str | None, session: str) -> bool:
     if not tmux:
         return False
     completed = _run(
-        [tmux, "has-session", "-t", session],
+        [tmux, "has-session", "-t", f"={session}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -254,7 +254,7 @@ def _tmux_kill(tmux: str | None, session: str) -> None:
     if not tmux:
         return
     _run(
-        [tmux, "kill-session", "-t", session],
+        [tmux, "kill-session", "-t", f"={session}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -394,7 +394,11 @@ def start_host(
             detail = (completed.stderr or completed.stdout or "").strip()
             raise HostError(f"could not create tmux session: {detail or 'tmux failed'}")
         created_session = True
-    owns_session = created_session or (existing.owns_session if existing is not None else False)
+    owns_session = created_session or (
+        existing.owns_session
+        if existing is not None and existing.session == session
+        else False
+    )
 
     log = ttyd_log_path()
     log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

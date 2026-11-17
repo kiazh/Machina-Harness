@@ -120,9 +120,20 @@ async def host_setup(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
 
 async def host_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
-    del gw, params
+    del gw
+    reconfigure = "machinaSession" in params or "session" in params
+    machina_session = (
+        _str(params, "machinaSession", required=False, max_len=64) if reconfigure else None
+    )
+    session = (
+        _str(params, "session", required=False, max_len=64) if "session" in params else None
+    )
     try:
-        status = await asyncio.to_thread(_setuper().start)
+        status = await asyncio.to_thread(
+            _setuper().start,
+            machina_session=machina_session,
+            session=session or None,
+        )
     except HostSetupError as error:
         raise RpcError(OPERATION_FAILED, str(error)) from None
     return {"status": status.public()}

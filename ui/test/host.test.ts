@@ -134,13 +134,33 @@ test("/host clients asks for a platform and prints the exact instructions", asyn
 	assert.match(host.last().text, /MacBook instructions/);
 });
 
-test("/host start and stop call the lifecycle methods", async () => {
-	for (const verb of ["start", "stop"]) {
-		const host = new FakeHost();
-		host.responses[`host.${verb}`] = { status: { ...RUNNING, running: verb === "start" } };
-		await run(`/host ${verb}`, host);
-		assert.deepEqual(host.calls.at(-1), { method: `host.${verb}`, params: {} });
-	}
+test("/host start can host the current session", async () => {
+	const host = new FakeHost();
+	host.responses["host.start"] = { status: RUNNING };
+	host.picks.push("current");
+	await run("/host start", host);
+	assert.deepEqual(host.calls.at(-1), {
+		method: "host.start",
+		params: { machinaSession: SESSION.id },
+	});
+});
+
+test("/host start can choose a new session", async () => {
+	const host = new FakeHost();
+	host.responses["host.start"] = { status: RUNNING };
+	host.picks.push("new");
+	await run("/host start", host);
+	assert.deepEqual(host.calls.at(-1), {
+		method: "host.start",
+		params: { machinaSession: "" },
+	});
+});
+
+test("/host stop calls the lifecycle method", async () => {
+	const host = new FakeHost();
+	host.responses["host.stop"] = { status: { ...RUNNING, running: false } };
+	await run("/host stop", host);
+	assert.deepEqual(host.calls.at(-1), { method: "host.stop", params: {} });
 });
 
 test("bare /host with a running host opens the management menu", async () => {
@@ -223,7 +243,7 @@ test("/host advanced passes custom port, session, and full mode", async () => {
 		result: { status: RUNNING, instructions: "MacBook instructions" },
 		log: [],
 	};
-	host.picks.push("both", "macos", "current", "full", "yes");
+	host.picks.push("both", "macos", "full", "yes");
 	host.textQueue.push("C:\\work", "9000", "remote", "");
 	await run("/host advanced", host);
 	assert.deepEqual(host.calls.at(-2), {
@@ -237,7 +257,6 @@ test("/host advanced passes custom port, session, and full mode", async () => {
 			port: 9000,
 			session: "remote",
 			allow_full: true,
-			machina_session: SESSION.id,
 		},
 	});
 });
@@ -259,7 +278,7 @@ test("/host setup runs the wizard and prints client instructions", async () => {
 		result: { status: RUNNING, instructions: "MacBook instructions" },
 		log: [],
 	};
-	host.picks.push("setup", "both", "macos", "current", "ask", "yes");
+	host.picks.push("setup", "both", "macos", "ask", "yes");
 	host.textQueue.push("C:\\work", "");
 	await run("/host", host);
 	assert.deepEqual(host.calls.at(-2), {
@@ -272,44 +291,19 @@ test("/host setup runs the wizard and prints client instructions", async () => {
 			public_key: "",
 			port: 7681,
 			session: "machina",
-			machina_session: SESSION.id,
 		},
 	});
 	assert.deepEqual(host.calls.at(-1), { method: "host.setup.status", params: { operationId: "op-1" } });
 	assert.match(host.last().text, /MacBook instructions/);
 });
 
-test("/host can start a fresh hosted Machina session", async () => {
+test("bare /host offers both start choices on a configured stopped host", async () => {
 	const host = new FakeHost();
 	host.responses["host.status"] = { status: { ...RUNNING, running: false } };
-	host.responses["host.plan"] = { status: { ...RUNNING, running: false }, steps: [] };
-	host.responses["host.setup.start"] = { operationId: "op-4" };
-	host.responses["host.setup.status"] = {
-		id: "op-4",
-		state: "done",
-		step: "done",
-		message: "Machina host is ready.",
-		url: "",
-		error: "",
-		restart_required: false,
-		done: true,
-		result: { status: RUNNING, instructions: "MacBook instructions" },
-		log: [],
-	};
-	host.picks.push("setup", "both", "macos", "new", "ask", "yes");
-	host.textQueue.push("C:\\work", "");
+	host.picks.push(undefined);
 	await run("/host", host);
-	assert.deepEqual(host.calls.at(-2), {
-		method: "host.setup.start",
-		params: {
-			workspace: "C:\\work",
-			mode: "ask",
-			access: "both",
-			client: "macos",
-			public_key: "",
-			port: 7681,
-			session: "machina",
-			machina_session: "",
-		},
-	});
+	assert.deepEqual(
+		host.pickItems[0]?.slice(0, 2).map((item) => item.value),
+		["start-current", "start-new"],
+	);
 });

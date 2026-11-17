@@ -27,7 +27,7 @@ def _status(**overrides) -> host_setup.HostStatus:
         "tailnet_name": "desktop.tailnet.ts.net",
         "tailscale_connected": True,
         "sshd_running": True,
-        "ssh_command": 'ssh me@desktop -t "wsl -d Ubuntu -- tmux attach -t machina"',
+        "ssh_command": 'ssh me@desktop -t "wsl -d Ubuntu -- tmux attach -t =machina"',
         "runtime_ready": True,
         "browser_ready": True,
         "ssh_ready": True,
@@ -61,7 +61,7 @@ def test_status_reports_a_running_wsl_host(monkeypatch):
     assert status.runtime_ready is True
     assert status.tailnet_name == "desktop.tailnet.ts.net"
     assert status.missing == []
-    assert "wsl -d Ubuntu -- tmux attach -t machina" in (status.ssh_command or "")
+    assert "wsl -d Ubuntu -- tmux attach -t =machina" in (status.ssh_command or "")
 
 
 def test_status_names_every_missing_piece(monkeypatch):
@@ -342,6 +342,59 @@ def test_status_uses_the_current_tmux_session_for_a_new_host(monkeypatch):
     monkeypatch.setattr(host_setup, "_sshd_running", lambda: True)
 
     assert host_setup.status().session == "dev"
+
+
+def test_start_uses_the_current_tmux_and_session(monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_current_tmux_session", lambda: "dev")
+    monkeypatch.setattr(
+        host_setup,
+        "status",
+        lambda: _status(runtime="native", distro="", running=False, session="machina"),
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        host_setup.local_host, "start_host", lambda **kwargs: captured.update(kwargs)
+    )
+    host_setup.start(
+        machina_session="11111111-2222-3333-4444-555555555555",
+        session="machina",
+    )
+    assert captured["session"] == "dev"
+    assert captured["machina_session"] == "11111111-2222-3333-4444-555555555555"
+
+
+def test_start_can_force_a_fresh_session(monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_current_tmux_session", lambda: "dev")
+    monkeypatch.setattr(
+        host_setup,
+        "status",
+        lambda: _status(runtime="native", distro="", running=False, session="machina"),
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        host_setup.local_host, "start_host", lambda **kwargs: captured.update(kwargs)
+    )
+    host_setup.start(machina_session="", session="machina")
+    assert captured["session"] == "machina"
+    assert captured["machina_session"] is None
+
+
+def test_start_refuses_a_new_session_from_inside_the_hosted_tmux(monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_current_tmux_session", lambda: "machina")
+    monkeypatch.setattr(
+        host_setup,
+        "status",
+        lambda: _status(runtime="native", distro="", running=True, session="machina"),
+    )
+    with pytest.raises(host_setup.HostSetupError, match="inside the hosted"):
+        host_setup.start(machina_session="")
+
 
 
 
