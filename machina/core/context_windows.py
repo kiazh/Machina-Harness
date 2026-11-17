@@ -67,6 +67,7 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     # Qwen hosted families. qwen-max is the 32K DashScope entry; the
     # 2.5/3 families are documented at 128K.
     "qwen3.8": 131_072,
+    "qwen3.5-35b-abliterated": 65_536,
     "qwen3": 131_072,
     "qwen2.5": 131_072,
     "qwen-plus": 131_072,

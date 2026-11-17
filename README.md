@@ -8,15 +8,27 @@ Machina is a terminal-first coding agent that runs entirely on your own machine 
 
 Most terminal agents are a loop around a chat API. They resend the transcript until it overflows, forget everything when the session ends, run whatever model you hard-coded, and treat a tool's name as its security boundary. That is fine for a quick one-off. It falls apart on long tasks, across days, and on actions you cannot undo.
 
-Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (28 tables) is the source of truth, and five subsystems give the model a bounded, governed, auditable view of it:
+Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (28 tables) is the source of truth, and the harness manages a bounded, governed, auditable view of it so the agent stays coherent over hours and across sessions.
 
-- **Context is engineered, not dumped.** The transcript is a typed event log; the prompt is a *projection* of it, fitted to each model's token budget. Machina compacts at safe boundaries and spills large tool results (a 1.2 MB `pytest` run) to recoverable artifacts with a paged read handle, so the window stays small and cheap instead of drowning in its own history.
-- **Memory that outlives the session.** Decisions, preferences, and lessons are extracted into durable claims that are scored, deduplicated, redacted, given provenance, and retrieved by relevance. Ask "which database did we choose?" a week later and it answers from memory, not by replaying the transcript.
-- **A real permission kernel.** Every risky action is canonicalized and bound to a SHA-256 digest of its exact arguments; approval is revalidated at execution and consumed once. A tool name can never stand in for a security boundary, and a reviewed action cannot be swapped out after you approve it.
-- **Routing across the models you actually have.** Machina builds a live inventory from your connected credentials and picks a model per role — planner, supervisor, worker, utility — by fit and cost, deterministically, with no extra model call to make the choice. No overpaying for trivial work, no underpowering the hard parts.
-- **One core, four surfaces.** The same engine runs behind the terminal UI, a CLI, an HTTP API with SSE, and an MCP server, with parity tested between them. Other harnesses (OpenCode, Codex, Hermes) can use Machina as an MCP tool server, and Machina can delegate out to them.
+**The parts that are automatic, not your job to babysit:**
 
-It survives interruptions the way a database does: turn leases with fencing, durable jobs, and resumable approvals mean a crash, a slow human approval, or a restarted cron job never corrupts a conversation.
+- **Context manages itself.** The transcript is a typed event log; the prompt the model sees is a *projection* of it, fitted to each model's token budget every turn. Machina compacts at safe boundaries and spills large tool results (a 1.2 MB `pytest` run) to recoverable artifacts with a paged read handle, so the window stays small and cheap instead of drowning in its own history. You never run `/compact` by hand.
+- **Memory outlives the session.** Decisions, preferences, and lessons are extracted into durable claims that are scored, deduplicated, redacted, given provenance, and retrieved by relevance. Ask "which database did we choose?" a week later and it answers from memory, not by replaying the transcript.
+- **Skills load on demand.** 77 bundled instruction packages are matched to the task by deterministic ranking (no extra model call) and loaded stage-aware, so a planning step gets planning guidance and the prompt never carries procedures it doesn't need.
+- **Model routing is chosen, not configured.** Machina builds a live inventory from your connected credentials and picks a model per role — planner, supervisor, worker, utility — by fit and cost, deterministically. Multi Auto is the default: the selected model anchors the session while delegated and parallel work is routed automatically. No overpaying for trivial work, no underpowering the hard parts.
+- **Parallel delegation is planned, not hoped for.** Say "do these in parallel" and the orchestrator builds a dependency plan, validates it for cycles and duplicate output ownership, runs bounded workers, and has a supervisor synthesize their reports — instead of hoping the model emits N delegate calls.
+
+**The parts that make it safe and durable:**
+
+- **A real permission kernel.** Every risky action is canonicalized and bound to a SHA-256 digest of its exact arguments; approval is revalidated at execution and consumed once. A reviewed action can't be swapped after you approve it, an agent can never approve its own request, and a tool name never stands in for a security boundary.
+- **It survives interruptions like a database.** Turn leases with fencing, durable jobs, and resumable approvals mean a crash, a slow human approval, or a restarted cron job never corrupts a conversation. Scheduled jobs (interval, cron, heartbeat, operator-approved scripts) persist across restarts and park for approval instead of self-approving.
+
+**The parts that make it reach further than one terminal:**
+
+- **One core, four surfaces.** The same engine runs behind the terminal UI, a CLI, an HTTP API with SSE, and an MCP server, with parity tested between them. Pause the same action on two surfaces and the approval identity matches.
+- **It controls other harnesses, both ways.** Register Machina's MCP server so OpenCode, Codex, or Hermes orchestrate durable Machina sub-agents; or set `worker_transport=mcp` and delegate Machina's own work out to an installed harness. Neither direction bypasses Machina's permissions or accounting.
+- **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
+- **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
 **At a glance:** ~124,000 lines of Python backed by 6,487 passing tests on real PostgreSQL · 18 provider types · 74 agent definitions · 77 skill packages · 44 built-in tools · 151 RPC methods · one-command install on Windows, macOS, and Linux.
 
