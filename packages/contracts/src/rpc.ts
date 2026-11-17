@@ -469,6 +469,21 @@ export interface MCPServerView {
  error?: string | null;
 }
 
+/** One built-in, non-secret MCP setup starter from `mcp.catalog`. */
+export interface MCPCatalogEntry {
+	id: string;
+	displayName: string;
+	kind: string;
+	category: string;
+	provider: string;
+	description: string;
+	docsUrl: string;
+	setup: { type: string; instructions: string[] };
+	/** Editable starter fields; not persisted until `mcp.configure` is called. */
+	config?: Record<string, unknown> | null;
+	runtime?: { command?: string; argv?: string[] };
+}
+
 /** Human-managed connector configuration; secret references contain names only. */
 export interface MCPConnectorConfig {
  id: string;

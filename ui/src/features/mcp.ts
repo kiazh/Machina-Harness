@@ -1,10 +1,135 @@
 // Human-operated MCP management. Inspection never connects or discovers tools.
-import type { MCPConnectorConfig, MCPOAuthSettings, MCPOAuthView, MCPServerView, MCPToolView } from "../protocol.ts";
+import type { SelectItem } from "@earendil-works/pi-tui";
+import type { MCPCatalogEntry, MCPConnectorConfig, MCPOAuthSettings, MCPOAuthView, MCPServerView, MCPToolView } from "../protocol.ts";
 import { sanitizeDisplay } from "../design/text.ts";
 import { confirm, options, requireSession, type Command, type FeatureHost } from "./types.ts";
 import { authorizeConnector, forgetConnectorAccess, formatOAuthStatus } from "./mcp-oauth.ts";
 const stateOf = (server: MCPServerView): string => server.enabled ? server.state : "disabled";
 const nameOf = (server: MCPServerView): string => sanitizeDisplay(server.display_name || server.id);
+const STARTER_PREFIX = "__starter__:";
+const MANUAL_ACTION = "__add__";
+const MANAGE_ACTION = "__manage__";
+const isMcpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
+
+/** Catalog starters can be saved as-is; custom and harness entries are not. */
+function availableStarters(entries: MCPCatalogEntry[], configured: Set<string>): MCPCatalogEntry[] {
+ return entries
+  .filter(entry => entry.kind === "connector" && entry.config && entry.id !== "custom-mcp" && !configured.has(entry.id))
+  .sort((left, right) => left.displayName.localeCompare(right.displayName));
+}
+
+function starterRows(entries: MCPCatalogEntry[]): Array<SelectItem & { section?: true; muted?: boolean }> {
+ if (!entries.length) return [];
+ return [
+  { value: "__section_starters__", label: `── Starters · ${entries.length} ──`, section: true },
+  ...entries.map(entry => ({
+   value: `${STARTER_PREFIX}${entry.id}`,
+   label: sanitizeDisplay(entry.displayName),
+   description: `${sanitizeDisplay(entry.category)} · ${sanitizeDisplay(entry.description)}`,
+  })),
+ ];
+}
+
+const errorText = (error: unknown): string => sanitizeDisplay(error instanceof Error ? error.message : String(error));
+const authRequired = (error: unknown): boolean => /oauth|authoriz|401|403|auth_required/i.test(errorText(error));
+
+interface ConnectPreview {
+ digest: string;
+ proposal?: { argv?: string[]; cwd?: string | null; network?: string[]; backend?: string; endpoint?: string; contentPreview?: string };
+ description?: string;
+}
+
+/** Connect a saved server; one Enter is the consent, including OAuth. */
+async function connectServer(
+ host: FeatureHost,
+ id: string,
+ label: string,
+ options: { docsUrl?: string; review?: boolean } = {},
+): Promise<boolean> {
+ const session = requireSession(host);
+ const preview = await host.request<ConnectPreview>("mcp.preview", { id, sessionId: session.id });
+ if (options.review) {
+  const review = [
+   `Connect ${label}?`,
+   preview.proposal?.argv?.length ? `Command argv: ${JSON.stringify(preview.proposal.argv)}` : "",
+   preview.proposal?.cwd ? `Working directory: ${preview.proposal.cwd}` : "",
+   preview.proposal?.endpoint ? `Endpoint: ${preview.proposal.endpoint}` : "",
+   preview.proposal?.network?.length ? `Network: ${JSON.stringify(preview.proposal.network)}` : "",
+   preview.proposal?.backend ? `Backend: ${preview.proposal.backend}` : "",
+   preview.proposal?.contentPreview ? `Configuration: ${preview.proposal.contentPreview}` : "",
+   preview.description || "",
+  ].filter(Boolean).map(line => sanitizeDisplay(line)).join("\n");
+  if (!await confirm(host, review, "Connect")) return false;
+ }
+ const connect = async (digest: string): Promise<boolean> => {
+  const result = await host.request<{ server: MCPServerView }>("mcp.connect", { id, sessionId: session.id, digest });
+  host.print(describe(result.server), result.server.state === "connected" ? "success" : "warning");
+  return result.server.state === "connected";
+ };
+ try {
+  return await connect(preview.digest);
+ } catch (error) {
+  if (!authRequired(error)) {
+   host.print(`Could not connect ${label}: ${errorText(error)}${options.docsUrl ? `\nDocs: ${options.docsUrl}` : ""}`, "error");
+   return false;
+  }
+  if (!await authorizeConnector(host, id, { auto: true })) return false;
+  const fresh = await host.request<ConnectPreview>("mcp.preview", { id, sessionId: session.id });
+  try {
+   return await connect(fresh.digest);
+  } catch (retryError) {
+   host.print(`Could not connect ${label}: ${errorText(retryError)}${options.docsUrl ? `\nDocs: ${options.docsUrl}` : ""}`, "error");
+   return false;
+  }
+ }
+}
+
+async function addStarter(host: FeatureHost, entry: MCPCatalogEntry): Promise<void> {
+ if (!entry.config) return;
+ const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config: entry.config });
+ await connectServer(host, server.id, nameOf(server), { docsUrl: entry.docsUrl });
+}
+
+function deriveServerId(endpoint: URL, servers: MCPServerView[]): string {
+ const parts = [endpoint.hostname.replace(/^www\./i, "")];
+ for (const segment of endpoint.pathname.split("/")) {
+  const clean = segment.trim().toLowerCase();
+  if (clean && !["mcp", "sse", "message", "messages"].includes(clean)) parts.push(clean);
+ }
+ let base = parts.join("-").replace(/[^a-z0-9_-]+/g, "-").replace(/-{2,}/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
+ base = base.replace(/[-_]+$/g, "");
+ if (!base) base = "mcp";
+ if (!/^[a-z0-9]/.test(base)) base = `mcp-${base}`.slice(0, 64).replace(/[-_]+$/g, "");
+ const used = new Set(servers.map(server => server.id));
+ let id = base;
+ for (let suffix = 2; used.has(id); suffix++) {
+  const tail = `-${suffix}`;
+  id = `${base.slice(0, 64 - tail.length)}${tail}`;
+ }
+ return id;
+}
+
+/** Paste an MCP link: derive a stable id, save, connect. */
+async function addUrl(host: FeatureHost, raw: string, servers: MCPServerView[]): Promise<void> {
+ const endpoint = new URL(raw.trim());
+ if (!["https:", "http:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+  throw new Error("Use an HTTP(S) MCP link without credentials, query parameters or fragments.");
+ }
+ const id = deriveServerId(endpoint, servers);
+ const loopback = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)$/i.test(endpoint.hostname);
+ const config: MCPConnectorConfig = {
+  id,
+  display_name: id,
+  transport: "streamable_http",
+  endpoint: endpoint.toString(),
+  trust: "untrusted",
+ };
+ if (loopback) config.local_access = true;
+ requireSession(host);
+ const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config });
+ host.print(`Adding ${nameOf(server)}…`, "plain");
+ await connectServer(host, server.id, nameOf(server));
+}
 function describe(server: MCPServerView): string {
  const lines = [`${nameOf(server)} · ${stateOf(server)}`, `ID: ${sanitizeDisplay(server.id)} · Transport: ${sanitizeDisplay(server.transport)}`];
  if (server.state === "connected") {
@@ -69,7 +194,7 @@ async function addServer(host: FeatureHost): Promise<void> {
   else throw new Error(`Unsupported advanced option: ${sanitizeDisplay(key)}. Use secret_refs for secret names; never enter secret values.`);
  }
  const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config });
- host.print(`${nameOf(server)} saved. Open /mcp and choose Connect when ready.`, "success");
+ await connectServer(host, server.id, nameOf(server));
 }
 async function askOAuthSettings(host: FeatureHost, existing?: MCPOAuthSettings): Promise<MCPOAuthSettings | undefined> {
  const mode = await host.pick("OAuth client registration", [
@@ -128,7 +253,7 @@ async function manageServer(host: FeatureHost, id: string): Promise<void> {
   }
  }
  const action = await host.pick(`${nameOf(server)} · actions`, [
-  server.state === "connected" ? { value: "disconnect", label: "Disconnect", description: "Close this server connection" } : { value: "connect", label: "Connect", description: "Request session approval and discover tools" },
+  server.state === "connected" ? { value: "disconnect", label: "Disconnect", description: "Close this server connection" } : { value: "connect", label: "Connect", description: "Connect now and discover its tools" },
   ...(isHttp ? [
    { value: "authorize", label: hasOAuth ? "Authorize / Reauthorize" : "Authorize", description: "Authorize in an external browser" },
    { value: "forget", label: "Forget access", description: "Remove saved OAuth credentials" },
@@ -148,12 +273,7 @@ async function manageServer(host: FeatureHost, id: string): Promise<void> {
   const { server: saved } = await host.request<{ server: MCPServerView }>("mcp.configure", { config: { id, oauth } });
   host.print(`${nameOf(saved)} OAuth settings saved. Choose Authorize when ready.`, "success");
  } else if (action.value === "connect") {
-  const session = requireSession(host);
-  const preview = await host.request<{ digest: string; proposal: { argv?: string[]; cwd?: string | null; network?: string[]; backend?: string; endpoint?: string; contentPreview?: string }; description?: string }>("mcp.preview", { id, sessionId: session.id });
-  const review = [`Connect ${nameOf(server)}?`, preview.proposal.argv?.length ? `Command argv: ${JSON.stringify(preview.proposal.argv)}` : "", preview.proposal.cwd ? `Working directory: ${preview.proposal.cwd}` : "", preview.proposal.endpoint ? `Endpoint: ${preview.proposal.endpoint}` : "", preview.proposal.network?.length ? `Network: ${JSON.stringify(preview.proposal.network)}` : "", preview.proposal.backend ? `Backend: ${preview.proposal.backend}` : "", preview.proposal.contentPreview ? `Configuration: ${preview.proposal.contentPreview}` : "", preview.description || ""].filter(Boolean).map(line => sanitizeDisplay(line)).join("\n");
-  if (!await confirm(host, review, "Connect")) return;
-  const result = await host.request<{ server: MCPServerView }>("mcp.connect", { id, sessionId: session.id, digest: preview.digest });
-  host.print(describe(result.server), result.server.state === "connected" ? "success" : "warning");
+  await connectServer(host, id, nameOf(server), { review: true });
  } else if (action.value === "disconnect") {
   const result = await host.request<{ server: MCPServerView }>("mcp.disconnect", { id });
   host.print(describe(result.server), "plain");
@@ -169,11 +289,20 @@ async function manageServer(host: FeatureHost, id: string): Promise<void> {
   host.print(lines.join("\n"), "plain");
  }
 }
+
+async function manageServers(host: FeatureHost, servers: MCPServerView[]): Promise<void> {
+ const choice = await host.pick("Manage MCP servers", servers.map(server => ({
+  value: server.id,
+  label: nameOf(server),
+  description: `${stateOf(server)} · ${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}`,
+ })));
+ if (choice) await manageServer(host, choice.value);
+}
 export const mcpCommand: Command = {
  name: "mcp",
- description: "Add, connect, inspect and remove MCP servers",
- argumentHint: "[list | status <id>]",
- getArgumentCompletions: options([["list", "List configured harness servers"], ["status", "Inspect a server by ID"]]),
+ description: "Paste an MCP link, connect, inspect and remove servers",
+ argumentHint: "[<url> | add [<url>] | list | status <id>]",
+ getArgumentCompletions: options([["add", "Add and connect from a pasted MCP link"], ["list", "List configured harness servers"], ["status", "Inspect a server by ID"]]),
  async run(args, host) {
   const words = args.trim().split(/\s+/).filter(Boolean);
   if (words[0] === "status" && words.length === 2) {
@@ -181,22 +310,70 @@ export const mcpCommand: Command = {
    host.print(describe(server), "plain");
    return;
   }
-  if (words.length && !(words[0] === "list" && words.length === 1)) {
-   host.print("Usage: /mcp (manage servers) · /mcp list · /mcp status <id>", "warning");
+  if (words[0] === "list" && words.length === 1) {
+   const { servers } = await host.request<{ servers: MCPServerView[] }>("mcp.list");
+   if (servers.length) host.print(servers.map(server => `${nameOf(server)} · ${stateOf(server)} · ${sanitizeDisplay(server.id)}`).join("\n"), "plain");
+   else host.print("No MCP servers registered in this harness. Run /mcp to add one.", "plain");
+   return;
+  }
+  const wantsAdd = words[0] === "add";
+  if (wantsAdd && words.length === 1) {
+   await addServer(host);
+   return;
+  }
+  const pasted = wantsAdd ? words[1] : words.length === 1 ? words[0] : undefined;
+  if (pasted && words.length === (wantsAdd ? 2 : 1)) {
+   if (!isMcpUrl(pasted)) {
+    host.print("Paste an http(s) MCP endpoint, for example /mcp https://example.com/mcp", "warning");
+    return;
+   }
+   const { servers } = await host.request<{ servers: MCPServerView[] }>("mcp.list");
+   await addUrl(host, pasted, servers);
+   return;
+  }
+  if (words.length) {
+   host.print("Usage: /mcp · /mcp <url> · /mcp add [<url>] · /mcp list · /mcp status <id>", "warning");
    return;
   }
   const { servers } = await host.request<{ servers: MCPServerView[] }>("mcp.list");
-  if (!servers.length) host.print("No MCP servers registered in this harness. Choose Add server to configure a connection.", "plain");
-  if (words[0] === "list") {
-   if (servers.length) host.print(servers.map(server => `${nameOf(server)} · ${stateOf(server)} · ${sanitizeDisplay(server.id)}`).join("\n"), "plain");
-   return;
+  // Starters are an optional convenience: an older gateway without
+  // mcp.catalog still gets the configured inventory and manual add flow.
+  let catalog: MCPCatalogEntry[] = [];
+  try {
+   ({ entries: catalog } = await host.request<{ entries: MCPCatalogEntry[] }>("mcp.catalog"));
+  } catch {
+   catalog = [];
   }
-  const selected = await host.pick("MCP servers", [
-   ...servers.map(server => ({ value: server.id, label: nameOf(server), description: `${stateOf(server)} · ${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}` })),
-   { value: "__add__", label: "Add server", description: "Configure a local command or HTTP endpoint" },
-  ]);
+  const starters = availableStarters(catalog, new Set(servers.map(server => server.id)));
+  if (!servers.length) {
+   host.print(starters.length
+    ? "No MCP servers configured in this harness. Pick a starter, paste a link, or add one manually."
+    : "No MCP servers configured in this harness. Paste an MCP link or add one manually.", "plain");
+  }
+  const rows: Array<SelectItem & { section?: true; muted?: boolean }> = [
+   { value: "__section_configured__", label: `── Configured · ${servers.length} ──`, section: true },
+  ];
+  if (!servers.length) rows.push({ value: "__configured_empty__", label: "No servers configured yet.", section: true, muted: true });
+  rows.push(...servers.map(server => ({
+   value: server.id,
+   label: nameOf(server),
+   description: `${stateOf(server)} · ${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}`,
+  })));
+  rows.push(...starterRows(starters));
+  rows.push({ value: "__section_add__", label: "── Add ──", section: true });
+  rows.push({ value: MANUAL_ACTION, label: "Add server manually", description: "Configure a local command or HTTP endpoint" });
+  if (servers.length) rows.push({ value: MANAGE_ACTION, label: "Manage servers", description: "Inspect tools, OAuth, or remove a configured server" });
+  const selected = await host.pick("MCP servers", rows, { count: false });
   if (!selected) return;
-  if (selected.value === "__add__") await addServer(host);
-  else await manageServer(host, selected.value);
+  if (selected.value === MANUAL_ACTION) await addServer(host);
+  else if (selected.value === MANAGE_ACTION) await manageServers(host, servers);
+  else if (selected.value.startsWith(STARTER_PREFIX)) {
+   const starter = starters.find(entry => `${STARTER_PREFIX}${entry.id}` === selected.value);
+   if (starter) await addStarter(host, starter);
+  } else {
+   const server = servers.find(candidate => candidate.id === selected.value);
+   if (server?.state === "connected") await manageServer(host, server.id);
+   else if (server) await connectServer(host, server.id, nameOf(server));
+  }
  },
 };

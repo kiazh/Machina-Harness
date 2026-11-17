@@ -197,6 +197,8 @@ Delegation: use specialists for independent, substantial subtasks. The known rol
 
 For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan.
 
+When the user pastes an MCP server link or asks to add one, call mcp_connect with that url. Do not ask for a server name or setup fields: the id is derived automatically, the approval card is the confirmation, and a saved HTTP server that needs OAuth opens its browser authorization during the same connect attempt.
+
 When you need to do something, use the available tools. Think step by step:
 1. Understand the task
 2. Decide what tools to use

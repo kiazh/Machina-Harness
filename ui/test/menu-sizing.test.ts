@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "../src/components/Menu.ts";
+import { DEFAULT_MENU_VISIBLE_ROWS, Menu, type MenuSectionItem } from "../src/components/Menu.ts";
 import { Picker } from "../src/components.ts";
 
 const CHROME_ROWS = 3; // title + filter + hint
@@ -80,4 +80,23 @@ test("setVisibleRows keeps the menu bounded on resize", () => {
 	const menu = new Menu("Skins", items(53));
 	menu.setVisibleRows(3);
 	assert.equal(clean(menu).length, 3 + CHROME_ROWS);
+});
+
+test("a count override replaces or hides the automatic title counter", () => {
+	const replaced = new Menu("Servers", items(2), { count: "3 configured" });
+	assert.match(clean(replaced)[0]!, /^Servers\s+3 configured/);
+	const hidden = new Menu("Servers", items(2), { count: false });
+	assert.doesNotMatch(clean(hidden)[0]!, /\(2\/2\)/);
+});
+
+test("muted section rows use the quiet ink without becoming selectable", () => {
+	const menu = new Menu("Servers", [
+		{ value: "__section__", label: "Configured", section: true } as MenuSectionItem,
+		{ value: "__empty__", label: "No servers configured yet.", section: true, muted: true } as MenuSectionItem,
+		{ value: "add", label: "Add server" },
+	]);
+	const lines = clean(menu);
+	assert.match(lines[2]!, /Configured/);
+	assert.match(lines[3]!, /No servers configured yet/);
+	assert.equal(menu.getSelectedItem()?.value, "add", "the informational row is skipped");
 });

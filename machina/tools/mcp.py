@@ -30,12 +30,13 @@ def _management():
 
 @registry.register(
     description=(
-        "Add and connect an MCP server, then report the tools it exposes. Give a short "
-        "unique name plus EITHER url (an HTTP/streamable server link) OR command "
-        "(executable) with optional argv (a local stdio server). Defining a server "
-        "grants new tools and network/process reach, so this call requires user "
-        "approval. Inspect existing servers with mcp_list; run discovered tools with "
-        "mcp_describe/mcp_call; remove with mcp_disconnect."
+        "Add and connect an MCP server from a pasted link, then report the tools it "
+        "exposes. When the user pastes an MCP URL, call this with url and no name; the "
+        "id is derived from the link automatically. Optionally supply a short unique "
+        "name, or use command plus optional argv for a local stdio server instead of "
+        "url. Defining a server grants new tools and network/process reach, so this "
+        "call requires user approval. Inspect existing servers with mcp_list; run "
+        "discovered tools with mcp_describe/mcp_call; remove with mcp_disconnect."
     ),
     parameters={
         "type": "object",
@@ -43,8 +44,8 @@ def _management():
             "name": {
                 "type": "string",
                 "description": (
-                    "Short unique server id, e.g. 'docs' (lowercase letters, digits, "
-                    "'-', '_'; max 64)."
+                    "Optional short server id (lowercase letters, digits, '-', '_'; "
+                    "max 64). Omit it for a pasted link; the id is derived from the URL."
                 ),
             },
             "url": {
@@ -105,12 +106,12 @@ def _management():
                 "description": "Seconds allowed for tool discovery (default 20).",
             },
         },
-        "required": ["name"],
+        "required": [],
     },
     effects=("net", "exec"),
 )
 async def mcp_connect(
-    name: str,
+    name: str = "",
     url: str = "",
     command: str = "",
     argv: list[str] | None = None,

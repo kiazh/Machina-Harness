@@ -19,6 +19,8 @@ export type { SelectItem };
  */
 export interface MenuSectionItem extends SelectItem {
 	section: true;
+	/** Render this informational row dim instead of the section secondary ink. */
+	muted?: boolean;
 }
 
 function isSection(item: SelectItem): boolean {
@@ -39,6 +41,12 @@ export interface MenuOptions {
 	/** Initially selected value (defaults to the first item). */
 	initialValue?: string;
 	multiSelect?: boolean;
+	/**
+	 * Replace the automatic `(matched/total)` title counter. A string renders
+	 * dim in its place; `false` hides the counter for menus whose rows are not
+	 * all the same kind (e.g. configured servers plus action rows).
+	 */
+	count?: string | false;
 }
 
 // Rendered chrome above and below the item rows (title, filter, hint) plus
@@ -70,12 +78,14 @@ export class Menu implements Component {
 	private filter = "";
 	private selectedValue: string | undefined;
 	private readonly multiSelect: boolean;
+	private readonly countOverride: string | false | undefined;
 	private readonly checked = new Set<string>();
 
 	constructor(title: string, items: SelectItem[], options: MenuOptions = {}) {
 		this.title = title;
 		this.items = items;
 		this.multiSelect = options.multiSelect ?? false;
+		this.countOverride = options.count;
 		this.hint = options.hint ?? (this.multiSelect ? "↑↓ move · space check · enter review · esc cancel" : "enter select · esc back");
 		this.visibleRows = options.visibleRows === undefined
 			? DEFAULT_MENU_VISIBLE_ROWS
@@ -315,13 +325,15 @@ export class Menu implements Component {
 		// see selectable rows.
 		const rows = visible.filter((item) => !isSection(item)).length;
 		const totalItems = this.items.filter((item) => !isSection(item)).length;
-		const count = theme.dim(`(${rows}/${totalItems}${this.multiSelect ? ` · ${this.checked.size} checked` : ""})`);
+		const count = this.countOverride === false
+			? ""
+			: theme.dim(this.countOverride ?? `(${rows}/${totalItems}${this.multiSelect ? ` · ${this.checked.size} checked` : ""})`);
 		// Titles/labels/descriptions are untrusted (session titles, recall
 		// previews, model IDs): sanitize first, then split embedded newlines
 		// into physical rows so a payload cannot corrupt the viewport.
 		const titleRows = this.titleLines();
 		const out = titleRows
-			.map((line, index) => truncateToWidth(`${theme.accentBold(line)}${index === 0 ? ` ${count}` : ""}`, content));
+			.map((line, index) => truncateToWidth(`${theme.accentBold(line)}${index === 0 && count ? ` ${count}` : ""}`, content));
 		out.push(
 			this.filter
 				? truncateToWidth(`${theme.secondary("Filter:")} ${theme.text(this.filter)}`, content)
@@ -335,8 +347,9 @@ export class Menu implements Component {
 			for (const item of this.visibleWindow(visible, content)) {
 				const entry = this.itemRows(item, content, selected);
 				if (entry.section) {
+					const style = (item as MenuSectionItem).muted ? theme.dim : theme.secondary;
 					for (const line of entry.rows) {
-						out.push(truncateToWidth(theme.secondary(line), content));
+						out.push(truncateToWidth(style(line), content));
 					}
 					continue;
 				}

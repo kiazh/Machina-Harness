@@ -10,7 +10,7 @@ import type {
 	MCPOAuthView,
 } from "../protocol.ts";
 import { sanitizeDisplay } from "../design/text.ts";
-import { confirm, requireSession, type FeatureHost } from "./types.ts";
+import { confirm, requireSession, type FeatureHost, type OAuthProgressHandle } from "./types.ts";
 
 const POLL_MS = 500;
 const OVERALL_MS = 300_000;
@@ -77,8 +77,17 @@ interface PreviewResult {
 	issuers?: string[];
 }
 
-/** Run Authorize/Reauthorize for one HTTP server; resolves when settled. */
-export async function authorizeConnector(host: FeatureHost, serverId: string): Promise<void> {
+export interface AuthorizeConnectorOptions {
+	/** The human already chose Connect: start immediately and open the browser. */
+	auto?: boolean;
+}
+
+/** Run Authorize/Reauthorize for one HTTP server; true when authorization completed. */
+export async function authorizeConnector(
+	host: FeatureHost,
+	serverId: string,
+	options: AuthorizeConnectorOptions = {},
+): Promise<boolean> {
 	const session = requireSession(host);
 	const sessionId = session.id;
 	// 1. Bounded login metadata (no tokens; user-selected action).
@@ -89,17 +98,19 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 			label: sanitizeDisplay(issuer),
 			description: "Advertised by the resource",
 		})));
-		if (!choice) return;
+		if (!choice) return false;
 		preview = await host.request<PreviewResult>("mcp.oauth.preview", { id: serverId, sessionId, issuer: choice.value });
 	}
 	if (!preview.previewId || !preview.digest || !preview.review) {
 		host.print(oauthErrorMessage("oauth_discovery_failed"), "error");
-		return;
+		return false;
 	}
-	host.print(`Authorize ${sanitizeDisplay(serverId)}?\n${formatReview(preview.review)}`, "plain");
-	if (!await confirm(host, `Continue to browser authorization for ${sanitizeDisplay(serverId)}?`, "Continue")) {
-		await host.request("mcp.oauth.cancel", { id: serverId, sessionId, previewId: preview.previewId }).catch(() => undefined);
-		return;
+	if (!options.auto) {
+		host.print(`Authorize ${sanitizeDisplay(serverId)}?\n${formatReview(preview.review)}`, "plain");
+		if (!await confirm(host, `Continue to browser authorization for ${sanitizeDisplay(serverId)}?`, "Continue")) {
+			await host.request("mcp.oauth.cancel", { id: serverId, sessionId, previewId: preview.previewId }).catch(() => undefined);
+			return false;
+		}
 	}
 	// 2. Consume the reviewed preview; work continues in the polled operation.
 	let operation: MCPOAuthOperationView;
@@ -113,7 +124,7 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 		// release it so no dangling authorization session survives the flow.
 		void host.request("mcp.oauth.cancel", { id: serverId, sessionId, previewId: preview.previewId }).catch(() => undefined);
 		host.print(oauthErrorMessage(operationReason(error)), "error");
-		return;
+		return false;
 	}
 	const operationId = operation.operationId;
 	let disposed = false;
@@ -121,6 +132,7 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 	let wakePoll: (() => void) | undefined;
 	let loginUrl: string | undefined;
 	let browserOpening = false;
+	const progressRef: { current?: OAuthProgressHandle } = {};
 	const cleanup = (): void => {
 		disposed = true;
 		if (pollTimer) clearTimeout(pollTimer);
@@ -140,31 +152,32 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 		wakePoll = resolve;
 		pollTimer = setTimeout(() => { wakePoll = undefined; resolve(); }, POLL_MS);
 	});
+	const openBrowser = (): void => {
+		if (disposed || browserOpening || !loginUrl) return;
+		browserOpening = true;
+		void (async () => {
+			try {
+				const { opened } = await host.request<{ opened: boolean }>("mcp.oauth.open", { id: serverId, sessionId, operationId });
+				if (disposed) return;
+				progressRef.current?.update(opened ? "Browser opened. Waiting for authorization…"
+					: "Could not open the browser. Press y to copy the full link, or o to retry.", loginUrl);
+			} catch {
+				if (!disposed) progressRef.current?.update("Could not open the browser. Press y to copy the full link, or o to retry.", loginUrl);
+			} finally {
+				browserOpening = false;
+			}
+		})();
+	};
 	const progress = host.showOAuthProgress({
 		title: `Authorizing ${serverId}`,
 		status: "Preparing authorization…",
-		onOpen: () => {
-			if (disposed || browserOpening || !loginUrl) return;
-			browserOpening = true;
-			void (async () => {
-				try {
-					const { opened } = await host.request<{ opened: boolean }>("mcp.oauth.open", { id: serverId, sessionId, operationId });
-					if (disposed) return;
-					progress.update(opened ? "Browser opened. Waiting for authorization…"
-						: "Could not open the browser. Press y to copy the full link, or o to retry.", loginUrl);
-				} catch {
-					if (!disposed) progress.update("Could not open the browser. Press y to copy the full link, or o to retry.", loginUrl);
-				} finally {
-					browserOpening = false;
-				}
-			})();
-		},
+		onOpen: openBrowser,
 		onCopy: () => {
 			if (disposed || !loginUrl) return;
 			void (async () => {
 				let copied = false;
 				try { copied = await host.copyText?.(loginUrl!) ?? false; } catch { /* local clipboard unavailable */ }
-				if (!disposed) progress.update(copied ? "Login link copied. Paste it into your browser to authorize."
+				if (!disposed) progressRef.current?.update(copied ? "Login link copied. Paste it into your browser to authorize."
 					: "Clipboard unavailable. Select the full link below and copy it into your browser, or press o to retry.", loginUrl);
 			})();
 		},
@@ -174,6 +187,7 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 			void host.request("mcp.oauth.cancel", { id: serverId, sessionId, operationId }).catch(() => undefined);
 		},
 	});
+	progressRef.current = progress;
 	try {
 		const deadline = Date.now() + OVERALL_MS;
 		let awaitingBrowser = false;
@@ -184,61 +198,63 @@ export async function authorizeConnector(host: FeatureHost, serverId: string): P
 				// Sequential awaits keep exactly one status request outstanding.
 				status = await host.request("mcp.oauth.status", { id: serverId, sessionId, operationId });
 			} catch (error) {
-				if (disposed) return;
+				if (disposed) return false;
 				const failure = permanentStatusError(error);
 				if (failure || ++unavailablePolls >= 3) {
 					// Transient failure (or typed permanent error): cancel the
 					// pending operation, never just abandon it server-side.
 					cancelOperation();
 					host.print(failure ?? "Authorization service unavailable. Start authorization again.", "error");
-					return;
+					return false;
 				}
 				progress.update("Authorization service unavailable. Retrying…");
 				await waitForPoll();
 				continue;
 			}
-			if (disposed) return;
+			if (disposed) return false;
 			unavailablePolls = 0;
 			const state = status.operation?.state;
 			if (!state) {
 				host.print(oauthErrorMessage("oauth_operation_not_found"), "error");
-				return;
+				return false;
 			}
 			if (state === "awaiting_browser" && !awaitingBrowser) {
 				try {
 					const { authorizationUrl } = await host.request<{ authorizationUrl: string }>("mcp.oauth.url", {
 						id: serverId, sessionId, operationId,
 					});
-					if (disposed) return;
+					if (disposed) return false;
 					loginUrl = authorizationUrl;
 					awaitingBrowser = true;
 					progress.update("Waiting for browser authorization…", authorizationUrl);
+					if (options.auto) openBrowser();
 				} catch (error) {
-					if (disposed) return;
+					if (disposed) return false;
 					cancelOperation();
 					host.print(permanentStatusError(error) ?? "The login link could not be loaded. Start authorization again.", "error");
-					return;
+					return false;
 				}
 			} else if (state === "preparing" || state === "exchanging") {
 				progress.update(state === "preparing" ? "Preparing authorization…" : "Completing authorization…");
 			} else if (state === "complete") {
 				progress.dispose();
 				disposed = true;
-				host.print(`${sanitizeDisplay(serverId)} authorized. Open /mcp and choose Connect to use it.`, "success");
-				return;
+				if (!options.auto) host.print(`${sanitizeDisplay(serverId)} authorized. Open /mcp and choose Connect to use it.`, "success");
+				return true;
 			} else if (state === "cancelled" || state === "expired" || state === "failed") {
 				progress.dispose();
 				disposed = true;
 				host.print(oauthErrorMessage(status.operation?.reasonCode ?? status.auth.reasonCode), state === "cancelled" ? "warning" : "error");
-				return;
+				return false;
 			}
 			await waitForPoll();
 		}
 		if (!disposed) {
 			await host.request("mcp.oauth.cancel", { id: serverId, sessionId, operationId }).catch(() => undefined);
-			if (disposed) return;
+			if (disposed) return false;
 			host.print(oauthErrorMessage("oauth_expired"), "error");
 		}
+		return false;
 	} finally {
 		cleanup();
 		progress.dispose();

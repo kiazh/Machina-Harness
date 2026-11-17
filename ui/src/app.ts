@@ -43,7 +43,7 @@ import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import { guardSubmit } from "./commandDispatch.ts";
-import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
+import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type PickOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
 import { FamilyStore, listFamilySessions } from "./family.ts";
 import { agentSessionItems } from "./features/agents.ts";
 import type { GatewayClient } from "./gateway.ts";
@@ -221,6 +221,10 @@ function sanitizeSelectItems(items: SelectItem[]): SelectItem[] {
 		value: item.value,
 		label: sanitizeDisplay(item.label),
 		...(item.description === undefined ? {} : { description: sanitizeDisplay(item.description) }),
+		// Section rows are chrome, not values: losing these flags would turn
+		// every group heading into a selectable row.
+		...((item as { section?: unknown }).section === true ? { section: true } : {}),
+		...((item as { muted?: unknown }).muted === true ? { muted: true } : {}),
 	}));
 }
 
@@ -1483,7 +1487,7 @@ export class App implements FeatureHost {
 		}
 	}
 
-	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined> {
+	pick(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined> {
 		// The overlay is full-screen, but the menu itself is bounded to the
 		// documented default so a long list scrolls instead of covering the
 		// page; Menu reserves its own chrome rows within the live viewport.
@@ -1498,6 +1502,7 @@ export class App implements FeatureHost {
 				DEFAULT_MENU_VISIBLE_ROWS,
 				undefined,
 				this.tui,
+				options?.count,
 			),
 		);
 	}

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CURSOR_MARKER, stripTerminalSequences, TuiAltScreen, type Terminal, type TUI } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
 import { TextForm } from "../src/components.ts";
-import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "../src/components/Menu.ts";
+import { DEFAULT_MENU_VISIBLE_ROWS, Menu, type MenuSectionItem } from "../src/components/Menu.ts";
 import { SecretForm } from "../src/components/Form.ts";
 import { parseCommand } from "../src/commands.ts";
 import { runCommand } from "../src/features/index.ts";
@@ -63,6 +63,23 @@ async function boot(columns = 80, rows = 24, responses: Record<string, unknown> 
 	await app.start();
 	return { app, tui, type, requests, client, term };
 }
+
+test("App.pick preserves section headers as non-selectable chrome", async (t) => {
+	const { app, tui, type } = await boot();
+	t.after(() => app.exit());
+	const choosing = app.pick("Models", [
+		{ value: "__section__::a", label: "── Group A ──", section: true } as MenuSectionItem,
+		{ value: "a", label: "Alpha" },
+	]);
+	await new Promise(resolve => setImmediate(resolve));
+	tui.renderNow(true);
+	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
+	assert.match(screen, /Group A/, "the header is rendered");
+	assert.doesNotMatch(screen, /❯ ── Group A/, "the header is not the selected row");
+	assert.match(screen, /❯ Alpha/, "the first data row is selected");
+	type("\r");
+	assert.equal((await choosing)?.value, "a");
+});
 
 test("real delete flow checks sessions, confirms once, and deletes only checked rows", async (t) => {
 	const { app, tui, type, requests } = await boot(80, 24, {

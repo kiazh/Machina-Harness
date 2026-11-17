@@ -428,8 +428,8 @@ export class ComposerBox extends Box {
 export class Picker implements Component {
 	private readonly menu: Menu;
 
-	constructor(title: string, items: SelectItem[], onSelect: (item: SelectItem) => void, onCancel: () => void, visibleRows?: number | "full", hint = "enter select · esc back", tui?: TUI) {
-		this.menu = new Menu(title, items, { visibleRows, hint, tui });
+	constructor(title: string, items: SelectItem[], onSelect: (item: SelectItem) => void, onCancel: () => void, visibleRows?: number | "full", hint = "enter select · esc back", tui?: TUI, count?: string | false) {
+		this.menu = new Menu(title, items, { visibleRows, hint, tui, count });
 		this.menu.onSelect = onSelect;
 		this.menu.onCancel = onCancel;
 	}

@@ -35,6 +35,12 @@ export interface AskTextOptions {
 
 export type AskTextResult = string | undefined;
 
+/** Display options for a feature-opened picker. */
+export interface PickOptions {
+	/** Replace the automatic `(matched/total)` title counter; false hides it. */
+	count?: string | false;
+}
+
 /** Profile ids double as agent-scope slugs: lowercase, dashes, max 40 chars. */
 export const PROFILE_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -65,7 +71,7 @@ export interface FeatureHost {
 	newSession?(title?: string): void;
 	/** Update details (e.g. title) of the current session. */
 	updateSession(session: SessionInfo): void;
-	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
+	pick(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined>;
 	/** Centered choice menu for provider management, when available. */
 	pickCentered?(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
 	/** Check multiple items; undefined means cancelled. Nothing starts here. */

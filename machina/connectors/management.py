@@ -19,10 +19,12 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from machina.connectors.models import (
     ConfigError,
@@ -62,6 +64,34 @@ def _string_list(args: dict[str, Any], key: str) -> list[str]:
     return list(value)
 
 
+def derive_connector_name(url: str = "", command: str = "") -> str:
+    """Derive a stable connector id from an MCP link or executable.
+
+    Pasting a link should not require naming the server first. The derived id
+    obeys the same contract as an explicit name and contains no credentials.
+    """
+    if url:
+        parts = urlparse(url)
+        host = (parts.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        segments = [host] if host else []
+        for segment in parts.path.strip("/").split("/"):
+            lowered = segment.lower()
+            if lowered and lowered not in {"mcp", "sse", "message", "messages"}:
+                segments.append(segment)
+        raw = "-".join(segments) or "mcp"
+    else:
+        raw = Path(command).stem if command else "mcp"
+    raw = re.sub(r"[^a-z0-9_-]+", "-", raw.lower())
+    raw = re.sub(r"-{2,}", "-", raw).strip("-_")[:64].rstrip("-_")
+    if not raw:
+        return "mcp"
+    if not raw[0].isalnum():
+        raw = f"mcp-{raw}"[:64].rstrip("-_")
+    return raw
+
+
 def _normalize_connect(args: dict[str, Any]) -> tuple[dict[str, Any], ConnectorConfig, str]:
     """Validate tool arguments into store fields (+ resolved stdio executable).
 
@@ -72,13 +102,12 @@ def _normalize_connect(args: dict[str, Any]) -> tuple[dict[str, Any], ConnectorC
     """
     if not isinstance(args, dict):
         raise ConfigError("mcp_connect arguments must be an object")
-    name = _string(args, "name")
-    if not name:
-        raise ConfigError("name is required (a short server id, e.g. 'docs')")
     url = _string(args, "url")
     command = _string(args, "command")
     if bool(url) == bool(command):
         raise ConfigError("provide exactly one of url (HTTP) or command (stdio)")
+    # A pasted link is enough: derive a stable id when the caller omits one.
+    name = _string(args, "name") or derive_connector_name(url=url, command=command)
     local_access = args.get("local_access", False)
     if not isinstance(local_access, bool):
         raise ConfigError("local_access must be a boolean")

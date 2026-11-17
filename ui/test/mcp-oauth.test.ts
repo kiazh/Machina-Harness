@@ -180,7 +180,7 @@ test("authorize confirms, starts, polls, and reports without leaking the URL", a
 		urlFetched = true;
 		return { authorizationUrl: "https://auth.example.com/authorize?client_id=x" };
 	};
-	host.picks.push("docs", "authorize", "yes");
+	host.picks.push("__manage__", "docs", "authorize", "yes");
 	await run("/mcp", host);
 	const methods = host.calls.map((call) => call.method);
 	assert.ok(methods.includes("mcp.oauth.preview"));
@@ -196,7 +196,7 @@ test("authorize confirms, starts, polls, and reports without leaking the URL", a
 
 test("preview cancel sends no start/open/exchange", async () => {
 	const host = authorizeHost();
-	host.picks.push("docs", "authorize", "no");
+	host.picks.push("__manage__", "docs", "authorize", "no");
 	await run("/mcp", host);
 	const methods = host.calls.map((call) => call.method);
 	assert.ok(methods.includes("mcp.oauth.preview"));
@@ -208,7 +208,7 @@ test("preview cancel sends no start/open/exchange", async () => {
 test("escape during authorization cancels and clears timers", async () => {
 	const host = authorizeHost();
 	host.responses["mcp.oauth.status"] = () => new Promise((_resolve, reject) => setTimeout(() => reject(new Error("gone")), 20));
-	host.picks.push("docs", "authorize", "yes");
+	host.picks.push("__manage__", "docs", "authorize", "yes");
 	const finished = run("/mcp", host);
 	while (host.progressOptions.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
 	host.progressOptions[0]!.onCancel();
@@ -222,7 +222,7 @@ test("forget confirmation reports the revocation outcome", async () => {
 	const host = authorizeHost();
 	host.responses["mcp.oauth.status"] = { auth: { state: "authorized", generation: 3 } };
 	host.responses["mcp.oauth.forget"] = { auth: { state: "signed_out", generation: 4 }, remoteRevocation: "unsupported" };
-	host.picks.push("docs", "forget", "yes", "no");
+	host.picks.push("__manage__", "docs", "forget", "yes", "no");
 	await run("/mcp", host);
 	const forget = host.calls.find((call) => call.method === "mcp.oauth.forget");
 	assert.deepEqual(forget!.params, { id: "docs", sessionId: SESSION.id, expectedGeneration: 3, revoke: false });
@@ -384,7 +384,7 @@ test("configured HTTP servers can edit OAuth settings without losing existing op
 		server: { ...HTTP_SERVER, oauth: { client_mode: "auto", issuer: "https://existing.example.com", scope_allowlist: ["read"], callback_port: 4567 } },
 	};
 	host.responses["mcp.configure"] = { server: HTTP_SERVER };
-	host.picks.push("docs", "configure-oauth", "auto");
+	host.picks.push("__manage__", "docs", "configure-oauth", "auto");
 	host.textQueue.push("https://existing.example.com", '["read","write"]');
 	await run("/mcp", host);
 	const configure = host.calls.find((call) => call.method === "mcp.configure");
@@ -402,7 +402,7 @@ test("changing OAuth client mode clears incompatible stored credentials and meta
 		const host = authorizeHost();
 		host.responses["mcp.status"] = { server: { ...HTTP_SERVER, oauth: existing } };
 		host.responses["mcp.configure"] = { server: HTTP_SERVER };
-		host.picks.push("docs", "configure-oauth", "auto");
+		host.picks.push("__manage__", "docs", "configure-oauth", "auto");
 		host.textQueue.push("", "[]");
 		await run("/mcp", host);
 		const configure = host.calls.find((call) => call.method === "mcp.configure")!;
@@ -420,7 +420,7 @@ test("editing a client metadata document updates its client ID to the new docume
 		client_mode: "metadata_document", client_id: "https://client.example.com/old", client_metadata_url: "https://client.example.com/old",
 	} } };
 	host.responses["mcp.configure"] = { server: HTTP_SERVER };
-	host.picks.push("docs", "configure-oauth", "metadata_document");
+	host.picks.push("__manage__", "docs", "configure-oauth", "metadata_document");
 	host.textQueue.push("https://client.example.com/new", "", "[]");
 	await run("/mcp", host);
 	const configure = host.calls.find((call) => call.method === "mcp.configure")!;
