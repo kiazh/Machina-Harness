@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 
@@ -25,6 +26,7 @@ def _state(**overrides) -> host_mod.HostState:
         "mode": "ask",
         "started_at": "2026-11-17T00:00:00+00:00",
         "ttyd_log": "/tmp/host-ttyd.log",
+        "owns_session": True,
     }
     values.update(overrides)
     return host_mod.HostState(**values)
@@ -136,6 +138,43 @@ def test_start_reuses_a_running_host(tmp_path, monkeypatch):
     assert created is False
 
 
+def test_start_attaches_to_an_existing_tmux_session_without_owning_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(host_mod, "_ensure_supported", lambda: None)
+    monkeypatch.setattr(
+        host_mod,
+        "_which",
+        lambda name: {"tmux": "/usr/bin/tmux", "ttyd": "/usr/bin/ttyd"}.get(name),
+    )
+    monkeypatch.setattr(host_mod, "_tmux_session_alive", lambda _tmux, _session: True)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        host_mod,
+        "_run",
+        lambda command, **_kwargs: calls.append(command)
+        or subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(host_mod, "_popen", lambda _command, **_kwargs: _Process())
+    monkeypatch.setattr(host_mod.time, "sleep", lambda _seconds: None)
+
+    state, _created = host_mod.start_host(workspace=tmp_path, session="dev")
+
+    assert state.session == "dev"
+    assert state.owns_session is False
+    assert calls == []
+
+
+def test_load_state_accepts_old_files_without_owns_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path))
+    state = _state()
+    payload = {key: value for key, value in state.__dict__.items() if key != "owns_session"}
+    (tmp_path / "host.json").write_text(json.dumps(payload), encoding="utf-8")
+    loaded = host_mod.load_state()
+    assert loaded is not None
+    assert loaded.owns_session is True
+
+
+
 def test_stop_terminates_the_bridge_and_session(tmp_path, monkeypatch):
     monkeypatch.setenv("MACHINA_HOME", str(tmp_path))
     host_mod.save_state(_state())
@@ -154,6 +193,25 @@ def test_stop_terminates_the_bridge_and_session(tmp_path, monkeypatch):
     assert saved is not None
     assert saved.ttyd_pid == 0
     assert saved.password == "secret-token"
+
+
+def test_stop_leaves_a_borrowed_tmux_session_running(tmp_path, monkeypatch):
+    monkeypatch.setenv("MACHINA_HOME", str(tmp_path))
+    host_mod.save_state(_state(owns_session=False))
+    terminated: list[int] = []
+    killed: list[str] = []
+    monkeypatch.setattr(host_mod, "_terminate_ttyd", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(host_mod, "_tmux_kill", lambda _tmux, session: killed.append(session))
+    monkeypatch.setattr(host_mod, "_which", lambda _name: "/usr/bin/tmux")
+
+    stopped = host_mod.stop_host()
+
+    assert stopped is not None
+    assert terminated == [4321]
+    assert killed == []
+    saved = host_mod.load_state()
+    assert saved is not None
+    assert saved.owns_session is False
 
 
 def test_cli_status_reports_not_running(monkeypatch):

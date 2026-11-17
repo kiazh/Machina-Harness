@@ -269,6 +269,22 @@ def _wsl_session_alive(distro: str, session: str, pid: int) -> bool:
     return completed.returncode == 0
 
 
+def _current_tmux_session() -> str | None:
+    if not os.environ.get("TMUX"):
+        return None
+    tmux = shutil.which("tmux")
+    if not tmux:
+        return None
+    try:
+        completed = _run([tmux, "display-message", "-p", "#S"], timeout=10)
+    except HostSetupError:
+        return None
+    name = completed.stdout.strip()
+    if completed.returncode == 0 and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+        return name
+    return None
+
+
 def _tailscale_exe() -> str | None:
     if _is_windows():
         if Path(_TAILSCALE_EXE).is_file():
@@ -375,7 +391,7 @@ def _status_native() -> HostStatus:
     state, tmux_alive, ttyd_alive = local_host.status_host()
     connected, dns_name, serve_url = _tailscale_status()
     sshd = _sshd_running()
-    session = state.session if state else _DEFAULT_SESSION
+    session = state.session if state else (_current_tmux_session() or _DEFAULT_SESSION)
     workspace = state.workspace if state else str(Path.cwd())
     mode = state.mode if state else local_host.DEFAULT_MODE
     bind = state.bind if state else local_host.DEFAULT_BIND
@@ -419,7 +435,7 @@ def _status_wsl_guest() -> HostStatus:
     state, tmux_alive, ttyd_alive = local_host.status_host()
     connected, dns_name, serve_url = _tailscale_status()
     sshd = _sshd_running()
-    session = state.session if state else _DEFAULT_SESSION
+    session = state.session if state else (_current_tmux_session() or _DEFAULT_SESSION)
     workspace = state.workspace if state else str(Path.cwd())
     mode = state.mode if state else local_host.DEFAULT_MODE
     bind = state.bind if state else local_host.DEFAULT_BIND

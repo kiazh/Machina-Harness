@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 
 import pytest
@@ -301,5 +302,37 @@ def test_autostart_writes_a_hidden_wsl_startup_entry(tmp_path, monkeypatch):
     content = startup.read_text(encoding="utf-8")
     assert 'wsl.exe -d "Ubuntu" -- "/home/me/.machina-host/start.sh"' in content.replace('""', '"')
     assert host_setup._autostart_ready() is True
+
+
+def test_current_tmux_session_reads_the_tmux_name(monkeypatch):
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+    monkeypatch.setattr(
+        host_setup.shutil,
+        "which",
+        lambda name: "/usr/bin/tmux" if name == "tmux" else None,
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "dev\n", ""),
+    )
+    assert host_setup._current_tmux_session() == "dev"
+
+
+def test_current_tmux_session_is_none_outside_tmux(monkeypatch):
+    monkeypatch.delenv("TMUX", raising=False)
+    assert host_setup._current_tmux_session() is None
+
+
+def test_status_uses_the_current_tmux_session_for_a_new_host(monkeypatch):
+    monkeypatch.setattr(host_setup, "_is_windows", lambda: False)
+    monkeypatch.setattr(host_setup, "_is_wsl", lambda: False)
+    monkeypatch.setattr(host_setup, "_current_tmux_session", lambda: "dev")
+    monkeypatch.setattr(host_setup.local_host, "status_host", lambda: (None, False, False))
+    monkeypatch.setattr(host_setup, "_tailscale_status", lambda: (True, "host.ts.net", None))
+    monkeypatch.setattr(host_setup, "_sshd_running", lambda: True)
+
+    assert host_setup.status().session == "dev"
+
 
 

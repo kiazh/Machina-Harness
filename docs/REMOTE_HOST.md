@@ -164,6 +164,28 @@ machina host stop
 machina host stop --keep-session
 ```
 
+## Broadcast an existing tmux session
+
+`ttyd` can only attach to a tmux session; it cannot take over an arbitrary
+already-running terminal. If the Machina TUI you want to share is already
+inside tmux, start the host with that session name:
+
+```bash
+# Only needed if the TUI is not in tmux yet:
+tmux new -s machina machina
+
+machina host start --session machina
+```
+
+If the tmux session already exists, `machina host start` attaches the browser
+bridge to it instead of creating a second shell. `/host advanced` exposes the
+same session field. The host records that it does not own a borrowed session,
+so `machina host stop` stops `ttyd` but leaves your tmux session running.
+
+When a new host is configured from inside a tmux session, `/host` uses the
+current tmux session name by default. A terminal that is not inside tmux cannot
+be handed to `ttyd` retroactively; start that TUI inside tmux first.
+
 `--mode full` is refused unless you pass `--allow-full`. A remote shell already
 has the same authority as your host user; do not make that the default.
 

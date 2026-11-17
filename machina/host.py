@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import MISSING, asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,9 @@ class HostState:
     mode: str
     started_at: str
     ttyd_log: str
+    # False when the host attached ttyd to a tmux session it did not create.
+    # Stopping the host must not kill a session owned by the operator.
+    owns_session: bool = True
 
 
 def host_home() -> Path:
@@ -96,7 +99,15 @@ def load_state(path: Path | None = None) -> HostState | None:
         data = json.loads(target.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or data.get("version") != STATE_VERSION:
             raise ValueError("unsupported host state")
-        return HostState(**{key: data[key] for key in HostState.__dataclass_fields__})
+        values: dict[str, Any] = {}
+        for field in fields(HostState):
+            if field.name in data:
+                values[field.name] = data[field.name]
+            elif field.default is not MISSING:
+                values[field.name] = field.default
+            else:
+                raise ValueError(f"missing host state field: {field.name}")
+        return HostState(**values)
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise HostError(f"cannot read host state at {target}: {error}") from None
 
@@ -347,7 +358,8 @@ def start_host(
         # A stale state file or a dead ttyd must not leave a half-running host.
         # Keep the state so a restart reuses the browser credential.
         _terminate_ttyd(existing.ttyd_pid)
-        _tmux_kill(tmux, existing.session)
+        if existing.owns_session:
+            _tmux_kill(tmux, existing.session)
     credential = existing or None
 
     created_session = False
@@ -363,6 +375,7 @@ def start_host(
             detail = (completed.stderr or completed.stdout or "").strip()
             raise HostError(f"could not create tmux session: {detail or 'tmux failed'}")
         created_session = True
+    owns_session = created_session or (existing.owns_session if existing is not None else False)
 
     log = ttyd_log_path()
     log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -378,6 +391,7 @@ def start_host(
         mode=mode,
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
         ttyd_log=str(log),
+        owns_session=owns_session,
     )
     try:
         with log.open("ab") as output:
@@ -426,7 +440,7 @@ def stop_host(*, keep_session: bool = False) -> HostState | None:
     if state is None:
         return None
     _terminate_ttyd(state.ttyd_pid)
-    if not keep_session:
+    if not keep_session and state.owns_session:
         _tmux_kill(_which("tmux"), state.session)
     # Keep the state so a later start reuses the browser credential.
     save_state(HostState(**{**asdict(state), "ttyd_pid": 0}))

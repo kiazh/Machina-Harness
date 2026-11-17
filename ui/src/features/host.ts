@@ -178,7 +178,7 @@ async function setupFlow(host: FeatureHost, advanced = false): Promise<void> {
 		port = parsedPort;
 		const sessionAnswer = await host.askText({
 			title: "tmux session name",
-			description: "The persistent session the remote shell attaches to.",
+			description: "If this session already exists, the host broadcasts it instead of creating another.",
 			initial: session,
 		});
 		if (sessionAnswer === undefined) return;
