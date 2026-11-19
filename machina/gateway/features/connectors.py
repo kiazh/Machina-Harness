@@ -123,7 +123,11 @@ async def mcp_tools(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     from machina.connectors.models import ConnectorError
     from machina.gateway.errors import OPERATION_FAILED
 
+    service = gw.runtime.get_connector_service()
+    connector_id = _str(params, "id", max_len=64)
     try:
-        return await gw.runtime.get_connector_service().tools_list(_str(params, "id", max_len=64))
+        if params.get("cached") is True:
+            return await service.cached_tools_list(connector_id)
+        return await service.tools_list(connector_id)
     except ConnectorError:
         raise RpcError(OPERATION_FAILED, "MCP catalog unavailable; connect first") from None

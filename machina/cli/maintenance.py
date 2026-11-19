@@ -580,21 +580,6 @@ def version():
     console.print(f"[bold cyan]Machina[/bold cyan] v{__version__}")
 
 
-def opencode_proxy_command(
-    host: str = typer.Option("127.0.0.1", "--host", help="Loopback bind host"),
-    port: int = typer.Option(8765, "--port", "-p", help="Loopback bind port"),
-):
-    """Run the text-only OpenAI-compatible OpenCode session proxy."""
-    import uvicorn
-
-    from machina.core.provider.opencode_proxy import create_app
-
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        console.print("[red]opencode-proxy is loopback-only[/red]")
-        raise typer.Exit(1)
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
-
-
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Bind host"),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port"),

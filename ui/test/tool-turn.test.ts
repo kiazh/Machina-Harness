@@ -26,3 +26,15 @@ test("harness_delegate without a platform says external harness", () => {
 
 	assert.match(tool.render(80).join("\n"), /Consulting external harness/);
 });
+
+test("mcp_call names the connector mention and a clean tool label", () => {
+	const tool = new ToolTurn(
+		"mcp_call",
+		{ name: "vercel__list_projects", arguments: {} },
+		ACTIVITY,
+	);
+
+	const running = tool.render(80).join("\n");
+	assert.match(running, /@vercel · List projects/);
+	assert.doesNotMatch(running, /needs_approval|vercel__/);
+});

@@ -105,6 +105,14 @@ export async function authorizeConnector(
 		host.print(oauthErrorMessage("oauth_discovery_failed"), "error");
 		return false;
 	}
+	if (preview.review.registrationMode === "preregistered-required") {
+		await host.request("mcp.oauth.cancel", { id: serverId, sessionId, previewId: preview.previewId }).catch(() => undefined);
+		host.print(
+			`${sanitizeDisplay(serverId)} requires a pre-registered OAuth client. Open /mcp, manage this server, then use Edit OAuth settings to add the provider's client ID, client secret and registered callback port.`,
+			"warning",
+		);
+		return false;
+	}
 	if (!options.auto) {
 		host.print(`Authorize ${sanitizeDisplay(serverId)}?\n${formatReview(preview.review)}`, "plain");
 		if (!await confirm(host, `Continue to browser authorization for ${sanitizeDisplay(serverId)}?`, "Continue")) {
@@ -239,7 +247,7 @@ export async function authorizeConnector(
 			} else if (state === "complete") {
 				progress.dispose();
 				disposed = true;
-				if (!options.auto) host.print(`${sanitizeDisplay(serverId)} authorized. Open /mcp and choose Connect to use it.`, "success");
+				if (!options.auto) host.print(`${sanitizeDisplay(serverId)} authorized.`, "success");
 				return true;
 			} else if (state === "cancelled" || state === "expired" || state === "failed") {
 				progress.dispose();

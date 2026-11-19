@@ -37,7 +37,6 @@ COMMANDS = (
     "init",
     "setup",
     "version",
-    "opencode-proxy",
     "serve",
     "stop",
     "config",

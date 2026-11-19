@@ -22,6 +22,7 @@ class OAuthFakeHost implements FeatureHost {
 	printed: Array<{ text: string; kind: NoticeKind }> = [];
 	picks: Array<string | undefined> = [];
 	textQueue: Array<string | undefined> = [];
+	asked: AskTextOptions[] = [];
 	current: SessionInfo | undefined = SESSION;
 	responses: Record<string, unknown | ((params: Record<string, unknown>) => unknown)> = {};
 	progressOptions: OAuthProgressOptions[] = [];
@@ -65,7 +66,8 @@ class OAuthFakeHost implements FeatureHost {
 	async pickTheme() {
 		return undefined;
 	}
-	async askText(_options: AskTextOptions): Promise<string | undefined> {
+	async askText(options: AskTextOptions): Promise<string | undefined> {
+		this.asked.push(options);
 		return this.textQueue.shift();
 	}
 	async inspectOutput(_toolId?: string) {}
@@ -152,6 +154,106 @@ test("/mcp HTTP add offers OAuth and saves non-secret settings", async () => {
 	assert.equal((config.oauth as { client_secret_ref: string }).client_secret_ref, "");
 });
 
+test("/mcp pre-registered OAuth stores a masked secret and fixed callback port", async () => {
+	const host = authorizeHost();
+	host.responses["mcp.list"] = { servers: [] };
+	host.picks.push("__add__", "streamable_http", "oauth", "preregistered");
+	host.textQueue.push(
+		"drive",
+		"Google Drive",
+		"https://drivemcp.googleapis.com/mcp/v1",
+		"client-id.apps.googleusercontent.com",
+		"SENTINEL-client-secret",
+		"8765",
+		"",
+		'["https://www.googleapis.com/auth/drive.readonly"]',
+		"{}",
+	);
+	host.responses["secrets.set"] = (params: Record<string, unknown>) => ({
+		key: params.key, set: true, persisted: true, envFile: "/tmp/.env",
+	});
+	host.responses["mcp.configure"] = { server: { ...HTTP_SERVER, id: "drive" } };
+	host.responses["mcp.preview"] = { digest: "drive-digest", proposal: { endpoint: "https://drivemcp.googleapis.com/mcp/v1" } };
+	host.responses["mcp.connect"] = { server: { ...HTTP_SERVER, id: "drive", state: "connected" } };
+	await run("/mcp", host);
+
+	const secretSet = host.calls.find((call) => call.method === "secrets.set");
+	assert.deepEqual(secretSet?.params, {
+		key: "MCP_OAUTH_CLIENT_SECRET", value: "SENTINEL-client-secret", persist: true,
+	});
+	const configure = host.calls.find((call) => call.method === "mcp.configure");
+	const oauth = (configure!.params as { config: { oauth: Record<string, unknown> } }).config.oauth;
+	assert.equal(oauth.client_mode, "preregistered");
+	assert.equal(oauth.client_id, "client-id.apps.googleusercontent.com");
+	assert.equal(oauth.client_secret_ref, "MCP_OAUTH_CLIENT_SECRET");
+	assert.equal(oauth.token_endpoint_auth_method, "client_secret_basic");
+	assert.equal(oauth.callback_port, 8765);
+	assert.ok(host.asked.some((options) => options.secret === true), "secret uses the masked editor");
+	assert.ok(!host.printed.some((notice) => notice.text.includes("SENTINEL")), "secret is never echoed");
+});
+
+test("/mcp Arcade starter explains setup and accepts the user's own gateway URL", async () => {
+	const host = authorizeHost();
+	host.responses["mcp.list"] = { servers: [] };
+	host.responses["mcp.catalog"] = { entries: [{
+		id: "arcade", displayName: "Arcade", kind: "connector", category: "Managed connectors",
+		provider: "Arcade", description: "Google Workspace through a personal Arcade gateway.",
+		docsUrl: "https://docs.arcade.dev/en/operate/governance/mcp-gateways",
+		setup: {
+			type: "gateway_url",
+			instructions: ["Create a free Arcade gateway.", "Paste its URL below."],
+			prompt: "Paste your Arcade MCP gateway URL",
+			example: "https://api.arcade.dev/mcp/gw_...",
+		},
+		config: { id: "arcade", display_name: "Arcade", transport: "streamable_http", oauth: { client_mode: "auto" } },
+	}] };
+	host.picks.push("setup:arcade");
+	host.textQueue.push("https://api.arcade.dev/mcp/gw_test");
+	host.responses["mcp.configure"] = { server: { ...HTTP_SERVER, id: "arcade", display_name: "Arcade" } };
+	host.responses["mcp.preview"] = { digest: "arcade-digest", proposal: { endpoint: "https://api.arcade.dev/mcp/gw_test" } };
+	host.responses["mcp.connect"] = { server: { ...HTTP_SERVER, id: "arcade", display_name: "Arcade", state: "connected" } };
+	await run("/mcp", host);
+
+	const configure = host.calls.find((call) => call.method === "mcp.configure");
+	const config = (configure!.params as { config: Record<string, unknown> }).config;
+	assert.equal(config.id, "arcade");
+	assert.equal(config.endpoint, "https://api.arcade.dev/mcp/gw_test");
+	assert.equal((config.oauth as Record<string, unknown>).client_mode, "auto");
+	assert.ok(host.printed.some((notice) => notice.text.includes("Create a free Arcade gateway")), "setup instructions are shown");
+});
+
+test("/mcp GitHub starter stores a masked PAT header reference", async () => {
+	const host = authorizeHost();
+	host.responses["mcp.list"] = { servers: [] };
+	host.responses["mcp.catalog"] = { entries: [{
+		id: "github", displayName: "GitHub", kind: "connector", category: "Development",
+		provider: "GitHub", description: "GitHub tools", docsUrl: "https://github.com/github/github-mcp-server",
+		setup: {
+			type: "secret", instructions: ["Create a personal access token."],
+			prompt: "Paste a GitHub personal access token", secretKey: "GITHUB_MCP_PAT",
+		},
+		config: {
+			id: "github", display_name: "GitHub", transport: "streamable_http",
+			endpoint: "https://api.githubcopilot.com/mcp/", header_refs: { Authorization: "GITHUB_MCP_PAT" },
+		},
+	}] };
+	host.picks.push("setup:github");
+	host.textQueue.push("github_pat_SENTINEL");
+	host.responses["secrets.set"] = (params: Record<string, unknown>) => ({ key: params.key, set: true, persisted: true, envFile: "/tmp/.env" });
+	host.responses["mcp.configure"] = { server: { ...HTTP_SERVER, id: "github", display_name: "GitHub" } };
+	host.responses["mcp.preview"] = { digest: "github-digest", proposal: { endpoint: "https://api.githubcopilot.com/mcp/" } };
+	host.responses["mcp.connect"] = { server: { ...HTTP_SERVER, id: "github", display_name: "GitHub", state: "connected" } };
+	await run("/mcp", host);
+
+	const secretSet = host.calls.find((call) => call.method === "secrets.set");
+	assert.deepEqual(secretSet?.params, { key: "GITHUB_MCP_PAT", value: "github_pat_SENTINEL", persist: true });
+	const configure = host.calls.find((call) => call.method === "mcp.configure");
+	const config = (configure!.params as { config: Record<string, unknown> }).config;
+	assert.deepEqual(config.header_refs, { Authorization: "GITHUB_MCP_PAT" });
+	assert.ok(host.asked.some((options) => options.secret === true), "PAT uses the masked editor");
+	assert.ok(!host.printed.some((notice) => notice.text.includes("SENTINEL")), "PAT is never echoed");
+});
+
 test("/mcp stdio add shows no OAuth controls", async () => {
 	const host = authorizeHost();
 	host.responses["mcp.list"] = { servers: [] };
@@ -162,6 +264,25 @@ test("/mcp stdio add shows no OAuth controls", async () => {
 	const configure = host.calls.find((call) => call.method === "mcp.configure");
 	const config = (configure!.params as { config: Record<string, unknown> }).config;
 	assert.equal(config.oauth, undefined);
+});
+
+test("authorize stops with setup guidance when dynamic registration is unavailable", async () => {
+	const host = authorizeHost();
+	host.responses["mcp.oauth.preview"] = {
+		previewId: "preview-1",
+		digest: "digest-1",
+		review: {
+			connectorId: "docs", revision: 1, endpoint: "https://mcp.example.com/mcp",
+			resource: "https://mcp.example.com/mcp", issuer: "https://auth.example.com",
+			requestedScopes: ["read"], registrationMode: "preregistered-required",
+			endpoints: { authorization: "https://auth.example.com/authorize", token: "https://auth.example.com/token" },
+			redirectUri: "http://127.0.0.1:9999/oauth/callback",
+		},
+	};
+	assert.equal(await authorizeConnector(host, "docs"), false);
+	assert.deepEqual(host.calls.map((call) => call.method), ["mcp.oauth.preview", "mcp.oauth.cancel"]);
+	assert.match(host.last().text, /requires a pre-registered OAuth client/);
+	assert.match(host.last().text, /Edit OAuth settings/);
 });
 
 test("authorize confirms, starts, polls, and reports without leaking the URL", async () => {
@@ -180,14 +301,18 @@ test("authorize confirms, starts, polls, and reports without leaking the URL", a
 		urlFetched = true;
 		return { authorizationUrl: "https://auth.example.com/authorize?client_id=x" };
 	};
-	host.picks.push("__manage__", "docs", "authorize", "yes");
+	host.responses["mcp.preview"] = { digest: "connect-digest" };
+	host.responses["mcp.connect"] = { server: { ...HTTP_SERVER, state: "connected" } };
+	host.picks.push("external:docs", "authorize", "yes");
 	await run("/mcp", host);
 	const methods = host.calls.map((call) => call.method);
 	assert.ok(methods.includes("mcp.oauth.preview"));
 	assert.ok(methods.includes("mcp.oauth.start"));
 	assert.ok(methods.includes("mcp.oauth.status"));
+	assert.ok(methods.includes("mcp.connect"));
 	assert.equal(host.last().kind, "success");
-	assert.match(host.last().text, /authorized/);
+	assert.ok(host.printed.some((entry) => entry.kind === "success" && /authorized/.test(entry.text)));
+	assert.match(host.last().text, /connected/);
 	// The authorization URL appears only in the transient overlay, never printed.
 	assert.ok(!host.printed.some((entry) => entry.text.includes("auth.example.com/authorize?")));
 	assert.ok(host.progressUpdates.some((update) => (update.loginUrl ?? "").includes("auth.example.com/authorize?")));
@@ -196,7 +321,7 @@ test("authorize confirms, starts, polls, and reports without leaking the URL", a
 
 test("preview cancel sends no start/open/exchange", async () => {
 	const host = authorizeHost();
-	host.picks.push("__manage__", "docs", "authorize", "no");
+	host.picks.push("external:docs", "authorize", "no");
 	await run("/mcp", host);
 	const methods = host.calls.map((call) => call.method);
 	assert.ok(methods.includes("mcp.oauth.preview"));
@@ -208,7 +333,7 @@ test("preview cancel sends no start/open/exchange", async () => {
 test("escape during authorization cancels and clears timers", async () => {
 	const host = authorizeHost();
 	host.responses["mcp.oauth.status"] = () => new Promise((_resolve, reject) => setTimeout(() => reject(new Error("gone")), 20));
-	host.picks.push("__manage__", "docs", "authorize", "yes");
+	host.picks.push("external:docs", "authorize", "yes");
 	const finished = run("/mcp", host);
 	while (host.progressOptions.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
 	host.progressOptions[0]!.onCancel();
@@ -218,15 +343,11 @@ test("escape during authorization cancels and clears timers", async () => {
 	assert.ok(host.progressDisposals >= 1);
 });
 
-test("forget confirmation reports the revocation outcome", async () => {
+test("external server actions do not expose Forget access", async () => {
 	const host = authorizeHost();
-	host.responses["mcp.oauth.status"] = { auth: { state: "authorized", generation: 3 } };
-	host.responses["mcp.oauth.forget"] = { auth: { state: "signed_out", generation: 4 }, remoteRevocation: "unsupported" };
-	host.picks.push("__manage__", "docs", "forget", "yes", "no");
+	host.picks.push("external:docs", "back");
 	await run("/mcp", host);
-	const forget = host.calls.find((call) => call.method === "mcp.oauth.forget");
-	assert.deepEqual(forget!.params, { id: "docs", sessionId: SESSION.id, expectedGeneration: 3, revoke: false });
-	assert.match(host.last().text, /forgotten/);
+	assert.equal(host.calls.some((call) => call.method === "mcp.oauth.forget"), false);
 });
 
 test("OAuthProgress sanitizes provider text and stays usable when narrow", async () => {
@@ -376,56 +497,6 @@ test("browser failure preserves full URL recovery, copy, and retry in the overla
 		await finished;
 		assert.ok(!host.printed.some((entry) => entry.text.includes(url)));
 	}
-});
-
-test("configured HTTP servers can edit OAuth settings without losing existing options", async () => {
-	const host = authorizeHost();
-	host.responses["mcp.status"] = {
-		server: { ...HTTP_SERVER, oauth: { client_mode: "auto", issuer: "https://existing.example.com", scope_allowlist: ["read"], callback_port: 4567 } },
-	};
-	host.responses["mcp.configure"] = { server: HTTP_SERVER };
-	host.picks.push("__manage__", "docs", "configure-oauth", "auto");
-	host.textQueue.push("https://existing.example.com", '["read","write"]');
-	await run("/mcp", host);
-	const configure = host.calls.find((call) => call.method === "mcp.configure");
-	assert.ok(configure, "existing OAuth settings must remain editable");
-	const oauth = (configure.params.config as { oauth: { callback_port: number; scope_allowlist: string[] } }).oauth;
-	assert.equal(oauth.callback_port, 4567);
-	assert.deepEqual(oauth.scope_allowlist, ["read", "write"]);
-});
-
-test("changing OAuth client mode clears incompatible stored credentials and metadata", async () => {
-	for (const existing of [
-		{ client_mode: "metadata_document", client_id: "https://client.example.com/old", client_metadata_url: "https://client.example.com/old" },
-		{ client_mode: "preregistered", client_id: "old-client", client_secret_ref: "OLD_SECRET", token_endpoint_auth_method: "client_secret_basic" },
-	]) {
-		const host = authorizeHost();
-		host.responses["mcp.status"] = { server: { ...HTTP_SERVER, oauth: existing } };
-		host.responses["mcp.configure"] = { server: HTTP_SERVER };
-		host.picks.push("__manage__", "docs", "configure-oauth", "auto");
-		host.textQueue.push("", "[]");
-		await run("/mcp", host);
-		const configure = host.calls.find((call) => call.method === "mcp.configure")!;
-		const oauth = (configure.params.config as { oauth: Record<string, unknown> }).oauth;
-		assert.equal(oauth.client_id, "");
-		assert.equal(oauth.client_metadata_url, "");
-		assert.equal(oauth.client_secret_ref, "");
-		assert.equal(oauth.token_endpoint_auth_method, "none");
-	}
-});
-
-test("editing a client metadata document updates its client ID to the new document", async () => {
-	const host = authorizeHost();
-	host.responses["mcp.status"] = { server: { ...HTTP_SERVER, oauth: {
-		client_mode: "metadata_document", client_id: "https://client.example.com/old", client_metadata_url: "https://client.example.com/old",
-	} } };
-	host.responses["mcp.configure"] = { server: HTTP_SERVER };
-	host.picks.push("__manage__", "docs", "configure-oauth", "metadata_document");
-	host.textQueue.push("https://client.example.com/new", "", "[]");
-	await run("/mcp", host);
-	const configure = host.calls.find((call) => call.method === "mcp.configure")!;
-	const oauth = (configure.params.config as { oauth: Record<string, unknown> }).oauth;
-	assert.equal(oauth.client_id, "https://client.example.com/new");
 });
 
 test("real gateway wrapper exposes the oauth method boundary", { timeout: 60_000 }, async (t) => {

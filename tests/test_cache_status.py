@@ -22,12 +22,6 @@ def test_openai_reports_its_implicit_cache_contract() -> None:
     assert "prompt_tokens_details.cached_tokens" in status["usageFields"]
 
 
-def test_opencode_session_reports_implicit_cache_usage() -> None:
-    status = cache_status("opencode_session", "deepseek/deepseek-flash")
-
-    assert status["supported"] is True
-    assert status["mode"] == "implicit"
-    assert "cache_read_tokens" in status["usageFields"]
 
 
 def test_unknown_provider_is_conservatively_unsupported() -> None:

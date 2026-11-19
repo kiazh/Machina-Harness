@@ -521,6 +521,11 @@ class OAuthCoordinator:
                         redirect_uri=snapshot.redirect_uri,
                     )
                     client_secret_ref = ""
+                elif snapshot.registration_mode == "preregistered-required":
+                    raise OAuthError(
+                        "server requires a pre-registered OAuth client",
+                        reason="oauth_client_configuration_required",
+                    )
                 else:
                     try:
                         reg_deadline = min(loop.time() + OAUTH_EXCHANGE_SECONDS, op_deadline)
@@ -1310,7 +1315,10 @@ class OAuthCoordinator:
                 and record.resource == binding.resource == normalize_resource(config.endpoint)
                 and record.issuer == binding.issuer
                 and record.client_id == binding.client_id
-                and (not settings.issuer or record.issuer == settings.issuer)
+                and (
+                    not settings.issuer
+                    or normalize_resource(record.issuer) == normalize_resource(settings.issuer)
+                )
                 and (not expected_client or record.client_id == expected_client)
             )
         except (ValueError, TypeError):

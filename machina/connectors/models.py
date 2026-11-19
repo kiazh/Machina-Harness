@@ -42,6 +42,18 @@ def _is_literal_loopback(host: str) -> bool:
 _CONNECTOR_ID_RE = re.compile(r"[a-z0-9][a-z0-9\-_]{0,63}")
 _ENV_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
 _TOOL_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,127}")
+_HEADER_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}")
+_DISALLOWED_HEADERS = frozenset(
+    {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "upgrade",
+        "proxy-authorization",
+        "proxy-authenticate",
+    }
+)
 _SHELL_METACHARS = re.compile(r"[;&|$`\n]")
 
 
@@ -121,6 +133,9 @@ class ConnectorConfig:
     credential_profile: str = ""
     local_access: bool = False
     oauth: dict[str, Any] | None = None
+    # HTTP headers whose values come from named secrets. Values never live in
+    # connector configuration.
+    header_refs: dict[str, str] = field(default_factory=dict)
     # Bounds and policy.
     connect_timeout: float = 15.0
     call_timeout: float = 60.0
@@ -232,6 +247,17 @@ class ConnectorConfig:
         for name in (*self.env_allowlist, *self.secret_refs):
             if not _ENV_NAME_RE.fullmatch(name or ""):
                 raise ConfigError(f"invalid environment/secret name: {name!r}")
+        if not isinstance(self.header_refs, dict):
+            raise ConfigError("header_refs must be an object")
+        if self.header_refs and self.transport != Transport.STREAMABLE_HTTP.value:
+            raise ConfigError("header_refs are HTTP-only")
+        for header, ref in self.header_refs.items():
+            if not isinstance(header, str) or not _HEADER_NAME_RE.fullmatch(header):
+                raise ConfigError(f"invalid HTTP header name: {header!r}")
+            if header.lower() in _DISALLOWED_HEADERS:
+                raise ConfigError(f"HTTP header is managed by the transport: {header!r}")
+            if not isinstance(ref, str) or not _ENV_NAME_RE.fullmatch(ref):
+                raise ConfigError(f"invalid header secret reference: {ref!r}")
         for tool in self.tool_allowlist:
             if not _TOOL_NAME_RE.fullmatch(tool or ""):
                 raise ConfigError(f"invalid allowlisted tool name: {tool!r}")
@@ -300,6 +326,7 @@ class ConnectorConfig:
             "revision": self.revision,
             "tool_allowlist": list(self.tool_allowlist),
             "oauth": oauth_view,
+            "header_refs": dict(self.header_refs),
         }
 
 

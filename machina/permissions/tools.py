@@ -111,6 +111,7 @@ def action_for_tool(name: str, args: dict) -> dict:
         "list_agents",
         "harness_status",
         "terminal_job",
+        "ask_user",
     ):
         return {"operation": "context.read", "targets": []}
     # Unknown/extensible tools: declared mutating effects become approval

@@ -41,6 +41,12 @@
       "items": "object[]",
       "delivered": "object[]"
     },
+    "question.asked": {
+      "requestId": "string",
+      "question": "string",
+      "options": "object[]",
+      "allowOther": "boolean"
+    },
     "shell.job": {
       "job": "object"
     },

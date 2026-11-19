@@ -34,7 +34,8 @@ SURFACES: tuple[str, ...] = (
 
 MECHANISMS: dict[str, str] = {
     "sessions": "durable conversations with pins, goals, fork, export, search, and resume",
-    "steering": "queued mid-turn user messages applied at safe tool boundaries",
+    "steering": "queued mid-turn user guidance applied at safe tool boundaries",
+    "questions": "interactive multiple-choice questions that pause and resume the current turn",
     "terminal": "foreground commands and background shell jobs with output, wait, and stop",
     "context": "typed chunks, token budget, projection, compaction/checkpoints, continuity, artifacts, reducers",
     "memory": "consolidation, scoring, dedupe, redaction/provenance, optional approval, hybrid retrieval, digest, growth/RSI",
@@ -100,6 +101,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "artifacts": ("artifact_describe", "artifact_read", "artifact_search"),
     "MCP": ("mcp_call", "mcp_connect", "mcp_describe", "mcp_disconnect", "mcp_list"),
     "workspace": ("code_intelligence",),
+    "interaction": ("ask_user",),
 }
 
 VOCABULARIES: dict[str, tuple[str, ...]] = {

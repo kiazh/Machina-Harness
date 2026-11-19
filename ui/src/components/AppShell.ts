@@ -62,6 +62,8 @@ export class AppShell {
 	private chromeCache: { key: string; rows: number } | undefined;
 	/** Created on first workspace use; its absence means today's chat-only tree. */
 	private workspace: WorkspaceShell | undefined;
+	/** Optional full-page tab (currently the live status tab). */
+	private page: Component | undefined;
 
 	constructor(tui: TUI, transcript: Component, composer: Component & ComposerBudget, footer: Footer) {
 		this.tui = tui;
@@ -110,6 +112,13 @@ export class AppShell {
 
 	setActivityBar(bar: Component & { visible: boolean }): void {
 		this.activityBar = bar;
+		this.invalidateChrome();
+		this.rebuild();
+	}
+
+	/** Swap the whole viewport for a page (status tab). Undefined restores chat. */
+	setPage(page?: Component): void {
+		this.page = page;
 		this.invalidateChrome();
 		this.rebuild();
 	}
@@ -179,6 +188,7 @@ export class AppShell {
 	 * mutate chrome content call {@link invalidateChrome}.
 	 */
 	chromeRows(): number {
+		if (this.page) return 0;
 		const width = this.liveColumns();
 		const activity = this.activityBar;
 		const activityRows = activity?.visible
@@ -302,6 +312,11 @@ export class AppShell {
 	}
 
 	private build(density: Density): VStack {
+		// Page tabs own the whole viewport: no composer, dock, activity bar or
+		// footer chrome underneath them.
+		if (this.page) {
+			return new VStack([{ component: this.page, basis: 0, grow: 1 }], { gap: 0 });
+		}
 		// Full density keeps one chrome gap row; smaller viewports spend
 		// every row on transcript, composer, or status.
 		const gap = density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;

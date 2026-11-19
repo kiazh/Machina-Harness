@@ -49,7 +49,7 @@ FEATURES = {
     "self_change": "When asked, the agent may change this installation within its offered tools and permissions: `machina config-set` (non-secret settings), the slash-command surface (/config, /theme, /models, /mode, /keys, /mcp, /skills, /memory, /harnesses), or permission-gated edits. Autonomous RSI never rewrites weights, code or permissions; user-owned choices are asked, not guessed.",
     "install": "repo_stage builds a digest-bound skills review plan; repo_activate installs reviewed skills. Never runs tests/installers/hooks/package managers. Skill metadata generates once at install. MCP drafts need /mcp review.",
     "execution": "Offered tools define access; approval-gated actions follow /mode and /approvals. Delegation inherits the parent's authority and returns through the parent, without sibling peer chat; share_memory shares signed memories.",
-    "mcp": "TUI /mcp manages servers (pasting an http(s)/mcp link, save/connect/disconnect); mcp_connect/mcp_disconnect add/remove servers. A pasted MCP URL is enough: mcp_connect derives the id when name is omitted, saves, connects, and reports tools; the approval card is the confirmation. mcp_list/mcp_describe cover catalogs; mcp_call requires exact approval unless trusted-read. HTTP servers support browser OAuth with PKCE; authorization grants no execution permission.",
+    "mcp": "TUI /mcp is a centered provider menu: configured providers show cached tools under their header, unauthorized providers offer Authorize, and Remove server is the only cleanup action. Pasting an http(s)/mcp link still works, and mcp_connect/mcp_disconnect add/remove servers. Authorized HTTP servers reconnect at startup; @provider mentions route requests to mcp_list/mcp_describe/mcp_call automatically. mcp_call requires exact approval unless trusted-read. HTTP servers support browser OAuth with PKCE; authorization grants no execution permission.",
     "harnesses": 'External agent harnesses (OpenCode, Codex, Hermes) are detected installed/running/registered; `machina harnesses status|enable|disable|setup|run` manages them and registers Machina\'s MCP server (state ~/.machina/interop.json; `interop` and /interop alias it). harness_features probes and caches available models, agents, MCP servers, auth providers and plugins with staleness; harness_status includes the cached compact inventory. "connect to opencode" means `machina harnesses enable opencode`; `machina harnesses run` delegates (TUI /harnesses; chat: approval-gated). Never touches their auth files.',
     "images": "The TUI accepts dropped PNG/JPEG/GIF/WebP or clipboard images (Ctrl+V), sent inline to the provider as [image 1] markers and kept in recent context. Understanding needs a vision-capable model; markers alone do not prove an image was supplied.",
     "music": "A pinned bar shows what is playing (/music: play/pause, next/previous, on|off; nowplaying_enabled). Detection is local and best-effort (system media APIs, Spotify/Music, a front YouTube tab); permission prompts are reported, never guessed.",
@@ -110,6 +110,45 @@ def _workspace_summary() -> object:
     }
 
 
+def _mcp_connector_summary(tool_names: set[str]) -> str:
+    """Bounded connected-connector inventory for automatic MCP routing.
+
+    Reads only the in-process registry and connection state: no refresh,
+    network call, connection launch, secret material or tool schema. When the
+    runtime has not created its connector service yet, the section is omitted.
+    """
+    if not {"mcp_list", "mcp_call"} <= tool_names:
+        return ""
+    try:
+        from machina.core.runtime import runtime_services
+
+        service = getattr(runtime_services, "_connector_service", None)
+        if service is None:
+            return ""
+        rows: list[str] = []
+        for config in service.registry.list():
+            if not getattr(config, "enabled", True):
+                continue
+            status = service.manager.status(config.id)
+            state = str(status.get("state") or "unknown")
+            tools = service.registry.tools_for(config.id)
+            names = [str(tool.remote_name or tool.name) for tool in tools[:8]]
+            suffix = f"; tools: {', '.join(names)}" if names else "; no catalog cached"
+            rows.append(f"- {config.id} ({state}{suffix})")
+        if not rows:
+            return ""
+        return (
+            "\n\nMCP connectors in this runtime (use them automatically when the "
+            "request needs their app or service):\n"
+            + "\n".join(rows)
+            + "\nCall mcp_list with connector=<id> for the full tool page, "
+            "mcp_describe for the exact schema, then mcp_call. A connected "
+            "connector must not be reported as unavailable."
+        )
+    except Exception:
+        return ""
+
+
 def capability_context(session: Session, *, tool_names: set[str], growth_state: str) -> str:
     """Always explain features, even with a custom prompt or failed growth store."""
     from machina.core.capability_catalog import capability_index
@@ -128,6 +167,7 @@ def capability_context(session: Session, *, tool_names: set[str], growth_state: 
         + facts
         + "\nCurrent configuration (enabled is not proof of successful learning): "
         + json.dumps(flags, separators=(",", ":"))
+        + _mcp_connector_summary(tool_names)
         + "\nAnswer feature questions directly from this brief. Do not infer features "
         "from recalled chat or empty notes, claim unobserved improvement, or invent unavailable tools."
         + inspection

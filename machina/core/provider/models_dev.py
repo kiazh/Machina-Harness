@@ -29,11 +29,6 @@ def provider_models(provider: str) -> list[dict[str, Any]]:
     if not isinstance(providers, dict):
         return []
     rows = providers.get(provider)
-    if provider == "opencode_session":
-        # The local OpenCode session bridge serves the same available model
-        # catalog; capability metadata is inherited, tool support is narrowed
-        # by the routing inventory (the bridge is text-only).
-        rows = providers.get("opencode")
     if provider == "grok":
         rows = providers.get("xai")
         try:

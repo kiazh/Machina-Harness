@@ -73,7 +73,7 @@ export interface FeatureHost {
 	updateSession(session: SessionInfo): void;
 	pick(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined>;
 	/** Centered choice menu for provider management, when available. */
-	pickCentered?(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
+	pickCentered?(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined>;
 	/** Check multiple items; undefined means cancelled. Nothing starts here. */
 	pickMany(title: string, items: SelectItem[]): Promise<SelectItem[] | undefined>;
 	/**
@@ -108,6 +108,8 @@ export interface FeatureHost {
 	/** Inspect locally retained tool output; never re-executes tools. */
 	inspectOutput(toolId?: string): Promise<void>;
 	inspectActivity?(): Promise<void>;
+	/** Open the full-page live status tab. */
+	openStatus?(): void;
 	/** Active user profile id (preferences bucket + new-chat agent scope). */
 	profileId(): string;
 	/** Switch the active profile (existing chats keep theirs). */

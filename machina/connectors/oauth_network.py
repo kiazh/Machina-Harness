@@ -78,7 +78,9 @@ def normalize_resource(url: str) -> str:
     if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
         port = None
     path = parts.path or ""
-    if len(path) > 1 and path.endswith("/"):
+    if path == "/":
+        path = ""
+    elif len(path) > 1 and path.endswith("/"):
         path = path.rstrip("/")
     out = f"{scheme}://{host}"
     if port:
@@ -632,9 +634,22 @@ class OAuthNetworkClient:
             else:
                 raise OAuthNetworkError("no authorization server advertised")
         if issuers and selected not in issuers:
-            raise OAuthNetworkError(
-                "configured issuer is not advertised", reason="oauth_issuer_mismatch"
+            # Authorization servers commonly publish a trailing slash in
+            # protected-resource metadata while their own metadata omits it.
+            # Treat only a trailing-slash difference as equivalent; use the
+            # advertised spelling from protected metadata for the binding.
+            selected = next(
+                (
+                    candidate
+                    for candidate in issuers
+                    if normalize_resource(candidate) == normalize_resource(selected)
+                ),
+                None,
             )
+            if selected is None:
+                raise OAuthNetworkError(
+                    "configured issuer is not advertised", reason="oauth_issuer_mismatch"
+                )
         await self._validate_url(selected, deadline=deadline, stage="issuer selection")
         # Public-to-private pivot: public resource must not inherit private issuer
         # without local consent.
@@ -676,10 +691,13 @@ class OAuthNetworkClient:
         if not isinstance(server_meta, dict):
             raise OAuthNetworkError("authorization server metadata is malformed")
         advertised_issuer = str(server_meta.get("issuer", ""))
-        if advertised_issuer != selected:
+        if normalize_resource(advertised_issuer) != normalize_resource(selected):
             raise OAuthNetworkError(
                 "issuer mismatch in server metadata", reason="oauth_issuer_mismatch"
             )
+        # The authorization-server metadata is authoritative for the issuer
+        # identifier. Keep its spelling for the stored binding and callbacks.
+        selected = advertised_issuer
         auth_endpoint = str(server_meta.get("authorization_endpoint", ""))
         token_endpoint = str(server_meta.get("token_endpoint", ""))
         registration_endpoint = str(server_meta.get("registration_endpoint", ""))

@@ -7,6 +7,7 @@ import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { LIMITS } from "../design/tokens.ts";
 import { sanitizeDisplay, shapePreview } from "../design/text.ts";
+import { toolCallDisplayName } from "../mcpNames.ts";
 import { theme } from "../theme.ts";
 import { panelContentWidth, renderToolPanel, renderToolSummary } from "./ToolPanel.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
@@ -38,6 +39,8 @@ function toolLabel(name: string, args: Record<string, unknown>): string {
 		const agent = typeof args.agent === "string" ? args.agent : "";
 		return agent ? `Delegating to ${agent}` : "Delegating";
 	}
+	const mcpLabel = toolCallDisplayName(name, args);
+	if (mcpLabel) return mcpLabel;
 	return name;
 }
 
@@ -87,7 +90,13 @@ export class ToolTurn implements Component {
 	constructor(name: string, args: Record<string, unknown>, activity: ActivitySource) {
 		this.name = sanitizeDisplay(toolLabel(name, args));
 		this.externalHarness = name === "harness_delegate";
-		this.args = sanitizeDisplay(Object.entries(args).map(([key, value]) =>
+		// The `mcp_call` label already names the connector and tool; showing the
+		// raw namespaced `name` in the argument line would duplicate the ugly
+		// wire form (`vercel__list_projects`). Keep only the call arguments.
+		const displayArgs = name === "mcp_call"
+			? (args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments) ? { arguments: args.arguments } : {})
+			: args;
+		this.args = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
 		this.activity = activity;

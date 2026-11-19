@@ -115,6 +115,7 @@ export const RPC_METHODS = [
   "providers.add",
   "providers.list",
   "providers.remove",
+  "question.answer",
   "runtime.capabilities",
   "runtime.selectWorkspace",
   "secrets.clear",

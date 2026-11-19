@@ -19,8 +19,13 @@ test("daily defaults use a plain control prefix and no function keys", () => {
 	assert.ok(defaults.includes("ctrl+n e"));
 	assert.ok(defaults.includes("ctrl+n s"));
 	assert.ok(defaults.includes("ctrl+n t"));
+	assert.ok(defaults.includes("ctrl+n left"));
+	assert.ok(defaults.includes("ctrl+n right"));
 	assert.deepEqual(new AppKeybindings().leaders(), ["ctrl+n"]);
 	assert.equal(matchesKey("\x0e", "ctrl+n"), true, "plain control byte works without enhanced keyboard protocols");
+	const bindings = new AppKeybindings();
+	assert.equal(bindings.matches("ctrl+n left", "statusLeft"), true);
+	assert.equal(bindings.matches("ctrl+n ctrl+right", "statusRightCtrl"), true);
 	assert.ok(Object.values(TUI_KEYBINDINGS).every((binding) =>
 		!([binding.defaultKeys].flat() as string[]).includes("ctrl+n"),
 	));

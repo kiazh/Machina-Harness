@@ -1,33 +1,33 @@
 // Human-operated MCP management. Inspection never connects or discovers tools.
 import type { SelectItem } from "@earendil-works/pi-tui";
-import type { MCPCatalogEntry, MCPConnectorConfig, MCPOAuthSettings, MCPOAuthView, MCPServerView, MCPToolView } from "../protocol.ts";
+import type { MCPCatalogEntry, MCPConnectorConfig, MCPOAuthSettings, MCPServerView, MCPToolView } from "../protocol.ts";
 import { sanitizeDisplay } from "../design/text.ts";
+import { cleanMcpDescription, cleanMcpToolName, mcpToolMention, mcpToolStatus } from "../mcpNames.ts";
 import { confirm, options, requireSession, type Command, type FeatureHost } from "./types.ts";
-import { authorizeConnector, forgetConnectorAccess, formatOAuthStatus } from "./mcp-oauth.ts";
+import { authorizeConnector } from "./mcp-oauth.ts";
 const stateOf = (server: MCPServerView): string => server.enabled ? server.state : "disabled";
 const nameOf = (server: MCPServerView): string => sanitizeDisplay(server.display_name || server.id);
-const STARTER_PREFIX = "__starter__:";
 const MANUAL_ACTION = "__add__";
-const MANAGE_ACTION = "__manage__";
+const PROVIDER_ORDER = ["composio", "arcade", "github", "firecrawl", "vercel"] as const;
+const PROVIDER_LABELS: Record<string, string> = {
+ composio: "Composio",
+ arcade: "Arcade",
+ github: "GitHub",
+ firecrawl: "Firecrawl",
+ vercel: "Vercel",
+};
 const isMcpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
-/** Catalog starters can be saved as-is; custom and harness entries are not. */
-function availableStarters(entries: MCPCatalogEntry[], configured: Set<string>): MCPCatalogEntry[] {
- return entries
-  .filter(entry => entry.kind === "connector" && entry.config && entry.id !== "custom-mcp" && !configured.has(entry.id))
-  .sort((left, right) => left.displayName.localeCompare(right.displayName));
+/** Centered overlay on the real TUI (same family as /keys); plain hosts fall back. */
+function pickMcp(host: FeatureHost, title: string, items: SelectItem[]): Promise<SelectItem | undefined> {
+ return host.pickCentered ? host.pickCentered(title, items, { count: false }) : host.pick(title, items, { count: false });
 }
 
-function starterRows(entries: MCPCatalogEntry[]): Array<SelectItem & { section?: true; muted?: boolean }> {
- if (!entries.length) return [];
- return [
-  { value: "__section_starters__", label: `── Starters · ${entries.length} ──`, section: true },
-  ...entries.map(entry => ({
-   value: `${STARTER_PREFIX}${entry.id}`,
-   label: sanitizeDisplay(entry.displayName),
-   description: `${sanitizeDisplay(entry.category)} · ${sanitizeDisplay(entry.description)}`,
-  })),
- ];
+/** Only the curated provider rows are shown; other configured servers are External. */
+function providerStarters(catalog: MCPCatalogEntry[]): MCPCatalogEntry[] {
+ return PROVIDER_ORDER
+  .map(id => catalog.find(entry => entry.id === id && entry.kind === "connector" && entry.config))
+  .filter((entry): entry is MCPCatalogEntry => entry !== undefined);
 }
 
 const errorText = (error: unknown): string => sanitizeDisplay(error instanceof Error ? error.message : String(error));
@@ -86,8 +86,147 @@ async function connectServer(
 
 async function addStarter(host: FeatureHost, entry: MCPCatalogEntry): Promise<void> {
  if (!entry.config) return;
- const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config: entry.config });
+ const config = { ...entry.config };
+ if (entry.setup.type === "gateway_url") {
+  host.print(
+   [`${entry.displayName} setup:`, ...entry.setup.instructions].join("\n"),
+   "plain",
+  );
+  const answer = await host.askText({
+   title: entry.setup.prompt ?? "Paste the gateway URL",
+   description: entry.setup.description,
+   example: entry.setup.example,
+  });
+  if (answer === undefined || !answer.trim()) return;
+  let endpoint: URL;
+  try {
+   endpoint = new URL(answer.trim());
+  } catch {
+   throw new Error("Use the HTTPS gateway URL copied from Arcade. Open /mcp to try again.");
+  }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+   throw new Error("Use an HTTPS gateway URL without credentials, query parameters or fragments. Open /mcp to try again.");
+  }
+  config.endpoint = endpoint.toString();
+ }
+ if (entry.setup.type === "secret") {
+  host.print(
+   [`${entry.displayName} setup:`, ...entry.setup.instructions].join("\n"),
+   "plain",
+  );
+  if (!entry.setup.secretKey) throw new Error("This starter is missing its secret reference. Open /mcp to try again.");
+  const secret = await host.askText({
+   title: entry.setup.prompt ?? "Paste the access token",
+   description: entry.setup.description,
+   example: entry.setup.example,
+   secret: true,
+  });
+  if (secret === undefined || !secret.trim()) return;
+  try {
+   await host.request("secrets.set", { key: entry.setup.secretKey, value: secret.trim(), persist: true });
+  } catch {
+   throw new Error("Could not save the access token to .env. Check secret storage and try /mcp again.");
+  }
+ }
+ const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config });
  await connectServer(host, server.id, nameOf(server), { docsUrl: entry.docsUrl });
+}
+
+interface CachedTools {
+ tools: MCPToolView[];
+ truncated: boolean;
+}
+
+async function cachedTools(host: FeatureHost, id: string): Promise<CachedTools> {
+ try {
+  // `cached` reads the last discovered catalog from the registry. It never
+  // re-lists over the network, so opening /mcp does not wait on providers.
+  return await host.request<CachedTools>("mcp.tools", { id, cached: true });
+ } catch {
+  return { tools: [], truncated: false };
+ }
+}
+
+async function setProviderSecret(host: FeatureHost, entry: MCPCatalogEntry): Promise<boolean> {
+ const secretKey = entry.setup.secretKey;
+ if (!secretKey) {
+  host.print(`${entry.displayName} does not expose a token setup step.`, "warning");
+  return false;
+ }
+ host.print([`${entry.displayName} setup:`, ...entry.setup.instructions].join("\n"), "plain");
+ const value = await host.askText({
+  title: entry.setup.prompt ?? `Paste the ${entry.displayName} access token`,
+  description: entry.setup.description,
+  example: entry.setup.example,
+  secret: true,
+ });
+ if (value === undefined || !value.trim()) return false;
+ try {
+  await host.request("secrets.set", { key: secretKey, value: value.trim(), persist: true });
+  return true;
+ } catch {
+  throw new Error(`Could not save ${secretKey} to .env. Check secret storage and try /mcp again.`);
+ }
+}
+
+function displayTool(tool: MCPToolView, provider: string): string {
+ return cleanMcpToolName(tool.remote_name ?? tool.name, provider);
+}
+
+function toolRow(server: MCPServerView, tool: MCPToolView): SelectItem {
+ const name = displayTool(tool, server.id);
+ const description = cleanMcpDescription(tool.description);
+ return {
+  value: `tool:${server.id}:${tool.name}`,
+  label: `${name}  ·  ${mcpToolStatus(tool.verdict)}`,
+  description: `@${server.id}${description ? ` · ${description}` : ""}`,
+ };
+}
+
+function selectTool(host: FeatureHost, server: MCPServerView, tool: MCPToolView): void {
+ const name = displayTool(tool, server.id);
+ const mention = mcpToolMention(server.id, name);
+ if (host.prefillInput) {
+  host.prefillInput(mention);
+  host.print(`MCP tool selected: @${server.id} · ${name}\nFinish the request and press Enter to run it.`, "info");
+  return;
+ }
+ host.print(`MCP tool: @${server.id} · ${name}${tool.description ? `\n${cleanMcpDescription(tool.description, 240)}` : ""}`, "plain");
+}
+
+async function authorizeAndConnect(host: FeatureHost, server: MCPServerView, docsUrl?: string): Promise<boolean> {
+ const authorized = await authorizeConnector(host, server.id);
+ if (!authorized) return false;
+ return connectServer(host, server.id, nameOf(server), { docsUrl });
+}
+
+async function externalServerMenu(host: FeatureHost, server: MCPServerView): Promise<void> {
+ const { tools, truncated } = await cachedTools(host, server.id);
+ const lines = [describe(server)];
+ if (!tools.length) lines.push("No tools are cached for this server.");
+ host.print(lines.join("\n"), "plain");
+ const rows: SelectItem[] = tools.map(tool => toolRow(server, tool));
+ if (truncated) {
+  rows.push({ value: "__more__", label: "More tools on server", description: "The server truncated its catalog at the discovery limit" });
+ }
+ if (server.transport === "streamable_http") rows.push({ value: "authorize", label: "Authorize", description: "Open provider authorization" });
+ rows.push({ value: "remove", label: "Remove server", description: "Delete this external configuration" });
+ rows.push({ value: "back", label: "Back", description: "Return to the MCP menu" });
+ const action = await pickMcp(host, `${nameOf(server)} · tools`, rows);
+ if (!action || action.value === "back") return;
+ if (action.value === "authorize") {
+  await authorizeAndConnect(host, server);
+  return;
+ }
+ if (action.value === "remove" && await confirm(host, `Remove ${nameOf(server)}?`, "Remove server")) {
+  await host.request("mcp.remove", { id: server.id });
+  host.print(`${nameOf(server)} removed.`, "success");
+  return;
+ }
+ if (action.value.startsWith("tool:")) {
+  const tool = tools.find(candidate => action.value === `tool:${server.id}:${candidate.name}`);
+  if (tool) selectTool(host, server, tool);
+ }
 }
 
 function deriveServerId(endpoint: URL, servers: MCPServerView[]): string {
@@ -143,8 +282,14 @@ function stringList(value: unknown, field: string): string[] {
  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new Error(`${field} must be a JSON array of strings. Open /mcp to try again.`);
  return value;
 }
+function stringMap(value: unknown, field: string): Record<string, string> {
+ if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(item => typeof item !== "string")) {
+  throw new Error(`${field} must be a JSON object of header names to secret names. Open /mcp to try again.`);
+ }
+ return value as Record<string, string>;
+}
 async function addServer(host: FeatureHost): Promise<void> {
- const transport = await host.pick("Add MCP server · transport", [
+ const transport = await pickMcp(host, "Add MCP server · transport", [
   { value: "stdio", label: "Local command", description: "Start a local MCP process when you connect" },
   { value: "streamable_http", label: "HTTP endpoint", description: "Connect to a remote MCP server" },
  ]);
@@ -172,7 +317,7 @@ async function addServer(host: FeatureHost): Promise<void> {
   const url = new URL(endpoint.trim());
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTP(S) endpoint without credentials, query parameters or fragments. Open /mcp to try again.");
   config.endpoint = endpoint.trim();
-  const authentication = await host.pick("HTTP authentication", [
+  const authentication = await pickMcp(host, "HTTP authentication", [
    { value: "none", label: "None", description: "Connect without credentials" },
    { value: "oauth", label: "OAuth", description: "Authorize in a browser with PKCE" },
   ]);
@@ -183,23 +328,24 @@ async function addServer(host: FeatureHost): Promise<void> {
    config.oauth = oauth;
   }
  }
- const advanced = await host.askText({ title: "Advanced options (JSON, optional)", initial: "{}", description: "Allowed: local_access, secret_refs (names only), tool_allowlist, trust (untrusted or trusted_read). Never enter secret values.", example: '{"secret_refs":["DOCS_TOKEN"],"tool_allowlist":["search"]}' });
+ const advanced = await host.askText({ title: "Advanced options (JSON, optional)", initial: "{}", description: "Allowed: local_access, secret_refs/header_refs (names only), tool_allowlist, trust (untrusted or trusted_read). Never enter secret values.", example: '{"header_refs":{"Authorization":"GITHUB_MCP_PAT"},"tool_allowlist":["search"]}' });
  if (advanced === undefined) return;
  const extra: unknown = JSON.parse(advanced || "{}");
  if (!extra || typeof extra !== "object" || Array.isArray(extra)) throw new Error("Advanced options must be a JSON object. Open /mcp to try again.");
  for (const [key, value] of Object.entries(extra)) {
   if (key === "secret_refs" || key === "tool_allowlist") config[key] = stringList(value, key);
+  else if (key === "header_refs") config.header_refs = stringMap(value, key);
   else if (key === "local_access" && typeof value === "boolean") config.local_access = value;
   else if (key === "trust" && (value === "untrusted" || value === "trusted_read")) config.trust = value;
-  else throw new Error(`Unsupported advanced option: ${sanitizeDisplay(key)}. Use secret_refs for secret names; never enter secret values.`);
+  else throw new Error(`Unsupported advanced option: ${sanitizeDisplay(key)}. Use secret_refs/header_refs for secret names; never enter secret values.`);
  }
  const { server } = await host.request<{ server: MCPServerView }>("mcp.configure", { config });
  await connectServer(host, server.id, nameOf(server));
 }
 async function askOAuthSettings(host: FeatureHost, existing?: MCPOAuthSettings): Promise<MCPOAuthSettings | undefined> {
- const mode = await host.pick("OAuth client registration", [
+ const mode = await pickMcp(host, "OAuth client registration", [
   { value: "auto", label: "Automatic", description: "Use dynamic registration when the server supports it" },
-  { value: "preregistered", label: "Pre-registered", description: "Use an existing client ID" },
+  { value: "preregistered", label: "Pre-registered", description: "Use an existing client ID (required by Google, GitHub and some other providers)" },
   { value: "metadata_document", label: "Client metadata document", description: "Reference a published client metadata URL" },
  ]);
  if (!mode) return undefined;
@@ -219,6 +365,43 @@ async function askOAuthSettings(host: FeatureHost, existing?: MCPOAuthSettings):
   const clientId = await host.askText({ title: "Client ID", initial: existing?.client_id, description: "Public client ID from the provider" });
   if (clientId === undefined) return undefined;
   settings.client_id = clientId.trim();
+  // OAuth client secrets never belong in mcp.json. Collect the value through
+  // the masked editor, persist it in .env, and keep only the reference name.
+  const secret = await host.askText({
+   title: "Client secret (optional, masked)",
+   description: "Stored in .env as MCP_OAUTH_CLIENT_SECRET. Leave empty for a public client or to keep the current secret.",
+   secret: true,
+   allowEmpty: true,
+  });
+  if (secret === undefined) return undefined;
+  if (secret.trim()) {
+   try {
+    await host.request("secrets.set", { key: "MCP_OAUTH_CLIENT_SECRET", value: secret.trim(), persist: true });
+   } catch {
+    throw new Error("Could not save the OAuth client secret to .env. Check secret storage and try /mcp again.");
+   }
+   settings.client_secret_ref = "MCP_OAUTH_CLIENT_SECRET";
+   settings.token_endpoint_auth_method = "client_secret_basic";
+  } else if (existing?.client_secret_ref) {
+   settings.client_secret_ref = existing.client_secret_ref;
+   settings.token_endpoint_auth_method = "client_secret_basic";
+  } else {
+   settings.client_secret_ref = "";
+   settings.token_endpoint_auth_method = "none";
+  }
+  // Google and other pre-registered providers require an exact registered
+  // redirect URI, so the loopback port must be stable instead of ephemeral.
+  const portText = await host.askText({
+   title: "Callback port (optional)",
+   initial: String(existing?.callback_port ?? 0),
+   description: "Use a fixed port registered with the provider as http://127.0.0.1:<port>/oauth/callback. 0 chooses a free port.",
+  });
+  if (portText === undefined) return undefined;
+  const port = Number((portText || "0").trim());
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+   throw new Error("Callback port must be an integer from 0 to 65535. Open /mcp to try again.");
+  }
+  settings.callback_port = port;
  }
  if (mode.value === "metadata_document") {
   const documentUrl = await host.askText({ title: "Client metadata URL", initial: existing?.client_metadata_url, example: "https://client.example.com/metadata" });
@@ -236,71 +419,9 @@ async function askOAuthSettings(host: FeatureHost, existing?: MCPOAuthSettings):
  settings.scope_allowlist = parsed;
  return settings;
 }
-async function manageServer(host: FeatureHost, id: string): Promise<void> {
- const { server } = await host.request<{ server: MCPServerView & { oauth?: MCPOAuthSettings | null } }>("mcp.status", { id });
- host.print(describe(server), "plain");
- const isHttp = server.transport === "streamable_http";
- const hasOAuth = isHttp && server.oauth !== undefined && server.oauth !== null;
- if (isHttp) {
-  try {
-   const session = host.session();
-   if (session) {
-    const { auth } = await host.request<{ auth: MCPOAuthView }>("mcp.oauth.status", { id, sessionId: session.id });
-    host.print(formatOAuthStatus(auth), "plain");
-   }
-  } catch {
-   // Auth status is advisory; management stays usable without it.
-  }
- }
- const action = await host.pick(`${nameOf(server)} · actions`, [
-  server.state === "connected" ? { value: "disconnect", label: "Disconnect", description: "Close this server connection" } : { value: "connect", label: "Connect", description: "Connect now and discover its tools" },
-  ...(isHttp ? [
-   { value: "authorize", label: hasOAuth ? "Authorize / Reauthorize" : "Authorize", description: "Authorize in an external browser" },
-   { value: "forget", label: "Forget access", description: "Remove saved OAuth credentials" },
-  ] : []),
-  ...(isHttp ? [{ value: "configure-oauth", label: hasOAuth ? "Edit OAuth settings" : "Configure OAuth", description: hasOAuth ? "Update client, issuer and allowed scopes" : "Add OAuth settings to this server" }] : []),
-  { value: "tools", label: "View tools", description: "Inspect cached tools without connecting" },
-  { value: "remove", label: "Remove server", description: "Delete its configuration and close its connection" },
- ]);
- if (!action) return;
- if (action.value === "authorize") {
-  await authorizeConnector(host, id);
- } else if (action.value === "forget") {
-  await forgetConnectorAccess(host, id);
- } else if (action.value === "configure-oauth") {
-  const oauth = await askOAuthSettings(host, server.oauth ?? undefined);
-  if (!oauth) return;
-  const { server: saved } = await host.request<{ server: MCPServerView }>("mcp.configure", { config: { id, oauth } });
-  host.print(`${nameOf(saved)} OAuth settings saved. Choose Authorize when ready.`, "success");
- } else if (action.value === "connect") {
-  await connectServer(host, id, nameOf(server), { review: true });
- } else if (action.value === "disconnect") {
-  const result = await host.request<{ server: MCPServerView }>("mcp.disconnect", { id });
-  host.print(describe(result.server), "plain");
- } else if (action.value === "remove") {
-  if (!await confirm(host, `Remove ${nameOf(server)} and disconnect it?`, "Remove server")) return;
-  const { removed } = await host.request<{ removed: boolean }>("mcp.remove", { id });
-  host.print(removed ? `${nameOf(server)} removed.` : "Server was already removed.", removed ? "success" : "warning");
- } else if (action.value === "tools") {
-  const { tools, truncated } = await host.request<{ tools: MCPToolView[]; truncated: boolean }>("mcp.tools", { id });
-  const lines = tools.map(tool => `${sanitizeDisplay(tool.name)}${tool.verdict ? ` · ${sanitizeDisplay(tool.verdict)}` : ""}${tool.description ? ` · ${sanitizeDisplay(tool.description)}` : ""}`);
-  if (!lines.length) lines.push("No cached tools. Connect the server to discover its tools.");
-  if (truncated) lines.push("Tool list truncated.");
-  host.print(lines.join("\n"), "plain");
- }
-}
-
-async function manageServers(host: FeatureHost, servers: MCPServerView[]): Promise<void> {
- const choice = await host.pick("Manage MCP servers", servers.map(server => ({
-  value: server.id,
-  label: nameOf(server),
-  description: `${stateOf(server)} · ${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}`,
- })));
- if (choice) await manageServer(host, choice.value);
-}
 export const mcpCommand: Command = {
  name: "mcp",
- description: "Paste an MCP link, connect, inspect and remove servers",
+ description: "Providers, cached tools, and external MCP servers",
  argumentHint: "[<url> | add [<url>] | list | status <id>]",
  getArgumentCompletions: options([["add", "Add and connect from a pasted MCP link"], ["list", "List configured harness servers"], ["status", "Inspect a server by ID"]]),
  async run(args, host) {
@@ -335,45 +456,114 @@ export const mcpCommand: Command = {
    host.print("Usage: /mcp · /mcp <url> · /mcp add [<url>] · /mcp list · /mcp status <id>", "warning");
    return;
   }
-  const { servers } = await host.request<{ servers: MCPServerView[] }>("mcp.list");
-  // Starters are an optional convenience: an older gateway without
-  // mcp.catalog still gets the configured inventory and manual add flow.
-  let catalog: MCPCatalogEntry[] = [];
-  try {
-   ({ entries: catalog } = await host.request<{ entries: MCPCatalogEntry[] }>("mcp.catalog"));
-  } catch {
-   catalog = [];
+ for (;;) {
+  const [{ servers }, catalogResult] = await Promise.all([
+  host.request<{ servers: MCPServerView[] }>("mcp.list"),
+  host.request<{ entries: MCPCatalogEntry[] }>("mcp.catalog").catch(() => ({ entries: [] as MCPCatalogEntry[] })),
+ ]);
+ const catalog = catalogResult.entries;
+ const providers = providerStarters(catalog);
+ const providerIds = new Set(providers.map(entry => entry.id));
+ const external = servers.filter(server => !providerIds.has(server.id));
+ // Cached catalogs are read in parallel from the local registry. Opening the
+ // menu never launches or re-lists a provider, so it stays instant.
+ const toolEntries = await Promise.all(
+  providers
+   .map(entry => servers.find(server => server.id === entry.id))
+   .filter((server): server is MCPServerView => Boolean(server && server.state === "connected"))
+   .map(async server => [server.id, await cachedTools(host, server.id)] as const),
+ );
+ const toolsById = new Map(toolEntries);
+ if (!servers.length) {
+  host.print(
+   providers.length
+    ? "No MCP servers registered yet. Choose a provider below or add an external server."
+    : "No MCP servers registered yet. Add an external server or paste an MCP link.",
+   "plain",
+  );
+ }
+ const rows: Array<SelectItem & { section?: true; muted?: boolean }> = [];
+ for (const entry of providers) {
+  rows.push({ value: `__provider__:${entry.id}`, label: sanitizeDisplay(PROVIDER_LABELS[entry.id] ?? entry.displayName), section: true });
+  const server = servers.find(candidate => candidate.id === entry.id);
+  if (!server) {
+   rows.push({ value: `setup:${entry.id}`, label: "Set up", description: sanitizeDisplay(entry.setup.instructions[0] ?? entry.description) });
+   continue;
   }
-  const starters = availableStarters(catalog, new Set(servers.map(server => server.id)));
-  if (!servers.length) {
-   host.print(starters.length
-    ? "No MCP servers configured in this harness. Pick a starter, paste a link, or add one manually."
-    : "No MCP servers configured in this harness. Paste an MCP link or add one manually.", "plain");
+  if (server.state !== "connected") {
+   if (entry.setup.type === "oauth" || entry.setup.type === "gateway_url") {
+    rows.push({ value: `auth:${entry.id}`, label: "Authorize", description: "Open provider authorization" });
+   } else if (entry.setup.type === "secret") {
+    rows.push({ value: `token:${entry.id}`, label: "Set access token", description: "Save a masked token for this provider" });
+   } else {
+    rows.push({ value: `__provider_status__:${entry.id}`, label: "Not connected", section: true, muted: true });
+   }
   }
-  const rows: Array<SelectItem & { section?: true; muted?: boolean }> = [
-   { value: "__section_configured__", label: `── Configured · ${servers.length} ──`, section: true },
-  ];
-  if (!servers.length) rows.push({ value: "__configured_empty__", label: "No servers configured yet.", section: true, muted: true });
-  rows.push(...servers.map(server => ({
-   value: server.id,
-   label: nameOf(server),
-   description: `${stateOf(server)} · ${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}`,
-  })));
-  rows.push(...starterRows(starters));
-  rows.push({ value: "__section_add__", label: "── Add ──", section: true });
-  rows.push({ value: MANUAL_ACTION, label: "Add server manually", description: "Configure a local command or HTTP endpoint" });
-  if (servers.length) rows.push({ value: MANAGE_ACTION, label: "Manage servers", description: "Inspect tools, OAuth, or remove a configured server" });
-  const selected = await host.pick("MCP servers", rows, { count: false });
-  if (!selected) return;
-  if (selected.value === MANUAL_ACTION) await addServer(host);
-  else if (selected.value === MANAGE_ACTION) await manageServers(host, servers);
-  else if (selected.value.startsWith(STARTER_PREFIX)) {
-   const starter = starters.find(entry => `${STARTER_PREFIX}${entry.id}` === selected.value);
-   if (starter) await addStarter(host, starter);
-  } else {
-   const server = servers.find(candidate => candidate.id === selected.value);
-   if (server?.state === "connected") await manageServer(host, server.id);
-   else if (server) await connectServer(host, server.id, nameOf(server));
+  const { tools, truncated } = toolsById.get(entry.id) ?? { tools: [], truncated: false };
+  for (const tool of tools) rows.push(toolRow(server, tool));
+  if (server.state === "connected" && !tools.length) {
+   rows.push({ value: `__provider_empty__:${entry.id}`, label: "No tools discovered", section: true, muted: true });
+  } else if (truncated) {
+   rows.push({ value: `__provider_more__:${entry.id}`, label: "More tools on server", section: true, muted: true });
   }
+  rows.push({ value: `remove:${entry.id}`, label: "Remove server", description: "Delete this configuration" });
+ }
+ rows.push({ value: "__section_external__", label: "External", section: true });
+ rows.push(...external.map(server => ({
+  value: `external:${server.id}`,
+  label: `${nameOf(server)}  ·  ${stateOf(server)}`,
+  description: `${sanitizeDisplay(server.transport)} · ${sanitizeDisplay(server.id)}`,
+ })));
+ rows.push({ value: MANUAL_ACTION, label: "Add external server", description: "HTTP endpoint or local command" });
+ const selected = await pickMcp(host, "MCP servers", rows);
+ if (!selected) return;
+ if (selected.value.startsWith("tool:")) {
+  const [, providerId, ...rest] = selected.value.split(":");
+  const toolName = rest.join(":");
+  const server = servers.find(candidate => candidate.id === providerId);
+  const tool = toolsById.get(providerId ?? "")?.tools.find(candidate => candidate.name === toolName);
+  if (server && tool) selectTool(host, server, tool);
+  return;
+ }
+ if (selected.value === MANUAL_ACTION) {
+  await addServer(host);
+  continue;
+ }
+ if (selected.value.startsWith("setup:")) {
+  const provider = providers.find(entry => `setup:${entry.id}` === selected.value);
+  if (provider) await addStarter(host, provider);
+  continue;
+ }
+ if (selected.value.startsWith("auth:")) {
+  const provider = providers.find(entry => `auth:${entry.id}` === selected.value);
+  const server = provider ? servers.find(candidate => candidate.id === provider.id) : undefined;
+  if (provider && server) await authorizeAndConnect(host, server, provider.docsUrl);
+  continue;
+ }
+ if (selected.value.startsWith("token:")) {
+  const provider = providers.find(entry => `token:${entry.id}` === selected.value);
+  if (provider && await setProviderSecret(host, provider)) {
+   const server = servers.find(candidate => candidate.id === provider.id);
+   if (server) await connectServer(host, server.id, nameOf(server), { docsUrl: provider.docsUrl });
+  }
+  continue;
+ }
+ if (selected.value.startsWith("remove:")) {
+  const provider = providers.find(entry => `remove:${entry.id}` === selected.value);
+  if (provider) {
+   const server = servers.find(candidate => candidate.id === provider.id);
+   if (server && await confirm(host, `Remove ${nameOf(server)}?`, "Remove server")) {
+    await host.request("mcp.remove", { id: provider.id });
+    host.print(`${nameOf(server)} removed.`, "success");
+   }
+  }
+  continue;
+ }
+ if (selected.value.startsWith("external:")) {
+  const server = external.find(candidate => `external:${candidate.id}` === selected.value);
+  if (server) await externalServerMenu(host, server);
+  continue;
+ }
+ }
  },
 };

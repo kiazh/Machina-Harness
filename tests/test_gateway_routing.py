@@ -82,26 +82,6 @@ async def test_providers_list_reports_multi_auto_mode(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_opencode_session_models_use_entitlement_list(monkeypatch) -> None:
-    from machina.core.provider import opencode_session
-    from machina.gateway.features import providers_feature
-
-    monkeypatch.setattr(
-        opencode_session,
-        "available_models",
-        lambda force=False: ("opencode/big-pickle", "deepseek/deepseek-flash"),
-    )
-    payload = await providers_feature._opencode_session_models("opencode_session", False)
-
-    assert payload["source"] == "opencode-models"
-    assert [model["id"] for model in payload["models"]] == [
-        "opencode/big-pickle",
-        "deepseek/deepseek-flash",
-    ]
-    assert all(model["tools"] is False for model in payload["models"])
-
-
-@pytest.mark.asyncio
 async def test_model_inventory_is_read_only_serializable(monkeypatch) -> None:
     inventory = SimpleNamespace(to_dict=lambda: {"profiles": [], "providers": {}})
     monkeypatch.setattr(routing_feature, "build_inventory", lambda _config: inventory)

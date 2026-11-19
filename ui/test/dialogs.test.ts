@@ -411,6 +411,43 @@ test("bare output with nothing retained stays local and quiet", async (t) => {
 	assert.equal(requests.length, before, "inspection never hits the gateway");
 });
 
+test("the status tab takes over the full viewport", async (t) => {
+	const { app, tui } = await boot();
+	t.after(() => app.exit());
+	app.openStatus();
+	await new Promise(resolve => setTimeout(resolve, 300));
+	tui.renderNow(true);
+	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
+	assert.match(screen, /Machina status/);
+	assert.match(screen, /Agents/);
+	assert.match(screen, /Harnesses/);
+});
+
+test("a structured question renders its options and sends the selected answer", async (t) => {
+	const { app, type, requests, client } = await boot();
+	t.after(() => app.exit());
+	await app.submitTurn("build a web app");
+	const emit = (client as unknown as { onEvent(event: unknown): void }).onEvent;
+	emit({
+		protocolVersion: 2,
+		type: "question.asked",
+		sessionId: "s",
+		turnId: "t1",
+		requestId: "q1",
+		question: "Which stack should I use?",
+		options: [
+			{ id: "option-1", label: "Next.js + React (recommended)" },
+			{ id: "option-2", label: "Plain HTML" },
+		],
+		allowOther: true,
+	});
+	await new Promise(resolve => setImmediate(resolve));
+	type("\r");
+	await new Promise(resolve => setImmediate(resolve));
+	const answer = requests.includes("question.answer");
+	assert.equal(answer, true);
+});
+
 test("provider section headers organize a menu without becoming selectable rows", () => {
 	const rows = [
 		{ value: "__section__::chatgpt", label: "── chatgpt (current) · 2 model(s) ──", section: true },
@@ -437,11 +474,15 @@ test("provider section headers organize a menu without becoming selectable rows"
 	assert.match(frame, /\(3\/3\)/);
 	assert.match(frame, /── chatgpt \(current\)/);
 	assert.doesNotMatch(frame, /❯ ──/);
-	// A typed filter drops headers and keeps every matching model row.
+	// A typed filter keeps the header for every group that still has a match.
 	menu.handleInput("deepseek");
-	assert.deepEqual(menu.filtered().map((row) => row.value), ["deepseek::deepseek-chat"]);
+	assert.deepEqual(menu.filtered().map((row) => row.value), [
+		"__section__::deepseek",
+		"deepseek::deepseek-chat",
+	]);
 	const filtered = menu.render(80).map((line) => stripTerminalSequences(line)).join("\n");
-	assert.doesNotMatch(filtered, /── deepseek/);
+	assert.match(filtered, /── deepseek/);
+	assert.doesNotMatch(filtered, /── chatgpt/);
 	// A menu with only a header has nothing to select and Esc still cancels.
 	const headerOnly = new Menu("Models", [rows[0]!], {});
 	headerOnly.onCancel = () => void cancelled++;

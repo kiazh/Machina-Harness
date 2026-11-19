@@ -9,6 +9,8 @@ import {
 	Container,
 	type Component,
 	type Editor,
+	isKeyRelease,
+	isKeyRepeat,
 	isViewportTUI,
 	Key,
 	matchesKey,
@@ -28,6 +30,8 @@ import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.t
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { ActivityBar, ActivityStore, activityEmptyGuidance, type SteeringItem, type ShellJob } from "./activity.ts";
+import { StatusPage, type StatusRow, type StatusSnapshot } from "./components/StatusPage.ts";
+import { toolCallDisplayName } from "./mcpNames.ts";
 import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
@@ -54,11 +58,14 @@ import type {
 	ConfigResult,
 	GatewayEvent,
 	HistoryEntry,
+	InteropStatusResult,
 	KiroFallback,
+	MCPServerView,
 	ProvidersListResult,
 	InitializeResult,
 	ResumeResult,
 	SessionInfo,
+	SessionListResult,
 	SessionResult,
 } from "./protocol.ts";
 import { type DocumentRecord } from "./editor/model.ts";
@@ -275,6 +282,8 @@ export class App implements FeatureHost {
 	private cursorBlinkStartedAt = 0;
 	private lastPrompt = "";
 	private lastEscAt = 0;
+	private pendingAbortEscAt = 0;
+	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
 	private version = "";
 	private current: SessionInfo | undefined;
 	/** Title chosen by /new while the chat is still a client-side draft. */
@@ -284,7 +293,25 @@ export class App implements FeatureHost {
 	private readonly defaultProfile = defaultProfileId();
 	private currentProfile: string = this.defaultProfile;
 	private running = false;
+	/** Questions waiting for their owning session to become visible. */
+	private readonly pendingQuestions = new Map<string, QuestionPromptEvent[]>();
+	/** Question request IDs whose picker is already open. */
+	private readonly openQuestions = new Set<string>();
 	private readonly activity = new ActivityStore();
+	private view: "chat" | "status" = "chat";
+	private statusPage!: StatusPage;
+	private statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+	private statusRefreshing = false;
+	private statusHarnesses: StatusRow[] = [];
+	private statusMcp: StatusRow[] = [];
+	private statusSessions: StatusRow[] = [];
+	private statusDefaultPending = false;
+	private statusUpdatedAt = "";
+	private statusError = "";
+	private explorerBurstStartedAt = 0;
+	private explorerBurstCount = 0;
+	private explorerBurstKey = "";
+	private lastStatusSwitchAt = 0;
 	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
 	private readonly turnSession = new TurnSessionStore({
 		visibleSessionId: () => this.current?.id,
@@ -329,6 +356,13 @@ export class App implements FeatureHost {
 	private readonly featureEventHandlers = new Set<(event: GatewayEvent) => void>();
 	private resolveExit: () => void = () => {};
 	private inputListenerDisposer: (() => void) | undefined;
+	/**
+	 * True while a slash command is doing pre-dialog work (RPCs, secret
+	 * prompts). Input must not reach the composer in that window: typing `/`
+	 * while `/mcp` loads opens autocomplete underneath the menu that is about
+	 * to appear and corrupts both surfaces.
+	 */
+	private commandRunning = false;
     private imageDraft = new ImageDraft();
     private imageLoads = Promise.resolve();
     private imageEpoch = 0;
@@ -420,6 +454,7 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.family.open(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
+		this.statusPage = new StatusPage(tui, () => this.statusSnapshot());
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -1082,6 +1117,7 @@ export class App implements FeatureHost {
 				.then(({ session }) => {
 					this.draftSessionTitle = undefined;
 					this.current = session;
+					this.flushPendingQuestions(session.id);
 					this.rememberSession(session.id);
 					this.turnSession.resetSessionTokens();
 					this.transcript.clear();
@@ -1137,6 +1173,9 @@ export class App implements FeatureHost {
 		// The backend stays paused for this session's approvals; rebuild the
 		// review cards retained while it was hidden (R15).
 		this.restoreApprovals(session.id);
+		// A question delivered while this session was hidden should reappear
+		// when its owning session becomes visible.
+		this.flushPendingQuestions(session.id);
 		// F-30: approvals the hidden session never saw are parked only in the
 		// permission store; re-read the target session's pending rows so the
 		// turn cannot sit stranded behind a card that was never re-opened.
@@ -1302,6 +1341,291 @@ export class App implements FeatureHost {
 				setTimeout(() => { void this.flushSteering(sessionId); }, 25);
 			}
 		}
+	}
+
+	/** Open the full-page live status tab (also `/status`). */
+	openStatus(): void {
+		this.openStatusTab(1);
+	}
+
+	private statusSnapshot(): StatusSnapshot {
+		const family = this.familyRows();
+		const titles = new Map(family.map((row) => [row.session.id, row.session.title || row.session.id]));
+		if (this.current && !titles.has(this.current.id)) titles.set(this.current.id, this.current.title || this.current.id);
+		const agentIds = new Set(family.map((row) => row.session.id));
+		const agents: StatusRow[] = family.map((row) => {
+			const detail = [
+				row.session.model || "",
+				this.turnSession.activeToolLabel(row.session.id) ? `tool ${this.turnSession.activeToolLabel(row.session.id)}` : "",
+				this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length
+					? `${this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length} queued`
+					: "",
+			].filter(Boolean).join(" · ");
+			return {
+				id: `agent:${row.session.id}`,
+				label: row.main ? `Main · ${row.session.title || "untitled"}` : (row.session.title || "Subagent"),
+				detail,
+				state: row.running ? "running" : "idle",
+				running: row.running,
+				logs: [
+					`Session: ${row.session.id}`,
+					`Title: ${row.session.title || "untitled"}`,
+					`Route: ${row.session.provider || "?"} / ${row.session.model || "?"}`,
+					`State: ${row.running ? "running" : "idle"}`,
+					`Active tool: ${this.turnSession.activeToolLabel(row.session.id) || "none"}`,
+					`Queued: ${this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length}`,
+				],
+			};
+		});
+		// Turns in other sessions still count as live agents even when they are
+		// outside the visible family (for example a background child session).
+		for (const sessionId of this.turnSession.inFlightSessions()) {
+			if (agentIds.has(sessionId)) continue;
+			agentIds.add(sessionId);
+			agents.push({
+				id: `agent:${sessionId}`,
+				label: `Session ${sessionId.slice(0, 8)}`,
+				detail: this.turnSession.activeToolLabel(sessionId) ? `tool ${this.turnSession.activeToolLabel(sessionId)}` : "turn in flight",
+				state: "running",
+				running: true,
+				logs: [
+					`Session: ${sessionId}`,
+					"State: running (outside the visible family)",
+					`Active tool: ${this.turnSession.activeToolLabel(sessionId) || "none"}`,
+				],
+			});
+		}
+		const shells: StatusRow[] = this.activity.allJobs().map(({ sessionId, job }) => ({
+			id: `shell:${sessionId}:${job.id}`,
+			label: job.foreground ? "foreground shell" : "background shell",
+			detail: `${titles.get(sessionId) ?? sessionId.slice(0, 8)} · ${job.command}`,
+			state: job.status,
+			running: job.status === "running" || job.status === "stopping",
+			logs: [
+				`Session: ${titles.get(sessionId) ?? sessionId.slice(0, 8)}`,
+				`Command: ${job.command}`,
+				`Status: ${job.status}`,
+				`Return code: ${job.returncode ?? "pending"}`,
+				...(job.output ? ["", "Output:", ...job.output.split(/\r?\n/).slice(0, 12)] : []),
+			],
+		}));
+		const tools: StatusRow[] = this.activity.allTools().slice(0, 24).map((tool) => {
+			const kind = tool.name.startsWith("mcp_")
+				? "MCP"
+				: tool.name.startsWith("harness_")
+					? "HARNESS"
+					: "TOOL";
+			const display = toolCallDisplayName(tool.name, tool.args) || tool.name;
+			const duration = tool.completedAt ? `${Math.max(0, tool.completedAt - tool.startedAt)}ms` : "running";
+			return {
+				id: `tool:${tool.sessionId}:${tool.id}`,
+				label: `${kind} · ${display}`,
+				detail: titles.get(tool.sessionId) ?? tool.sessionId.slice(0, 8),
+				state: tool.status,
+				running: tool.status === "running",
+				logs: [
+					`Tool: ${tool.name}`,
+					`Session: ${titles.get(tool.sessionId) ?? tool.sessionId}`,
+					`Started: ${new Date(tool.startedAt).toLocaleTimeString()} · ${duration}`,
+					`Status: ${tool.status}`,
+					...(tool.outcome ? [`Outcome: ${tool.outcome}`] : []),
+					...(tool.args && Object.keys(tool.args).length ? [`Arguments: ${JSON.stringify(tool.args)}`] : []),
+					...(tool.result ? ["", "Result:", ...tool.result.split(/\r?\n/).slice(0, 12)] : []),
+				],
+			};
+		});
+		const queued = this.activity.queuedCount() + family.reduce(
+			(total, row) => total + this.turnSession.queuedSteering(row.session.id).length,
+			0,
+		);
+		const project = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+		return {
+			session: this.current?.title || "No active session",
+			route: this.current ? `${this.current.provider || "?"} / ${this.current.model || "?"}` : "no route",
+			project: project || undefined,
+			agents,
+			sessions: this.statusSessions,
+			shells,
+			tools,
+			mcp: this.statusMcp,
+			harnesses: this.statusHarnesses,
+			queued,
+			approvals: this.turnSession.approvalDialogCount(),
+			updatedAt: this.statusUpdatedAt,
+			error: this.statusError,
+			running: this.running,
+			mode: this.footer.mode,
+			tokens: this.footer.tokens,
+			contextPercent: this.footer.contextPercent,
+		};
+	}
+
+	private async refreshStatusData(): Promise<void> {
+		if (this.view !== "status" || this.statusRefreshing) return;
+		this.statusRefreshing = true;
+		const sessionId = this.current?.id;
+		try {
+			const [interop, mcp, jobs, steering, sessionsResult] = await Promise.allSettled([
+				this.request<InteropStatusResult>("interop.status"),
+				this.request<{ servers?: MCPServerView[] }>("mcp.list"),
+				sessionId
+					? this.request<{ jobs?: ShellJob[] }>("shell.jobs", { sessionId })
+					: Promise.resolve({ jobs: [] }),
+				sessionId
+					? this.request<{ items?: SteeringItem[] }>("prompt.steering", { sessionId })
+					: Promise.resolve({ items: [] }),
+				this.request<SessionListResult>("session.list", { limit: 40 }),
+			]);
+			if (this.view !== "status") return;
+			if (sessionId) {
+				if (jobs.status === "fulfilled") {
+					for (const job of jobs.value.jobs ?? []) this.activity.setJob(sessionId, job);
+				}
+				if (steering.status === "fulfilled") {
+					this.activity.setQueue(sessionId, steering.value.items ?? []);
+				}
+			}
+			if (sessionsResult.status === "fulfilled") {
+				const live = new Set(this.turnSession.inFlightSessions());
+				const currentId = this.current?.id;
+				const defaultProject = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "global";
+				this.statusSessions = (sessionsResult.value.sessions ?? [])
+					.slice(0, 40)
+					.map((session) => {
+						const project = session.workspaceRoot
+							? (session.workspaceRoot.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || defaultProject)
+							: defaultProject;
+						// A persisted session's "active" status means "not archived";
+						// it is not proof that a turn is running right now. Only the
+						// in-flight turn registry can make the live dot green.
+						const running = live.has(session.id);
+						const state = running
+							? "active"
+							: session.status === "active"
+								? "inactive"
+								: session.status || "inactive";
+						return {
+							id: `session:${session.id}`,
+							label: session.title || "untitled",
+							detail: `${session.provider || "?"} / ${session.model || "?"}`,
+							state,
+							running,
+							updatedAt: session.lastActivity ?? undefined,
+							project,
+							logs: [
+								`Session: ${session.id}`,
+								`Title: ${session.title || "untitled"}`,
+								`Project: ${project}`,
+								`Route: ${session.provider || "?"} / ${session.model || "?"}`,
+								`Status: ${state}`,
+								`Last activity: ${session.lastActivity || "unknown"}`,
+								...(session.parentSessionId ? [`Parent: ${session.parentSessionId}`] : []),
+							],
+						};
+					})
+					.sort((left, right) => {
+						if (left.id === `session:${currentId}`) return -1;
+						if (right.id === `session:${currentId}`) return 1;
+						return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+					});
+				// The first refresh starts before session.list returns, so the
+				// queue summary (or a stale session list) can be selected for one
+				// frame. Once the real session list arrives after opening the tab,
+				// move the default selection to the current chat.
+				if (this.statusDefaultPending && this.statusSessions.length && this.view === "status") {
+					this.statusPage.selectDefault();
+					this.statusDefaultPending = false;
+				}
+			}
+			if (interop.status === "fulfilled") {
+				this.statusHarnesses = (interop.value.platforms ?? []).map((row) => ({
+					id: `harness:${row.platform}`,
+					label: row.label || row.platform,
+					detail: [row.version, row.scope, row.notes?.[0]].filter(Boolean).join(" · "),
+					state: row.running ? "running" : row.installed ? "installed" : "not installed",
+					running: row.running,
+					logs: [
+						`Platform: ${row.platform}`,
+						`Installed: ${row.installed ? "yes" : "no"}`,
+						`Running: ${row.running ? "yes" : "no"}`,
+						`Version: ${row.version || "unknown"}`,
+						`Scope: ${row.scope || "none"}`,
+						...(row.notes?.length ? ["", "Notes:", ...row.notes] : []),
+					],
+				}));
+			}
+			if (mcp.status === "fulfilled") {
+				this.statusMcp = (mcp.value.servers ?? []).map((server) => ({
+					id: `mcp:${server.id}`,
+					label: server.display_name || server.id,
+					detail: [server.transport, server.server_version, server.error].filter(Boolean).join(" · "),
+					state: server.error ? "error" : server.state,
+					running: server.state === "connected" || server.state === "connecting",
+					logs: [
+						`ID: ${server.id}`,
+						`Transport: ${server.transport}`,
+						`State: ${server.state}`,
+						`Server: ${server.server_name || "unknown"}${server.server_version ? ` ${server.server_version}` : ""}`,
+						`Protocol: ${server.protocol_version || "unknown"}`,
+						...(server.error ? [`Error: ${server.error}`] : []),
+					],
+				}));
+			}
+			const failures = [interop, mcp].filter((result) => result.status === "rejected").length;
+			this.statusError = failures ? `Live status refresh incomplete (${failures} source${failures === 1 ? "" : "s"} unavailable).` : "";
+			this.statusUpdatedAt = new Date().toLocaleTimeString();
+		} finally {
+			this.statusRefreshing = false;
+			this.tui.requestRender();
+		}
+	}
+
+	private openStatusTab(direction: 1 | -1): void {
+		if (this.exiting) return;
+		if (this.view === "status") {
+			this.statusPage.enter(direction);
+			void this.refreshStatusData();
+			this.tui.requestRender();
+			return;
+		}
+		this.view = "status";
+		this.statusDefaultPending = true;
+		this.statusPage.enter(direction);
+		this.shell.setPage(this.statusPage);
+		this.tui.setFocus(this.statusPage);
+		this.footer.keyHint = "";
+		this.statusUpdatedAt = "";
+		this.statusError = "";
+		this.refreshFamily();
+		void this.refreshStatusData();
+		this.statusRefreshTimer = setInterval(() => { void this.refreshStatusData(); }, 3_000);
+		this.tui.requestRender();
+	}
+
+	private closeStatusTab(): void {
+		if (this.view !== "status") return;
+		this.view = "chat";
+		if (this.statusRefreshTimer !== undefined) {
+			clearInterval(this.statusRefreshTimer);
+			this.statusRefreshTimer = undefined;
+		}
+		this.statusPage.dispose();
+		this.shell.setPage(undefined);
+		this.tui.setFocus(this.editor);
+		this.footer.keyHint = "";
+		this.tui.requestRender();
+	}
+
+	private statusTabDirection(data: string): 1 | -1 | 0 {
+		if (
+			this.keybindings.matches(data, "statusLeft") ||
+			this.keybindings.matches(data, "statusLeftCtrl")
+		) return -1;
+		if (
+			this.keybindings.matches(data, "statusRight") ||
+			this.keybindings.matches(data, "statusRightCtrl")
+		) return 1;
+		return 0;
 	}
 
 	async inspectActivity(): Promise<void> {
@@ -1507,11 +1831,11 @@ export class App implements FeatureHost {
 		);
 	}
 
-	pickCentered(title: string, items: SelectItem[]): Promise<SelectItem | undefined> {
+	pickCentered(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined> {
 		return this.openDialog<SelectItem>((close) => new Picker(
 			sanitizeDisplay(title), sanitizeSelectItems(items), close, () => close(),
-			DEFAULT_MENU_VISIBLE_ROWS, undefined, this.tui,
-		), { width: 68, maxHeight: 12, anchor: "center" });
+			DEFAULT_MENU_VISIBLE_ROWS, undefined, this.tui, options?.count,
+		), { width: 68, maxHeight: 19, anchor: "center" });
 	}
 
 	pickMany(title: string, items: SelectItem[]): Promise<SelectItem[] | undefined> {
@@ -1834,6 +2158,7 @@ export class App implements FeatureHost {
 		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
 		this.pendingKeyLeaderTimer = undefined;
 		this.pendingKeyLeader = undefined;
+		this.clearPendingAbortEsc();
 		this.footer.keyHint = "";
 		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
 		// cancel loop below never sees it; tear it down explicitly so its
@@ -1843,6 +2168,11 @@ export class App implements FeatureHost {
 		// the moment the app is leaving: it must publish nothing.
 		this.beginWorkspaceFence();
 		this.footer.dispose();
+		if (this.statusRefreshTimer !== undefined) {
+			clearInterval(this.statusRefreshTimer);
+			this.statusRefreshTimer = undefined;
+		}
+		this.statusPage.dispose();
 		this.turnSession.clearInFlightTimers();
 		this.transcript.suspend();
 		this.invalidateApprovals();
@@ -1962,7 +2292,21 @@ export class App implements FeatureHost {
 	}
 
 	private onInput(data: string): { consume: boolean } | undefined {
+		// Kitty-aware terminals can deliver key-up and auto-repeat events. A
+		// release must never cancel a pending leader, and a held leader must not
+		// restart its own timer. Legacy terminals send plain bytes, so the
+		// action-level cooldowns below still cover those repeats.
+		if (isKeyRelease(data)) return { consume: true };
+		// A command that has not opened its dialog yet owns the keyboard.
+		// Once a dialog/approval is visible it receives keys normally.
+		if (this.commandRunning && !this.dialogs.length && !this.turnSession.approvalDialogCount()) {
+			return { consume: true };
+		}
+		const repeated = isKeyRepeat(data);
 		const normalized = normalizeModifierArrow(data);
+		if (this.pendingAbortEscAt && !matchesKey(normalized, Key.escape)) this.clearPendingAbortEsc();
+		if (repeated && this.pendingAbortEscAt && matchesKey(normalized, Key.escape)) return { consume: true };
+		if (repeated && this.pendingKeyLeader) return { consume: true };
 		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
 		this.pendingKeyLeaderTimer = undefined;
 		this.footer.keyHint = "";
@@ -1974,6 +2318,20 @@ export class App implements FeatureHost {
 		this.pendingKeyLeader = undefined;
 		if (pending && Date.now() - pending.at < 5_000) {
 			if (matchesKey(normalized, Key.escape)) return { consume: true };
+			if (matchesKey(normalized, pending.key as Parameters<typeof matchesKey>[1])) {
+				// Holding the leader keeps it armed instead of consuming the
+				// repeat as an unknown second key.
+				this.pendingKeyLeader = { key: pending.key, at: Date.now() };
+				this.pendingKeyLeaderTimer = setTimeout(() => {
+					this.pendingKeyLeader = undefined;
+					this.pendingKeyLeaderTimer = undefined;
+					this.footer.keyHint = "";
+					this.tui.requestRender();
+				}, 5_000);
+				this.footer.keyHint = `${pending.key.toUpperCase()} then key · Esc cancels`;
+				this.tui.requestRender();
+				return { consume: true };
+			}
 			const next = parseKey(normalized);
 			if (next) this.onKey(`${pending.key} ${next.length === 1 ? next.toLowerCase() : next}`);
 			return { consume: true };
@@ -1981,7 +2339,7 @@ export class App implements FeatureHost {
 		for (const leader of this.keybindings.leaders()) {
 			if (matchesKey(normalized, leader as Parameters<typeof matchesKey>[1])) {
 				this.pendingKeyLeader = { key: leader, at: Date.now() };
-				this.footer.keyHint = `${leader.toUpperCase()} then letter · Esc cancels`;
+				this.footer.keyHint = `${leader.toUpperCase()} then key · ←/→ status · Esc cancels`;
 				this.pendingKeyLeaderTimer = setTimeout(() => {
 					this.pendingKeyLeader = undefined;
 					this.pendingKeyLeaderTimer = undefined;
@@ -2016,13 +2374,33 @@ export class App implements FeatureHost {
 		// A key may only reach a component the current geometry still composes.
 		// Layout changes normally reconcile already; this closes the window where
 		// the TUI still targets a pane removed by a resize/visibility toggle.
-		this.reconcileFocus();
+		if (this.view !== "status") this.reconcileFocus();
 		// The composer's autocomplete popup can change the chrome height while
 		// this key is being handled by the focused Editor. Recheck after the
 		// input dispatch so the panes (including Problems) get the remaining
 		// rows instead of being clipped by the grown composer.
 		this.scheduleWorkspaceChromeSync();
 		if (this.dialogs.length || this.turnSession.approvalDialogCount()) return undefined; // focused dialogs own their keys
+
+		const statusDirection = this.statusTabDirection(data);
+		if (this.view === "status") {
+			if (statusDirection !== 0 || matchesKey(data, Key.escape)) {
+				this.lastStatusSwitchAt = Date.now();
+				this.closeStatusTab();
+				return { consume: true };
+			}
+			this.statusPage.handleInput(data);
+			return { consume: true };
+		}
+		if (statusDirection !== 0) {
+			// A repeat after closing must not immediately reopen the page while
+			// the user is still holding the arrow key.
+			if (Date.now() - this.lastStatusSwitchAt >= 250) {
+				this.lastStatusSwitchAt = Date.now();
+				this.openStatusTab(statusDirection);
+			}
+			return { consume: true };
+		}
 
 		// ── integrated workspace (plan §8 focus priority) ────────────────────
 		// The Quick Open overlay owns every key except Esc/Ctrl+C (which would
@@ -2037,6 +2415,19 @@ export class App implements FeatureHost {
 		}
 		const integration = this.integration;
 		const explorerKey = this.matchesExplorerKey(data);
+		if (explorerKey) {
+			// Ctrl+T is a toggle, so terminal auto-repeat must not flip it
+			// indefinitely while the user holds the key. Allow two deliberate
+			// presses in a short burst, then suppress the repeat stream.
+			const now = Date.now();
+			if (data !== this.explorerBurstKey || now - this.explorerBurstStartedAt > 700) {
+				this.explorerBurstKey = data;
+				this.explorerBurstStartedAt = now;
+				this.explorerBurstCount = 0;
+			}
+			if (this.explorerBurstCount >= 2) return { consume: true };
+			this.explorerBurstCount++;
+		}
 		if (explorerKey && (!integration || this.workspaceUnsupported || !this.workspaceLayoutActive)) {
 			this.print(
 				this.workspaceUnsupported
@@ -2124,7 +2515,15 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 		if (this.keybindings.matches(data, "cancelTurn") && this.running && !this.editor.isShowingAutocomplete()) {
-			this.cancel();
+			// Escape is destructive: require a deliberate second press. Ctrl+C
+			// remains the immediate stop path.
+			const now = Date.now();
+			if (this.pendingAbortEscAt && now - this.pendingAbortEscAt <= 900) {
+				this.clearPendingAbortEsc();
+				this.cancel();
+			} else {
+				this.armPendingAbortEsc();
+			}
 			return { consume: true };
 		}
 		if (this.keybindings.matches(data, "clear") && !this.running) {
@@ -2135,7 +2534,7 @@ export class App implements FeatureHost {
 		// remains available for word selection in the file editor.
 		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
 		if (this.keybindings.matches(data, "activity")) {
-			void this.inspectActivity();
+			this.openStatus();
 			return { consume: true };
 		}
 		if (this.keybindings.matches(data, "agentClose")) {
@@ -3310,7 +3709,12 @@ export class App implements FeatureHost {
 		// form carries one in its ignored third token (see commandCarriesSecret).
         if (!commandCarriesSecret(command)) this.editor.addToHistory(draft.text);
 		if (command) {
-			await runCommand(command, this);
+			this.commandRunning = true;
+			try {
+				await runCommand(command, this);
+			} finally {
+				this.commandRunning = false;
+			}
 		} else {
 			this.lastPrompt = draft.text;
             this.lastPromptImages = draft.images;
@@ -3358,6 +3762,7 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
+		this.clearPendingAbortEsc();
 		this.turnSession.setInterrupted(sessionId, false);
 		this.transcript.addUser(text);
 		this.setRunning(true);
@@ -3386,7 +3791,29 @@ export class App implements FeatureHost {
 		}
 	}
 
+	private armPendingAbortEsc(): void {
+		this.clearPendingAbortEsc();
+		this.pendingAbortEscAt = Date.now();
+		this.footer.keyHint = "Esc again to stop reply · Ctrl+C stops immediately";
+		this.pendingAbortEscTimer = setTimeout(() => {
+			this.pendingAbortEscAt = 0;
+			this.pendingAbortEscTimer = undefined;
+			if (!this.exiting) this.footer.keyHint = "";
+			this.tui.requestRender();
+		}, 900);
+		this.tui.requestRender();
+	}
+
+	private clearPendingAbortEsc(): void {
+		this.pendingAbortEscAt = 0;
+		if (this.pendingAbortEscTimer !== undefined) {
+			clearTimeout(this.pendingAbortEscTimer);
+			this.pendingAbortEscTimer = undefined;
+		}
+	}
+
 	private cancel(): void {
+		this.clearPendingAbortEsc();
 		const inFlight = this.turnSession.inFlightSessions();
 		if (inFlight.length === 0) return;
 		// Cancel every in-flight turn, not just the most recent: two sessions
@@ -3404,7 +3831,7 @@ export class App implements FeatureHost {
 
 	private setRunning(running: boolean): void {
 		this.running = running;
-		this.composer.placeholder = running ? "Queue a message · Enter queues · Esc interrupts" : "Ask anything, or type / for commands.";
+		this.composer.placeholder = running ? "Queue a message · applies at next tool boundary · Esc×2 stops" : "Ask anything, or type / for commands.";
 		// AH-031: do NOT disable the composer while a turn runs — safe
 		// slash commands (/sessions, /new, /exit, /help, …) must stay
 		// usable. Prompt submits are guarded in submit()/submitTurn().
@@ -3492,6 +3919,16 @@ export class App implements FeatureHost {
 		} else if (hidden && !this.isFamilyMember(event.sessionId) && isTurnStart(event)) {
 			this.noteUnknownSession(event.sessionId);
 		}
+		if (event.type === "question.asked") {
+			if (event.sessionId === this.current?.id) void this.promptQuestion(event);
+			else {
+				const pending = this.pendingQuestions.get(event.sessionId) ?? [];
+				if (!pending.some((item) => item.requestId === event.requestId)) pending.push(event);
+				this.pendingQuestions.set(event.sessionId, pending);
+			}
+			this.tui.requestRender();
+			return;
+		}
 		if (!this.turnSession.isInFlight(event.sessionId)) {
 			// A session without a local turn binding (e.g. an in-flight turn
 			// from the server side): preview it in the hidden session's tail;
@@ -3517,8 +3954,20 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
-		if (event.type === "tool.start") this.turnSession.noteToolStart(event.sessionId, event.id, event.name);
-		else if (event.type === "tool.complete") this.turnSession.noteToolComplete(event.sessionId, event.id);
+		if (event.type === "tool.start") {
+			this.turnSession.noteToolStart(event.sessionId, event.id, event.name);
+			this.activity.noteToolStart(event.sessionId, event.id, event.name, event.args);
+		} else if (event.type === "tool.complete") {
+			this.turnSession.noteToolComplete(event.sessionId, event.id);
+			const status = event.isError || event.outcome === "denied"
+				? "error"
+				: event.outcome === "paused" || event.outcome === "awaiting_approval"
+					? "paused"
+					: event.outcome === "unknown" || event.outcome === "outcome_unknown"
+						? "unknown"
+						: "ok";
+			this.activity.noteToolComplete(event.sessionId, event.id, status, event.result, event.outcome);
+		}
 		else if (event.type === "message.complete") this.turnSession.clearActiveTools(event.sessionId);
 		// A hidden session keeps a live tail so switching back shows the work
 		// done while it was invisible (switchTo merges it
@@ -3647,6 +4096,72 @@ export class App implements FeatureHost {
 			}
 		}
 		this.tui.requestRender();
+	}
+
+	private flushPendingQuestions(sessionId: string): void {
+		if (this.current?.id !== sessionId) return;
+		const pending = this.pendingQuestions.get(sessionId);
+		if (!pending?.length) return;
+		const next = pending[0]!;
+		void this.promptQuestion(next);
+	}
+
+	/**
+	 * One structured question at a time. The tool call is waiting for this
+	 * answer, so a cancelled picker is reported explicitly rather than
+	 * silently leaving the turn blocked.
+	 */
+	private async promptQuestion(event: QuestionPromptEvent): Promise<void> {
+		if (this.openQuestions.has(event.requestId)) return;
+		if (this.current?.id !== event.sessionId) {
+			const pending = this.pendingQuestions.get(event.sessionId) ?? [];
+			if (!pending.some((item) => item.requestId === event.requestId)) pending.push(event);
+			this.pendingQuestions.set(event.sessionId, pending);
+			return;
+		}
+		this.openQuestions.add(event.requestId);
+		try {
+			const options = event.options.map((option) => ({
+				value: option.id,
+				label: option.label,
+				...(option.description ? { description: option.description } : {}),
+			}));
+			if (event.allowOther) {
+				options.push({ value: "__other__", label: "Other…", description: "Type a different answer" });
+			}
+			if (!options.length) options.push({ value: "__skip__", label: "Skip this question" });
+			const choice = await this.pick(event.question, options);
+			let answer: string | undefined;
+			if (choice?.value === "__other__") {
+				answer = await this.askText({
+					title: "Your answer",
+					description: event.question,
+					maxLength: 4_000,
+				});
+			} else if (choice && choice.value !== "__skip__") {
+				answer = choice.label;
+			}
+			await this.request("question.answer", {
+				sessionId: event.sessionId,
+				requestId: event.requestId,
+				...(answer === undefined ? { cancelled: true } : { answer }),
+			});
+		} catch (error) {
+			this.print(`Could not answer the question: ${message(error)}`, "error");
+		} finally {
+			this.openQuestions.delete(event.requestId);
+			const pending = this.pendingQuestions.get(event.sessionId);
+			if (pending) {
+				const rest = pending.filter((item) => item.requestId !== event.requestId);
+				if (rest.length) {
+					this.pendingQuestions.set(event.sessionId, rest);
+					this.flushPendingQuestions(event.sessionId);
+				} else {
+					this.pendingQuestions.delete(event.sessionId);
+				}
+			}
+			this.tui.requestRender();
+		}
 	}
 
 	/**
@@ -3867,6 +4382,12 @@ export class App implements FeatureHost {
 		this.cursorBlinkSub?.stop();
 		this.cursorBlinkSub = undefined;
 		this.footer.dispose();
+		this.clearPendingAbortEsc();
+		if (this.statusRefreshTimer !== undefined) {
+			clearInterval(this.statusRefreshTimer);
+			this.statusRefreshTimer = undefined;
+		}
+		this.statusPage.dispose();
 		this.transcript.suspend();
 		// The gateway is gone: clear workspace timers/mirrors without RPC
 		// expectations (every teardown call is bounded and fails fast).
@@ -3931,6 +4452,7 @@ function isTurnStart(event: GatewayEvent): boolean {
 }
 
 type ApprovalPromptEvent = Extract<GatewayEvent, { type: "needs_approval" | "permission.required" }>;
+type QuestionPromptEvent = Extract<GatewayEvent, { type: "question.asked" }>;
 
 /**
  * Synthesize the wire `needs_approval` event for a stored pending row.

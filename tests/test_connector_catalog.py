@@ -1,6 +1,5 @@
 """Built-in connector starters remain explicit, non-secret setup choices."""
 
-import sys
 from urllib.parse import urlparse
 
 import pytest
@@ -15,14 +14,12 @@ async def test_catalog_is_available_without_initializing_a_runtime_or_session():
     assert "mcp.catalog" in METHODS
     result = await METHODS["mcp.catalog"](object(), {})
     entries = result["entries"]
-    assert {entry["id"] for entry in entries} >= {
-        "gmail",
-        "google-drive",
-        "google-calendar",
+    assert {entry["id"] for entry in entries} == {
+        "composio",
+        "arcade",
         "github",
-        "firecrawl-selfhosted",
-        "custom-mcp",
-        "machina",
+        "firecrawl",
+        "vercel",
     }
     assert len({entry["id"] for entry in entries}) == len(entries)
     for entry in entries:
@@ -42,12 +39,18 @@ async def test_connector_starters_validate_without_tokens_or_installation_author
         if entry["kind"] != "connector":
             continue
         fields = entry["config"]
+        if entry["setup"]["type"] == "gateway_url":
+            # The gateway is account-specific: the UI asks for it before saving.
+            assert fields["id"] == entry["id"]
+            assert "endpoint" not in fields
+            continue
         config = ConnectorStore.validate_input(fields)
         assert config.id == entry["id"]
         assert config.trust == "untrusted"
         assert "owner" not in fields and "revision" not in fields
         assert not config.command and not config.argv  # No package-manager auto-install.
         assert not config.credential_profile and not config.secret_refs
+        assert all(value and not value.startswith(("ghp_", "github_pat_")) for value in config.header_refs.values())
         if config.oauth:
             assert not config.oauth.get("client_secret")
             assert not config.oauth.get("access_token")
@@ -55,54 +58,69 @@ async def test_connector_starters_validate_without_tokens_or_installation_author
 
 
 @pytest.mark.asyncio
-async def test_firecrawl_starter_targets_an_editable_local_mcp_bridge():
+async def test_firecrawl_starter_uses_the_hosted_oauth_endpoint():
     result = await METHODS["mcp.catalog"](object(), {})
-    entry = next(item for item in result["entries"] if item["id"] == "firecrawl-selfhosted")
+    entry = next(item for item in result["entries"] if item["id"] == "firecrawl")
     config = ConnectorStore.validate_input(entry["config"])
     assert config.transport == "streamable_http"
-    assert config.endpoint == "http://127.0.0.1:3000/mcp"
-    assert config.local_access is True
+    assert config.endpoint == "https://mcp.firecrawl.dev/v2/mcp-oauth"
+    assert config.oauth["client_mode"] == "auto"
+    assert config.local_access is False
+    assert entry["setup"]["type"] == "oauth"
+    assert any("dynamic client registration" in line for line in entry["setup"]["instructions"])
+
+
+@pytest.mark.asyncio
+async def test_arcade_starter_asks_for_the_users_own_gateway_url():
+    result = await METHODS["mcp.catalog"](object(), {})
+    entry = next(item for item in result["entries"] if item["id"] == "arcade")
+    assert entry["setup"]["type"] == "gateway_url"
+    assert "gateway URL" in entry["setup"]["prompt"]
+    assert entry["setup"]["example"].startswith("https://api.arcade.dev/mcp/")
+    assert entry["config"]["id"] == "arcade"
+    assert "endpoint" not in entry["config"]
+    assert any("2,000" in line for line in entry["setup"]["instructions"])
+
+
+@pytest.mark.asyncio
+async def test_composio_starter_uses_the_managed_mcp_oauth_endpoint():
+    result = await METHODS["mcp.catalog"](object(), {})
+    entry = next(item for item in result["entries"] if item["id"] == "composio")
+    config = ConnectorStore.validate_input(entry["config"])
+    assert config.endpoint == "https://connect.composio.dev/mcp"
+    assert config.transport == "streamable_http"
+    assert config.oauth["client_mode"] == "auto"
+    assert config.oauth.get("client_secret") is None
+    assert entry["setup"]["type"] == "oauth"
+    assert any("third-party" in line.lower() for line in entry["setup"]["instructions"])
+
+
+@pytest.mark.asyncio
+async def test_github_starter_uses_a_pat_header_reference_and_masked_setup():
+    result = await METHODS["mcp.catalog"](object(), {})
+    entry = next(item for item in result["entries"] if item["id"] == "github")
+    config = ConnectorStore.validate_input(entry["config"])
+    assert config.endpoint == "https://api.githubcopilot.com/mcp/"
     assert config.oauth is None
-    assert entry["setup"]["type"] == "local_endpoint"
-    # A different self-hosted bridge URL must still use the regular config validator.
-    edited = {**entry["config"], "endpoint": "http://localhost:4300/mcp"}
-    assert ConnectorStore.validate_input(edited).endpoint == "http://localhost:4300/mcp"
+    assert config.header_refs == {"Authorization": "GITHUB_MCP_PAT"}
+    assert entry["setup"]["type"] == "secret"
+    assert entry["setup"]["secretKey"] == "GITHUB_MCP_PAT"
+    assert "personal access token" in entry["setup"]["prompt"].lower()
 
 
 @pytest.mark.asyncio
-async def test_google_starters_use_official_remote_endpoints_and_read_scopes():
+async def test_vercel_starter_uses_the_official_oauth_endpoint():
     result = await METHODS["mcp.catalog"](object(), {})
-    entries = {entry["id"]: entry for entry in result["entries"]}
-    for connector_id, endpoint, scope in [
-        ("gmail", "https://gmailmcp.googleapis.com/mcp/v1", "gmail.readonly"),
-        ("google-drive", "https://drivemcp.googleapis.com/mcp/v1", "drive.readonly"),
-        (
-            "google-calendar",
-            "https://calendarmcp.googleapis.com/mcp/v1",
-            "calendar.events.readonly",
-        ),
-    ]:
-        entry = entries[connector_id]
-        config = ConnectorStore.validate_input(entry["config"])
-        assert config.endpoint == endpoint
-        assert config.local_access is False
-        assert entry["setup"]["type"] == "oauth"
-        assert f"https://www.googleapis.com/auth/{scope}" in config.oauth["scope_allowlist"]
-
-
-@pytest.mark.asyncio
-async def test_machina_is_an_outgoing_harness_registration_and_has_no_connector_config():
-    result = await METHODS["mcp.catalog"](object(), {})
-    entry = next(item for item in result["entries"] if item["id"] == "machina")
-    assert entry["kind"] == "harness"
-    assert entry["config"] is None
-    assert entry["setup"]["type"] == "harness"
-    assert entry["runtime"] == {"command": sys.executable, "argv": ["-m", "machina.mcp_server"]}
+    entry = next(item for item in result["entries"] if item["id"] == "vercel")
+    config = ConnectorStore.validate_input(entry["config"])
+    assert config.endpoint == "https://mcp.vercel.com"
+    assert config.oauth["client_mode"] == "auto"
+    assert entry["setup"]["type"] == "oauth"
 
 
 @pytest.mark.asyncio
 async def test_editing_one_starter_does_not_mutate_later_catalog_requests():
     first = await METHODS["mcp.catalog"](object(), {})
-    first["entries"][0]["config"]["oauth"]["scope_allowlist"].append("extra")
+    first["entries"][0]["config"]["display_name"] = "changed"
     second = await METHODS["mcp.catalog"](object(), {})
-    assert "extra" not in second["entries"][0]["config"]["oauth"]["scope_allowlist"]
+    assert second["entries"][0]["config"]["display_name"] != "changed"

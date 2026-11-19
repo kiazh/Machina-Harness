@@ -540,7 +540,16 @@ export interface MCPCatalogEntry {
 	provider: string;
 	description: string;
 	docsUrl: string;
-	setup: { type: string; instructions: string[] };
+	setup: {
+		type: string;
+		instructions: string[];
+		/** Prompt shown when the starter needs a value before it can be saved. */
+		prompt?: string;
+		description?: string;
+		example?: string;
+		/** Secret key to write before configuring a secret-backed starter. */
+		secretKey?: string;
+	};
 	/** Editable starter fields; not persisted until `mcp.configure` is called. */
 	config?: Record<string, unknown> | null;
 	runtime?: { command?: string; argv?: string[] };
@@ -557,6 +566,8 @@ export interface MCPConnectorConfig {
  endpoint?: string;
  local_access?: boolean;
  secret_refs?: string[];
+ /** Header name -> secret reference name; values never enter config. */
+ header_refs?: Record<string, string>;
  tool_allowlist?: string[];
  trust: "untrusted" | "trusted_read";
  oauth?: MCPOAuthSettings | null;

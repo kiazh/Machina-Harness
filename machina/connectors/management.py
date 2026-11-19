@@ -64,6 +64,17 @@ def _string_list(args: dict[str, Any], key: str) -> list[str]:
     return list(value)
 
 
+def _string_map(args: dict[str, Any], key: str) -> dict[str, str]:
+    value = args.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or any(
+        not isinstance(k, str) or not isinstance(v, str) for k, v in value.items()
+    ):
+        raise ConfigError(f"{key} must be an object of strings")
+    return dict(value)
+
+
 def derive_connector_name(url: str = "", command: str = "") -> str:
     """Derive a stable connector id from an MCP link or executable.
 
@@ -121,6 +132,7 @@ def _normalize_connect(args: dict[str, Any]) -> tuple[dict[str, Any], ConnectorC
         "trust": _string(args, "trust", "untrusted"),
         "tool_allowlist": _string_list(args, "tool_allowlist"),
         "env_allowlist": _string_list(args, "env_allowlist"),
+        "header_refs": _string_map(args, "header_refs"),
         "local_access": local_access,
     }
     for key in ("connect_timeout", "call_timeout", "discovery_timeout"):
@@ -155,6 +167,7 @@ def connect_spec(args: dict[str, Any]) -> dict[str, Any]:
             "trust": config.trust,
             "tool_allowlist": list(config.tool_allowlist),
             "env_allowlist": list(config.env_allowlist),
+            "header_refs": dict(config.header_refs),
             "local_access": config.local_access,
             "connect_timeout": config.connect_timeout,
             "call_timeout": config.call_timeout,

@@ -4,6 +4,18 @@ import { sanitizeDisplay } from "./design/text.ts";
 
 export interface SteeringItem { id: string; text: string }
 export interface ShellJob { id: string; command: string; status: string; returncode?: number | null; output?: string; truncated?: boolean; foreground?: boolean; deadline?: number | null }
+export interface ToolActivity {
+	id: string;
+	sessionId: string;
+	name: string;
+	status: "running" | "ok" | "error" | "paused" | "unknown";
+	startedAt: number;
+	completedAt?: number;
+	/** Bounded local copy for the status page; never re-executed or refetched. */
+	args?: Record<string, unknown>;
+	result?: string;
+	outcome?: string;
+}
 export interface ActivityAction { label: string; run: () => void }
 
 /**
@@ -19,7 +31,7 @@ export function activityEmptyGuidance(hasSession: boolean): string {
 		intro,
 		"",
 		hasSession ? "To create activity:" : "Then activity will appear here:",
-		"  1. Press Enter while a reply is running to queue steering.",
+		"  1. Press Enter while a reply is running to queue guidance for the next tool boundary.",
 		"  2. Ask for a long-running command; it appears here as a shell job.",
 		"  3. Use /delegate <task> to start a subagent.",
 		"",
@@ -31,6 +43,7 @@ export class ActivityStore {
 	readonly queues = new Map<string, SteeringItem[]>();
 	private readonly queueVersions = new Map<string, number>();
 	readonly jobs = new Map<string, Map<string, ShellJob>>();
+	readonly toolEvents = new Map<string, Map<string, ToolActivity>>();
 	setQueue(sessionId: string, items: SteeringItem[]): void {
 		this.queues.set(sessionId, items.slice(0, 32));
 		this.queueVersions.set(sessionId, this.queueVersion(sessionId) + 1);
@@ -47,11 +60,53 @@ export class ActivityStore {
 	}
 	queue(sessionId: string): SteeringItem[] { return this.queues.get(sessionId) ?? []; }
 	listJobs(sessionId: string): ShellJob[] { return [...(this.jobs.get(sessionId)?.values() ?? [])]; }
-	/** Drop every dormant per-session queue/job record for one session. */
+	allJobs(): Array<{ sessionId: string; job: ShellJob }> {
+		return [...this.jobs.entries()].flatMap(([sessionId, jobs]) =>
+			[...jobs.values()].map((job) => ({ sessionId, job })),
+		);
+	}
+	queuedCount(): number {
+		return [...this.queues.values()].reduce((total, items) => total + items.length, 0);
+	}
+	noteToolStart(sessionId: string, id: string, name: string, args: Record<string, unknown> = {}): void {
+		const tools = this.toolEvents.get(sessionId) ?? new Map<string, ToolActivity>();
+		tools.set(id, {
+			id,
+			sessionId,
+			name,
+			status: "running",
+			startedAt: Date.now(),
+			args: { ...args },
+		});
+		while (tools.size > 32) tools.delete(tools.keys().next().value!);
+		this.toolEvents.set(sessionId, tools);
+	}
+	noteToolComplete(
+		sessionId: string,
+		id: string,
+		status: ToolActivity["status"] = "ok",
+		result = "",
+		outcome = "",
+	): void {
+		const tools = this.toolEvents.get(sessionId);
+		const record = tools?.get(id);
+		if (!record) return;
+		record.status = status;
+		record.completedAt = Date.now();
+		record.result = result.slice(0, 4_000);
+		record.outcome = outcome;
+	}
+	allTools(): ToolActivity[] {
+		return [...this.toolEvents.values()]
+			.flatMap((tools) => [...tools.values()])
+			.sort((left, right) => right.startedAt - left.startedAt);
+	}
+	/** Drop every dormant per-session queue/job/tool record for one session. */
 	pruneSession(sessionId: string): void {
 		this.queues.delete(sessionId);
 		this.queueVersions.delete(sessionId);
 		this.jobs.delete(sessionId);
+		this.toolEvents.delete(sessionId);
 	}
 }
 
@@ -75,7 +130,7 @@ export class ActivityBar {
 		}
 		const summary = sanitizeDisplay(this.summary());
 		if (summary) {
-			const text = theme.muted(" " + summary + "  ") + theme.dim("Ctrl+N A details");
+			const text = theme.muted(" " + summary + "  ") + theme.dim("Ctrl+N A status");
 			if (row && width - visibleWidth(row) < 24) { rows.push(row); row = ""; }
 			row += (row ? "  " : "") + truncateToWidth(text, Math.max(0, width - visibleWidth(row) - (row ? 2 : 0)));
 		}

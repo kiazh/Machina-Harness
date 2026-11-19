@@ -32,7 +32,15 @@ export { formatLspStatusLine, workspaceCommands } from "./workspace.ts";
 export type { WorkspaceHost } from "./types.ts";
 
 const appCommands: Command[] = [
-	{ name: "activity", description: "View queued steering, background commands, and agents", async run(_args, host) { await host.inspectActivity?.(); } },
+	{
+		name: "activity",
+		description: "Open the live status tab; use /activity list for actions",
+		async run(args, host) {
+			if (!args.trim() && host.openStatus) host.openStatus();
+			else await host.inspectActivity?.();
+		},
+	},
+	{ name: "overview", description: "Open the full-page live status tab", async run(_args, host) { host.openStatus?.(); } },
 	{
 		name: "clear",
 		description: "Clear the terminal and start a new chat",

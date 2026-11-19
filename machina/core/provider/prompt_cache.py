@@ -83,18 +83,6 @@ _OPENAI_IMPLICIT = CacheProfile(
     notes="automatic prefix caching; cached input reported as a prompt_tokens subset",
 )
 
-_OPENCODE_SESSION_IMPLICIT = CacheProfile(
-    mode="implicit",
-    min_prefix_tokens=0,
-    max_breakpoints=0,
-    usage_fields=("cache_read_tokens", "cache_write_tokens"),
-    verified_at="2026-11-14",
-    notes=(
-        "OpenCode session tokens report cache read/write categories; "
-        "cache policy and hit behavior are owned by OpenCode"
-    ),
-)
-
 _DEEPSEEK_IMPLICIT = CacheProfile(
     mode="implicit",
     min_prefix_tokens=64,
@@ -133,8 +121,6 @@ def _direct_profile(name: str) -> CacheProfile:
         return _DEEPSEEK_IMPLICIT
     if name == "google":
         return _GOOGLE_IMPLICIT
-    if name == "opencode_session":
-        return _OPENCODE_SESSION_IMPLICIT
     return CACHE_NONE
 
 

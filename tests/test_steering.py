@@ -103,7 +103,7 @@ async def test_failed_persistence_retains_undelivered_steering(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_steering_before_dispatch_skips_announced_tool(monkeypatch):
+async def test_steering_during_tool_batch_preserves_the_current_action(monkeypatch):
     from machina.core import agent as module
     from machina.core.models import LLMResponse
     from machina.core.steering import steering_inbox
@@ -135,11 +135,14 @@ async def test_steering_before_dispatch_skips_announced_tool(monkeypatch):
         events = [event async for event in stream]
     finally:
         steering_inbox.reset(token)
-    execute.assert_not_awaited()
-    assert any(
-        "NOT executed" in event.tool_result for event in events if event.type == "tool_result"
-    )
-    assert len([event for event in events if event.type == "tool_result"]) == 1
+    # Steering changes the next plan; it does not cancel an action that is
+    # already in the current tool batch.
+    execute.assert_awaited_once()
+    results = [event for event in events if event.type == "tool_result"]
+    assert len(results) == 1
+    assert "NOT executed" not in results[0].tool_result
+    # The steering remains queued for the loop's next safe boundary.
+    assert [item.text for item in inbox.items] == ["change plan"]
 
 
 @pytest.mark.asyncio

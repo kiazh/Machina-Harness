@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~124,000 lines of Python backed by 6,487 passing tests on real PostgreSQL · 18 provider types · 74 agent definitions · 77 skill packages · 44 built-in tools · 151 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~124,000 lines of Python backed by 6,487 passing tests on real PostgreSQL · 18 provider types · 74 agent definitions · 77 skill packages · 45 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -115,7 +115,7 @@ flowchart TB
     subgraph EDGE["Edge protocol"]
         direction LR
         GW["Gateway<br/>JSON-RPC 2.0 over stdio"]
-        FEATURES["138 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
+        FEATURES["152 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
         REST["REST + event stream<br/>sessions, jobs<br/>approvals"]
     end
 
@@ -156,7 +156,7 @@ flowchart TB
 
     subgraph TOOLS["Tools and integrations"]
         direction LR
-        TOOLREG["Tool registry<br/>44 built-in tools"]
+        TOOLREG["Tool registry<br/>45 built-in tools"]
         WORKSPACE["Workspace + LSP<br/>files, completion<br/>diagnostics"]
         RAG["Documents + RAG<br/>ingest, embed<br/>search, rerank"]
         SKILLS["Skills<br/>77 packages<br/>catalog-first"]
@@ -361,8 +361,8 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 44 built-in tools; 40 top-level CLI commands (85 paths); 53 slash commands |
-| Protocol and API | 151 RPC methods (13 core + 138 feature); 33 REST routes; 24 protocol events |
+| Tools and commands | 45 built-in tools; 40 top-level CLI commands (85 paths); 53 slash commands |
+| Protocol and API | 166 RPC methods (14 core + 152 feature); 33 REST routes; 25 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 28 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
@@ -958,7 +958,7 @@ Routing is a control-plane decision made before the model call, not a prompt sug
 - **Bounded workers.** `worker_count=0` auto-sizes; values up to 64 are accepted and capped by `max_delegate_concurrency` (default 8). At most `max_worker_routes` (default 4) distinct worker routes are reused per plan to preserve cache and review coherence.
 - **Transports.** `worker_transport=native|proxy|mcp` selects in-process delegation, an OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
 - **Explicit parallel plans.** An explicit "in parallel" request in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) is planned once and JSON-validated for cycles, duplicate artifact ownership, and task count. A dependency-aware scheduler runs the first wave up to the worker limit. The supervisor route performs a bounded final synthesis, falling back to the deterministic summary if it fails. Workers paused for approval are reported as awaiting approval, never as completed.
-- **Truthful roles.** Text-only `opencode_session` routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat; `/routing mode` is the switch, and `/routing <prompt>` only explains a route.
+- **Truthful roles.** Route capability is reported explicitly: a model that cannot carry tool schemas is never used as a tool-capable worker or supervisor. `route_explain` and `model_inventory` expose the same decision inside chat; `/routing mode` is the switch, and `/routing <prompt>` only explains a route.
 
 The plan is only as good as the inventory. A provider that is configured but has no usable credential is reported as a warning, not silently treated as available. A model ID is a request, not a guarantee of account access or tool support.
 
@@ -1018,7 +1018,6 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `mistral` | `MISTRAL_API_KEY` | `mistral-large-4` |
 | `google` | `GOOGLE_API_KEY` | `gemini-4-argon` |
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
-| `opencode_session` | Local OpenCode background service; no API key | Text-only bridge for the account's available OpenCode models, including free ones; `machina opencode-proxy` exposes the same bridge as an OpenAI-compatible loopback URL |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
 | `kiro` | Kiro account via a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start`, `/auth kiro usage`; fallback `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; full alias catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog |
@@ -1039,8 +1038,8 @@ Machina can route work across every model you have actually connected rather tha
 - `cost_tier=low|balanced|high` shifts the ranking without changing the task classification. Route pins and fallbacks are explicit in the explanation.
 - `worker_transport=native|proxy|mcp` selects in-process delegation, the OpenAI-compatible route, or an installed external harness (OpenCode, Codex, Hermes) through Machina's MCP registration.
 - Explicit "in parallel" requests in `multi_model` mode (or `single_model` with `single_model_auto_parallel=true`) are planned and executed by the harness, not left to whether the model happens to emit N `delegate` calls. Plans are JSON-validated, dependency-aware, and reject duplicate artifact ownership or cycles. The selected supervisor route performs a bounded final synthesis of the worker reports, falling back to the deterministic summary if it fails.
-- Text-only OpenCode session routes may plan but never replace tool-capable workers or supervisors. `route_explain` and `model_inventory` expose the same decision inside chat.
-- `machina usage` reports prompt-cache support separately from counters. Kiro reports `unsupported` instead of a misleading zero-read miss; the OpenCode session bridge reports its real cache read/write categories.
+- Route capability is reported explicitly: a model that cannot carry tool schemas is never used as a tool-capable worker or supervisor. `route_explain` and `model_inventory` expose the same decision inside chat.
+- `machina usage` reports prompt-cache support separately from counters. Kiro reports `unsupported` instead of a misleading zero-read miss.
 - For web artifacts, `web_verify` starts a loopback static server and runs a real headless Chrome/Edge check (DOM, clicks, storage, console/page errors, viewport). Install with `pip install 'Machina[browser]'`; an existing Chrome or Edge channel is used before any download.
 
 The full modes, transport, free-OpenCode, and verification contract is in [docs/ROUTING.md](docs/ROUTING.md).
@@ -1091,7 +1090,7 @@ The mental model is an **adapter over shared semantics**, not an implementation 
 The model cannot use a capability it does not know exists, and it should not guess at one that does not. Every turn carries a generated capability index built from live registries:
 
 - the six surfaces (terminal UI, CLI, HTTP, MCP server, MCP client, external harness interop);
-- the mechanisms (sessions, steering, terminal, context, memory, permissions, routing, orchestration, repair, jobs, skills, RAG, workspace, web, artifacts, MCP, interop, media, observability, accounting);
+- the mechanisms (sessions, steering, questions, terminal, context, memory, permissions, routing, orchestration, repair, jobs, skills, RAG, workspace, web, artifacts, MCP, interop, media, observability, accounting);
 - every built-in tool, grouped by function;
 - the 18 provider IDs;
 - the vocabularies for modes, terminal backends, orchestration, route roles, transports, cost tiers, job schedules and states, approval states, session states, delegation states, memory categories, usage bases, and reducer formats;
@@ -1517,7 +1516,7 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | Group | Commands |
 |---|---|
 | **Work** | `chat`, `repl`, `status`, `sessions`, `sessions-search`, `export`, `fork`, `delete`, `context`, `compress` |
-| **Routing and providers** | `route`, `routes`, `providers`, `auth`, `opencode-proxy` |
+| **Routing and providers** | `route`, `routes`, `providers`, `auth` |
 | **Memory and identity** | `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `memory-approve-all`, `memory-reject-all`, `memory-stats`, `user-profile`, `user-profile-update`, `user-profile-list`, `growth` |
 | **Skills and learning** | `skills`, `learn`, `curator`, `hub` |
 | **Operations** | `setup`, `init`, `doctor`, `serve`, `host`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
@@ -1551,7 +1550,6 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | `memory-search` | Search memories by relevance. |
 | `memory-stats` | Show memory approval statistics. |
 | `mode` | Show or set the execution mode. |
-| `opencode-proxy` | Run the text-only OpenAI-compatible OpenCode session proxy. |
 | `repl` | Open the interactive UI (same as running `machina` with no arguments). |
 | `route` | Explain the connected-model route for a prompt without calling a model. |
 | `routes` | List connected models and their role-fit scores. |
@@ -1637,7 +1635,6 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | `memory-search` | Search memories by relevance. |
 | `memory-stats` | Show memory approval statistics. |
 | `mode` | Show or set the execution mode. |
-| `opencode-proxy` | Run the text-only OpenAI-compatible OpenCode session proxy. |
 | `optimization prefix-plan` | Estimate paid prefix-warming economics without making a provider call. |
 | `optimization status` | Show configured modes and, optionally, shadow decision counts. |
 | `providers add` | Register a provider, store its key, and pull its model catalog. |
@@ -1955,11 +1952,11 @@ These appendices are reference material. Catalogs and counts were checked agains
 
 | Appendix | Contents |
 |---|---|
-| [A](#appendix-a-rpc-method-catalog) | 151 RPC methods |
-| [B](#appendix-b-tool-catalog) | 44 tools and their effects |
+| [A](#appendix-a-rpc-method-catalog) | 166 RPC methods |
+| [B](#appendix-b-tool-catalog) | 45 tools and their effects |
 | [C](#appendix-c-database-catalog) | 28 tables and two ER diagrams |
 | [D](#appendix-d-configuration-reference) | 130 configuration keys |
-| [E](#appendix-e-protocol-events) | 24 protocol events |
+| [E](#appendix-e-protocol-events) | 25 protocol events |
 | [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
 | [G](#appendix-g-failure-semantics) | Failure and degradation matrix |
 | [H](#appendix-h-verification-map) | Test coverage by area |
@@ -1971,7 +1968,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 
 ### Appendix A: RPC method catalog
 
-The gateway exposes **151** JSON-RPC methods: **13 core** methods handled directly by `gateway/server.py` and **138 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
+The gateway exposes **166** JSON-RPC methods: **14 core** methods handled directly by `gateway/server.py` and **152 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
 
 **Core methods**
 
@@ -1985,8 +1982,9 @@ The gateway exposes **151** JSON-RPC methods: **13 core** methods handled direct
 | `usage.get` | usage and budget summary |
 | `prompt.submit` | start an owned turn |
 | `prompt.cancel` | cancel the running turn |
-| `prompt.steer` | queue steering for the running turn |
-| `prompt.steering` | read pending and delivered steering |
+| `prompt.steer` | queue guidance for the running turn |
+| `prompt.steering` | read pending and delivered guidance |
+| `question.answer` | answer a structured question waiting in a running turn |
 | `shell.jobs` | list background shell jobs |
 | `config.set` | set a non-secret setting (optionally persist it) |
 | `shutdown` | stop the gateway |
@@ -2023,13 +2021,14 @@ The gateway exposes **151** JSON-RPC methods: **13 core** methods handled direct
 
 ### Appendix B: Tool catalog
 
-The registry exposes **44** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
+The registry exposes **45** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
 
 | Tool | Effects | What it does |
 |---|---|---|
 | `artifact_describe` | `context.read` | Show metadata for a retained artifact (kind, size, status, completeness, source/revision binding, retention) without reading its content. |
 | `artifact_read` | `context.read` | Read a retained tool-result artifact by its handle (character paging). |
 | `artifact_search` | `context.read` | Search retained artifacts (one handle, or the session's recent artifacts) for a case-insensitive substring. |
+| `ask_user` | — | Ask the user a short multiple-choice question; the turn pauses for an inline answer. |
 | `browser_verify` | — | Run a real headless-browser check against a local web app. |
 | `code_intelligence` | `fs.read` | Read-only workspace code intelligence: diagnostics, definition, references, symbols, or hover via the editor's language server. |
 | `delegate` | `delegate` | Hand a self-contained task to another agent and get its result. |
@@ -2568,7 +2567,7 @@ erDiagram
 
 ### Appendix E: Protocol events
 
-The protocol declares **24** events in `machina/protocol/events.json`; `machina/protocol` generates the TypeScript types consumed by the UI. Payload fields are exact keys from the contract; `?` marks optional fields.
+The protocol declares **25** events in `machina/protocol/events.json`; `machina/protocol` generates the TypeScript types consumed by the UI. Payload fields are exact keys from the contract; `?` marks optional fields.
 
 | Event | Payload |
 |---|---|
@@ -2582,6 +2581,7 @@ The protocol declares **24** events in `machina/protocol/events.json`; `machina/
 | `growth.status` | `stage`, `detail?` |
 | `agent.child` | `childSessionId`, `phase`, `value` |
 | `steering.update` | `items`, `delivered` |
+| `question.asked` | `requestId`, `question`, `options`, `allowOther` |
 | `shell.job` | `job` |
 | `message.complete` | `text`, `tokens`, `iterations`, `toolCalls`, `cancelled`, `needsApproval?` |
 | `error` | `message` |
@@ -2733,10 +2733,10 @@ The local suite (`tests/`, 455 collected at this commit) covers contracts and fa
 | Context and tokens | `test_token_budget.py`, `test_prompt_token_pressure.py`, `test_archive_ordering.py`, `test_context_window_catalog.py` | Budgets, compaction ordering, window resolution |
 | Memory | `test_memory_digest.py`, `test_experience_brief.py` | Bounded multi-fact digest and experience rendering |
 | Permissions | `test_permission_ask_room.py`, DevTools approval suites | Ask-mode classification, canonical decisions, resume |
-| Turn control | `test_steering.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, background jobs, empty-final recovery |
+| Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
-| Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py`, `test_opencode_session.py` | Catalog normalization, subscription adapters, bridge behavior |
+| Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py` | Catalog normalization and subscription adapters |
 | MCP and interop | `test_interop_fast.py`, `test_meta_harness.py`, `test_harness_inventory.py`, `test_researcher_mcp_web.py` | Registration, routing, bounded external delegation |
 | Web and browser | `test_web_extract_validation.py`, `test_web_search_fallback.py`, `test_browser_verify.py` | Untrusted extraction, fallback, real browser checks |
 | Skills | `test_skill_catalog.py`, `test_skill_install_durability.py` | Catalog ranking, durable installs, revisions |
@@ -2926,7 +2926,7 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 
 | Command | Usage | Description |
 |---|---|---|
-| `/activity` | `/activity` | View queued steering, background commands, and agents |
+| `/activity` | `/activity` | Open the live status tab; `/activity list` views queued steering, background commands, and agents |
 | `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K) |
 | `/approvals` | `/approvals [list\|allow <id>\|deny <id>\|revoke]` | List pending approvals, or allow/deny one |
 | `/attach` | `/attach` | Attach the editor selection to the next message |

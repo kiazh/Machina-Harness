@@ -483,8 +483,6 @@ def _is_free(model_id: str, input_cost: float | None, output_cost: float | None)
 
 
 def _transport_for(profile: ModelProfile) -> str:
-    if profile.provider == "opencode_session":
-        return "native"
     if profile.provider == "opencode" and profile.free:
         return "mcp"
     if profile.provider == "opencode":
@@ -493,8 +491,6 @@ def _transport_for(profile: ModelProfile) -> str:
 
 
 def _route_reason(profile: ModelProfile) -> str:
-    if profile.provider == "opencode_session":
-        return "OpenCode local session bridge (text-only)"
     if profile.provider == "opencode" and profile.free:
         return "free OpenCode model: requires OpenCode session/MCP transport"
     if profile.provider in _QUOTA_SENSITIVE:
@@ -510,9 +506,6 @@ def profile_from_row(provider: str, row: dict[str, Any]) -> ModelProfile:
     context_window = int(row.get("contextWindow") or row.get("context") or 0) or 128_000
     max_output = int(row.get("maxOutputTokens") or row.get("output") or 0) or 32_000
     tools = bool(row.get("tools", True))
-    if provider == "opencode_session":
-        # The session bridge cannot carry arbitrary Machina tool schemas.
-        tools = False
     reasoning = bool(row.get("reasoning", bool(row.get("efforts"))))
     vision = bool(row.get("vision")) or any(
         token in f"{description} {model}".lower()
@@ -602,14 +595,6 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
             return False, "gateway not already connected"
         except Exception as exc:
             return False, f"gateway unavailable: {type(exc).__name__}"
-    if name == "opencode_session":
-        try:
-            from machina.core.provider.opencode_session import service_password
-
-            service_password()
-            return True, "local OpenCode service credentials available"
-        except Exception as exc:
-            return False, f"OpenCode service unavailable: {type(exc).__name__}"
     if name == "custom":
         base = _config_value(config, "custom_base_url")
         return bool(base), "base URL configured" if base else "no base URL"
@@ -635,44 +620,6 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
 
 
 def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
-    if name == "opencode_session":
-        try:
-            from machina.core.provider.opencode_session import available_models
-
-            available = available_models()
-        except Exception:
-            available = ()
-        catalog_rows = {
-            str(row.get("id")): row for row in provider_models("opencode") if row.get("id")
-        }
-        result: list[dict[str, Any]] = []
-        for model_id in available:
-            provider_id, _, bare_id = model_id.partition("/")
-            row = dict(catalog_rows.get(bare_id) or catalog_rows.get(model_id) or {})
-            row.setdefault("id", model_id)
-            row.setdefault("displayName", model_id)
-            row.setdefault("description", f"OpenCode available model ({provider_id})")
-            row["tools"] = False
-            row.setdefault("reasoning", True)
-            row.setdefault("source", "opencode-models")
-            result.append(row)
-        if result:
-            return result
-        try:
-            configured = str(config.get("model") or "").strip()
-        except Exception:
-            configured = ""
-        if configured:
-            return [
-                {
-                    "id": configured,
-                    "displayName": configured,
-                    "description": "Configured OpenCode session model",
-                    "tools": False,
-                    "source": "configured",
-                }
-            ]
-        return []
     rows = provider_models(name)
     if rows:
         return rows

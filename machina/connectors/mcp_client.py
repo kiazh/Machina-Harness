@@ -625,6 +625,20 @@ class MCPConnection:
         }
         if oauth_auth is not None:
             client_kwargs["auth"] = oauth_auth
+        if self.config.header_refs:
+            headers: dict[str, str] = {}
+            for header, ref in self.config.header_refs.items():
+                value = str(secrets.get(ref, "") or "").strip()
+                if not value:
+                    raise AuthRequired(f"secret '{ref}' was not provided for HTTP auth")
+                if "\r" in value or "\n" in value:
+                    raise AuthRequired(f"secret '{ref}' contains invalid header characters")
+                if header.lower() == "authorization" and not re.match(
+                    r"(?i)^(?:bearer|token)\s+", value
+                ):
+                    value = f"Bearer {value}"
+                headers[header] = value
+            client_kwargs["headers"] = headers
         client = await self._stack.enter_async_context(httpx2.AsyncClient(**client_kwargs))
         try:
             streams = await self._stack.enter_async_context(

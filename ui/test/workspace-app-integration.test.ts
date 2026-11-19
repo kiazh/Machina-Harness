@@ -1073,7 +1073,9 @@ test("Esc with an open completion popup dismisses it without cancelling the runn
 	assert.equal(client.requests.filter((entry) => entry.method === "prompt.cancel").length, 0, "turn not cancelled");
 
 	tui.press("\x1b");
-	assert.equal(client.requests.filter((entry) => entry.method === "prompt.cancel").length, 1, "second Esc stops the turn");
+	assert.equal(client.requests.filter((entry) => entry.method === "prompt.cancel").length, 0, "second Esc arms the abort");
+	tui.press("\x1b");
+	assert.equal(client.requests.filter((entry) => entry.method === "prompt.cancel").length, 1, "third Esc stops the turn");
 	await app.exit();
 });
 

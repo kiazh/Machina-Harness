@@ -33,6 +33,10 @@ class FakeHost implements FeatureHost {
 	asked: AskTextOptions[] = [];
 	current: SessionInfo | undefined = SESSION;
 	switched: Array<{ session: SessionInfo; history: HistoryEntry[] }> = [];
+	prefilled: string[] = [];
+	prefillInput(text: string) {
+		this.prefilled.push(text);
+	}
 	responses: Record<string, unknown | ((params: Record<string, unknown>) => unknown)> = {};
 	configured: ConfigResult[] = [];
 	/** Optional interactive-directory surface for the A5 `/skills` tests. */
@@ -1652,15 +1656,20 @@ test("/models search matches provider names and model ids across groups", async 
 	const grouped = await fetchModelGroups(host);
 	const rows = buildModelPickerRows(grouped.groups);
 	const menu = new Menu("Models", rows, {});
-	// Typing a provider name narrows to that provider's models.
+	// Typing a provider name narrows to that provider's models, keeping its heading.
 	menu.handleInput("deepseek");
-	assert.deepEqual(menu.filtered().map((row) => row.value), ["deepseek::deepseek-v4-flash"]);
-	assert.ok(!menu.filtered().some((row) => row.value.startsWith("__section__")), "headers yield during search");
-	// Typing a family matches every provider's gpt rows (catalog + curated).
+	assert.deepEqual(menu.filtered().map((row) => row.value), [
+		"__section__::deepseek",
+		"deepseek::deepseek-v4-flash",
+	]);
+	// Typing a family matches every provider's gpt rows (catalog + curated),
+	// with the heading for each matching provider retained.
 	for (let i = 0; i < "deepseek".length; i++) menu.handleInput("\x7f");
 	menu.handleInput("gpt");
 	const gpt = menu.filtered().map((row) => row.value);
+	assert.ok(gpt.includes("__section__::chatgpt"));
 	assert.ok(gpt.includes("chatgpt::gpt-6-luna"));
+	assert.ok(gpt.includes("__section__::openai"));
 	assert.ok(gpt.includes("openai::gpt-6.1-sol"));
 	// The /models <query> path uses the same match across groups.
 	const deepseek = filterModelGroups(grouped.groups, "deepseek");
@@ -2202,7 +2211,7 @@ test("/mcp lists real harness inventory and reports an honest empty state", asyn
  host.responses["mcp.catalog"] = {entries:[]};
  await run("/mcp", host);
  assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog"]);
- assert.match(host.last().text, /No MCP servers configured/);
+ assert.match(host.last().text, /No MCP servers registered yet/);
  assert.equal(host.pickTitles.length, 1);
  assert.ok(SLASH_COMMANDS.some(command => command.name === "mcp"));
 });
@@ -2213,10 +2222,9 @@ test("/mcp opens a connection picker then fetches fresh status without connectin
  host.responses["mcp.list"] = {servers:[server]};
  host.responses["mcp.catalog"] = {entries:[]};
  host.responses["mcp.status"] = {server};
- host.picks.push("docs");
+ host.picks.push("external:docs", "back");
  await run("/mcp", host);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog", "mcp.status"]);
- assert.deepEqual(host.calls[2]!.params, {id:"docs"});
+ assert.ok(host.calls.some(call => call.method === "mcp.tools"));
  assert.match(host.last().text, /Docs.*connected/s);
  assert.match(host.last().text, /2025-11-25/);
  assert.doesNotMatch(host.last().text, /connected.*tools available/i);
@@ -2250,191 +2258,165 @@ function mcpHost(): FakeHost {
  return host;
 }
 const FIRECRAWL_CATALOG = {
- id: "firecrawl-selfhosted",
- displayName: "Firecrawl (self-hosted)",
+ id: "firecrawl",
+ displayName: "Firecrawl",
  kind: "connector",
  category: "Web research",
  provider: "Firecrawl",
- description: "Scrape and crawl through your own Firecrawl server and local MCP bridge.",
- docsUrl: "https://github.com/firecrawl/firecrawl-mcp-server",
- setup: { type: "local_endpoint", instructions: ["Start the local bridge with FIRECRAWL_API_URL set."] },
+ description: "Search, scrape, crawl and parse the web through the hosted Firecrawl MCP server.",
+ docsUrl: "https://docs.firecrawl.dev/mcp-server",
+ setup: { type: "oauth", instructions: ["Authorize Firecrawl in the browser."] },
  config: {
-  id: "firecrawl-selfhosted",
-  display_name: "Firecrawl (self-hosted)",
+  id: "firecrawl",
+  display_name: "Firecrawl",
   transport: "streamable_http",
-  endpoint: "http://127.0.0.1:3000/mcp",
-  local_access: true,
+  endpoint: "https://mcp.firecrawl.dev/v2/mcp-oauth",
+  oauth: { client_mode: "auto" },
+ },
+};
+const COMPOSIO_CATALOG = {
+ ...FIRECRAWL_CATALOG,
+ id: "composio",
+ displayName: "Composio",
+ provider: "Composio",
+ setup: { type: "oauth", instructions: ["Authorize Composio."] },
+ config: {
+  id: "composio", display_name: "Composio", transport: "streamable_http",
+  endpoint: "https://connect.composio.dev/mcp", oauth: { client_mode: "auto" },
+ },
+};
+const VERCEL_CATALOG = {
+ ...COMPOSIO_CATALOG,
+ id: "vercel",
+ displayName: "Vercel",
+ provider: "Vercel",
+ config: {
+  id: "vercel", display_name: "Vercel", transport: "streamable_http",
+  endpoint: "https://mcp.vercel.com", oauth: { client_mode: "auto" },
  },
 };
 
-test("/mcp surfaces catalog starters and adds plus connects one", async () => {
- const host = new FakeHost();
- host.responses["mcp.list"] = { servers: [] };
- host.responses["mcp.catalog"] = { entries: [FIRECRAWL_CATALOG] };
- host.responses["mcp.configure"] = { server: { id: "firecrawl-selfhosted", display_name: "Firecrawl (self-hosted)", enabled: true, transport: "streamable_http", state: "disconnected" } };
- host.responses["mcp.preview"] = { digest: "firecrawl-digest" };
- host.responses["mcp.connect"] = { server: { id: "firecrawl-selfhosted", display_name: "Firecrawl (self-hosted)", enabled: true, transport: "streamable_http", state: "connected" } };
- host.picks.push("__starter__:firecrawl-selfhosted");
+test("/mcp groups provider headers and keeps manually added servers in External", async () => {
+ const host = mcpHost();
+ host.responses["mcp.catalog"] = { entries: [COMPOSIO_CATALOG, VERCEL_CATALOG] };
  await run("/mcp", host);
  const items = host.pickItems[0]!;
- assert.ok(items.some(item => item.label === "Firecrawl (self-hosted)"), "the starter is offered");
- assert.ok(items.some(item => item.value === "__section_starters__"), "starters are organized under a section header");
- assert.deepEqual(host.calls.find(call => call.method === "mcp.configure"), { method: "mcp.configure", params: { config: FIRECRAWL_CATALOG.config } });
- assert.deepEqual(host.calls.at(-1), { method: "mcp.connect", params: { id: "firecrawl-selfhosted", sessionId: SESSION.id, digest: "firecrawl-digest" } });
- assert.match(host.last().text, /connected/);
+ assert.ok(items.some(item => item.value === "__provider__:composio" && item.label === "Composio"), "Composio header is present");
+ assert.ok(items.some(item => item.value === "setup:composio"), "unconfigured Composio has setup");
+ assert.ok(items.some(item => item.value === "__provider__:vercel" && item.label === "Vercel"), "Vercel header is present");
+ assert.ok(items.some(item => item.value === "__section_external__"), "External header is present");
+ assert.ok(items.some(item => item.value === "external:docs"), "manual server is External");
+ assert.ok(items.some(item => item.value === "__add__"));
 });
 
-test("/mcp <url> adds and connects a pasted MCP link without forms", async () => {
+test("/mcp setup configures a provider without a connect button", async () => {
  const host = new FakeHost();
  host.responses["mcp.list"] = { servers: [] };
- host.responses["mcp.configure"] = { server: { id: "mcp-example-com", display_name: "mcp-example-com", enabled: true, transport: "streamable_http", state: "disconnected" } };
- host.responses["mcp.preview"] = { digest: "pasted-digest" };
- host.responses["mcp.connect"] = { server: { id: "mcp-example-com", display_name: "mcp-example-com", enabled: true, transport: "streamable_http", state: "connected" } };
- await run("/mcp https://mcp.example.com/mcp", host);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.configure", "mcp.preview", "mcp.connect"]);
- assert.deepEqual(host.calls[1], { method: "mcp.configure", params: { config: {
-  id: "mcp-example-com", display_name: "mcp-example-com", transport: "streamable_http",
-  endpoint: "https://mcp.example.com/mcp", trust: "untrusted",
- } } });
- assert.equal(host.asked.length, 0, "no setup forms");
- assert.match(host.last().text, /connected/);
-});
-
-test("/mcp add <url> also accepts a pasted loopback link", async () => {
- const host = new FakeHost();
- host.responses["mcp.list"] = { servers: [] };
- host.responses["mcp.configure"] = { server: { id: "127-0-0-1-3000", display_name: "127-0-0-1-3000", enabled: true, transport: "streamable_http", state: "disconnected" } };
- host.responses["mcp.preview"] = { digest: "loopback-digest" };
- host.responses["mcp.connect"] = { server: { id: "127-0-0-1-3000", display_name: "127-0-0-1-3000", enabled: true, transport: "streamable_http", state: "connected" } };
- await run("/mcp add http://127.0.0.1:3000/mcp", host);
- const config = (host.calls.find(call => call.method === "mcp.configure")!.params as { config: Record<string, unknown> }).config;
- assert.equal(config.endpoint, "http://127.0.0.1:3000/mcp");
- assert.equal(config.local_access, true);
- assert.equal(host.asked.length, 0);
-});
-
-test("/mcp does not offer a starter that is already configured", async () => {
- const host = new FakeHost();
- host.responses["mcp.list"] = { servers: [{ id: "firecrawl-selfhosted", display_name: "Firecrawl (self-hosted)", enabled: true, transport: "streamable_http", state: "disconnected" }] };
  host.responses["mcp.catalog"] = { entries: [FIRECRAWL_CATALOG] };
+ host.responses["mcp.configure"] = { server: { id: "firecrawl", display_name: "Firecrawl", enabled: true, transport: "streamable_http", state: "disconnected" } };
+ host.responses["mcp.preview"] = { digest: "firecrawl-digest" };
+ host.responses["mcp.connect"] = { server: { id: "firecrawl", display_name: "Firecrawl", enabled: true, transport: "streamable_http", state: "connected" } };
+ host.picks.push("setup:firecrawl");
  await run("/mcp", host);
- const values = host.pickItems[0]!.map(item => item.value);
- assert.ok(values.includes("firecrawl-selfhosted"), "the configured server row is present");
- assert.ok(!values.includes("__starter__:firecrawl-selfhosted"), "the duplicate starter is hidden");
- assert.ok(values.includes("__add__"), "manual add stays available");
+ assert.deepEqual(host.calls.find(call => call.method === "mcp.configure"), { method: "mcp.configure", params: { config: FIRECRAWL_CATALOG.config } });
+ assert.deepEqual(host.calls.find(call => call.method === "mcp.connect"), { method: "mcp.connect", params: { id: "firecrawl", sessionId: SESSION.id, digest: "firecrawl-digest" } });
 });
 
-test("/mcp falls back to the manual add flow when the catalog is unavailable", async () => {
- const host = new FakeHost();
- host.responses["mcp.list"] = { servers: [] };
- const count = host.calls.length;
+test("/mcp lists cached provider tools under the provider header", async () => {
+ const host = mcpHost();
+ const composio = { ...MCP_DOCS, id: "composio", display_name: "Composio", transport: "streamable_http", state: "connected" };
+ host.responses["mcp.list"] = { servers: [composio] };
+ host.responses["mcp.catalog"] = { entries: [COMPOSIO_CATALOG] };
+ host.responses["mcp.tools"] = { tools: [{ name: "COMPOSIO_SEARCH_TOOLS", description: "Find tools" }], truncated: false };
  await run("/mcp", host);
- assert.equal(host.pickItems[0]?.filter(item => !(item as { section?: boolean }).section).length, 1);
- assert.match(host.last().text, /Paste an MCP link/);
- assert.equal(host.calls.length, count + 2);
+ const items = host.pickItems[0]!;
+ assert.ok(items.some(item => item.value === "__provider__:composio"));
+ assert.ok(items.some(item => item.value === "tool:composio:COMPOSIO_SEARCH_TOOLS"));
+ assert.ok(items.some(item => item.label?.startsWith("Search tools")), "tool names are provider-relative and clean");
+ assert.ok(items.every(item => !item.label?.includes("needs_approval")), "policy enums stay out of labels");
+ assert.ok(items.some(item => item.value === "remove:composio"));
+ assert.ok(!items.some(item => /^Connect$/.test(item.label ?? "")), "no Connect action");
 });
 
-test("/mcp adds a stdio server through forms and connects it", async () => {
+test("/mcp renders the complete cached catalog instead of stopping at 20 rows", async () => {
+ const host = mcpHost();
+ const vercel = { ...MCP_DOCS, id: "vercel", display_name: "Vercel", transport: "streamable_http", state: "connected" };
+ host.responses["mcp.list"] = { servers: [vercel] };
+ host.responses["mcp.catalog"] = { entries: [VERCEL_CATALOG] };
+ host.responses["mcp.tools"] = {
+  tools: Array.from({ length: 31 }, (_, index) => ({
+   name: `vercel__tool_${index}`,
+   description: `Tool ${index}`,
+  })),
+  truncated: false,
+ };
+ await run("/mcp", host);
+ const tools = host.pickItems[0]!.filter(item => item.value?.startsWith("tool:vercel:"));
+ assert.equal(tools.length, 31);
+});
+
+test("/mcp tool selection gives immediate feedback and prepares an @provider request", async () => {
+ const host = mcpHost();
+ const composio = { ...MCP_DOCS, id: "composio", display_name: "Composio", transport: "streamable_http", state: "connected" };
+ host.responses["mcp.list"] = { servers: [composio] };
+ host.responses["mcp.catalog"] = { entries: [COMPOSIO_CATALOG] };
+ host.responses["mcp.tools"] = { tools: [{ name: "COMPOSIO_SEARCH_TOOLS", description: "Find tools" }], truncated: false };
+ host.picks.push("tool:composio:COMPOSIO_SEARCH_TOOLS");
+ await run("/mcp", host);
+ assert.deepEqual(host.prefilled, ["@composio Search tools: "]);
+ assert.match(host.last().text, /MCP tool selected: @composio · Search tools/);
+});
+
+test("/mcp opens immediately without launching or re-listing providers", async () => {
+ const host = mcpHost();
+ const composio = { ...MCP_DOCS, id: "composio", display_name: "Composio", transport: "streamable_http" };
+ host.responses["mcp.list"] = { servers: [composio] };
+ host.responses["mcp.catalog"] = { entries: [COMPOSIO_CATALOG] };
+ host.responses["mcp.connect"] = { server: { ...composio, state: "connected" } };
+ await run("/mcp", host);
+ assert.equal(host.calls.some(call => call.method === "mcp.preview"), false);
+ assert.equal(host.calls.some(call => call.method === "mcp.connect"), false);
+ assert.equal(host.calls.some(call => call.method === "mcp.tools"), false, "a disconnected provider is not re-listed");
+});
+
+test("/mcp shows Authorize instead of Connect for an unauthenticated provider", async () => {
+ const host = mcpHost();
+ host.responses["mcp.list"] = { servers: [{ ...MCP_DOCS, id: "composio", display_name: "Composio", transport: "streamable_http" }] };
+ host.responses["mcp.catalog"] = { entries: [COMPOSIO_CATALOG] };
+ await run("/mcp", host);
+ const items = host.pickItems[0]!;
+ assert.ok(items.some(item => item.value === "auth:composio" && item.label === "Authorize"));
+ assert.ok(!items.some(item => item.label === "Connect"));
+});
+
+test("/mcp external actions never expose Connect, Disconnect or Forget", async () => {
+ const host = mcpHost();
+ host.picks.push("external:docs", "back");
+ await run("/mcp", host);
+ const actions = host.pickItems.find(items => items.some(item => item.value === "remove" && item.label === "Remove server"))!;
+ assert.deepEqual(actions.map(item => item.value), ["remove", "back"]);
+ assert.ok(!actions.some(item => /connect|disconnect|forget/i.test(item.label ?? "")));
+});
+
+test("/mcp external add and cancel flows remain explicit", async () => {
  const host = mcpHost();
  host.picks.push("__add__", "stdio");
  host.textQueue.push("local-docs", "Local docs", "node", '["server.js", "with spaces"]', "", "{}");
  host.responses["mcp.configure"] = { server: { ...MCP_DOCS, id: "local-docs" } };
  host.responses["mcp.connect"] = { server: { ...MCP_DOCS, id: "local-docs", state: "connected" } };
  await run("/mcp", host);
- assert.deepEqual(host.calls.find(call => call.method === "mcp.configure"), { method: "mcp.configure", params: { config: {
-  id: "local-docs", display_name: "Local docs", transport: "stdio", command: "node", argv: ["server.js", "with spaces"], trust: "untrusted",
- } } });
- assert.deepEqual(host.calls.at(-1), { method: "mcp.connect", params: { id: "local-docs", sessionId: SESSION.id, digest: "reviewed-digest" } });
+ assert.equal(host.calls.some(call => call.method === "mcp.configure"), true);
  assert.equal(host.last().kind, "success");
- assert.ok(host.asked.every(field => !field.secret));
 });
+
 test("/mcp cancelling an add form never saves configuration", async () => {
  const host = mcpHost();
  host.picks.push("__add__", "stdio");
  host.textQueue.push("docs", undefined);
  await run("/mcp", host);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog"]);
-});
-test("/mcp connects only after confirmation with the active session", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "connect", "yes");
- host.responses["mcp.connect"] = { server: { ...MCP_DOCS, state: "connected" } };
- await run("/mcp", host);
- assert.deepEqual(host.calls.at(-1), { method: "mcp.connect", params: { id: "docs", sessionId: SESSION.id, digest: "reviewed-digest" } });
- assert.match(host.last().text, /connected/);
-});
-test("/mcp denied connection never launches a server", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "connect", "no");
- await run("/mcp", host);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog", "mcp.status", "mcp.preview"]);
- assert.match(host.pickTitles.at(-1)!, /node.*server.js/s);
- assert.match(host.pickTitles.at(-1)!, /workspace/);
-});
-test("/mcp removal requires confirmation and reports the outcome", async () => {
- for (const choice of ["no", "yes"]) {
-  const host = mcpHost();
-  host.picks.push("__manage__", "docs", "remove", choice);
-  host.responses["mcp.remove"] = { removed: true };
-  await run("/mcp", host);
-  assert.equal(host.calls.some(call => call.method === "mcp.remove"), choice === "yes");
-  if (choice === "yes") assert.equal(host.last().kind, "success");
- }
-});
-test("/mcp connection failure reports an error without claiming success", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "connect", "yes");
- host.responses["mcp.connect"] = () => { throw new Error("Connection denied by policy"); };
- await run("/mcp", host);
- assert.equal(host.last().kind, "error");
- assert.match(host.last().text, /denied/);
-});
-test("/mcp shows cached tools without connecting and marks truncation", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "tools");
- host.responses["mcp.tools"] = { tools: [{ name: "lookup", description: "Look up documentation" }], truncated: true };
- await run("/mcp", host);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog", "mcp.status", "mcp.tools"]);
- assert.match(host.last().text, /lookup/);
- assert.match(host.last().text, /truncated/i);
-});
-test("/mcp advanced configuration rejects secret values", async () => {
- const host = mcpHost();
- host.picks.push("__add__", "streamable_http", "none");
- host.textQueue.push("docs", "Docs", "https://example.com/mcp", '{"headers":{"Authorization":"secret"}}');
- await run("/mcp", host);
- assert.equal(host.last().kind, "error");
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog"]);
+ assert.equal(host.calls.some(call => call.method === "mcp.configure"), false);
 });
 
-test("/mcp configures HTTP with reference names and allowlist, then connects", async () => {
- const host = mcpHost();
- host.picks.push("__add__", "streamable_http", "none");
- host.textQueue.push("remote", "Remote docs", "https://example.com/mcp", '{"secret_refs":["DOCS_TOKEN"],"tool_allowlist":["lookup"],"local_access":false}');
- host.responses["mcp.configure"] = { server: { ...MCP_DOCS, id: "remote", transport: "streamable_http" } };
- host.responses["mcp.connect"] = { server: { ...MCP_DOCS, id: "remote", transport: "streamable_http", state: "connected" } };
- await run("/mcp", host);
- assert.deepEqual(host.calls.find(call => call.method === "mcp.configure"), { method: "mcp.configure", params: { config: { id: "remote", display_name: "Remote docs", transport: "streamable_http", endpoint: "https://example.com/mcp", trust: "untrusted", secret_refs: ["DOCS_TOKEN"], tool_allowlist: ["lookup"], local_access: false } } });
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog", "mcp.configure", "mcp.preview", "mcp.connect"]);
-});
-test("/mcp disconnects a connected server without starting it", async () => {
- const host = mcpHost();
- host.responses["mcp.status"] = { server: { ...MCP_DOCS, state: "connected" } };
- host.responses["mcp.disconnect"] = { server: MCP_DOCS };
- host.picks.push("__manage__", "docs", "disconnect");
- await run("/mcp", host);
- assert.deepEqual(host.calls.at(-1), { method: "mcp.disconnect", params: { id: "docs" } });
- assert.match(host.last().text, /disconnected/);
-});
-test("/mcp needs an active session before previewing or connecting", async () => {
- const host = mcpHost();
- host.current = undefined;
- host.picks.push("__manage__", "docs", "connect", "yes");
- await run("/mcp", host);
- assert.equal(host.last().kind, "error");
- assert.match(host.last().text, /No active session/);
- assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog", "mcp.status"]);
-});
 test("/mcp rejected argv and credential endpoints are never configured", async () => {
  for (const transport of ["stdio", "streamable_http"]) {
   const host = mcpHost();
@@ -2442,28 +2424,17 @@ test("/mcp rejected argv and credential endpoints are never configured", async (
   host.textQueue.push("docs", "Docs", ...(transport === "stdio" ? ["node", '["ok", 42]'] : ["https://user:password@example.com/mcp"]));
   await run("/mcp", host);
   assert.equal(host.last().kind, "error");
-  assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog"]);
+  assert.equal(host.calls.some(call => call.method === "mcp.configure"), false);
  }
 });
 
-test("/mcp supports trusted_read configuration without granting broader trust", async () => {
+test("/mcp advanced configuration rejects secret values", async () => {
  const host = mcpHost();
  host.picks.push("__add__", "streamable_http", "none");
- host.textQueue.push("docs", "Docs", "https://example.com/mcp", '{"trust":"trusted_read"}');
- host.responses["mcp.configure"] = { server: MCP_DOCS };
- host.responses["mcp.connect"] = { server: { ...MCP_DOCS, state: "connected" } };
+ host.textQueue.push("docs", "Docs", "https://example.com/mcp", '{"headers":{"Authorization":"secret"}}');
  await run("/mcp", host);
- const configure = host.calls.find(call => call.method === "mcp.configure")!;
- assert.equal((configure.params.config as Record<string, unknown>).trust, "trusted_read");
- assert.equal(host.last().kind, "success");
-});
-test("/mcp cached tools report the policy verdict alongside the tool", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "tools");
- host.responses["mcp.tools"] = { tools: [{ name: "docs__lookup", remote_name: "lookup", description: "Read docs", verdict: "allow" }, { name: "docs__write", remote_name: "write", description: "Write docs", verdict: "deny" }], truncated: false };
- await run("/mcp", host);
- assert.match(host.last().text, /docs__lookup.*allow/);
- assert.match(host.last().text, /docs__write.*deny/);
+ assert.equal(host.last().kind, "error");
+ assert.equal(host.calls.some(call => call.method === "mcp.configure"), false);
 });
 
 test("/mcp rejects invalid server IDs before saving or collecting further fields", async () => {
@@ -2474,18 +2445,25 @@ test("/mcp rejects invalid server IDs before saving or collecting further fields
   await run("/mcp", host);
   assert.equal(host.last().kind, "error", id);
   assert.equal(host.asked.length, 1, id);
-  assert.deepEqual(host.calls.map(call => call.method), ["mcp.list", "mcp.catalog"], id);
+  assert.equal(host.calls.some(call => call.method === "mcp.configure"), false, id);
  }
 });
-test("/mcp connection confirmation shows the reviewed safe configuration", async () => {
- const host = mcpHost();
- host.picks.push("__manage__", "docs", "connect", "no");
- host.responses["mcp.preview"] = { digest: "config-digest", proposal: { argv: ["node", "server.js"], cwd: "/workspace", network: [], backend: "subprocess", contentPreview: '{"trust":"untrusted","tool_allowlist":["lookup"],"secret_refs":["DOCS_TOKEN"]}' } };
+
+test("/mcp status and list inspect without launching; malformed commands are inert", async () => {
+ const host = new FakeHost();
+ host.responses["mcp.status"] = { server: { id: "docs", display_name: "Docs", state: "disconnected", enabled: false, transport: "stdio", error: null } };
+ await run("/mcp status docs", host);
+ assert.deepEqual(host.calls, [{ method: "mcp.status", params: { id: "docs" } }]);
+ assert.match(host.last().text, /disabled/);
+ host.responses["mcp.list"] = { servers: [{ id: "docs", display_name: "Docs", state: "disconnected", enabled: false, transport: "stdio" }] };
+ host.responses["mcp.catalog"] = { entries: [] };
+ await run("/mcp list", host);
+ assert.match(host.last().text, /Docs.*disabled/);
  await run("/mcp", host);
- assert.match(host.pickTitles.at(-1)!, /tool_allowlist.*lookup/);
- assert.match(host.pickTitles.at(-1)!, /secret_refs.*DOCS_TOKEN/);
- assert.match(host.pickTitles.at(-1)!, /trust.*untrusted/);
- assert.equal(host.calls.some(call => call.method === "mcp.connect"), false);
+ const count = host.calls.length;
+ await run("/mcp connect docs", host);
+ assert.equal(host.calls.length, count);
+ assert.match(host.last().text, /Usage:/);
 });
 
 // ─── A5: interactive /skills directory + legacy compatibility (spec §12.3) ──

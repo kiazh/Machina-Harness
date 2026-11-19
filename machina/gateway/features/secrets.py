@@ -29,6 +29,8 @@ MANAGED_ENV_KEYS: tuple[tuple[str, str], ...] = (
     ("MACHINA_MODEL", "Default model identifier"),
     ("CUSTOM_BASE_URL", "Custom OpenAI-compatible base URL"),
     ("KIRO_BASE_URL", "Kiro local proxy base URL"),
+    ("MCP_OAUTH_CLIENT_SECRET", "OAuth client secret for pre-registered MCP servers"),
+    ("GITHUB_MCP_PAT", "GitHub personal access token for the remote MCP server"),
 )
 
 # RF4-W6: only catalogued provider keys and documented managed keys may be

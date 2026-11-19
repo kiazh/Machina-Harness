@@ -45,6 +45,19 @@ test("activity stores queued prompts and command status by session", () => {
 	assert.equal(store.listJobs("main")[0]?.status, "exited", "a stale list response cannot revive a finished job");
 });
 
+test("activity retains recent tool and MCP call state for the status page", () => {
+	const store = new ActivityStore();
+	store.noteToolStart("main", "t1", "terminal", { command: "pytest" });
+	store.noteToolStart("main", "t2", "mcp_call");
+	store.noteToolComplete("main", "t1", "ok", "2 passed");
+	store.noteToolComplete("main", "t2", "running");
+	assert.equal(store.allTools().length, 2);
+	assert.equal(store.allTools().find((tool) => tool.id === "t1")?.status, "ok");
+	assert.deepEqual(store.allTools().find((tool) => tool.id === "t1")?.args, { command: "pytest" });
+	assert.equal(store.allTools().find((tool) => tool.id === "t1")?.result, "2 passed");
+	assert.equal(store.allTools().find((tool) => tool.id === "t2")?.name, "mcp_call");
+});
+
 test("activity row collapses when empty and stays inside narrow terminal widths", () => {
 	let summary = "";
 	const bar = new ActivityBar(() => summary, () => {});

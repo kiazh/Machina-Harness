@@ -237,6 +237,7 @@ class Gateway:
         self._job_runner = None
         self._warmers_task = None
         self._kiro_task = None
+        self._connector_autoconnect_task = None
         self._turns: dict[str, asyncio.Task[None]] = {}
         from machina.gateway.operations import Operations
 
@@ -304,6 +305,7 @@ class Gateway:
             "prompt.cancel": self._prompt_cancel,
             "prompt.steer": self._prompt_steer,
             "prompt.steering": self._prompt_steering,
+            "question.answer": self._question_answer,
             "shell.jobs": self._shell_jobs,
             "config.set": self._config_set,
             "shutdown": self._shutdown,
@@ -490,6 +492,13 @@ class Gateway:
             except (asyncio.CancelledError, Exception):
                 pass
             self._kiro_task = None
+        if self._connector_autoconnect_task is not None:
+            self._connector_autoconnect_task.cancel()
+            try:
+                await self._connector_autoconnect_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._connector_autoconnect_task = None
         from machina.core.optimization.shadow import drain_shadow_tasks
 
         await drain_shadow_tasks()
@@ -758,6 +767,13 @@ class Gateway:
             from machina.core.provider.kiro_gateway import schedule_autostart
 
             self._kiro_task = schedule_autostart()
+            # Reconnect already-authorized HTTP MCP servers without blocking
+            # initialize or the first turn. This is best-effort: missing or
+            # expired authorization stays on the explicit /mcp path.
+            if self._connector_autoconnect_task is None or self._connector_autoconnect_task.done():
+                self._connector_autoconnect_task = asyncio.create_task(
+                    self._auto_connect_connectors(), name="gateway-connector-autoconnect"
+                )
         payload = {
             "version": __version__,
             "protocolVersion": self.protocol_version,
@@ -790,6 +806,20 @@ class Gateway:
                 await db.close()
         except Exception as _boundary_error:
             record_failure("server.initialize.db_cleanup", _boundary_error)
+
+    async def _auto_connect_connectors(self) -> None:
+        """Best-effort startup reconnect for configured HTTP MCP servers.
+
+        Runs after initialize has returned (created as a task) and never opens
+        a browser or requests approval. Failures stay silent here; /mcp shows
+        the honest per-server state and offers authorization.
+        """
+        try:
+            await self.runtime.get_connector_service().auto_connect_authorized()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            record_failure("server.connector_autoconnect", error)
 
     async def _session_create(self, params: dict[str, Any]) -> dict[str, Any]:
         """Create and select a session using the agent definition and gateway routing defaults."""
@@ -1010,6 +1040,29 @@ class Gateway:
                 raise RpcError(INVALID_PARAMS, str(error)) from error
         return {"items": inbox.snapshot()}
 
+    async def _question_answer(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Answer the structured question currently waiting in one turn."""
+        self.require_db()
+        session = await self.get_session(params)
+        request_id = params.get("requestId")
+        if not isinstance(request_id, str) or not request_id:
+            raise RpcError(INVALID_PARAMS, "requestId is required")
+        cancelled = bool(params.get("cancelled"))
+        answer = params.get("answer")
+        if not cancelled and (not isinstance(answer, str) or not answer.strip()):
+            raise RpcError(INVALID_PARAMS, "answer must be a non-empty string or cancelled=true")
+        from machina.core.questions import question_broker
+
+        if not question_broker.answer(
+            session.id,
+            request_id,
+            "User cancelled the question. Continue with your best judgment."
+            if cancelled
+            else str(answer),
+        ):
+            raise RpcError(INVALID_PARAMS, "this question is no longer pending")
+        return {"answered": True}
+
     async def _prompt_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         key = str(_parse_session_id(params))
         task = self._turns.get(key)
@@ -1102,6 +1155,8 @@ class Gateway:
     ) -> None:
         """Run one agent turn through the shared transport-neutral lifecycle."""
         sid = str(session_id)
+        from machina.core.questions import question_broker
+
         owned_token = self._turn_tokens.get(sid)
         registered_turn = self._turns.get(sid)
         self._record_stage(turn_id, "turn_started", session_id=sid)
@@ -1265,6 +1320,10 @@ class Gateway:
             emit("message.complete", **lifecycle.build_terminal(cancelled=cancelled))
 
         emit("message.start")
+        # Structured questions are delivered to the active client for this
+        # session while the tool call waits. The broker is scoped to this turn
+        # and always unbound in the cleanup below.
+        question_broker.bind(sid, lambda payload: emit("question.asked", **payload))
         _cancelled = False
         _release_failed = False
         # Growth indicator: background training (consolidation wins, staged
@@ -1517,6 +1576,7 @@ class Gateway:
                 child_observer.reset(child_observer_token)
                 steering_inbox.reset(steering_token)
                 inbox.changed = None
+                question_broker.unbind(sid)
                 # Growth notices may land with late background consolidation;
                 # keep the listener until the terminal event, then always drop it.
                 remove_growth_listener(_growth_emit)

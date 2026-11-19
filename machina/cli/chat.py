@@ -124,7 +124,6 @@ def chat(
             "LLM provider (openrouter, openai, anthropic, chatgpt, google, mistral, groq, "
             "together, deepseek, xai, opencode, kimi, kiro, custom, ollama). "
             "opencode = OpenCode Zen gateway (OPENCODE_API_KEY); "
-            "opencode_session = text-only local OpenCode session bridge; "
             "kiro = Kiro account through a local OpenAI-compatible proxy; custom = any "
             "OpenAI-compatible base URL (CUSTOM_BASE_URL, key optional)"
         ),

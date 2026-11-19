@@ -24,6 +24,7 @@ _TOOL_MODULES = (
     "harness",  # read-only feature/configuration/learning inspection
     "mcp",  # lazy connector catalogs and exact remote calls
     "memory",  # remember, recall
+    "questions",  # ask_user (interactive multiple-choice pause)
     "meta_harness",  # approval-gated external harness execution
     "rag",  # index_document, search_documents
     "repo",  # repo_stage, repo_activate

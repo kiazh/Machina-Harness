@@ -104,24 +104,11 @@ machina --mode workspace chat --provider deepseek --model deepseek-v4-pro \
 
 ## OpenCode free models
 
-Direct OpenCode Zen requests for free models are rejected outside OpenCode.
-Machina's `opencode_session` provider uses OpenCode's local v2 session API
-(`session create` → `prompt` → `messages`) instead:
-
-```text
-machina chat --provider opencode_session --model opencode/big-pickle "Reply OK"
-```
-
-The bridge is text-only. It ignores Machina tool schemas and reports that fact;
-the route inventory marks it `tools=False`, so it can plan but never replace a
-tool-using worker or supervisor. For local clients that need an OpenAI-shaped
-endpoint:
-
-```text
-machina opencode-proxy --port 8765
-```
-
-Then point an OpenAI-compatible client at `http://127.0.0.1:8765/v1`.
+OpenCode free Zen models are available inside the OpenCode harness, but the
+local session API is text-only and cannot carry Machina tool schemas. Machina
+does not expose that bridge as a provider. Use the Hermes proxy for a
+tool-capable free-model backend, or configure the direct OpenCode Zen provider
+with OPENCODE_API_KEY.
 
 ## Verification and cost
 
@@ -131,8 +118,8 @@ Then point an OpenAI-compatible client at `http://127.0.0.1:8765/v1`.
   verification gating.
 - `browser_verification=off` disables the automatic web-build nudge.
 - `machina usage` separates cache capability from cache counters. Kiro is
-  `unsupported` (not reported); OpenCode session reports real cache read/write
-  categories. Estimated route cost is visible in `machina route`.
+  `unsupported` (not reported). Estimated route cost is visible in
+  `machina route`.
 - Explicit parallel requests avoid the old failure mode where one model
   serialized or hand-rolled the fan-out; the scheduler records each child
   session, route, token count, and approval state.

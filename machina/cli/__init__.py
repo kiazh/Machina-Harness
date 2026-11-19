@@ -43,7 +43,6 @@ from machina.cli.maintenance import (
     config_show,
     doctor,
     init,
-    opencode_proxy_command,
     serve,
     set_mode,
     setup,
@@ -135,7 +134,6 @@ __all__ = [
     "memory_reject_all",
     "memory_search",
     "memory_stats",
-    "opencode_proxy_command",
     "output",
     "repl",
     "route_command",
@@ -214,7 +212,6 @@ app.command(name="doctor")(doctor)
 app.command(name="init")(init)
 app.command(name="setup")(setup)
 app.command(name="version")(version)
-app.command(name="opencode-proxy")(opencode_proxy_command)
 app.command(name="serve")(serve)
 app.command(name="stop")(stop_all)
 app.command(name="config")(config_show)

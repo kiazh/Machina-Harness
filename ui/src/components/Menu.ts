@@ -13,9 +13,9 @@ export type { SelectItem };
 /**
  * A non-selectable section header row for grouped menus (e.g. the provider
  * sections in the model picker). Marked rows render dim and are skipped by
- * ↑/↓/home/end/page keys and Enter; a typed filter hides them so search
- * results stay a flat, navigable list. Purely additive: menus without marked
- * rows behave exactly as before.
+ * ↑/↓/home/end/page keys and Enter. A typed filter keeps the header for every
+ * group that still has a matching row, so search results stay organized.
+ * Purely additive: menus without marked rows behave exactly as before.
  */
 export interface MenuSectionItem extends SelectItem {
 	section: true;
@@ -124,12 +124,40 @@ export class Menu implements Component {
 	filtered(): SelectItem[] {
 		const query = this.filter.toLowerCase();
 		if (!query) return [...this.items];
-		// Section headers exist to organize the unfiltered view; a search is
-		// a flat result list (and never matches a header itself).
-		return this.items.filter((item) =>
-			!isSection(item) &&
-			`${item.label ?? item.value} ${item.value} ${item.description ?? ""}`.toLowerCase().includes(query),
-		);
+		const matches = (item: SelectItem): boolean =>
+			`${item.label ?? item.value} ${item.value} ${item.description ?? ""}`.toLowerCase().includes(query);
+		// Keep each section header attached to the rows below it. A header is
+		// shown when at least one of its rows matches; when the header itself
+		// matches (e.g. searching a provider name), keep its whole group.
+		const out: SelectItem[] = [];
+		let header: SelectItem | undefined;
+		let headerMatches = false;
+		let rows: SelectItem[] = [];
+		const flush = (): void => {
+			const matchingRows = rows.filter(matches);
+			if (header) {
+				if (headerMatches || matchingRows.length > 0) {
+					out.push(header);
+					out.push(...(headerMatches ? rows : matchingRows));
+				}
+			} else {
+				out.push(...matchingRows);
+			}
+			header = undefined;
+			headerMatches = false;
+			rows = [];
+		};
+		for (const item of this.items) {
+			if (isSection(item)) {
+				flush();
+				header = item;
+				headerMatches = matches(item);
+			} else {
+				rows.push(item);
+			}
+		}
+		flush();
+		return out;
 	}
 
 	private clampSelection(): void {

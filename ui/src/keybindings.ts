@@ -4,7 +4,7 @@ import { SHORTCUT_ROWS, type ShortcutRow } from "./design/shortcuts.ts";
 export const APP_BINDINGS = {
 	shortcuts: { label: "Show shortcuts", key: "ctrl+n h" },
 	stop: { label: "Stop / clear / exit", key: "ctrl+c" },
-	cancelTurn: { label: "Stop active reply", key: "escape" },
+	cancelTurn: { label: "Stop active reply (press Escape twice)", key: "escape" },
 	pasteImage: { label: "Paste image", key: "ctrl+v" },
 	pasteImageMac: { label: "Paste image (macOS)", key: "super+v" },
 	agentMenu: { label: "Agent menu", key: "down" },
@@ -14,6 +14,10 @@ export const APP_BINDINGS = {
 	agentPrevious: { label: "Previous agent", key: "ctrl+n k" },
 	agentClose: { label: "Close idle agent tab", key: "ctrl+n d" },
 	activity: { label: "View activity and queued prompts", key: "ctrl+n a" },
+	statusLeft: { label: "Status tab — left", key: "ctrl+n left" },
+	statusRight: { label: "Status tab — right", key: "ctrl+n right" },
+	statusLeftCtrl: { label: "Status tab — left (Ctrl+Arrow)", key: "ctrl+n ctrl+left" },
+	statusRightCtrl: { label: "Status tab — right (Ctrl+Arrow)", key: "ctrl+n ctrl+right" },
 	quickOpen: { label: "Quick open", key: "ctrl+p" },
 	explorer: { label: "Toggle file tree", key: "ctrl+t" },
 	explorerAlt: { label: "Toggle file tree (fallback)", key: "ctrl+n t" },
@@ -103,6 +107,7 @@ const SHORTCUT_BINDINGS: Record<string, string[]> = {
 	intel: ["complete"], focus: ["focusNext", "focusPrevious"], chatmax: ["chatMaximize", "editorMaximize", "restoreSplit"],
 	help: ["shortcuts"],
 	activity: ["activity"],
+	status: ["statusLeft", "statusRight", "statusLeftCtrl", "statusRightCtrl"],
 };
 
 export function effectiveShortcutRows(overrides: BindingOverrides): ShortcutRow[] {

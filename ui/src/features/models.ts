@@ -10,7 +10,7 @@
 //
 // The menu filter matches label, value and description, so typing a provider
 // ("deepseek") or a model family ("gpt") narrows to those rows; section
-// headers yield while a filter is active.
+// headers stay attached to every group that still has a matching row.
 //
 // A selected model row carries its provider, even when another provider has
 // the same model ID. `/models <query>` searches all groups;
@@ -45,6 +45,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 	together: "Together AI",
 	openrouter: "OpenRouter",
 	opencode: "OpenCode Zen",
+	"hermes-proxy": "Hermes proxy",
 	kimi: "Kimi Code",
 	kiro: "Kiro local proxy",
 	chatgpt: "ChatGPT subscription",

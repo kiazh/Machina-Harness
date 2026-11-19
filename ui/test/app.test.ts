@@ -198,10 +198,90 @@ function widgetWith<K extends string>(tui: FakeTUI, property: K): Component & Re
 	assert.fail(`widget with ${property} exists`);
 }
 
+test("a slash command loading owns input until its dialog opens", async () => {
+	const { app, tui } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		const state = app as unknown as { commandRunning: boolean; onInput(data: string): { consume: boolean } | undefined };
+		const editor = widgetWith(tui, "getText") as unknown as { getText(): string };
+		state.commandRunning = true;
+		assert.deepEqual(state.onInput("/"), { consume: true });
+		assert.equal(editor.getText(), "", "a slash typed during loading never reaches the composer");
+		state.commandRunning = false;
+		assert.equal(state.onInput("/"), undefined, "the composer regains normal handling after the command settles");
+	} finally {
+		await app.exit();
+	}
+});
+
 test("start() enables shrink-clearing so closed menus leave no ghost rows", async () => {
 	const { app, tui } = makeApp(SESSION_A);
 	await app.start();
 	assert.equal(tui.clearOnShrink, true);
+	await app.exit();
+});
+
+test("Ctrl+N then an arrow opens and closes the full-page status tab", async () => {
+	const { app } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
+		input("\x0e"); // Ctrl+N leader
+		input("\x1b[C"); // right arrow
+		assert.equal((app as unknown as { view: string }).view, "status");
+		input("\x0e"); // Ctrl+N leader
+		input("\x1b[D"); // left arrow
+		assert.equal((app as unknown as { view: string }).view, "chat");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("status sessions are listed with the current session first but only in-flight turns are active", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	client.responses.set("interop.status", { platforms: [] });
+	client.responses.set("mcp.list", { servers: [] });
+	client.responses.set("shell.jobs", { jobs: [] });
+	client.responses.set("prompt.steering", { items: [] });
+	client.responses.set("session.list", { sessions: [SESSION_A, SESSION_B] });
+	await app.start();
+	try {
+		app.openStatus();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const snapshot = (app as unknown as {
+			statusSnapshot(): {
+				project?: string;
+				sessions: Array<{ label: string; state: string; running: boolean }>;
+			};
+		}).statusSnapshot();
+		assert.equal(snapshot.project, "tmp");
+		assert.deepEqual(
+			snapshot.sessions.map((session) => [session.label, session.state, session.running]),
+			[
+				["session A", "inactive", false],
+				["session B", "inactive", false],
+			],
+		);
+		assert.equal(
+			(app as unknown as { statusPage: { selectedKey?: string } }).statusPage.selectedKey,
+			`session:${SESSION_A.id}`,
+			"the loaded current session replaces the temporary queue default",
+		);
+	} finally {
+		await app.exit();
+	}
+});
+
+test("Escape requires two deliberate presses to stop a running turn", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("work");
+	client.emit(ev({ type: "message.start" }));
+	const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
+	input("\x1b");
+	assert.equal(client.requests.filter((request) => request.method === "prompt.cancel").length, 0);
+	input("\x1b");
+	assert.equal(client.requests.filter((request) => request.method === "prompt.cancel").length, 1);
 	await app.exit();
 });
 

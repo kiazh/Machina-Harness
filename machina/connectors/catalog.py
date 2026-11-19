@@ -10,171 +10,152 @@ from __future__ import annotations
 from typing import Any
 
 from machina.connectors.store import ConnectorStore
-from machina.interop import server_command
-
-_GOOGLE_DOCS = "https://developers.google.com/workspace/guides/configure-mcp-servers"
-
-
-def _google_entry(
-    connector_id: str, display_name: str, service: str, description: str, scopes: list[str]
-) -> dict[str, Any]:
-    return {
-        "id": connector_id,
-        "displayName": display_name,
-        "kind": "connector",
-        "category": "Google Workspace",
-        "provider": "Google",
-        "description": description,
-        "docsUrl": _GOOGLE_DOCS,
-        "setup": {
-            "type": "oauth",
-            "instructions": [
-                "Requires Google Workspace Developer Preview access and a Google Cloud "
-                "project with the product API and its MCP service enabled.",
-                "Create a Google OAuth client for an AI-powered agent. Configure its "
-                "registered callback, then select preregistered OAuth and supply its "
-                "client ID and secret reference before authorizing. Store the client "
-                "secret in Secrets.",
-                "Review the requested read scopes, authorize with Google, then preview "
-                "and connect the server. Saving this starter does not sign in.",
-            ],
-        },
-        "config": {
-            "id": connector_id,
-            "display_name": display_name,
-            "transport": "streamable_http",
-            "endpoint": f"https://{service}.googleapis.com/mcp/v1",
-            "oauth": {
-                "client_mode": "auto",
-                "scope_allowlist": [f"https://www.googleapis.com/auth/{scope}" for scope in scopes],
-            },
-        },
-    }
 
 
 def connector_catalog() -> list[dict[str, Any]]:
     """Return fresh editable starters; availability is not connection health."""
-    command, *argv = server_command()
     entries = [
-        _google_entry(
-            "gmail",
-            "Gmail",
-            "gmailmcp",
-            "Search and read email through Google's official Gmail MCP server.",
-            ["gmail.readonly"],
-        ),
-        _google_entry(
-            "google-drive",
-            "Google Drive",
-            "drivemcp",
-            "Find and read files through Google's official Drive MCP server.",
-            ["drive.readonly"],
-        ),
-        _google_entry(
-            "google-calendar",
-            "Google Calendar",
-            "calendarmcp",
-            "Read calendars and events through Google's official Calendar MCP server.",
-            ["calendar.calendarlist.readonly", "calendar.events.readonly"],
-        ),
+        {
+            "id": "composio",
+            "displayName": "Composio",
+            "kind": "connector",
+            "category": "Managed connectors",
+            "provider": "Composio",
+            "description": "Google Drive, Gmail, Calendar, GitHub and many other apps through Composio's managed OAuth MCP gateway.",
+            "docsUrl": "https://docs.composio.dev/docs/composio-connect",
+            "setup": {
+                "type": "oauth",
+                "instructions": [
+                    "Composio handles provider OAuth and token refresh, so no Google Cloud "
+                    "project or provider OAuth client is required for Drive, Gmail or Calendar.",
+                    "Connect and authorize Composio in the browser. Then ask Machina to connect "
+                    "the app you need; Composio returns its own one-time authorization link.",
+                    "Composio is a third-party gateway and receives brokered access to connected "
+                    "apps. Review its trust, scopes and retention policy before using sensitive data.",
+                ],
+            },
+            "config": {
+                "id": "composio",
+                "display_name": "Composio",
+                "transport": "streamable_http",
+                "endpoint": "https://connect.composio.dev/mcp",
+                "oauth": {"client_mode": "auto"},
+            },
+        },
+        {
+            # The gateway slug is account-specific. The UI asks for it at add
+            # time; it must never be committed as a shared starter endpoint.
+            "id": "arcade",
+            "displayName": "Arcade",
+            "kind": "connector",
+            "category": "Managed connectors",
+            "provider": "Arcade",
+            "description": "Google Drive, Gmail and Calendar through your own Arcade MCP Gateway.",
+            "docsUrl": "https://docs.arcade.dev/en/operate/governance/mcp-gateways",
+            "setup": {
+                "type": "gateway_url",
+                "instructions": [
+                    "Create a free Arcade account and an MCP Gateway. Add the Google "
+                    "Drive, Gmail or Calendar tools you want the agent to use.",
+                    "Copy the gateway URL from Arcade. It looks like "
+                    "https://api.arcade.dev/mcp/gw_...",
+                    "Paste it below; Machina saves it and starts the normal browser "
+                    "OAuth flow. Arcade's free tier includes 2,000 tool calls per month.",
+                    "Arcade is a third-party gateway. Review its trust, scopes and "
+                    "retention policy before using sensitive data.",
+                ],
+                "prompt": "Paste your Arcade MCP gateway URL",
+                "description": "Copy this from the Arcade MCP Gateway dashboard. Do not use the project API key here.",
+                "example": "https://api.arcade.dev/mcp/gw_...",
+            },
+            "config": {
+                "id": "arcade",
+                "display_name": "Arcade",
+                "transport": "streamable_http",
+                "oauth": {"client_mode": "auto"},
+            },
+        },
         {
             "id": "github",
             "displayName": "GitHub",
             "kind": "connector",
             "category": "Development",
             "provider": "GitHub",
-            "description": "Access repositories, issues, and pull requests with GitHub's MCP server.",
+            "description": "Access repositories, issues, pull requests, Actions and code security through GitHub's official MCP server.",
             "docsUrl": "https://github.com/github/github-mcp-server",
             "setup": {
-                "type": "oauth",
+                "type": "secret",
                 "instructions": [
-                    "OAuth requires a GitHub App or OAuth App registered for this MCP client. "
-                    "Configure its client details in OAuth settings before authorizing.",
-                    "Review the server, authorize, then preview and connect it.",
+                    "Create a GitHub personal access token with the repository access you "
+                    "want the agent to have. Fine-grained tokens are recommended.",
+                    "Paste it below; Machina stores it in .env as GITHUB_MCP_PAT and sends "
+                    "it only to GitHub's remote MCP endpoint.",
                 ],
+                "prompt": "Paste a GitHub personal access token",
+                "description": "The token is masked and stored in .env, never in the MCP configuration.",
+                "example": "github_pat_... or ghp_...",
+                "secretKey": "GITHUB_MCP_PAT",
             },
             "config": {
                 "id": "github",
                 "display_name": "GitHub",
                 "transport": "streamable_http",
                 "endpoint": "https://api.githubcopilot.com/mcp/",
+                "header_refs": {"Authorization": "GITHUB_MCP_PAT"},
+            },
+        },
+        {
+            "id": "firecrawl",
+            "displayName": "Firecrawl",
+            "kind": "connector",
+            "category": "Web research",
+            "provider": "Firecrawl",
+            "description": "Search, scrape, crawl, parse and research the web through Firecrawl's hosted MCP server.",
+            "docsUrl": "https://docs.firecrawl.dev/mcp-server",
+            "setup": {
+                "type": "oauth",
+                "instructions": [
+                    "Connect Firecrawl in the browser. Firecrawl supports MCP OAuth with "
+                    "dynamic client registration, so no API key or local bridge is required.",
+                    "The hosted account endpoint exposes the full tool surface allowed by "
+                    "your Firecrawl plan. Keyless access is available separately but is "
+                    "limited to Search, Scrape, and Parse.",
+                ],
+            },
+            "config": {
+                "id": "firecrawl",
+                "display_name": "Firecrawl",
+                "transport": "streamable_http",
+                "endpoint": "https://mcp.firecrawl.dev/v2/mcp-oauth",
                 "oauth": {"client_mode": "auto"},
             },
         },
         {
-            "id": "firecrawl-selfhosted",
-            "displayName": "Firecrawl (self-hosted)",
+            "id": "vercel",
+            "displayName": "Vercel",
             "kind": "connector",
-            "category": "Web research",
-            "provider": "Firecrawl",
-            "description": "Scrape and crawl through your own Firecrawl server and local MCP bridge.",
-            "docsUrl": "https://github.com/firecrawl/firecrawl-mcp-server",
+            "category": "Development",
+            "provider": "Vercel",
+            "description": "Search Vercel docs, manage projects, inspect deployments and query Web Analytics.",
+            "docsUrl": "https://vercel.com/docs/agent-resources/vercel-mcp",
             "setup": {
-                "type": "local_endpoint",
+                "type": "oauth",
                 "instructions": [
-                    "Requires your self-hosted Firecrawl REST API and a separately running "
-                    "official firecrawl-mcp bridge. This starter does not install or start either.",
-                    "Start the bridge with HTTP_STREAMABLE_SERVER=true, HOST=127.0.0.1, "
-                    "and FIRECRAWL_API_URL set to your self-hosted REST API URL. Set the "
-                    "backend API URL explicitly so the bridge uses your own server.",
-                    "Enter the bridge's MCP URL below (default http://127.0.0.1:3000/mcp). "
-                    "This differs from the backend REST API URL. Review, save, then connect.",
+                    "Connect Vercel in the browser and approve access to the projects and "
+                    "analytics the agent may use.",
+                    "Vercel supports standard MCP OAuth; no OAuth client setup is required.",
                 ],
             },
             "config": {
-                "id": "firecrawl-selfhosted",
-                "display_name": "Firecrawl (self-hosted)",
+                "id": "vercel",
+                "display_name": "Vercel",
                 "transport": "streamable_http",
-                "endpoint": "http://127.0.0.1:3000/mcp",
-                "local_access": True,
+                "endpoint": "https://mcp.vercel.com",
+                "oauth": {"client_mode": "auto"},
             },
-        },
-        {
-            "id": "custom-mcp",
-            "displayName": "Custom MCP server",
-            "kind": "connector",
-            "category": "Custom",
-            "provider": "Your server",
-            "description": "Connect another MCP server using its endpoint or local executable.",
-            "docsUrl": "https://modelcontextprotocol.io/docs/learn/architecture",
-            "setup": {
-                "type": "custom",
-                "instructions": [
-                    "Replace the example endpoint with your server URL, or choose stdio "
-                    "and enter an executable and separate arguments.",
-                    "Configure any required credentials through secret references or OAuth. "
-                    "Review the exact transport before connecting.",
-                ],
-            },
-            "config": {
-                "id": "custom-mcp",
-                "display_name": "Custom MCP server",
-                "transport": "streamable_http",
-                "endpoint": "https://mcp.example.com/mcp",
-            },
-        },
-        {
-            "id": "machina",
-            "displayName": "Machina MCP",
-            "kind": "harness",
-            "category": "Agent harnesses",
-            "provider": "Machina",
-            "description": "Make Machina's tools available to Codex, OpenCode, and other harnesses.",
-            "docsUrl": "https://github.com/kiazh/Machina-Harness#mcp-catalog-first-tool-use",
-            "setup": {
-                "type": "harness",
-                "instructions": [
-                    "Open Agent harnesses to detect an installed harness and register "
-                    "Machina's MCP server with it.",
-                    "For another client, use the displayed executable and arguments in "
-                    "that client's MCP configuration.",
-                ],
-            },
-            "config": None,
-            "runtime": {"command": command, "argv": argv},
         },
     ]
     for entry in entries:
-        if entry["kind"] == "connector":
+        if entry["kind"] == "connector" and entry["setup"]["type"] != "gateway_url":
             ConnectorStore.validate_input(entry["config"])
     return entries

@@ -16,11 +16,11 @@ export interface ShortcutRow {
 }
 
 export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
-	{ value: "send", context: "Composer", label: "Enter — send / queue steering", description: "While working, queues a message for the next safe tool boundary; Escape interrupts" },
-	{ value: "activity", context: "Composer", label: "Ctrl+N then A — activity", description: "Edit queued steering, inspect live command output, stop background jobs, or switch agents · /activity" },
+	{ value: "send", context: "Composer", label: "Enter — send / queue guidance", description: "While working, queues guidance for the next safe tool boundary; the current task stays in context; Escape interrupts" },
+	{ value: "activity", context: "Composer", label: "Ctrl+N then A — activity", description: "Live status tab for agents, shells, tools, queues and harnesses · /activity; /activity list for actions" },
 	{ value: "newline", context: "Composer", label: "Shift+Enter — new line" },
 	{ value: "image", context: "Composer", label: "Drop an image / Ctrl+V — paste image", description: "PNG, JPEG, GIF or WebP · ⌘V where forwarded by your terminal" },
-	{ value: "stop", context: "Composer", label: "Esc — stop reply", description: "Twice on empty input edits the last prompt" },
+	{ value: "stop", context: "Composer", label: "Esc ×2 - stop reply", description: "First press arms the abort; second within 900ms stops. Ctrl+C stops immediately. Twice on empty input edits the last prompt" },
 	{ value: "cancel", context: "Composer", label: "Ctrl+C — stop / clear / exit", description: "Stop a reply, clear a draft, or exit when empty" },
 	{ value: "exit", context: "Composer", label: "Ctrl+D — exit", description: "When input is empty and idle" },
 	{ value: "clear", context: "Composer", label: "Ctrl+L — clear chat", description: "When idle" },
@@ -28,6 +28,7 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ value: "words", context: "Composer", label: "Ctrl+←/→ — move by word", description: "Alt+B / Alt+F also move by word when a terminal does not forward Ctrl+Arrow" },
 	{ value: "subagents", context: "Composer", label: "↓ — subagent menu", description: "On empty input: switch between the main session and its subagents" },
 	{ value: "tabs", context: "Composer", label: "Ctrl+N then J / K — next / previous agent", description: "With composer focus; the file editor keeps Ctrl+Shift+Arrow word selection" },
+	{ value: "status", context: "Composer", label: "Ctrl+N then ← / → — status tab", description: "Full-page live view of agents, shells, tools/MCP calls, queues and external harnesses · /overview" },
 	{ value: "quickopen", context: "Workspace", label: "Ctrl+P — quick open", description: "Fuzzy file search in the workspace" },
 	{ value: "save", context: "Workspace", label: "Ctrl+S — save file", description: "Save the active editor buffer" },
 	{ value: "closetab", context: "Workspace", label: "Ctrl+W — close tab", description: "Close the active editor tab (dirty: save/discard/cancel); the terminal may intercept" },

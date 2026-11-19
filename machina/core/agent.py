@@ -195,9 +195,13 @@ For substantial work, keep a short task plan and update it as results arrive. Or
 
 Delegation: use specialists for independent, substantial subtasks. The known roles are researcher (read-only), coder (code and tests), and harness (mixed work); call list_agents only when another specialty is needed. When the user explicitly says to parallelize or names independent tracks, you must issue at least two disjoint delegate calls together; a serial plan is not an acceptable substitute, even when the pieces look small. Issue independent delegate calls together; the configured concurrency limit queues excess work. Give each worker a complete task and required evidence, and tell it to use workspace-relative paths rather than assuming a Unix `/tmp` location. A worker reports only to you. If a worker is still running, use delegate_status with its child session ID; when it finishes, use delegate with that session_id for a focused follow-up. On each report, check what remains, continue your own work or assign a focused follow-up, then verify and synthesize the result. Treat a worker report as evidence to check, not as final truth: inspect the cited files or results before relaying a finding. Keep working toward the user's full objective across tool cycles; only return to the user when the work is complete or their input is truly required. Workers inherit your restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
-For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan.
+For slow commands, use terminal(background=true) and continue independent work. A job handle is running work, never evidence of success. Use terminal_job to inspect output and exit status before relying on it; stop jobs you no longer need. User steering delivered at a safe boundary takes priority over your earlier plan. Do not abandon completed work: integrate the new instruction into the current objective, then continue toward the full task unless the user explicitly cancels it.
+
+When a user decision materially changes the implementation and cannot be inferred safely, call ask_user with 2–5 concrete options (mark the recommended one in its label). It pauses the turn for an inline choice. Do not use it for facts you can inspect yourself or for questions the user has already answered.
 
 When the user pastes an MCP server link or asks to add one, call mcp_connect with that url. Do not ask for a server name or setup fields: the id is derived automatically, the approval card is the confirmation, and a saved HTTP server that needs OAuth opens its browser authorization during the same connect attempt.
+
+When the user names an MCP connector with @<connector> (for example @vercel or @composio), or asks for an external-app action such as email, calendar, deployment, repository or SaaS work, use the connector instead of saying it is unavailable. Call mcp_list with connector=<connector> to see its namespaced tools, mcp_describe for the exact schema, then mcp_call with complete arguments. For Composio, use COMPOSIO_SEARCH_TOOLS first when the app action is not already in the catalog, then execute the returned tool. If no connector is configured or authorized, say exactly what is missing and point to /mcp; never claim a tool ran when it did not.
 
 When you need to do something, use the available tools. Think step by step:
 1. Understand the task
@@ -282,6 +286,10 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     # N6 (final pass): a cold scan of a large repo can exceed the 30s default;
     # 120s matches the other "legitimately slow read" tools above.
     "learn_directory": 120.0,
+    # A question waits for a human, not for a provider or tool. The broker's
+    # own timeout is the upper bound; this keeps the wrapper from cancelling
+    # the question first.
+    "ask_user": 620.0,
 }
 _TOOL_TIMEOUT_DEFAULT = 30.0
 _TERMINAL_CAP = 300.0  # R4-019: terminal's schema max (1..300); tools/terminal.py.
@@ -319,11 +327,7 @@ def _tool_outcome(item: dict[str, Any]) -> str:
         return "paused"
     if item.get("_delegation_status") in {"queued", "running", "interrupted", "pending"}:
         return item["_delegation_status"]
-    if (
-        item.get("_denied")
-        or item.get("_steering_skipped")
-        or preview.startswith("Permission denied:")
-    ):
+    if item.get("_denied") or preview.startswith("Permission denied:"):
         return "denied"
     if item.get("_outcome_unknown"):
         return "outcome_unknown"
@@ -1163,20 +1167,6 @@ class BaseReActAgent:
 
         # ── Phase C: execute concurrently, yielding completions as they finish
         async def _run_one(item: dict[str, Any]) -> None:
-            from machina.core.steering import pending_steering
-
-            def superseded() -> bool:
-                if not pending_steering(session_id):
-                    return False
-                item["_steering_skipped"] = True
-                item["result"] = (
-                    "Skipped: new user steering received. This action was NOT executed; replan."
-                )
-                item["elapsed_ms"] = 0
-                return True
-
-            if superseded():
-                return
             tool_name = item["name"]
             tool_args = item["args"]
             audit_log("tool_call_start", session_id=str(session_id), tool_name=tool_name)
@@ -1345,8 +1335,6 @@ class BaseReActAgent:
                                     item["_delegated_tokens"] = completed.tokens_used
 
                             async def execute():
-                                if superseded():
-                                    return item["result"]
                                 try:
                                     completed = await registry.execute(tool_name, **tool_args)
                                 except CompletedOnCancellation as cancellation:

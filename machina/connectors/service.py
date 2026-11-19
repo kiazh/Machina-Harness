@@ -12,6 +12,7 @@ from typing import Any
 
 from machina.connectors.manager import ConnectorManager
 from machina.connectors.models import (
+    AuthRequired,
     ConfigError,
     ConnectionFailed,
     ConnectionState,
@@ -275,9 +276,10 @@ class ConnectorService:
 
         config = self._config(connector_id)
         refuse_sandbox_stdio(config, mode)
+        refs = tuple(dict.fromkeys((*config.secret_refs, *config.header_refs.values())))
         # Vault/AWS resolution is synchronous HTTP; keep it off the loop.
         secrets = await asyncio.to_thread(
-            lambda: {name: get_secret(name) or "" for name in config.secret_refs}
+            lambda: {name: get_secret(name) or "" for name in refs}
         )
         await self.manager.connect(connector_id, secrets, launch_config=launch_config)
         connection = self._live_connection(connector_id)
@@ -304,6 +306,20 @@ class ConnectorService:
         connection = self._live_connection(connector_id)
         tools, truncated = await connection.list_tools()
         stored = self.manager.registry.set_tools(connector_id, tools)
+        return self._tool_page(connector_id, stored, truncated=bool(truncated))
+
+    async def cached_tools_list(self, connector_id: str) -> dict[str, Any]:
+        """Last discovered catalog without re-listing over the network.
+
+        Opening the human /mcp menu must not wait on every configured
+        provider. This reads the registry copy installed by a successful
+        connect/discovery; an absent catalog is an honest empty page.
+        """
+        await self.refresh()
+        self._config(connector_id)
+        return self._tool_page(connector_id, self.registry.tools_for(connector_id), truncated=False)
+
+    def _tool_page(self, connector_id: str, tools, *, truncated: bool) -> dict[str, Any]:
         return {
             "tools": [
                 {
@@ -312,10 +328,46 @@ class ConnectorService:
                     "description": tool.description,
                     "verdict": classify_tool(self._config(connector_id), tool),
                 }
-                for tool in stored
+                for tool in tools
             ],
-            "truncated": bool(truncated),
+            "truncated": truncated,
         }
+
+    async def auto_connect_authorized(self) -> dict[str, str]:
+        """Reconnect configured HTTP servers with usable local credentials.
+
+        Best-effort startup work: no browser flow, no new approval, no stdio
+        process launch, and no secret values in the result. OAuth connectors
+        without cached authorization, and servers whose credentials fail,
+        stay disconnected for the normal /mcp authorization path.
+        """
+        await self.refresh()
+        results: dict[str, str] = {}
+        for config in self.registry.list():
+            if not getattr(config, "enabled", True) or config.transport != "streamable_http":
+                continue
+            current = self.manager.connection(config.id)
+            if current is not None and current.state == ConnectionState.CONNECTED:
+                results[config.id] = "connected"
+                continue
+            if config.oauth:
+                try:
+                    authorized = self.auth_identity(config.id) is not None
+                except Exception:
+                    authorized = False
+                if not authorized:
+                    results[config.id] = "authorization_required"
+                    continue
+            try:
+                await self.connect_and_discover(config.id)
+                results[config.id] = "connected"
+            except AuthRequired:
+                results[config.id] = "authorization_required"
+            except (ConfigError, ConnectionFailed):
+                results[config.id] = "unavailable"
+            except Exception:
+                results[config.id] = "unavailable"
+        return results
 
     async def tools_describe(self, name: str) -> dict[str, Any]:
         """Full schema + policy verdict for one namespaced tool."""

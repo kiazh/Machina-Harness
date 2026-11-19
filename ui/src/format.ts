@@ -4,7 +4,7 @@ import { theme } from "./theme.ts";
 
 /**
  * Codex-style keyboard hints: bold key labels with dim descriptions,
- * joined by ` · ` — e.g. `Enter send · Esc stop`.
+ * joined by ` · ` — e.g. `Enter send · Esc×2 stop`.
  */
 export function hintLine(pairs: Array<[label: string, action: string]>): string {
 	const sep = theme.dim(" · ");

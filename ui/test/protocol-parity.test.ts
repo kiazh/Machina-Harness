@@ -31,6 +31,7 @@ export const TS_EVENT_TYPES = [
 	"growth.status",
 	"agent.child",
 	"steering.update",
+	"question.asked",
 	"shell.job",
 	"message.complete",
 	"error",
