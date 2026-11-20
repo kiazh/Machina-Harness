@@ -31,6 +31,26 @@ blocking it, six tests fail for lack of the fixture service even when the
 source repair is correct. The benchmark needs a local httpbin-compatible
 fixture, not public network access.
 
+## Partial corrected run (not a ranking)
+
+After adding Git isolation and the first proxy attempt, the run reached six
+tasks before it was stopped for the integrity audit. These observations are
+kept only as diagnostics; they are not a valid ten-task score:
+
+| Task | Machina | OpenCode | Hermes |
+| --- | --- | --- | --- |
+| `pytest-11143` | PASS | PASS | PASS |
+| `pytest-11148` | FAIL | PASS | FAIL |
+| `pytest-5103` | FAIL | PASS | PASS |
+| `pytest-5227` | PASS | PASS | PASS |
+| `pytest-5413` | PASS | PASS | FAIL |
+| `requests-1963` | invalid (httpbin blocked) | invalid | invalid |
+
+The useful signal is that `pytest-5413` now passes for Machina in the corrected
+run. The remaining Machina failures are `11148` and `5103`, not `5413`.
+`requests-1963` cannot be scored under the restricted network until a local
+httpbin fixture exists.
+
 ## What was learned
 
 - Git isolation and network isolation are separate requirements.
