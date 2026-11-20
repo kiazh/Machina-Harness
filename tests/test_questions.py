@@ -37,7 +37,9 @@ async def test_question_broker_emits_options_and_resumes_with_answer():
 @pytest.mark.asyncio
 async def test_question_broker_refuses_without_interactive_client():
     broker = QuestionBroker()
-    result = await broker.ask("session", "Which stack?", [QuestionOption("a", "A"), QuestionOption("b", "B")])
+    result = await broker.ask(
+        "session", "Which stack?", [QuestionOption("a", "A"), QuestionOption("b", "B")]
+    )
     assert "No interactive client" in result
 
 

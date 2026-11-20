@@ -18,6 +18,24 @@ export interface ToolActivity {
 }
 export interface ActivityAction { label: string; run: () => void }
 
+const MAX_TOOL_ARG_CHARS = 4_000;
+
+/** Keep status evidence bounded without losing the connector/tool identity. */
+function boundedToolArgs(args: Record<string, unknown>): Record<string, unknown> {
+	let serialized: string;
+	try {
+		serialized = JSON.stringify(args);
+	} catch {
+		return { _unserializable: true };
+	}
+	if (serialized.length <= MAX_TOOL_ARG_CHARS) return { ...args };
+	return {
+		...(typeof args.name === "string" ? { name: args.name } : {}),
+		_truncated: true,
+		_preview: serialized.slice(0, MAX_TOOL_ARG_CHARS - 100),
+	};
+}
+
 /**
  * What to show when `/activity` has nothing to inspect. Activity is created
  * by ordinary work, so the empty state has to teach the next action instead
@@ -76,7 +94,7 @@ export class ActivityStore {
 			name,
 			status: "running",
 			startedAt: Date.now(),
-			args: { ...args },
+			args: boundedToolArgs(args),
 		});
 		while (tools.size > 32) tools.delete(tools.keys().next().value!);
 		this.toolEvents.set(sessionId, tools);
@@ -96,10 +114,11 @@ export class ActivityStore {
 		record.result = result.slice(0, 4_000);
 		record.outcome = outcome;
 	}
-	allTools(): ToolActivity[] {
+	allTools(limit = 24): ToolActivity[] {
 		return [...this.toolEvents.values()]
 			.flatMap((tools) => [...tools.values()])
-			.sort((left, right) => right.startedAt - left.startedAt);
+			.sort((left, right) => right.startedAt - left.startedAt)
+			.slice(0, Math.max(0, limit));
 	}
 	/** Drop every dormant per-session queue/job/tool record for one session. */
 	pruneSession(sessionId: string): void {

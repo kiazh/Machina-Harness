@@ -19,7 +19,7 @@ from machina.cli.common import (
     _sync_env_shadow,
 )
 from machina.cli.output import console
-from machina.core.config import SECRET_KEYS, config, is_configured_secret, validate_value
+from machina.core.config import DEFAULTS, SECRET_KEYS, config, is_configured_secret, validate_value
 from machina.core.provider.specs import provider_names
 from machina.db.connection import db
 
@@ -740,9 +740,9 @@ def config_set(
             "[dim]Use `machina setup` or the UI's /keys command to store it in .env.[/dim]"
         )
         raise typer.Exit(1)
-    if key not in config.to_dict():
+    if key not in DEFAULTS:
         console.print(f"[red]Unknown config key: {escape(key)}[/red]")
-        console.print(f"[dim]Available keys: {', '.join(config.to_dict().keys())}[/dim]")
+        console.print(f"[dim]Available keys: {', '.join(sorted(DEFAULTS))}[/dim]")
         raise typer.Exit(1)
 
     try:

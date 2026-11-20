@@ -59,6 +59,31 @@ const APP_LABELS: Record<string, string> = {
 	SPOTIFY: "Spotify",
 };
 
+const KNOWN_TOOL_LABELS: Record<string, string> = {
+	get_tool_schemas: "Tool schemas",
+	manage_connections: "Connections",
+	search_tools: "Search tools",
+	multi_execute_tool: "Run tools",
+	proxy_execute: "Send request",
+	remote_bash_tool: "Remote shell",
+	remote_workbench: "Workbench",
+	submit_feedback: "Submit feedback",
+	wait_for_connections: "Wait for connections",
+	manage_skill: "Manage skill",
+	search_skills: "Search skills",
+};
+const APP_LABEL_KEYS = Object.keys(APP_LABELS).sort((left, right) => right.length - left.length);
+const PROVIDER_PREFIX_PATTERNS = new Map<string, RegExp>();
+
+function providerPrefixPattern(provider: string): RegExp {
+	let pattern = PROVIDER_PREFIX_PATTERNS.get(provider);
+	if (!pattern) {
+		pattern = new RegExp(`^${provider.replace(/[^A-Za-z0-9_-]/g, "")}[_-]+`, "i");
+		PROVIDER_PREFIX_PATTERNS.set(provider, pattern);
+	}
+	return pattern;
+}
+
 function titleWord(word: string, first: boolean): string {
 	const lower = word.toLowerCase();
 	if (ACRONYMS.has(lower)) return lower.toUpperCase();
@@ -88,24 +113,9 @@ export function cleanMcpToolName(raw: string, provider = ""): string {
 	// Drop any remaining connector namespace, then a repeated provider prefix
 	// from providers that include their own brand in the remote name.
 	name = name.replace(/^[A-Za-z0-9-]+__/, "");
-	if (provider) {
-		name = name.replace(new RegExp(`^${provider.replace(/[^A-Za-z0-9_-]/g, "")}[_-]+`, "i"), "");
-	}
+	if (provider) name = name.replace(providerPrefixPattern(provider), "");
 	const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-	const known: Record<string, string> = {
-		get_tool_schemas: "Tool schemas",
-		manage_connections: "Connections",
-		search_tools: "Search tools",
-		multi_execute_tool: "Run tools",
-		proxy_execute: "Send request",
-		remote_bash_tool: "Remote shell",
-		remote_workbench: "Workbench",
-		submit_feedback: "Submit feedback",
-		wait_for_connections: "Wait for connections",
-		manage_skill: "Manage skill",
-		search_skills: "Search skills",
-	};
-	if (known[key]) return known[key];
+	if (KNOWN_TOOL_LABELS[key]) return KNOWN_TOOL_LABELS[key];
 	// Tool vendors that encode an app + operation in one identifier read much
 	// better with the app separated: GoogleDrive_ListFiles.
 	const appSplit = /^([A-Z][A-Za-z0-9]*?(?:Drive|Mail|Calendar|Docs|Sheets|Slides|GitHub|Slack|Notion|Linear|Stripe|Gmail))_([A-Za-z0-9_]+)$/.exec(name);
@@ -116,9 +126,7 @@ export function cleanMcpToolName(raw: string, provider = ""): string {
 	// Composio app tools are `{TOOLKIT}_{ACTION}`; use the known app's brand
 	// casing and show the action as a readable suffix. Longest prefixes win so
 	// MICROSOFT_TEAMS and GOOGLE_DRIVE are not mistaken for MICROSOFT/GOOGLE.
-	const appKey = Object.keys(APP_LABELS)
-		.sort((left, right) => right.length - left.length)
-		.find(candidate => name.startsWith(`${candidate}_`));
+	const appKey = APP_LABEL_KEYS.find(candidate => name.startsWith(`${candidate}_`));
 	if (appKey) {
 		const app = APP_LABELS[appKey]!;
 		const action = name.slice(appKey.length + 1);

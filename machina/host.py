@@ -395,9 +395,7 @@ def start_host(
             raise HostError(f"could not create tmux session: {detail or 'tmux failed'}")
         created_session = True
     owns_session = created_session or (
-        existing.owns_session
-        if existing is not None and existing.session == session
-        else False
+        existing.owns_session if existing is not None and existing.session == session else False
     )
 
     log = ttyd_log_path()

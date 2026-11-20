@@ -1507,7 +1507,7 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 ### Commands
 
-Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 53 slash commands.
+Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 52 slash commands, plus the short aliases below.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
@@ -2973,7 +2973,6 @@ The terminal UI registers **52** slash commands. A bare `/` lists the registry, 
 | `/routing` | `/routing [mode\|<prompt>]` | Choose Multi Auto or Single Model, or explain the planner/supervisor/worker route for a prompt |
 | `/search` | `/search <words>` | Find sessions by title |
 | `/sessions` | `/sessions` | Resume a session (menu when empty) |
-| `/settings` | `/settings` | Open the settings menu (same as bare /config) |
 | `/skills` | `/skills [list\|search\|show\|learn\|proposals\|approve\|reject\|revert\|delete\|curator]` | Skills: browse, list, search, show, learn, proposals, approve, reject, revert, delete, curator |
 | `/status` | `/status` | Database, counts and configuration health |
 | `/theme` | `/theme [skin]` | Switch UI skin (menu when empty) |

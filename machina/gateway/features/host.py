@@ -62,9 +62,7 @@ async def host_plan(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 async def host_setup_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     del gw
     try:
-        operation_id = await asyncio.to_thread(
-            _setuper().start_setup, _options(params)
-        )
+        operation_id = await asyncio.to_thread(_setuper().start_setup, _options(params))
     except HostSetupError as error:
         raise RpcError(OPERATION_FAILED, str(error)) from None
     return {"operationId": operation_id}
@@ -99,9 +97,7 @@ async def host_setup_resume(gw: Gateway, params: dict[str, Any]) -> dict[str, An
 
 async def host_add_key(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     del gw
-    public_key = _str(params, "publicKey", max_len=4096) or _str(
-        params, "public_key", max_len=4096
-    )
+    public_key = _str(params, "publicKey", max_len=4096) or _str(params, "public_key", max_len=4096)
     try:
         status = await asyncio.to_thread(_setuper().add_key, public_key)
     except HostSetupError as error:
@@ -146,9 +142,7 @@ async def host_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         if reconfigure
         else None
     )
-    session = (
-        _str(params, "session", required=False, max_len=64) if "session" in params else None
-    )
+    session = _str(params, "session", required=False, max_len=64) if "session" in params else None
     try:
         status = await asyncio.to_thread(
             _setuper().start,

@@ -43,18 +43,6 @@ export function oauthErrorMessage(reasonCode?: string): string {
 	return sanitizeDisplay(OAUTH_ERROR_HELP[reasonCode] ?? "Authorization failed.");
 }
 
-export function formatOAuthStatus(auth: MCPOAuthView): string {
-	const lines = [`Authorization: ${sanitizeDisplay(auth.state)}`];
-	if (auth.issuer) lines.push(`Issuer: ${sanitizeDisplay(auth.issuer)}`);
-	if (auth.resource) lines.push(`Resource: ${sanitizeDisplay(auth.resource)}`);
-	if (auth.grantedScopes?.length) {
-		const scopes = auth.grantedScopes.slice(0, 10).map((scope) => sanitizeDisplay(scope)).join(", ");
-		lines.push(`Scopes: ${scopes}${auth.grantedScopes.length > 10 ? ` (+${auth.grantedScopes.length - 10} more)` : ""}`);
-	}
-	if (auth.expiresAt) lines.push(`Expires: ${sanitizeDisplay(auth.expiresAt)}`);
-	return lines.join("\n");
-}
-
 function formatReview(review: MCPOAuthReview): string {
 	const lines = [
 		`Issuer: ${review.issuer}`,
@@ -267,27 +255,6 @@ export async function authorizeConnector(
 		cleanup();
 		progress.dispose();
 	}
-}
-
-/** Forget saved access (Cancel default; optional provider revocation). */
-export async function forgetConnectorAccess(host: FeatureHost, serverId: string): Promise<void> {
-	const session = requireSession(host);
-	const status = await host.request<{ auth: MCPOAuthView }>("mcp.oauth.status", { id: serverId, sessionId: session.id });
-	const generation = status.auth.generation;
-	if (!await confirm(host, `Forget saved access for ${sanitizeDisplay(serverId)}?`, "Forget access")) return;
-	const revokeChoice = await host.pick("Also revoke at the provider?", [
-		{ value: "no", label: "Keep provider grant" },
-		{ value: "yes", label: "Also revoke at provider" },
-	]);
-	if (!revokeChoice) return;
-	const result = await host.request<{ auth: MCPOAuthView; remoteRevocation: string }>("mcp.oauth.forget", {
-		id: serverId, sessionId: session.id, expectedGeneration: generation, revoke: revokeChoice.value === "yes",
-	});
-	const remote = result.remoteRevocation === "succeeded" ? " Provider revocation succeeded."
-		: result.remoteRevocation === "failed" ? " Provider revocation failed; local access was still forgotten."
-		: result.remoteRevocation === "unsupported" ? " The provider has no revocation endpoint; local access was forgotten."
-		: "";
-	host.print(`${sanitizeDisplay(serverId)} access forgotten.${sanitizeDisplay(remote)}`, "success");
 }
 
 function operationReason(error: unknown): string | undefined {

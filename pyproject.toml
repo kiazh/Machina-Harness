@@ -71,6 +71,10 @@ exclude = [
     ".venv*",
     ".env",
     ".env.local",
+    "**/*.bak",
+    "**/*.bak-*",
+    "**/*.orig",
+    "**/*.rej",
     ".coverage",
     "coverage.xml",
     # Machine-local runtime state (gitignored). Never ship it in any artifact.

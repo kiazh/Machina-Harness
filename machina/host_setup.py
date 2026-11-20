@@ -201,9 +201,7 @@ def _wsl_root(
     wsl = shutil.which("wsl") or shutil.which("wsl.exe")
     if not wsl:
         raise HostSetupError("WSL is not available on this Windows host.")
-    return _run(
-        [wsl, "-d", distro, "-u", "root", "--", "bash", "-lc", script], timeout=timeout
-    )
+    return _run([wsl, "-d", distro, "-u", "root", "--", "bash", "-lc", script], timeout=timeout)
 
 
 def _ensure_wsl_packages(distro: str) -> None:
@@ -639,9 +637,7 @@ def _run_script(distro: str, script: str, *, timeout: float = 60.0) -> None:
         raise HostSetupError(detail or f"host command failed in {distro}.")
 
 
-def start(
-    *, machina_session: str | None = None, session: str | None = None
-) -> HostStatus:
+def start(*, machina_session: str | None = None, session: str | None = None) -> HostStatus:
     """Start the installed host, optionally choosing the hosted conversation.
 
     No arguments preserve the last start script/state. Passing
@@ -681,9 +677,7 @@ def start(
     if machina_session and current_tmux:
         target_session = current_tmux
     if not re.fullmatch(r"^[A-Za-z0-9_-]{1,64}$", target_session):
-        raise HostSetupError(
-            "session must contain only letters, numbers, dashes, and underscores."
-        )
+        raise HostSetupError("session must contain only letters, numbers, dashes, and underscores.")
     target_workspace = current.workspace or str(Path.cwd())
     target_mode = current.execution_mode or local_host.DEFAULT_MODE
     target_port = current.port or _DEFAULT_PORT
@@ -867,9 +861,7 @@ def _setup_windows(
     workspace_wsl = shlex.quote(_wsl_path(Path(workspace).expanduser()))
     env_file = shlex.quote(_env_file_wsl())
     allow_flag = " --allow-full" if allow_full and mode == "full" else ""
-    session_flag = (
-        f" --machina-session {shlex.quote(machina_session)}" if machina_session else ""
-    )
+    session_flag = f" --machina-session {shlex.quote(machina_session)}" if machina_session else ""
     script = f"""
 set -euo pipefail
 mkdir -p "$HOME/.local/bin" "$HOME/.machina-host"
@@ -1082,7 +1074,12 @@ def _tailscale_service_running() -> bool:
         return False
     try:
         completed = _run(
-            [powershell, "-NoProfile", "-Command", "(Get-Service Tailscale -ErrorAction SilentlyContinue).Status"],
+            [
+                powershell,
+                "-NoProfile",
+                "-Command",
+                "(Get-Service Tailscale -ErrorAction SilentlyContinue).Status",
+            ],
             timeout=15,
         )
     except HostSetupError:
@@ -1094,9 +1091,7 @@ def _ensure_tailscale_service(op: _SetupOperation) -> None:
     if _tailscale_service_running():
         return
     _step(op, "tailscale", "Starting the Tailscale service…")
-    _run_elevated_powershell(
-        "Start-Service -Name Tailscale -ErrorAction Stop", timeout=120
-    )
+    _run_elevated_powershell("Start-Service -Name Tailscale -ErrorAction Stop", timeout=120)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if _tailscale_service_running():
@@ -1356,7 +1351,9 @@ if ($added) {{ Restart-Service -Name sshd -ErrorAction SilentlyContinue }}
                 if _is_windows():
                     target = Path.home() / ".ssh/authorized_keys"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                existing = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
+                existing = (
+                    target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
+                )
                 if key not in existing:
                     with target.open("a", encoding="utf-8") as handle:
                         if existing and not existing.endswith("\n"):
@@ -1394,8 +1391,10 @@ def _startup_path() -> Path | None:
                 appdata = _wsl_path(Path(candidate))
         except HostSetupError:
             appdata = ""
-        base = Path(appdata) if appdata else (
-            Path("/mnt/c/Users") / _windows_user() / "AppData/Roaming"
+        base = (
+            Path(appdata)
+            if appdata
+            else (Path("/mnt/c/Users") / _windows_user() / "AppData/Roaming")
         )
     else:
         return None
@@ -1406,17 +1405,18 @@ def _configure_autostart(op: _SetupOperation) -> None:
     target = _startup_path()
     if target is None:
         return
-    distro = _select_distro() if _is_windows() else (os.environ.get("WSL_DISTRO_NAME") or DEFAULT_WSL_DISTRO)
+    distro = (
+        _select_distro()
+        if _is_windows()
+        else (os.environ.get("WSL_DISTRO_NAME") or DEFAULT_WSL_DISTRO)
+    )
     if _is_windows():
         home = _wsl_home(distro)
     else:
         home = os.environ.get("HOME") or f"/home/{os.environ.get('USER') or 'user'}"
     command = f'wsl.exe -d "{distro}" -- "{home}/.machina-host/start.sh"'
     escaped = command.replace('"', '""')
-    content = (
-        'Set shell = CreateObject("WScript.Shell")\r\n'
-        f'shell.Run "{escaped}", 0, False\r\n'
-    )
+    content = f'Set shell = CreateObject("WScript.Shell")\r\nshell.Run "{escaped}", 0, False\r\n'
     try:
         if target.is_file() and target.read_text(encoding="utf-8", errors="replace") == content:
             return
@@ -1520,7 +1520,6 @@ def add_key(public_key: str) -> HostStatus:
     return status()
 
 
-
 def _step(op: _SetupOperation, step: str, message: str, url: str = "") -> None:
     with op.lock:
         op.step = step
@@ -1555,7 +1554,9 @@ def _execute_setup(op: _SetupOperation) -> None:
     options = op.options
     try:
         if options.mode not in local_host.VALID_MODES:
-            raise HostSetupError(f"mode must be one of: {', '.join(sorted(local_host.VALID_MODES))}.")
+            raise HostSetupError(
+                f"mode must be one of: {', '.join(sorted(local_host.VALID_MODES))}."
+            )
         if options.mode == "full" and not options.allow_full:
             raise HostSetupError("Full host mode is refused for remote access.")
         if options.access not in {"both", "browser", "ssh"}:

@@ -30,8 +30,6 @@ export interface StatusRow {
 }
 
 export interface StatusSnapshot {
-	session: string;
-	route: string;
 	agents: StatusRow[];
 	/** Recent persisted sessions (may include the current session). */
 	sessions?: StatusRow[];
@@ -45,9 +43,6 @@ export interface StatusSnapshot {
 	error?: string;
 	project?: string;
 	running?: boolean;
-	mode?: string;
-	tokens?: number;
-	contextPercent?: number | null;
 }
 
 type StatusFilter = "all" | "sessions" | "agents" | "shells" | "tools" | "mcp" | "harnesses";
@@ -66,7 +61,6 @@ interface PanelLine {
 	text: string;
 	/** Right-aligned state/count column. */
 	right?: string;
-	selected?: boolean;
 	/** Present only for selectable rows. */
 	key?: string;
 	row?: StatusRow;
@@ -228,13 +222,10 @@ export class StatusPage implements Component {
 		push(theme.border("─".repeat(width)));
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		let panels = this.buildPanels(snap);
+		const panels = this.buildPanels(snap);
 		this.ensureSelection(panels);
-		// Rebuild after selection so the row marker/selection bar is painted on
-		// the first frame, not only after the first navigation key.
-		if (this.selectedKey && panels.left.keys.includes(this.selectedKey)) panels = this.buildPanels(snap);
 		const selected = panels.left.lines.find(line => line.key === this.selectedKey);
-		const detail = this.buildDetail(selected);
+		const detail = this.buildDetail(selected, snap);
 		const leftSelected = panels.left.lines.findIndex(line => line.key === this.selectedKey);
 		const hasDataRows = panels.left.lines.some(line => line.key && !line.key.startsWith("queue:"));
 		const leftOffset = hasDataRows
@@ -248,8 +239,10 @@ export class StatusPage implements Component {
 		const wide = width >= 84 && bodyHeight >= 10;
 		const formatPanelLine = (line: PanelLine | undefined, panelWidth: number): string => {
 			if (!line) return " ".repeat(panelWidth);
-			const content = line.right ? between(line.text, line.right, panelWidth) : fit(line.text, panelWidth);
-			return line.selected ? selectionBar(content, panelWidth) : content;
+			const selected = Boolean(line.key && line.key === this.selectedKey);
+			const text = selected ? `${theme.accent("›")}${line.text.slice(1)}` : line.text;
+			const content = line.right ? between(text, line.right, panelWidth) : fit(text, panelWidth);
+			return selected ? selectionBar(content, panelWidth) : content;
 		};
 		this.hitboxes = [];
 		if (wide) {
@@ -351,7 +344,6 @@ export class StatusPage implements Component {
 			}
 			for (const [index, entry] of section.entries.entries()) {
 				const key = entry.id ?? `${section.category}:${index}:${entry.label}`;
-				const selected = key === this.selectedKey;
 				const marker = entry.running ? theme.success("●") : theme.dim("○");
 				const detail = entry.detail ? theme.muted(` · ${sanitizeDisplay(entry.detail)}`) : "";
 				const state = entry.state ? stateStyle(entry.state)(sanitizeDisplay(entry.state)) : "";
@@ -361,9 +353,8 @@ export class StatusPage implements Component {
 					? (this.expanded.has(key) ? theme.accent("▾") : theme.dim("▸"))
 					: " ";
 				lines.push({
-					text: `${selected ? theme.accent("›") : " "} ${marker} ${theme.text(sanitizeDisplay(entry.label))}${detail} ${arrow}`,
+					text: `  ${marker} ${theme.text(sanitizeDisplay(entry.label))}${detail} ${arrow}`,
 					right,
-					selected,
 					key,
 					row: entry,
 					section: section.title,
@@ -374,7 +365,7 @@ export class StatusPage implements Component {
 		return { lines, keys };
 	}
 
-	private buildDetail(selected: PanelLine | undefined): PanelModel {
+	private buildDetail(selected: PanelLine | undefined, snap: StatusSnapshot): PanelModel {
 		const row = selected?.row;
 		const lines: PanelLine[] = [{ text: theme.accentBold("Task details") }];
 		if (!row) {
@@ -386,7 +377,7 @@ export class StatusPage implements Component {
 			["Status", row.state || "unknown"],
 			["Updated", age(row.updatedAt) || "unknown"],
 			["Section", selected.section || "activity"],
-			["Project", row.project || this.snapshot().project || "global"],
+			["Project", row.project || snap.project || "global"],
 			["Detail", row.detail || "none"],
 		];
 		lines.push({ text: "" });
@@ -396,7 +387,6 @@ export class StatusPage implements Component {
 		lines.push({ text: "" });
 		const expanded = this.expanded.has(selected.key ?? "");
 		if (!expanded) {
-			const snap = this.snapshot();
 			const onlineMcp = snap.mcp.filter(entry => entry.running).length;
 			const liveHarnesses = snap.harnesses.filter(entry => entry.running).length;
 			lines.push({

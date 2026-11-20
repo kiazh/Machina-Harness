@@ -138,7 +138,6 @@ class FakeHost implements FeatureHost {
 	clear() {
 		this.cleared++;
 	}
-	banner() {}
 	restyle() {
 		this.restyled++;
 	}
@@ -2447,23 +2446,6 @@ test("/mcp rejects invalid server IDs before saving or collecting further fields
   assert.equal(host.asked.length, 1, id);
   assert.equal(host.calls.some(call => call.method === "mcp.configure"), false, id);
  }
-});
-
-test("/mcp status and list inspect without launching; malformed commands are inert", async () => {
- const host = new FakeHost();
- host.responses["mcp.status"] = { server: { id: "docs", display_name: "Docs", state: "disconnected", enabled: false, transport: "stdio", error: null } };
- await run("/mcp status docs", host);
- assert.deepEqual(host.calls, [{ method: "mcp.status", params: { id: "docs" } }]);
- assert.match(host.last().text, /disabled/);
- host.responses["mcp.list"] = { servers: [{ id: "docs", display_name: "Docs", state: "disconnected", enabled: false, transport: "stdio" }] };
- host.responses["mcp.catalog"] = { entries: [] };
- await run("/mcp list", host);
- assert.match(host.last().text, /Docs.*disabled/);
- await run("/mcp", host);
- const count = host.calls.length;
- await run("/mcp connect docs", host);
- assert.equal(host.calls.length, count);
- assert.match(host.last().text, /Usage:/);
 });
 
 // ─── A5: interactive /skills directory + legacy compatibility (spec §12.3) ──

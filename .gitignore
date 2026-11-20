@@ -32,6 +32,10 @@ ENV/
 *.swp
 *.swo
 *~
+*.bak
+*.bak-*
+*.orig
+*.rej
 
 # Environment (never commit secrets; keep only public examples)
 .env

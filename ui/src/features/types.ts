@@ -126,8 +126,6 @@ export interface FeatureHost {
 	writeFile(path: string, text: string): Promise<string>;
 	onConfig(result: ConfigResult): void;
 	clear(): void;
-	/** Re-render the startup banner. */
-	banner(): void;
 	/** Re-resolve theme colors without clearing the transcript (skin change). */
 	restyle(): void;
 	exit(): Promise<void>;

@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from machina.core.questions import question_broker
-from machina.tools.base import registry
 from machina.tools.agents import current_session_id
+from machina.tools.base import registry
 
 
 @registry.register(

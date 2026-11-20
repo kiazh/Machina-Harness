@@ -186,6 +186,28 @@ test("constructor onChange is called after accepted readings", async () => {
 	}
 });
 
+test("an unchanged poll refreshes state without repainting the bar", async () => {
+	const coordinator = new AnimationCoordinator(() => {});
+	const bar = new NowPlayingBar(coordinator);
+	let notifications = 0;
+	const controller = new NowPlayingController({
+		bar,
+		request: async <T,>() => PLAYING as T,
+		onChange: () => {
+			notifications += 1;
+		},
+	});
+	try {
+		await controller.initialize({ nowplaying_enabled: true });
+		assert.equal(notifications, 1);
+		await controller.refresh();
+		assert.equal(notifications, 1, "identical metadata does not request another frame");
+	} finally {
+		controller.stop();
+		coordinator.dispose();
+	}
+});
+
 test("omitting onChange stays supported and causes no exception", async () => {
 	const coordinator = new AnimationCoordinator(() => {});
 	const bar = new NowPlayingBar(coordinator);

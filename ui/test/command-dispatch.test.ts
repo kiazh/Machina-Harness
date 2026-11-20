@@ -94,6 +94,6 @@ test("settings menus stop first during a turn and are available when idle", () =
 		assert.equal(guard(input), "stop-first", input);
 		assert.equal(guard(input, false), "allow", input);
 	}
-	assert.equal(guardSubmit({ name: "settings", args: "" }, true), "stop-first");
+	assert.equal(guardSubmit({ name: "config", args: "" }, true), "stop-first");
 	assert.equal(guard("/config list"), "allow");
 });

@@ -629,22 +629,27 @@ class ContextManager:
         chunk_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        *,
+        include_embedding: bool = True,
     ) -> list[ContextChunk]:
         """Get context chunks for a session, newest first.
 
         Deterministic tie order (created_at DESC, event_seq DESC, id DESC) so a
         batch written in one transaction (identical created_at) still replays in
         original event order; the random UUID is only the final fallback.
+        ``include_embedding=False`` is for preview/history readers that never
+        consume vectors.
         """
+        embedding_column = "embedding" if include_embedding else "NULL::vector AS embedding"
         if chunk_type:
             rows = await db.fetch(
-                """
-                SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, embedding, created_at, accessed_at, document_source
+                f"""
+                SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, {embedding_column}, created_at, accessed_at, document_source
                 FROM context_chunks
                 WHERE session_id = $1 AND chunk_type = $2
                 ORDER BY created_at DESC, event_seq DESC NULLS LAST, id DESC
                 LIMIT $3 OFFSET $4
-                """,
+                """,  # nosec B608 # fixed column expression; values are bound
                 session_id,
                 chunk_type,
                 limit,
@@ -652,13 +657,13 @@ class ContextManager:
             )
         else:
             rows = await db.fetch(
-                """
-                SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, embedding, created_at, accessed_at, document_source
+                f"""
+                SELECT id, session_id, agent_id, chunk_type, payload_msgpack, token_count, {embedding_column}, created_at, accessed_at, document_source
                 FROM context_chunks
                 WHERE session_id = $1
                 ORDER BY created_at DESC, event_seq DESC NULLS LAST, id DESC
                 LIMIT $2 OFFSET $3
-                """,
+                """,  # nosec B608 # fixed column expression; values are bound
                 session_id,
                 limit,
                 offset,

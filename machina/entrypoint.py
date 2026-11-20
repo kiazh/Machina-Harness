@@ -12,6 +12,11 @@ from __future__ import annotations
 import sys
 
 _VALID_MODES = {"ask", "workspace", "sandbox", "full"}
+_VERSION_FLAGS = {"version", "--version", "-V"}
+
+
+def _version_requested(args: list[str]) -> bool:
+    return len(args) == 1 and args[0] in _VERSION_FLAGS
 
 
 def _interactive_mode(args: list[str]) -> tuple[bool, str | None]:
@@ -44,7 +49,15 @@ def _interactive_mode(args: list[str]) -> tuple[bool, str | None]:
 
 def main() -> None:
     """Console-script entry point (``machina``)."""
-    is_ui, mode = _interactive_mode(sys.argv[1:])
+    args = sys.argv[1:]
+    # Version output is a scalar read from the package, not a command that
+    # needs Typer, the tool registry, provider transports, or the DB stack.
+    if _version_requested(args):
+        from machina import __version__
+
+        print(f"Machina v{__version__}")
+        return
+    is_ui, mode = _interactive_mode(args)
     if is_ui:
         from machina.update import auto_update
 

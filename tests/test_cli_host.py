@@ -162,8 +162,9 @@ def test_start_attaches_to_an_existing_tmux_session_without_owning_it(tmp_path, 
     monkeypatch.setattr(
         host_mod,
         "_run",
-        lambda command, **_kwargs: calls.append(command)
-        or subprocess.CompletedProcess(command, 0, "", ""),
+        lambda command, **_kwargs: (
+            calls.append(command) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
     )
     monkeypatch.setattr(host_mod, "_popen", lambda _command, **_kwargs: _Process())
     monkeypatch.setattr(host_mod.time, "sleep", lambda _seconds: None)
@@ -217,8 +218,9 @@ def test_start_resumes_a_machina_session_in_a_new_tmux(tmp_path, monkeypatch):
     monkeypatch.setattr(
         host_mod,
         "_run",
-        lambda command, **_kwargs: calls.append(command)
-        or subprocess.CompletedProcess(command, 0, "", ""),
+        lambda command, **_kwargs: (
+            calls.append(command) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
     )
     monkeypatch.setattr(host_mod, "_popen", lambda _command, **_kwargs: _Process())
     monkeypatch.setattr(host_mod.time, "sleep", lambda _seconds: None)
@@ -241,7 +243,6 @@ def test_load_state_accepts_old_files_without_owns_session(tmp_path, monkeypatch
     loaded = host_mod.load_state()
     assert loaded is not None
     assert loaded.owns_session is True
-
 
 
 def test_stop_terminates_the_bridge_and_session(tmp_path, monkeypatch):

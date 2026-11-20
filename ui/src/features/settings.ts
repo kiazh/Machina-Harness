@@ -767,13 +767,6 @@ export async function openSettingsMenu(host: FeatureHost): Promise<void> {
 
 export const settingsCommands: Command[] = [
 	{
-		name: "settings",
-		description: "Open the settings menu (same as bare /config)",
-		async run(_args, host) {
-			await openSettingsMenu(host);
-		},
-	},
-	{
 		name: "persona",
 		description: "Manage your default persona (menu when empty)",
 		argumentHint: "[description|--clear]",

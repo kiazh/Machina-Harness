@@ -28,6 +28,7 @@ import {
 import { App } from "../src/app.ts";
 import { isOpaqueBackground, setOpaqueBackground, theme } from "../src/design/theme.ts";
 import { runCommand } from "../src/features/index.ts";
+import { parseCommand } from "../src/commands.ts";
 import { RpcError } from "../src/protocol.ts";
 import type { GatewayClient } from "../src/gateway.ts";
 import type { GatewayEvent, SessionInfo } from "../src/protocol.ts";
@@ -1497,7 +1498,7 @@ test("/settings opens the keyboard shortcuts editor", async () => {
 		let opened = 0;
 		app.openKeybindings = async () => { opened++; };
 		const picks = scriptPicks(app, ["cat-keybindings", undefined]);
-		await runCommand({ name: "settings", args: "" }, app);
+		await runCommand(parseCommand("/settings")!, app);
 		assert.equal(opened, 1);
 		assert.ok(picks.calls[0]?.items.some((item) => item.value === "cat-keybindings"));
 	} finally {
@@ -1523,7 +1524,7 @@ test("/settings menu: Editor prefs persist to ui_preferences and reach the live 
 	);
 
 	const picks = scriptPicks(app, ["cat-editor", "syntax", "off", undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	assert.equal(picks.calls[0]?.title, "Settings");
 	assert.ok(picks.calls[0]?.items.some((item) => item.value === "cat-editor"), "Editor category present");
 	const saved = client.requests.filter(
@@ -1556,7 +1557,7 @@ test("/settings menu: tab width applies to the viewport and persists", async () 
 	const pane = internals(app).integration!.pane;
 	assert.ok(pane.render(80).join("\n").includes("a   b"), "4-column default tab stop");
 	scriptPicks(app, ["cat-editor", "tab", "8", undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	const saved = client.requests.filter(
 		(entry) => entry.method === "config.set" && entry.params.key === "ui_preferences",
 	);
@@ -1572,7 +1573,7 @@ test("/settings appearance: transparent background toggles live and persists", a
 	const before = isOpaqueBackground();
 	try {
 		const picks = scriptPicks(app, ["cat-appearance", "transparent", undefined]);
-		await runCommand({ name: "settings", args: "" }, app);
+		await runCommand(parseCommand("/settings")!, app);
 		assert.ok(
 			picks.calls.some((call) => call.title === "Appearance" && call.items.some((item) => item.value === "transparent")),
 			"the transparency row is present in Appearance",
@@ -1601,7 +1602,7 @@ test("/settings appearance: a failed transparency save keeps the session behavio
 	});
 	try {
 		scriptPicks(app, ["cat-appearance", "transparent", undefined]);
-		await runCommand({ name: "settings", args: "" }, app);
+		await runCommand(parseCommand("/settings")!, app);
 		assert.equal(isOpaqueBackground(), false, "the setting stays applied for this session");
 		assert.ok(
 			notices.some((notice) => /could not save/i.test(notice.text)),
@@ -1621,11 +1622,11 @@ test("/settings menu: chat side and ratio reset follow the workspace surface", a
 	controller.setRatio(0.62);
 	assert.equal(controller.getLayoutInput().splitRatio, 0.62);
 	const picks = scriptPicks(app, ["cat-workspace", "side", "right", undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	assert.equal(internals(app).integration?.controller.chatSide, "right", "chat side applied");
 	assert.ok(picks.calls.some((call) => call.title === "Chat side"), "chat side picker opened");
 	const picks2 = scriptPicks(app, ["cat-workspace", "ratio", "reset", undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	assert.equal(internals(app).integration?.controller.getLayoutInput().splitRatio, 0.5, "50/50 reset applied");
 	assert.ok(picks2.calls.some((call) => call.title === "Split ratio"), "ratio picker opened");
 	await app.exit();
@@ -1640,7 +1641,7 @@ test("/settings menu: a language-server row restarts through the controller", as
 	});
 	client.responses.set("workspace.lspControl", { action: "restart", profile: "pyright", state: "starting" });
 	const picks = scriptPicks(app, ["cat-lsp", "pyright", "restart", undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	const lspPicks = picks.calls.find((call) => call.title === "Language servers");
 	assert.ok(lspPicks, "language servers category opened");
 	assert.ok(
@@ -1661,7 +1662,7 @@ test("cancelling the settings menu exits every loop with no side effects", async
 	await waitForWorkspace(app);
 	const before = client.requests.length;
 	const picks = scriptPicks(app, [undefined]);
-	await runCommand({ name: "settings", args: "" }, app);
+	await runCommand(parseCommand("/settings")!, app);
 	assert.equal(picks.calls.length, 1, "one category picker, then cancelled");
 	assert.equal(picks.calls[0]?.title, "Settings");
 	assert.equal(client.requests.length, before, "no RPC beyond the open initialization");

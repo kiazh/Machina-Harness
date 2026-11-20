@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 # Keep a question bounded so a foreground turn cannot wait forever. This is
 # deliberately longer than the default tool timeout: waiting for a human is

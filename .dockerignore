@@ -71,6 +71,10 @@ communications/
 .venv.*/
 .env.*
 !.env.example
+**/*.bak
+**/*.bak-*
+**/*.orig
+**/*.rej
 ui/node_modules/
 .ruff_cache/
 .skill-hub/

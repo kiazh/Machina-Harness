@@ -274,7 +274,6 @@ function makeHost(request: FeatureHost["request"], session?: SessionInfo): Featu
 		writeFile: async (path) => path,
 		onConfig() {},
 		clear() {},
-		banner() {},
 		restyle() {},
 		exit: async () => {},
 	};

@@ -4,8 +4,6 @@ import { stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { StatusPage, type StatusSnapshot } from "../src/components/StatusPage.ts";
 
 const snapshot: StatusSnapshot = {
-	session: "Build a calculator",
-	route: "hermes-proxy / longcat",
 	agents: [
 		{ id: "agent:main", label: "Main · Build a calculator", detail: "longcat · tool terminal", state: "running", running: true, logs: ["Session: main", "Active tool: terminal", "Third detail"] },
 		{ id: "agent:reviewer", label: "Reviewer", detail: "longcat", state: "idle" },

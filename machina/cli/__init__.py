@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import typer
 
-import machina.tools  # noqa: F401 — registers all built-in tools
 from machina import interop as interop_mod
 from machina.cli import output
 from machina.cli.auth import app as auth_app

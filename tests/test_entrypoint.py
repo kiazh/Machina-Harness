@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from machina import update
-from machina.entrypoint import _interactive_mode
+from machina.entrypoint import _interactive_mode, _version_requested
 from machina.ui_launcher import ui_dir
 
 
@@ -23,6 +23,15 @@ def test_subcommands_help_and_unknown_flags_use_the_full_cli() -> None:
     assert _interactive_mode(["--help"]) == (False, None)
     assert _interactive_mode(["--mode", "bogus"]) == (False, None)
     assert _interactive_mode(["--mode"]) == (False, None)
+
+
+def test_version_is_handled_before_the_full_cli_import() -> None:
+    assert _version_requested(["version"])
+    assert _version_requested(["--version"])
+    assert _version_requested(["-V"])
+    assert not _version_requested([])
+    assert not _version_requested(["version", "extra"])
+    assert not _version_requested(["--help"])
 
 
 def test_ui_dir_points_at_the_repository_ui_package() -> None:

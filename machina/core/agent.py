@@ -2253,7 +2253,9 @@ class BaseReActAgent:
                 cursor = (session.state or {}).get("mem_consolidated_up_to") if session else None
                 since = self._parse_consolidation_cursor(cursor)
                 try:
-                    newest = await context_manager.get_chunks(session_id, limit=1)
+                    newest = await context_manager.get_chunks(
+                        session_id, limit=1, include_embedding=False
+                    )
                 except Exception as exc:
                     record_failure("agent.consolidation_cursor", exc)
                     newest = []

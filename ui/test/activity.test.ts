@@ -58,6 +58,23 @@ test("activity retains recent tool and MCP call state for the status page", () =
 	assert.equal(store.allTools().find((tool) => tool.id === "t2")?.name, "mcp_call");
 });
 
+test("activity bounds retained tool arguments and the global tool result page", () => {
+	const store = new ActivityStore();
+	store.noteToolStart("main", "large", "write_file", {
+		name: "mcp_call",
+		path: "a.py",
+		content: "x".repeat(1_000_000),
+	});
+	const retained = store.allTools()[0]!.args!;
+	assert.equal(retained.name, "mcp_call", "connector identity survives truncation");
+	assert.equal(retained._truncated, true);
+	assert.ok(JSON.stringify(retained).length < 5_000);
+	for (let index = 0; index < 40; index++) {
+		store.noteToolStart("main", `t${index}`, "terminal", { index });
+	}
+	assert.equal(store.allTools(7).length, 7);
+});
+
 test("activity row collapses when empty and stays inside narrow terminal widths", () => {
 	let summary = "";
 	const bar = new ActivityBar(() => summary, () => {});

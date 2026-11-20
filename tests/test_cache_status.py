@@ -22,8 +22,6 @@ def test_openai_reports_its_implicit_cache_contract() -> None:
     assert "prompt_tokens_details.cached_tokens" in status["usageFields"]
 
 
-
-
 def test_unknown_provider_is_conservatively_unsupported() -> None:
     status = cache_status("acme-local", "mystery-1")
 

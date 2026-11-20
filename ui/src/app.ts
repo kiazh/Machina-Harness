@@ -306,6 +306,7 @@ export class App implements FeatureHost {
 	private statusMcp: StatusRow[] = [];
 	private statusSessions: StatusRow[] = [];
 	private statusDefaultPending = false;
+	private statusSlowRefreshAt = 0;
 	private statusUpdatedAt = "";
 	private statusError = "";
 	private explorerBurstStartedAt = 0;
@@ -1354,12 +1355,12 @@ export class App implements FeatureHost {
 		if (this.current && !titles.has(this.current.id)) titles.set(this.current.id, this.current.title || this.current.id);
 		const agentIds = new Set(family.map((row) => row.session.id));
 		const agents: StatusRow[] = family.map((row) => {
+			const activeTool = this.turnSession.activeToolLabel(row.session.id);
+			const queued = this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length;
 			const detail = [
 				row.session.model || "",
-				this.turnSession.activeToolLabel(row.session.id) ? `tool ${this.turnSession.activeToolLabel(row.session.id)}` : "",
-				this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length
-					? `${this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length} queued`
-					: "",
+				activeTool ? `tool ${activeTool}` : "",
+				queued ? `${queued} queued` : "",
 			].filter(Boolean).join(" · ");
 			return {
 				id: `agent:${row.session.id}`,
@@ -1372,8 +1373,8 @@ export class App implements FeatureHost {
 					`Title: ${row.session.title || "untitled"}`,
 					`Route: ${row.session.provider || "?"} / ${row.session.model || "?"}`,
 					`State: ${row.running ? "running" : "idle"}`,
-					`Active tool: ${this.turnSession.activeToolLabel(row.session.id) || "none"}`,
-					`Queued: ${this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length}`,
+					`Active tool: ${activeTool || "none"}`,
+					`Queued: ${queued}`,
 				],
 			};
 		});
@@ -1395,7 +1396,7 @@ export class App implements FeatureHost {
 				],
 			});
 		}
-		const shells: StatusRow[] = this.activity.allJobs().map(({ sessionId, job }) => ({
+		const shells: StatusRow[] = this.activity.allJobs().slice(0, 24).map(({ sessionId, job }) => ({
 			id: `shell:${sessionId}:${job.id}`,
 			label: job.foreground ? "foreground shell" : "background shell",
 			detail: `${titles.get(sessionId) ?? sessionId.slice(0, 8)} · ${job.command}`,
@@ -1409,7 +1410,7 @@ export class App implements FeatureHost {
 				...(job.output ? ["", "Output:", ...job.output.split(/\r?\n/).slice(0, 12)] : []),
 			],
 		}));
-		const tools: StatusRow[] = this.activity.allTools().slice(0, 24).map((tool) => {
+		const tools: StatusRow[] = this.activity.allTools(24).map((tool) => {
 			const kind = tool.name.startsWith("mcp_")
 				? "MCP"
 				: tool.name.startsWith("harness_")
@@ -1440,8 +1441,6 @@ export class App implements FeatureHost {
 		);
 		const project = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 		return {
-			session: this.current?.title || "No active session",
-			route: this.current ? `${this.current.provider || "?"} / ${this.current.model || "?"}` : "no route",
 			project: project || undefined,
 			agents,
 			sessions: this.statusSessions,
@@ -1454,9 +1453,6 @@ export class App implements FeatureHost {
 			updatedAt: this.statusUpdatedAt,
 			error: this.statusError,
 			running: this.running,
-			mode: this.footer.mode,
-			tokens: this.footer.tokens,
-			contextPercent: this.footer.contextPercent,
 		};
 	}
 
@@ -1464,17 +1460,19 @@ export class App implements FeatureHost {
 		if (this.view !== "status" || this.statusRefreshing) return;
 		this.statusRefreshing = true;
 		const sessionId = this.current?.id;
+		const slow = Date.now() - this.statusSlowRefreshAt >= 15_000;
+		if (slow) this.statusSlowRefreshAt = Date.now();
 		try {
 			const [interop, mcp, jobs, steering, sessionsResult] = await Promise.allSettled([
-				this.request<InteropStatusResult>("interop.status"),
-				this.request<{ servers?: MCPServerView[] }>("mcp.list"),
+				slow ? this.request<InteropStatusResult>("interop.status") : Promise.resolve(null),
+				slow ? this.request<{ servers?: MCPServerView[] }>("mcp.list") : Promise.resolve(null),
 				sessionId
 					? this.request<{ jobs?: ShellJob[] }>("shell.jobs", { sessionId })
 					: Promise.resolve({ jobs: [] }),
 				sessionId
 					? this.request<{ items?: SteeringItem[] }>("prompt.steering", { sessionId })
 					: Promise.resolve({ items: [] }),
-				this.request<SessionListResult>("session.list", { limit: 40 }),
+				slow ? this.request<SessionListResult>("session.list", { limit: 40 }) : Promise.resolve(null),
 			]);
 			if (this.view !== "status") return;
 			if (sessionId) {
@@ -1485,7 +1483,7 @@ export class App implements FeatureHost {
 					this.activity.setQueue(sessionId, steering.value.items ?? []);
 				}
 			}
-			if (sessionsResult.status === "fulfilled") {
+			if (sessionsResult.status === "fulfilled" && sessionsResult.value) {
 				const live = new Set(this.turnSession.inFlightSessions());
 				const currentId = this.current?.id;
 				const defaultProject = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "global";
@@ -1537,7 +1535,7 @@ export class App implements FeatureHost {
 					this.statusDefaultPending = false;
 				}
 			}
-			if (interop.status === "fulfilled") {
+			if (interop.status === "fulfilled" && interop.value) {
 				this.statusHarnesses = (interop.value.platforms ?? []).map((row) => ({
 					id: `harness:${row.platform}`,
 					label: row.label || row.platform,
@@ -1554,7 +1552,7 @@ export class App implements FeatureHost {
 					],
 				}));
 			}
-			if (mcp.status === "fulfilled") {
+			if (mcp.status === "fulfilled" && mcp.value) {
 				this.statusMcp = (mcp.value.servers ?? []).map((server) => ({
 					id: `mcp:${server.id}`,
 					label: server.display_name || server.id,
@@ -1596,6 +1594,7 @@ export class App implements FeatureHost {
 		this.footer.keyHint = "";
 		this.statusUpdatedAt = "";
 		this.statusError = "";
+		this.statusSlowRefreshAt = 0;
 		this.refreshFamily();
 		void this.refreshStatusData();
 		this.statusRefreshTimer = setInterval(() => { void this.refreshStatusData(); }, 3_000);
@@ -2125,12 +2124,6 @@ export class App implements FeatureHost {
 
 	clear(): void {
 		this.transcript.clear();
-		this.tui.requestRender();
-	}
-
-	banner(): void {
-		this.transcript.clear();
-		this.transcript.addComponent(header(this.version, this.headerInfo(this.current)));
 		this.tui.requestRender();
 	}
 

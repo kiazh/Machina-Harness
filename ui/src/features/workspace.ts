@@ -44,31 +44,6 @@ function requireWorkspace(host: FeatureHost): WorkspaceHost | undefined {
 	return surface;
 }
 
-/**
- * One-line-per-server status text for `/lsp status` and the editor status
- * row. Honest states only: the values are the protocol's server states, and
- * an absent capability summary is reported as unknown, never invented.
- */
-export function formatLspStatusLine(snapshot: WorkspaceLspStatusSnapshot): string | undefined {
-	const parts: string[] = [];
-	const seen = new Set<string>();
-	for (const server of snapshot.servers) {
-		const name = server.languageId || server.profile;
-		if (!name || seen.has(name)) continue;
-		seen.add(name);
-		parts.push(`${name} ${server.state}`);
-	}
-	if (parts.length === 0) {
-		for (const [profile, entry] of Object.entries(snapshot.profiles)) {
-			parts.push(`${profile} ${entry.state}`);
-		}
-	}
-	if (parts.length === 0) return undefined;
-	const shown = parts.slice(0, 3);
-	if (parts.length > shown.length) shown.push(`+${parts.length - shown.length}`);
-	return shown.join(" · ");
-}
-
 function capabilitiesSummary(capabilities: Record<string, unknown> | undefined): string {
 	if (!capabilities) return "capabilities unknown";
 	const names = Object.entries(capabilities)

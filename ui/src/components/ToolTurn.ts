@@ -6,7 +6,7 @@ import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { LIMITS } from "../design/tokens.ts";
-import { sanitizeDisplay, shapePreview } from "../design/text.ts";
+import { sanitizeDisplay, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
 import { toolCallDisplayName } from "../mcpNames.ts";
 import { theme } from "../theme.ts";
 import { panelContentWidth, renderToolPanel, renderToolSummary } from "./ToolPanel.ts";
@@ -96,9 +96,11 @@ export class ToolTurn implements Component {
 		const displayArgs = name === "mcp_call"
 			? (args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments) ? { arguments: args.arguments } : {})
 			: args;
-		this.args = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
+		const argsText = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
+		const clipped = truncateUtf8ByBytes(argsText, 4_000);
+		this.args = clipped.truncated ? `${clipped.text} …` : clipped.text;
 		this.activity = activity;
 		this.startedAt = Date.now();
 	}

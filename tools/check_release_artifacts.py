@@ -16,6 +16,15 @@ import zipfile
 from pathlib import Path
 
 
+def _is_local_artifact(name: str) -> bool:
+    """Editor backups/temporaries must never enter a release artifact."""
+    parts = Path(name).parts
+    return any(
+        part.endswith((".bak", ".orig", ".rej")) or ".bak-" in part or part.endswith("~")
+        for part in parts
+    )
+
+
 def check_source(archive_path: Path) -> None:
     with tarfile.open(archive_path) as archive:
         members = archive.getmembers()
@@ -44,9 +53,10 @@ def check_source(archive_path: Path) -> None:
                 or part in {".env", "__pycache__"}
                 for part in Path(name).parts
             )
+            or _is_local_artifact(name)
             for name in names
         ):
-            raise ValueError("Source archive contains local dependencies or state")
+            raise ValueError("Source archive contains local dependencies, state, or backups")
     print(f"Verified clean source distribution: {archive_path.name}")
 
 
@@ -83,6 +93,7 @@ def check(wheel: Path) -> None:
                 part in {".env", "node_modules", "__pycache__", ".venv.broken.bak"}
                 for part in Path(name).parts
             )
+            or _is_local_artifact(name)
         ]
         if forbidden:
             raise ValueError(f"Unexpected local artifacts: {forbidden}")

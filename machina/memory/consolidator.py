@@ -308,7 +308,9 @@ class MemoryConsolidator:
                 chunks = await pending
             else:
                 chunks = await context_manager.get_chunks(
-                    session_id, limit=MAX_CHUNKS_PER_CONSOLIDATION
+                    session_id,
+                    limit=MAX_CHUNKS_PER_CONSOLIDATION,
+                    include_embedding=False,
                 )
         if not chunks:
             logger.debug("No chunks to consolidate for session %s", session_id)

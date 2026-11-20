@@ -28,7 +28,6 @@ import { workspaceCommands } from "./workspace.ts";
 import type { AskTextOptions, AskTextResult, Command, FamilySession, FeatureHost, NoticeKind } from "./types.ts";
 
 export type { AskTextOptions, AskTextResult, Command, FamilySession, FeatureHost, NoticeKind };
-export { formatLspStatusLine, workspaceCommands } from "./workspace.ts";
 export type { WorkspaceHost } from "./types.ts";
 
 const appCommands: Command[] = [
@@ -40,7 +39,6 @@ const appCommands: Command[] = [
 			else await host.inspectActivity?.();
 		},
 	},
-	{ name: "overview", description: "Open the full-page live status tab", async run(_args, host) { host.openStatus?.(); } },
 	{
 		name: "clear",
 		description: "Clear the terminal and start a new chat",

@@ -106,9 +106,7 @@ def test_setup_runs_every_windows_step_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(host_setup, "_ensure_wsl_packages", lambda distro: None)
     monkeypatch.setattr(host_setup, "status", lambda: _status(running=running, runtime_ready=False))
 
-    def fake_setup(
-        distro, workspace, mode, port, session, allow_full=False, machina_session=""
-    ):
+    def fake_setup(distro, workspace, mode, port, session, allow_full=False, machina_session=""):
         calls.append("runtime")
         session_ids.append(machina_session)
 
@@ -213,7 +211,9 @@ def test_client_instructions_include_browser_and_ssh(monkeypatch):
 
 def test_pending_setup_round_trips_and_resumes(tmp_path, monkeypatch):
     monkeypatch.setattr(host_setup, "_shared_home", lambda: tmp_path)
-    options = host_setup.SetupOptions(workspace=str(tmp_path), access="ssh", public_key="ssh-ed25519 AAAA")
+    options = host_setup.SetupOptions(
+        workspace=str(tmp_path), access="ssh", public_key="ssh-ed25519 AAAA"
+    )
     host_setup._save_pending(options, "Restart Windows, then run /host setup again.")
 
     pending = host_setup.pending_setup()

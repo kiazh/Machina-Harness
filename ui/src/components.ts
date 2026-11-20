@@ -14,7 +14,6 @@ import {
 	truncateToWidth,
 	type TuiMouseEvent,
 	visibleWidth,
-	VStack,
 	type TUI,
 } from "@earendil-works/pi-tui";
 import { ICONS } from "./design/icons.ts";
@@ -71,17 +70,15 @@ export class ThinkingIndicator implements Component {
 }
 
 // Compact transcript widgets live in components/*. New code imports them
-// directly; this facade re-exports the shared surface plus legacy helper
-// names (diffStyle/formatArgs) so existing callers keep compiling.
+// directly; this facade keeps the shared transcript surface.
 export { AssistantTurn } from "./components/AssistantTurn.ts";
 export { ApprovalCard } from "./components/ApprovalCard.ts";
 export type { ApprovalDecision, ApprovalDetails } from "./components/ApprovalCard.ts";
 export { DiffBlock, styleDiffLine } from "./components/DiffBlock.ts";
-export { styleDiffLine as diffStyle } from "./components/DiffBlock.ts";
 export { Notice } from "./components/Notice.ts";
 export { OutputStore, OutputViewer } from "./components/OutputViewer.ts";
 export type { OutputRecord, OutputViewerOptions } from "./components/OutputViewer.ts";
-export { formatToolArgs as formatArgs, ToolTurn } from "./components/ToolTurn.ts";
+export { formatToolArgs, ToolTurn } from "./components/ToolTurn.ts";
 export type { ToolOutcome, ToolResultView } from "./components/ToolTurn.ts";
 export { UserTurn } from "./components/UserTurn.ts";
 
@@ -309,14 +306,6 @@ export class ComposerInput extends Editor {
 
 /** Muted composer placeholder (the Editor cannot render its own). */
 export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
-
-/**
- * The app's fullscreen layout, Codex style: the transcript scrolls in the
- * flexible area while the composer and footer stay pinned to the bottom.
- * The fixed chrome must never shrink — all overflow belongs to the scroll
- * area (opencode's composer is flexShrink=0 too).
- */
-export type LayoutRoot = VStack;
 
 /**
  * Codex-style composer: a filled input block with a left accent bar. Wraps

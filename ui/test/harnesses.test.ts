@@ -101,7 +101,6 @@ class HarnessesFakeHost implements FeatureHost {
 	}
 	onConfig(_result: unknown) {}
 	clear() {}
-	banner() {}
 	restyle() {}
 	async exit() {}
 	showOAuthProgress(_options: OAuthProgressOptions): OAuthProgressHandle {

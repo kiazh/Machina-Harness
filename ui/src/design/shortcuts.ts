@@ -28,7 +28,7 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ value: "words", context: "Composer", label: "Ctrl+←/→ — move by word", description: "Alt+B / Alt+F also move by word when a terminal does not forward Ctrl+Arrow" },
 	{ value: "subagents", context: "Composer", label: "↓ — subagent menu", description: "On empty input: switch between the main session and its subagents" },
 	{ value: "tabs", context: "Composer", label: "Ctrl+N then J / K — next / previous agent", description: "With composer focus; the file editor keeps Ctrl+Shift+Arrow word selection" },
-	{ value: "status", context: "Composer", label: "Ctrl+N then ← / → — status tab", description: "Full-page live view of agents, shells, tools/MCP calls, queues and external harnesses · /overview" },
+	{ value: "status", context: "Composer", label: "Ctrl+N then ← / → — status tab", description: "Full-page live view of agents, shells, tools/MCP calls, queues and external harnesses · /activity" },
 	{ value: "quickopen", context: "Workspace", label: "Ctrl+P — quick open", description: "Fuzzy file search in the workspace" },
 	{ value: "save", context: "Workspace", label: "Ctrl+S — save file", description: "Save the active editor buffer" },
 	{ value: "closetab", context: "Workspace", label: "Ctrl+W — close tab", description: "Close the active editor tab (dirty: save/discard/cancel); the terminal may intercept" },

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Component, Container, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { helpText, parseCommand } from "../src/commands.ts";
-import { Footer, formatArgs, Notice, ToolTurn, UserTurn } from "../src/components.ts";
+import { Footer, Notice, ToolTurn, UserTurn } from "../src/components.ts";
+import { styleDiffLine } from "../src/components/DiffBlock.ts";
+import { formatToolArgs } from "../src/components/ToolTurn.ts";
 import { AnimationCoordinator, type ActivitySource } from "../src/design/motion.ts";
 import { SLASH_COMMANDS } from "../src/features/index.ts";
 import type { GatewayEvent } from "../src/protocol.ts";
@@ -102,6 +104,13 @@ test("parseCommand recognizes commands, aliases and plain prompts", () => {
 	assert.equal(parseCommand("explain /etc/hosts"), undefined);
 	assert.equal(parseCommand("//not a command"), undefined);
 	assert.equal(parseCommand("/"), undefined);
+});
+
+test("every registered command parses back to itself", () => {
+	for (const command of SLASH_COMMANDS) {
+		assert.deepEqual(parseCommand(`/${command.name}`), { name: command.name, args: "" }, command.name);
+	}
+	assert.deepEqual(parseCommand("/settings"), { name: "config", args: "" }, "settings is the documented config alias");
 });
 
 test("help lists every command", () => {
@@ -248,8 +257,8 @@ test("every widget respects the render width", async () => {
 	);
 });
 
-test("formatArgs summarizes arguments", () => {
-	assert.equal(formatArgs({ path: "a.py", limit: 20, flags: ["-n"] }), 'path=a.py, limit=20, flags=["-n"]');
+test("formatToolArgs summarizes arguments", () => {
+	assert.equal(formatToolArgs({ path: "a.py", limit: 20, flags: ["-n"] }), 'path=a.py, limit=20, flags=["-n"]');
 });
 
 test("assistant output renders a square response frame and respects width", async () => {
@@ -300,16 +309,15 @@ test("transcript blocks leave a margin row so corners never touch", async () => 
 	for (const line of tool.render(40)) assert.ok(visibleWidth(line) <= 40, "margin row respects width");
 });
 
-test("codex-style diff coloring marks additions and deletions", async () => {
-	const { diffStyle } = await import("../src/components.ts");
-	assert.match(diffStyle("+ added"), /added/);
-	assert.match(diffStyle("- removed"), /removed/);
-	assert.match(diffStyle("@@ -1 +1 @@"), /@@/);
-	assert.equal(stripTerminalSequences(diffStyle("+ added")), "+ added");
-	assert.notEqual(diffStyle("+ added"), "+ added", "additions carry color");
-	assert.notEqual(diffStyle("- removed"), "- removed", "deletions carry color");
-	assert.equal(stripTerminalSequences(diffStyle("  context")), "  context");
-	assert.equal(diffStyle("  context").length > 0, true);
+test("codex-style diff coloring marks additions and deletions", () => {
+	assert.match(styleDiffLine("+ added"), /added/);
+	assert.match(styleDiffLine("- removed"), /removed/);
+	assert.match(styleDiffLine("@@ -1 +1 @@"), /@@/);
+	assert.equal(stripTerminalSequences(styleDiffLine("+ added")), "+ added");
+	assert.notEqual(styleDiffLine("+ added"), "+ added", "additions carry color");
+	assert.notEqual(styleDiffLine("- removed"), "- removed", "deletions carry color");
+	assert.equal(stripTerminalSequences(styleDiffLine("  context")), "  context");
+	assert.equal(styleDiffLine("  context").length > 0, true);
 });
 
 test("key hints join bold labels with dot separators", async () => {

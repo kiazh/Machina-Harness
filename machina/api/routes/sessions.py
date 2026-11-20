@@ -135,7 +135,7 @@ async def get_session(session_id: str) -> dict[str, Any]:
     session = await session_manager.get(sid)
     if session is None:
         raise HTTPException(404, "session not found")
-    chunks = await context_manager.get_chunks(sid, limit=200)
+    chunks = await context_manager.get_chunks(sid, limit=200, include_embedding=False)
     return {
         "session": session_to_dict(session),
         "history": [_redact_value(h) for h in history_from_chunks(chunks)],
@@ -161,7 +161,7 @@ async def get_context(session_id: str, limit: int = Query(50, ge=1, le=500)) -> 
     session = await session_manager.get(sid)
     if session is None:
         raise HTTPException(404, "session not found")
-    chunks = await context_manager.get_chunks(sid, limit=limit)
+    chunks = await context_manager.get_chunks(sid, limit=limit, include_embedding=False)
     return {
         "chunks": [
             {

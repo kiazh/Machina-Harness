@@ -170,7 +170,6 @@ test("slash commands work against the real gateway and database", { skip, timeou
 		},
 		onConfig: () => {},
 		clear: () => {},
-		banner: () => {},
 		restyle: () => {},
 		profileId: () => "default",
 		setProfile: () => {},

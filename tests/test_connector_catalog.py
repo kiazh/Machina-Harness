@@ -50,7 +50,10 @@ async def test_connector_starters_validate_without_tokens_or_installation_author
         assert "owner" not in fields and "revision" not in fields
         assert not config.command and not config.argv  # No package-manager auto-install.
         assert not config.credential_profile and not config.secret_refs
-        assert all(value and not value.startswith(("ghp_", "github_pat_")) for value in config.header_refs.values())
+        assert all(
+            value and not value.startswith(("ghp_", "github_pat_"))
+            for value in config.header_refs.values()
+        )
         if config.oauth:
             assert not config.oauth.get("client_secret")
             assert not config.oauth.get("access_token")

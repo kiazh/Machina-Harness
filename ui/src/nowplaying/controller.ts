@@ -21,6 +21,19 @@ function displayValue(value: unknown): string | null {
 	return safe || null;
 }
 
+function readingSignature(state: NowPlayingState): string {
+	return JSON.stringify([
+		state.available,
+		state.state,
+		state.title,
+		state.artist,
+		state.album,
+		state.source,
+		state.error,
+		state.duration,
+	]);
+}
+
 function normalize(payload: unknown): NowPlayingState {
 	const raw = (payload ?? {}) as Partial<NowPlayingState>;
 	const state: NowPlayingState["state"] =
@@ -50,6 +63,8 @@ export class NowPlayingController {
 	private transition = 0;
 	/** Reads awaiting a gateway answer; the poll tick skips while this is > 0. */
 	private inFlight = 0;
+	/** Last accepted reading; identical polls update progress without a repaint. */
+	private lastSignature = "";
 	onChange?: () => void;
 
 	constructor(options: NowPlayingControllerOptions) {
@@ -135,8 +150,13 @@ export class NowPlayingController {
 		// A slower older poll must never overwrite a newer reading, and a
 		// refresh that lands after disabling must not resurface state.
 		if (!this.enabled || id !== this.seq) return;
+		const signature = readingSignature(next);
+		const changed = signature !== this.lastSignature;
+		this.lastSignature = signature;
 		this.bar.state = next;
-		this.sync();
+		// A static reading needs no repaint; playing audio is already driven by
+		// the shared 250 ms animation coordinator for the clock and equalizer.
+		if (changed) this.sync();
 	}
 
 	/** Re-read after a command; the state is never guessed. */
@@ -189,11 +209,13 @@ export class NowPlayingController {
 		if (!enabled) {
 			this.stop();
 			this.seq += 1;
+			this.lastSignature = "";
 			this.bar.state = undefined;
 			this.bar.visible = false;
 			this.sync();
 			return saved;
 		}
+		this.lastSignature = "";
 		this.bar.visible = true;
 		await this.refresh();
 		if (transition !== this.transition) {

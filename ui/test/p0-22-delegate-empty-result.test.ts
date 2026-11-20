@@ -75,7 +75,6 @@ class FakeHost implements FeatureHost {
 	}
 	onConfig(_result: ConfigResult) {}
 	clear() {}
-	banner() {}
 	restyle() {}
 	async exit() {}
 

@@ -325,7 +325,7 @@ def context(
                 console.print(f"[bold]Context window:[/bold] {window} tokens")
                 console.print()
 
-            chunks = await context_manager.get_chunks(sid, limit=limit)
+            chunks = await context_manager.get_chunks(sid, limit=limit, include_embedding=False)
             if not chunks:
                 console.print("[yellow]No context chunks found.[/yellow]")
                 return

@@ -83,7 +83,6 @@ class OAuthFakeHost implements FeatureHost {
 	}
 	onConfig(_result: unknown) {}
 	clear() {}
-	banner() {}
 	restyle() {}
 	async exit() {}
 	showOAuthProgress(options: OAuthProgressOptions): OAuthProgressHandle {
