@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 620 focused local tests plus the external real-PostgreSQL suite · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 620 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -1340,6 +1340,15 @@ Run a pre-registered suite with at least 10 fresh held-out tasks, 3 trials each,
 ## Ecosystem integration status
 
 The landscape contains standards, frameworks, and hardware specifications at very different levels. Machina integrates a small set with real lifecycle behavior and deliberately does **not** claim the rest. A name in the landscape is not a feature.
+
+The shipped integrations are not decorative:
+
+- `AGENTS.md` and Agent Skills reduce repeated prompt instructions; the compact tool catalog keeps ordinary turns from carrying every schema.
+- JSON-Schema tool contracts and the protected OpenAPI 3.2.1 document give clients a typed surface; OAuth/OIDC and Vault/AWS bind credentials and approvals without putting secrets in the prompt.
+- Audit events, the usage ledger, OTLP export, CycloneDX SBOM, and the Sigstore/SLSA release workflow make a turn and a release traceable.
+- A2A 1.0, MCP, CloudEvents 1.0, and the OpenCode/Codex/Hermes adapters make Machina usable as a server or a delegate without a second runtime.
+- The entity/time memory graph extends retrieval beyond flat claims; Docker, gVisor, Kata, Kata-Firecracker, and WASI provide selectable execution isolation.
+- The headless Chrome/Edge check verifies rendered web artifacts instead of trusting HTML inspection.
 
 | Area | Integrated and exercised here | Not integrated / not claimed |
 |---|---|---|
