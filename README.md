@@ -30,9 +30,11 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~124,000 lines of Python backed by 6,487 passing tests on real PostgreSQL · 18 provider types · 74 agent definitions · 77 skill packages · 45 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 620 focused local tests plus the external real-PostgreSQL suite · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
+
+**Benchmark status:** token-efficient on measured tasks; not yet proven best overall. Held-out SWE-bench Lite currently favors OpenCode. See [benchmark evidence](#benchmark-evidence-and-head-to-head-results).
 
 ## Install
 
@@ -76,6 +78,8 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 - [Deep dive 5: Providers and accounting](#deep-dive-5-providers-and-accounting) — one interface, many models
 - [Deep dive 6: Surfaces and integrations](#deep-dive-6-surfaces-and-integrations) — TUI, CLI, HTTP, MCP, skills, jobs
 - [Reliability and testing](#reliability-and-testing) — how the project is kept honest
+- [Benchmark evidence and head-to-head results](#benchmark-evidence-and-head-to-head-results) — what the comparisons do and do not prove
+- [Ecosystem integration status](#ecosystem-integration-status) — what is integrated, compatible, or intentionally not claimed
 - [Conceptual blueprint](#conceptual-blueprint) — how to build a harness like this
 - [Get started](#get-started) — installation, requirements, first task
 - [Reference](#reference) — commands, configuration, API, deployment, source map
@@ -107,7 +111,7 @@ flowchart TB
         direction LR
         TUI["Terminal UI<br/>chat, editor, explorer<br/>approval cards"]
         CLI["CLI<br/>chat, sessions, memory<br/>jobs, routing"]
-        API["HTTP API + SSE<br/>33 REST routes<br/>approval pause"]
+        API["HTTP API + SSE<br/>35 functional REST routes<br/>approval pause"]
         MCPS["MCP server<br/>bounded Machina tools<br/>for other agents"]
         EXT["External harnesses<br/>OpenCode, Codex<br/>Hermes"]
     end
@@ -122,7 +126,7 @@ flowchart TB
     subgraph TURN["Turn engine"]
         direction LR
         OWN["Turn ownership<br/>lease, fencing<br/>cancellation"]
-        FACTORY["Agent factory<br/>74 definitions<br/>intersected with authority"]
+        FACTORY["Agent factory<br/>71 definitions<br/>intersected with authority"]
         LOOP["Agent loop<br/>stream, tools<br/>recovery, budgets"]
         ORCH["Orchestrator<br/>delegation, parallel plan<br/>supervisor synthesis"]
         REPAIR["Repair controller<br/>caps, evidence<br/>verify gate"]
@@ -156,7 +160,7 @@ flowchart TB
 
     subgraph TOOLS["Tools and integrations"]
         direction LR
-        TOOLREG["Tool registry<br/>45 built-in tools"]
+        TOOLREG["Tool registry<br/>46 built-in tools"]
         WORKSPACE["Workspace + LSP<br/>files, completion<br/>diagnostics"]
         RAG["Documents + RAG<br/>ingest, embed<br/>search, rerank"]
         SKILLS["Skills<br/>77 packages<br/>catalog-first"]
@@ -357,16 +361,16 @@ Both systems share the same discipline: **store the original, project a bounded 
 
 | Metric | This checkout |
 |---|---|
-| Python backend | ~124,000 lines across 336 files |
-| Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
+| Python backend | ~130,239 lines across 363 files |
+| Backend tests | 620 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
-| Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 45 built-in tools; 41 top-level CLI commands (86 paths); 53 slash commands |
-| Protocol and API | 166 RPC methods (14 core + 152 feature); 33 REST routes; 25 protocol events |
-| Configuration | 130 keys with defaults (Appendix D) |
+| Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
+| Tools and commands | 46 built-in tools; 47 top-level CLI commands (39 one-shot + 8 groups); 52 slash commands |
+| Protocol and API | 166 RPC methods (14 core + 152 feature); 35 functional REST routes (38 with docs); 25 protocol events |
+| Configuration | 134 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 32 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
-| CLI cold start | `machina version` measured at ~0.5 s on this checkout with a warm filesystem cache; the first run after install is slower |
+| CLI cold start | `machina --version` measured at ~0.12 s; `machina --help` at ~0.24 s on this checkout with a warm filesystem cache; first run after install is slower |
 
 Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](CHANGELOG.md); historical release-gate evidence is in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
 
@@ -403,7 +407,10 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Harness interop** | Let OpenCode, Codex, or Hermes use Machina as an MCP server, or delegate Machina work to an installed external harness | [Surfaces](#harness-interop) |
 | **Durable automation** | Interval, cron, heartbeat, and operator-approved script jobs that survive restarts | [Surfaces](#jobs-that-survive-restarts) |
 | **Workspace and LSP** | Editor, tabs, explorer, Quick Open, diagnostics, and optional language servers | [Surfaces](#workspace-and-language-intelligence) |
-| **Capability awareness** | Every turn carries a generated index of surfaces, mechanisms, tools, providers, and vocabularies; a read-only tool returns the full catalog | [Self-knowledge](#self-knowledge-the-capability-catalog) |
+| **Capability awareness** | A compact generated orientation each turn; `tool_load` and `harness_catalog` expose full tool and provider details on demand | [Self-knowledge](#self-knowledge-the-capability-catalog) |
+| **Dynamic tool loading** | Eight core schemas plus on-demand schemas; the full 46-tool surface stays out of the ordinary prompt | [Token efficiency](docs/TOKEN_EFFICIENCY.md) |
+| **A2A and OIDC** | A2A 1.0 agent card and task bridge, CloudEvents envelopes, optional OIDC/JWT verification, and the protected OpenAPI 3.2.1 document | [HTTP API](#http-api) |
+| **Isolation and evidence** | Docker, gVisor, Kata, Kata-Firecracker, and WASI backends; audit/usage ledger, OTLP export, CycloneDX SBOM, and release-workflow Sigstore/SLSA provenance | [Docker](#docker-compose) |
 | **Observability** | Audit events, traces, metrics, usage accounting, and redaction at the boundary | [Reliability](#reliability-and-testing) |
 
 Built-in tools cover file reads and writes, terminal commands, repository and code intelligence, document indexing and search, web search/extraction/crawls, browser verification, artifacts, memory, skills, delegation, routing explanation, MCP, and the capability catalog itself. Remote MCP tool schemas are browsed catalog-first rather than injected wholesale into every request.
@@ -1087,18 +1094,19 @@ The mental model is an **adapter over shared semantics**, not an implementation 
 
 ### Self-knowledge: the capability catalog
 
-The model cannot use a capability it does not know exists, and it should not guess at one that does not. Every turn carries a generated capability index built from live registries:
+The model cannot use a capability it does not know exists, and it should not guess at one that does not. The always-on prompt carries a **compact generated orientation**, not the whole manual:
 
 - the six surfaces (terminal UI, CLI, HTTP, MCP server, MCP client, external harness interop);
 - the mechanisms (sessions, steering, questions, terminal, context, memory, permissions, routing, orchestration, repair, jobs, skills, RAG, workspace, web, artifacts, MCP, interop, media, observability, accounting);
-- every built-in tool, grouped by function;
-- the 18 provider IDs;
-- the vocabularies for modes, terminal backends, orchestration, route roles, transports, cost tiers, job schedules and states, approval states, session states, delegation states, memory categories, usage bases, and reducer formats;
-- the exact set of tools offered to this agent in this request.
+- tool categories, with eight always-on core schemas (including `tool_load`); the rest load on demand;
+- 24 short feature briefs and the current configuration flags;
+- the exact tools currently offered to this agent.
 
-**Exists is not the same as callable now.** The index lists the full built-in catalog, marks the offered set, and states that only offered tools are callable. Tool schemas remain the authority for arguments and availability; when a capability is not offered, the model can explain the correct surface or ask for the right mode or agent instead of inventing a call.
+`tool_load` lists the tools outside the core surface and loads their schemas for the next model step. Execution permissions are still enforced after loading. **Exists is not the same as callable now:** the catalog tells the model what it can request, while the current schema and the agent/session authority decide what it can actually run.
 
-`harness_catalog` returns the detailed, read-only catalog. Its `summary` section covers surfaces, mechanisms, tool groups, providers, and vocabularies; `tools`, `providers`, `vocabularies`, and `surfaces` return one area; `all` returns everything. It reads no database, filesystem, provider, credential, or secret. A local test pins every registered tool and routing vocabulary to the catalog, so adding a capability without describing it fails the suite.
+`harness_catalog` returns the detailed, read-only inventory on demand: surfaces, mechanisms, every built-in tool with effects, providers, modes, job types, approval states, route roles, transports, cost tiers, memory categories, and reducer formats. `harness_status` adds live settings, persona, and this agent’s learning/RSI state; `harness_features` covers external harnesses; `model_inventory` covers connected models. These tools read no secrets. A local test pins every registered tool and routing vocabulary to the catalog, so adding a capability without describing it fails the suite.
+
+The compact prompt and the full catalog are separate on purpose. The compact brief is optimized for ordinary work; the full catalog is a tool call for self-knowledge questions. Neither is allowed to invent a feature or claim a tool ran.
 
 ### Skills: catalog first, bodies on demand
 
@@ -1226,6 +1234,130 @@ The suite is not just feature coverage. It includes:
 - **Routing is only as good as the inventory.** A configured provider without a usable credential is reported, not assumed. Model access and pricing can change between runs.
 - **Embeddings and reranking are optional.** Search is keyword-only by default and reports its degraded mode rather than fabricating vectors.
 - **Prompt caching is opt-in.** The project does not claim savings it has not measured.
+
+## Benchmark evidence and head-to-head results
+
+**The honest answer is no, not yet in general.** The current evidence does **not** support the claim that Machina is "better" than OpenCode, Hermes, Pi, or Claude Code across coding work. It supports narrower claims: on small measured task sets Machina is substantially more token-efficient, and its code-repair accuracy is competitive; on a larger held-out SWE-bench Lite set it trails OpenCode and is slower. This section records the negative results alongside the wins.
+
+### Evidence ledger
+
+| Evidence | Result | What it supports |
+|---|---|---|
+| [Held-out SWE-bench Lite, DeepSeek V4.1 Flash](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **5/10**, OpenCode **9/10**, Hermes **6/10**. Mean wall 687.8 s / 58.2 s / 285.0 s. Machina hit the 900 s cap on 5 tasks. | **No general accuracy or speed claim.** This is the clearest negative result. |
+| [Held-out SWE-bench Lite, Haiku 5.5](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/6**, Kiro **4/6**, Hermes **4/6**. Mean wall 249.0 s / 79.0 s / 229.2 s. | **No general accuracy or speed claim.** |
+| [Fresh four-task post-change check](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/4**, OpenCode **4/4**, Hermes **3/4**. Total wall 964.82 s / 189.43 s / 640.11 s. | Shell and nudge fixes helped, but did not establish a lead. |
+| [Fresh two-task clean-history check](docs/verification/SWE_HOLDOUT_2026-11-12.md) | All **2/2**. Machina 205.4 s and **279,735 tokens**; OpenCode 166.1 s and **996,249 tokens**; Hermes 374.0 s. | **Token efficiency**; OpenCode still faster. One trial per task. |
+| [Easy seven-task suite](docs/verification/HARNESS_HEAD_TO_HEAD_2026-11-08.md) | All **7/7**. Kiro 124.34 s, Machina 375.59 s, Hermes 454.84 s. | Suite hit its ceiling; it ranks neither correctness nor general capability. |
+| [Development SWE-bench subset](docs/verification/SWE_BENCH_LITE_SUBSET_2026-11-08.md) | Machina **5/6**, Kiro **3/6**, Hermes **3/6**. | Development-set only. The same tasks guided harness changes; not held-out evidence. |
+| [Portable microbenchmark](#portable-microbenchmark-2026-11-20) | Exact and one-file repair tasks: equal pass rates. Machina uses **59% fewer** processed prompt tokens on the exact task and **39% fewer** on code repair than OpenCode; exact is faster, code is **13% slower**. | **Overhead/token efficiency** on two small task shapes. Not a coding benchmark. |
+| [Harbor Terminal-Bench adapter](docs/verification/HELDOUT_SWE_2026-11-10.md#harbor-terminal-bench-adapter) | One task completed, reward **0.0**, no infrastructure exception. | The adapter works; no Terminal-Bench score or comparison is claimed. |
+
+The 10-task held-out runs predate the 2026-11-20 token and tool-loading changes. The later portable probe measures overhead, not held-out accuracy improvement. Re-run the held-out suite before changing the verdict.
+
+### The claim the evidence supports
+
+Machina is a **self-hosted, durable, permissioned harness with low prompt overhead on measured tasks**. That is a real advantage, but it is not the same as being the best coding agent. The defensible scoped sentence is:
+
+> On small same-model code-repair microbenchmarks, Machina used 39-72% fewer processed prompt tokens than OpenCode with equal pass rates; OpenCode remained faster, and on a 10-task held-out SWE-bench Lite set OpenCode solved more tasks.
+
+Do not shorten that to "Machina is better." The 10-task held-out result is a clear counterexample. Pi and Claude Code were not part of these runs, so they are outside any comparative claim.
+
+### Portable microbenchmark (2026-11-20)
+
+This is a **harness overhead microbenchmark**, not a SWE-bench ranking. It measures the complete request path and the verified outcome on two task shapes.
+
+**Protocol**
+
+- Model: DeepSeek V4.1 Flash (`deepseek/deepseek-v4-flash`).
+- Host: Windows 11, Python 3.12, local PostgreSQL where the harness uses one.
+- Each trial starts from a fresh temporary Git repository.
+- The code task is verified by an **external pytest run**, never by the agent's self-report.
+- Exact task and external harnesses: 3 trials. Machina code build: 5 trials.
+- Machina ran with `MACHINA_EXECUTION_MODE=full`, memory and RAG disabled, and a fresh workspace.
+- OpenCode ran with `--standalone --auto --format json`.
+- Hermes ran with `--provider deepseek --model deepseek-v4-flash --reasoning none -z`.
+
+The task prompts were:
+
+```text
+Reply with exactly: OK
+```
+
+```text
+You are in a small Python repository. Fix the bug in calc.py so test_calc.py
+would pass. Do not edit tests. Make the smallest source edit only.
+Reply with exactly one line: TEST: PASS or TEST: FAIL.
+```
+
+**Results (medians)**
+
+| Task | Harness | Verified pass | Wall | Processed prompt | Visible completion |
+|---|---|---:|---:|---:|---:|
+| Exact answer | **Machina** | 3/3 | **3.26 s** | **2,923** | 2 |
+| Exact answer | OpenCode | 3/3 | 3.51 s | 7,148 | 8 |
+| Exact answer | Hermes | 3/3 | 5.11 s | 16,754 | 1 |
+| Code repair | **Machina** | **5/5** | 12.12 s | **17,481** | 721 |
+| Code repair | OpenCode | 3/3 | **10.68 s** | 28,498 | 357 |
+| Code repair | Hermes | 3/3 | 17.96 s | 90,305 | 355 |
+
+`Processed prompt` includes provider cache reads. OpenCode reports uncached input and cache reads separately, so its normalized value is `input + cache.read`. Machina and Hermes report cached input inside their input token count. Median cache reads were 2,688 / 3,328 / 4,736 for the exact task and 16,512 / 23,936 / 74,368 for the code task. Completion excludes provider reasoning tokens where they are reported separately.
+
+**What the numbers support**
+
+- **Exact answer:** Machina uses **~59% fewer processed prompt tokens than OpenCode** and **~83% fewer than Hermes**, and is the fastest of the three.
+- **Code repair:** Machina uses **~39% fewer processed prompt tokens than OpenCode** and **~81% fewer than Hermes**. OpenCode is **~13% faster in wall time**; Hermes is ~33% slower than Machina.
+- **Accuracy:** all code trials passed the external verifier for every harness. Machina passed 5/5; OpenCode and Hermes passed 3/3. This does **not** show an accuracy advantage.
+
+The raw trial values, fixture, and limitations are in [the portable benchmark report](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md).
+
+**Reproducing**
+
+Use the task prompts above and isolate the workspace. Representative commands:
+
+```bash
+# Machina
+MACHINA_WORKSPACE_ROOT="$TASK_DIR" MACHINA_EXECUTION_MODE=full \
+MACHINA_MEMORY_ENABLED=false MACHINA_RAG_ENABLED=false \
+machina chat --provider deepseek --model deepseek-v4-flash --quiet "$PROMPT"
+
+# OpenCode
+opencode run --standalone --auto --format json \
+  --model deepseek/deepseek-v4-flash "$PROMPT"
+
+# Hermes
+hermes --provider deepseek --model deepseek-v4-flash --reasoning none \
+  -z "$PROMPT" --usage-file /tmp/hermes-usage.json
+```
+
+Use `git diff` and pytest for the code task; do not accept the agent's claimed PASS as evidence.
+
+### What would make a broad claim rigorous
+
+Run a pre-registered suite with at least 10 fresh held-out tasks, 3 trials each, the same model, reasoning effort, tool policy, and network policy, external verifiers, and untouched test splits. Report pass@1, pass^3, tokens per resolved task, cache-hit ratio, known cost, p50/p95 latency, timeout rate, and verifier integrity. Include Pi and Claude Code adapters if they are part of the comparison. Use an official harness where feasible (SWE-bench, Terminal-Bench, OSWorld, tau3) and keep failure cases in the result.
+
+[`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) defines the ledger, lockbox, and gates. The current bar is explicit: a pass-rate gain that costs more than 1.5x the best same-model harness's tokens per resolved task is not a competitive gain, and a latency claim needs a fair distribution, not one fast run. Until those gates are met, this README keeps the scoped claim and the negative evidence visible.
+
+## Ecosystem integration status
+
+The landscape contains standards, frameworks, and hardware specifications at very different levels. Machina integrates a small set with real lifecycle behavior and deliberately does **not** claim the rest. A name in the landscape is not a feature.
+
+| Area | Integrated and exercised here | Not integrated / not claimed |
+|---|---|---|
+| **Intent and contracts** | `AGENTS.md` global/workspace instructions; Agent Skills catalog and on-demand bodies; JSON-Schema tool contracts; OpenAPI 3.2.1 document and protected Swagger/ReDoc | A declared JSON Schema 2020-12 dialect for every extension; GNAP; a policy DSL |
+| **Identity and access** | API-key auth; optional OIDC/JWT/JWS resource-server verification with JWKS; OAuth 2.0 flows for MCP providers; Vault and AWS Secrets Manager secret backends; keyring-backed OAuth keys | SCIM 2.0, W3C DID Core, W3C VC 2.0, OPA/Rego, Cedar, Keycloak, OpenBao, SPIFFE/SPIRE, OpenFGA, GNAP |
+| **Trace and evidence** | CycloneDX 1.7 SBOM generation; optional OTLP/HTTP trace export; audit events and usage ledger; Promptfoo/Ragas/DeepEval gate configurations; keyless Sigstore bundles and SLSA build provenance in the tagged-release workflow | EAT, native in-toto attestations (the release workflow uses GitHub attestations), Langfuse, Obelisk, Phoenix, RATS, SCITT, SPDX 3.0.1, W3C PROV |
+| **Harness and turns** | Durable sessions, fenced turn leases, approvals, steering, delegation, repair controller, usage accounting; external interop with OpenCode, Codex, and Hermes | AtomCode, Microsoft Agent Framework, Codex SDK, CrewAI, Dapr Agents, DeerFlow, Google ADK, Goose, LangChain, Mastra, Octos, OpenClaw, OpenHands, openJiuwen, Pi-Mono, Pydantic AI, Rig, ZeroClaw |
+| **Memory and context** | Durable claim memory, optional approval, provenance, hybrid retrieval, digest, growth/RSI, and a bounded entity/time graph | Cognee, Graphiti, JiuwenMemory, Letta, Mem0, MemoryOS, MemOS as external memory backends |
+| **Agent RL and self-improvement** | Bounded strategy guidance and retrieval/skill RSI from recorded outcomes; no weight or permission rewriting | Agent Lightning, AHE, ART, DSPy, JIT-Agent, PenguinHarness, PhyAgentOS, RAGEN, SkyRL |
+| **Builders and interfaces** | Terminal UI, CLI, HTTP/SSE, MCP server/client, A2A 1.0 task bridge, CloudEvents 1.0 envelope option | A2UI, AG-UI, Agent TARS, Coze Studio, Dify, LibreChat, Makepad, Octop, Open WebUI, TuyaOpen |
+| **Operating systems and durable execution** | Windows, macOS, and Linux host support; PostgreSQL-backed sessions, turns, and scheduled jobs | A custom OS or endpoint stack (Linux, Omarchy, openEuler, OpenHarmony, OpenVela); AX, Dora, LangGraph, Temporal as execution engines |
+| **Execution environment** | Host execution; Docker, gVisor, Kata, Kata-Firecracker, and WASI/Wasmtime sandbox backends; OCI-compatible container invocation; WASI module execution | Bubblewrap, containerd, E2B, Moby, Pyodide, full OCI Distribution/Image/Runtime APIs, POSIX kernel isolation |
+| **Action execution** | A real headless Chrome/Edge check for web artifacts (`web_verify`), plus file/terminal actions through the permission kernel | browser-use, BrowserGym, Playwright, Playwright MCP, UI-TARS Desktop |
+| **Connectivity** | A2A 1.0, MCP, CloudEvents 1.0, HTTP/SSE, OAuth 2.0 | AgentConnect, ANP, DHTTP, Matrix, NATS, OpenAgents, Robrix, Zenoh, SRv6, QUIC/HTTP3, DNSSEC, SVCB/HTTPS, network standards and drafts |
+| **Inference infrastructure** | Provider adapters for hosted, subscription, and local OpenAI-compatible endpoints; normalized usage and pricing | CANN, FlagOS, PyTorch, ROCm, TileLang, Triton, Dynamo, KTransformers, llama.cpp, llm-d, MindIE-LLM, MLC-LLM, SGLang, vLLM, KV-cache fabrics, CXL/UALink/UCIe/Ultra Ethernet, Slurm/Kubernetes/Volcano, BMC/Redfish/YANG/OpenConfig |
+| **Open models** | Model IDs and provider access, including local/Ollama-compatible endpoints | Weight training, fine-tuning frameworks, model formats (GGUF/SafeTensors/ONNX), Hugging Face/ModelScope distribution |
+
+Why this boundary: a protocol is integrated only when there is a real request/response path, failure behavior, authorization boundary, and a test that proves it. Labels for unimplemented standards would be dead code and false documentation. The out-of-scope categories are intentionally omitted rather than scaffolded.
 
 ## Conceptual blueprint
 
@@ -1512,7 +1644,7 @@ Run `/help` to print the full command reference: every registered command with i
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
-The CLI mirrors these capabilities with 41 top-level commands and 86 invocable paths once grouped subcommands are counted. The main groups are:
+The CLI mirrors these capabilities with 47 top-level commands (39 one-shot commands plus 8 groups) and additional invocable paths once grouped subcommands are counted. The main groups are:
 
 | Group | Commands |
 |---|---|
@@ -1523,7 +1655,7 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 | **Operations** | `setup`, `init`, `doctor`, `serve`, `host`, `stop`, `audit`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
 
 <details>
-<summary>All 41 top-level CLI commands</summary>
+<summary>All 47 top-level CLI commands</summary>
 
 | Command | Purpose |
 |---|---|
@@ -1531,6 +1663,8 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 | `compress` | Compress context for a session. Reduces token usage while preserving key information. |
 | `config` | Show current configuration. |
 | `config-set` | Set a configuration value. |
+| `auth` | Manage provider authentication. |
+| `growth` | Inspect growth and memory learning. |
 | `context` | View context chunks for a session. |
 | `curator` | Run skill curator — background maintenance for skills. |
 | `delete` | Permanently delete a session and all its context chunks. |
@@ -1538,6 +1672,8 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 | `export` | Export a conversation as markdown. |
 | `fork` | Fork a session — create a new session with copied state and context. |
 | `host` | Run a persistent tmux shell with an optional ttyd browser bridge. |
+| `harnesses` | Register external harnesses. |
+| `interop` | Register external harnesses. |
 | `hub` | Skill hub — community-curated skill sharing. |
 | `init` | Initialize Machina — create the database schema. |
 | `learn` | Learn a new skill from a source (file, URL, or existing skill). |
@@ -1550,7 +1686,9 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 | `memory-reject-all` | Reject all pending memories. |
 | `memory-search` | Search memories by relevance. |
 | `memory-stats` | Show memory approval statistics. |
+| `optimization` | Inspect optimization data. |
 | `mode` | Show or set the execution mode. |
+| `providers` | Manage providers. |
 | `repl` | Open the interactive UI (same as running `machina` with no arguments). |
 | `route` | Explain the connected-model route for a prompt without calling a model. |
 | `routes` | List connected models and their role-fit scores. |
@@ -1558,6 +1696,7 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 | `sessions` | List recent sessions. |
 | `sessions-search` | Full-text search over session titles. |
 | `setup` | First-launch setup — create the .env file and configure API keys. |
+| `skills` | Manage skills. |
 | `status` | Show Machina status: database, sessions, tools and API key. |
 | `audit` | Show recent sanitized audit events, optionally as JSON. |
 | `stop` | Stop Machina clients in order, then stop the managed database. |
@@ -1571,7 +1710,7 @@ The CLI mirrors these capabilities with 41 top-level commands and 86 invocable p
 </details>
 
 <details>
-<summary>All 86 invocable CLI paths, including grouped subcommands</summary>
+<summary>All invocable CLI paths, including grouped subcommands</summary>
 
 | Command path | Purpose |
 |---|---|
@@ -1970,7 +2109,7 @@ scripts/            Operator script mount point and setup guidance
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
 | [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
-| [Benchmarking](docs/BENCHMARKING.md) | Benchmark ledger, lockbox, and held-out verification |
+| [Benchmarking](docs/BENCHMARKING.md) | Ledger, lockbox, and gates; [portable microbenchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md) and [held-out SWE-bench](docs/verification/HELDOUT_SWE_2026-11-10.md) |
 | [Evaluation gates](evals/README.md) | Promptfoo, Ragas, DeepEval, and metric-baseline regressions |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
@@ -1999,9 +2138,9 @@ These appendices are reference material. Catalogs and counts were checked agains
 | Appendix | Contents |
 |---|---|
 | [A](#appendix-a-rpc-method-catalog) | 166 RPC methods |
-| [B](#appendix-b-tool-catalog) | 45 tools and their effects |
+| [B](#appendix-b-tool-catalog) | 46 tools and their effects |
 | [C](#appendix-c-database-catalog) | 32 tables and two ER diagrams |
-| [D](#appendix-d-configuration-reference) | 130 configuration keys |
+| [D](#appendix-d-configuration-reference) | 134 configuration keys |
 | [E](#appendix-e-protocol-events) | 25 protocol events |
 | [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
 | [G](#appendix-g-failure-semantics) | Failure and degradation matrix |
@@ -2009,8 +2148,8 @@ These appendices are reference material. Catalogs and counts were checked agains
 | [I](#appendix-i-module-map) | Package-level module map |
 | [J](#appendix-j-extension-points) | How to extend each surface |
 | [K](#appendix-k-glossary) | 42 terms |
-| [L](#appendix-l-http-route-catalog) | 33 HTTP routes |
-| [M](#appendix-m-slash-command-catalog) | 53 slash commands |
+| [L](#appendix-l-http-route-catalog) | 35 functional HTTP routes (38 with docs) |
+| [M](#appendix-m-slash-command-catalog) | 52 slash commands |
 
 ### Appendix A: RPC method catalog
 
@@ -2067,7 +2206,7 @@ The gateway exposes **166** JSON-RPC methods: **14 core** methods handled direct
 
 ### Appendix B: Tool catalog
 
-The registry exposes **45** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
+The registry exposes **46** built-in tools. `effects` is broker metadata (`fs.read`, `fs.write`, `exec`, `net`, `memory`, `delegate`, `context.read`, `rag.read`, `rag.write`, `skill.read`); it is never sent to the model. A dash means no declared mutating effect. Connected MCP tools are additional and appear only after a server is connected.
 
 | Tool | Effects | What it does |
 |---|---|---|
@@ -2110,6 +2249,7 @@ The registry exposes **45** built-in tools. `effects` is broker metadata (`fs.re
 | `skill_resource` | `skill.read` | List or read ECC supporting files. |
 | `terminal` | `exec` | Execute a shell command for git, builds, tests, etc. |
 | `terminal_job` | — | Inspect, wait for, or stop a background command in this session. |
+| `tool_load` | — | Load full schemas for tools not in the current core surface from the compact catalog. Execution permissions still apply. |
 | `web_crawl` | `net`, `rag.write` | Crawl a site from a starting URL, following links up to max_pages/max_depth, and save each page's text to the active session's RAG context for later turns. |
 | `web_extract` | `net` | Extract text from a public URL using static HTTP. |
 | `web_research` | `net`, `rag.write` | Search the public web, fetch up to three pages, and save their text to the active session's RAG context for later turns. |
@@ -2119,11 +2259,12 @@ The registry exposes **45** built-in tools. `effects` is broker metadata (`fs.re
 
 ### Appendix C: Database catalog
 
-PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sql` plus the additive schema files (`growth_schema.sql`, `delegation_schema.sql`, `image_context_schema.sql`, `soulspec_schema.sql`). On connect, the gateway applies those idempotent additive migrations to an already-initialized database; it does not create the base schema. The catalog below covers all **28** tables.
+PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sql` plus the additive schema files (`growth_schema.sql`, `delegation_schema.sql`, `image_context_schema.sql`, `soulspec_schema.sql`). On connect, the gateway applies those idempotent additive migrations to an already-initialized database; it does not create the base schema. The catalog below covers all **32** tables.
 
 | Group | Table | What it holds |
 |---|---|---|
-| **Session and context** | `sessions` | One conversation: title, agent, goal, pinned provider/model, serialized state, status, activity time |
+| **Session and context** | `schema_meta` | Internal additive-migration version marker; lets repeated CLI launches skip already-applied runtime DDL |
+| | `sessions` | One conversation: title, agent, goal, pinned provider/model, serialized state, status, activity time |
 | | `context_chunks` | Typed live events: user/assistant messages, tool calls and results, documents, summaries, with token counts and embeddings |
 | | `context_archive` | Originals displaced by compaction or eviction, with the reason and resurrection history |
 | | `tool_artifacts` | Verbatim oversized tool results with kind, completeness, revision, retention, and access counters |
@@ -2136,7 +2277,10 @@ PostgreSQL with pgvector is the durable store. `machina init` applies `schema.sq
 | | `learning_reviews` | Proposed learned skills with trigger, status, reviewer, and auto-apply flag |
 | | `semantic_cache_entries` | Optional semantic response cache: scope, request hash, response, expiry, hit count |
 | | `optimization_shadow_events` | Shadow decisions from semantic cache, compression, and warming experiments |
-| **Memory and identity** | `memories` | Durable claims with category, importance, strength, embedding, access history, quarantine flag |
+| **Memory and identity** | `memory_entities` | Durable entity nodes extracted from memory content, with normalized names and first/last evidence times |
+| | `memory_entity_mentions` | Memory-to-entity graph edges used for bounded retrieval expansion |
+| | `memory_edges` | Explicit subject-relation-object edges between entities and their source memory |
+| | `memories` | Durable claims with category, importance, strength, embedding, access history, quarantine flag |
 | | `pending_memories` | Approval queue holding a candidate memory, redactions, and review status before it becomes durable |
 | | `memory_provenance` | Source agent, signature, and parent memory for a stored claim |
 | | `shared_memory_deliveries` | Signed memory deliveries between agents and their acceptance status |
@@ -2424,10 +2568,10 @@ erDiagram
 
 ### Appendix D: Configuration reference
 
-**130** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys. `temp` is a legacy compatibility alias for `temperature`.
+**134** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys. `temp` is a legacy compatibility alias for `temperature`.
 
 <details>
-<summary>All 130 keys and defaults</summary>
+<summary>All 134 keys and defaults</summary>
 
 #### Model, routing, and identity
 
@@ -2492,6 +2636,7 @@ erDiagram
 | `memory_digest_candidates` | `16` |
 | `memory_digest_max_chars` | `1200` |
 | `memory_digest_max_facts` | `6` |
+| `memory_graph_enabled` | `true` |
 | `persona_default_emotion` | `trust` |
 | `persona_description` | `""` |
 | `persona_memory_enabled` | `true` |
@@ -2514,7 +2659,6 @@ erDiagram
 | `terminal_sandbox` | `disabled` (or `local`, `docker`, `gvisor`, `kata`, `firecracker`, `wasm`) |
 | `terminal_image` | `machina-tool-sandbox:latest` |
 | `terminal_wasm_module` | `""` (WASI module for the `wasm` backend) |
-| `MACHINA_TERMINAL_SHELL` | auto-detects Git Bash for POSIX compound commands on Windows; set `cmd` to force cmd.exe |
 | `dynamic_tool_loading` | `true` (core schemas plus `tool_load`; set `MACHINA_DYNAMIC_TOOL_LOADING=0` for eager schemas) |
 | `skill_query_expansion_enabled` | `false` (opt-in extra model call for skill-routing vocabulary) |
 | `browser_verification` | `auto` |
@@ -2775,7 +2919,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 455 collected at this commit) covers contracts and fast regression paths; the full 6,487-test backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 620 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|
@@ -2786,6 +2930,7 @@ The local suite (`tests/`, 455 collected at this commit) covers contracts and fa
 | Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
+| Benchmark evidence | [Portable harness benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out SWE-bench Lite](docs/verification/HELDOUT_SWE_2026-11-10.md) | Token efficiency and negative held-out results are both retained |
 | Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py` | Catalog normalization and subscription adapters |
 | MCP and interop | `test_interop_fast.py`, `test_meta_harness.py`, `test_harness_inventory.py`, `test_researcher_mcp_web.py` | Registration, routing, bounded external delegation |
 | Web and browser | `test_web_extract_validation.py`, `test_web_search_fallback.py`, `test_browser_verify.py` | Untrusted extraction, fallback, real browser checks |
@@ -2832,7 +2977,7 @@ The DevTools suite adds architecture ratchets (layer boundaries, file-size ceili
 | `machina/repomap/` | Repository map and symbol navigation |
 | `machina/research/` | Benchmarks, head-to-head evaluation, workflow trials |
 | `machina/soulspec/` | Reviewed identity schema, merge, lifecycle |
-| `machina/bundled_agents/` | 74 shipped agent definitions, including ECC |
+| `machina/bundled_agents/` | 71 shipped agent definitions, including ECC |
 | `machina/bench/` | Benchmark harness entry points |
 | `ui/src/` | Terminal UI, editor, explorer, transcript, protocol client |
 | `ui/test/` | Node/TypeScript UI suite |
@@ -2932,7 +3077,7 @@ Extension rules that do not bend: an extension cannot expand session authority, 
 
 ### Appendix L: HTTP route catalog
 
-The HTTP API exposes **33** functional routes (the FastAPI docs endpoints are excluded). `/health` and `/ready` are public; every other route requires `Authorization: Bearer $MACHINA_API_KEY`. `POST /rpc` bridges feature methods; the turn and shutdown methods are not dispatched through it.
+The HTTP API exposes **35** functional routes (38 with the OpenAPI/Swagger/ReDoc endpoints). `/health` and `/ready` are public; every other route requires `Authorization: Bearer $MACHINA_API_KEY`. `POST /rpc` bridges feature methods; the turn and shutdown methods are not dispatched through it.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -2961,6 +3106,8 @@ The HTTP API exposes **33** functional routes (the FastAPI docs endpoints are ex
 | `GET` | `/metrics` | Return Prometheus-formatted metrics including LLM usage totals. |
 | `GET` | `/ready` | Check if the database is connected and schema is initialized. |
 | `POST` | `/rpc` | Generic JSON-RPC dispatch to gateway methods (turns and shutdown excluded). |
+| `GET` | `/.well-known/agent-card.json` | A2A 1.0 agent card. Public discovery metadata only. |
+| `POST` | `/a2a` | Authenticated A2A JSON-RPC task bridge over durable sessions and turns. |
 | `GET` | `/sessions` | List sessions. |
 | `POST` | `/sessions` | Create a new session. |
 | `GET` | `/sessions/{session_id}` | Get a session by ID. |

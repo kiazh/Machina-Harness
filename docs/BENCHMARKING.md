@@ -3,6 +3,23 @@
 Machina's benchmark evidence is stored outside the product runtime and treated
 as immutable input. The canonical pieces live in `machina/bench`.
 
+## Current evidence
+
+The evidence is mixed and must be reported that way:
+
+- [`PORTABLE_HARNESS_BENCHMARK_2026-11-20.md`](verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md):
+  two-task harness-overhead probe. Machina used fewer processed tokens and
+  passed the external verifier, but OpenCode was faster on code repair.
+- [`HELDOUT_SWE_2026-11-10.md`](verification/HELDOUT_SWE_2026-11-10.md):
+  held-out SWE-bench Lite result. Machina scored 5/10 with DeepSeek versus
+  OpenCode 9/10 and Hermes 6/10, and was the slowest harness.
+- [`SWE_HOLDOUT_2026-11-12.md`](verification/SWE_HOLDOUT_2026-11-12.md):
+  fresh two-task clean-history check. Machina and OpenCode both solved 2/2;
+  Machina used 72% fewer tokens and was 1.24x slower.
+
+Until a fresh suite clears the gates below, the README must not claim general
+superiority on accuracy or latency.
+
 ## Task identity
 
 `TaskSpec` records the suite, repository, base commit, prompt hash, and hidden
