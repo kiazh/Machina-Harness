@@ -2515,6 +2515,7 @@ erDiagram
 | `terminal_image` | `machina-tool-sandbox:latest` |
 | `terminal_wasm_module` | `""` (WASI module for the `wasm` backend) |
 | `dynamic_tool_loading` | `true` (core schemas plus `tool_load`; set `MACHINA_DYNAMIC_TOOL_LOADING=0` for eager schemas) |
+| `skill_query_expansion_enabled` | `false` (opt-in extra model call for skill-routing vocabulary) |
 | `browser_verification` | `auto` |
 | `approval_timeout` | `300` |
 | `meta_harness_enabled` | `true` |

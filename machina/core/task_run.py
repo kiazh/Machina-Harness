@@ -94,7 +94,7 @@ TASK_RUN_JOB_NUDGE = (
 )
 TASK_RUN_FINALIZE_NUDGE = (
     "A source edit and a successful targeted verification are already present. "
-    "Stop adding scope: report the final diff and the exact verification result now."
+    "Do not call any more tools. Report the final diff and the exact verification result now."
 )
 
 _EDIT_COMMAND_RE = re.compile(

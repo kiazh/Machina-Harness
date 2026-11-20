@@ -349,9 +349,24 @@ async def prepare_turn(
     Called once per turn before the system prompt is built. The previous
     turn's value is cleared first, so a failed/absent expansion can never leak
     into this turn's deterministic routing.
+
+    The model call is opt-in (``skill_query_expansion_enabled``). The default
+    path uses the raw request in the deterministic skill picker; this removes
+    one provider round trip and several seconds from every turn. An explicit
+    ``seam`` still runs, which keeps the expansion evaluator deterministic and
+    testable.
     """
     normalized = _normalize(query)
     _CURRENT.set(None)
+    if seam is None:
+        try:
+            from machina.core.config import config
+
+            if not bool(config.get("skill_query_expansion_enabled")):
+                _CURRENT.set((normalized, EMPTY_EXPANSION))
+                return EMPTY_EXPANSION
+        except Exception:
+            pass
     expansion = await expand_query(query, seam=seam, timeout=timeout)
     _CURRENT.set((normalized, expansion))
     return expansion

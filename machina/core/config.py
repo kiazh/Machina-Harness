@@ -473,6 +473,10 @@ DEFAULTS: dict[str, Any] = {
     # ``tool_load``. Direct ReActAgent construction defaults to eager schemas
     # so embedders/tests keep the historical explicit surface.
     "dynamic_tool_loading": True,
+    # One extra provider call used only to enrich skill routing vocabulary.
+    # The deterministic picker works from the raw request; leave this off for
+    # the default fast path.
+    "skill_query_expansion_enabled": False,
     # Entity/time graph expansion over durable memories. It is additive: when
     # disabled or unavailable, flat hybrid retrieval remains the whole path.
     "memory_graph_enabled": True,
@@ -891,6 +895,7 @@ class Config:
     terminal_wasm_module: str = ""
     approval_timeout: int = 300
     dynamic_tool_loading: bool = True
+    skill_query_expansion_enabled: bool = False
     memory_graph_enabled: bool = True
     # Human-in-the-loop memory writes: ON routes MemoryStore.add to
     # pending_memories (approve/reject via CLI/gateway); OFF writes directly.

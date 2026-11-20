@@ -431,72 +431,81 @@ class UsageStore:
             return None
 
         reserved = _estimate_tokens(messages, tools, max_tokens)
+        budget_scopes = any(bool(value) for value in limits.values())
         async with db.acquire() as conn:
             async with conn.transaction():
-                lineage = await conn.fetchrow(
-                    """
-                    SELECT ancestor_session_ids AS session_ids,
-                           ancestor_agent_ids AS agent_ids,
-                           is_fork
-                    FROM sessions WHERE id = $1
-                    """,
-                    session_id,
-                )
-                if (lineage or {}).get("is_fork"):
-                    # A user fork is an independent branch, not a delegated
-                    # child: its spend must not consume the source budgets.
+                if budget_scopes:
+                    lineage = await conn.fetchrow(
+                        """
+                        SELECT ancestor_session_ids AS session_ids,
+                               ancestor_agent_ids AS agent_ids,
+                               is_fork
+                        FROM sessions WHERE id = $1
+                        """,
+                        session_id,
+                    )
+                    if (lineage or {}).get("is_fork"):
+                        # A user fork is an independent branch, not a delegated
+                        # child: its spend must not consume the source budgets.
+                        ancestor_sessions = []
+                        ancestor_agents = []
+                    else:
+                        ancestor_sessions = list((lineage or {}).get("session_ids", []))
+                        ancestor_agents = list((lineage or {}).get("agent_ids", []))
+                    session_scopes = sorted({session_id, *ancestor_sessions}, key=str)
+                    agent_scopes = sorted({agent_id, *ancestor_agents})
+                    scopes = [("agent", aid) for aid in agent_scopes] + [
+                        ("session", str(sid)) for sid in session_scopes
+                    ]
+                    # Lock in a fixed order to avoid deadlocks between concurrent
+                    # calls for the same agent in different sessions.
+                    # Conservative accounting: budget checks count every prior row
+                    # (reserved + complete + error). Errored calls keep the
+                    # conservative reservation, so excluding them would allow
+                    # overspend. Only 'complete'/'reserved' represent live spend,
+                    # but counting all statuses is intentionally conservative.
+                    for scope, identifier in scopes:
+                        await conn.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                            f"llm_usage:{scope}:{identifier}",
+                        )
+                    # Combine both scope aggregates into a single query with UNION ALL
+                    scope_rows = await conn.fetch(
+                        """
+                        SELECT 'agent' AS scope, identifier, COUNT(usage.id) AS requests,
+                               COALESCE(SUM(usage.accounted_tokens), 0) AS tokens
+                        FROM unnest($1::text[]) AS identifier
+                        LEFT JOIN llm_usage usage ON usage.agent_id = identifier
+                            OR usage.ancestor_agent_ids @> ARRAY[identifier]
+                        GROUP BY identifier
+                        UNION ALL
+                        SELECT 'session' AS scope, identifier::text, COUNT(usage.id) AS requests,
+                               COALESCE(SUM(usage.accounted_tokens), 0) AS tokens
+                        FROM unnest($2::uuid[]) AS identifier
+                        LEFT JOIN llm_usage usage ON usage.session_id = identifier
+                            OR usage.ancestor_session_ids @> ARRAY[identifier]
+                        GROUP BY identifier
+                        """,
+                        agent_scopes,
+                        session_scopes,
+                    )
+                    for scope_data in scope_rows:
+                        scope = scope_data["scope"]
+                        _check_limit(
+                            scope,
+                            int(scope_data["requests"]),
+                            int(scope_data["tokens"]),
+                            limits[f"usage_{scope}_request_limit"],
+                            limits[f"usage_{scope}_token_limit"],
+                            reserved,
+                        )
+                else:
+                    # With no configured budget, ancestry and advisory scope
+                    # locks cannot affect admission. Keep the reservation row
+                    # (accounting still needs it) but skip the expensive budget
+                    # projection on every model call.
                     ancestor_sessions = []
                     ancestor_agents = []
-                else:
-                    ancestor_sessions = list((lineage or {}).get("session_ids", []))
-                    ancestor_agents = list((lineage or {}).get("agent_ids", []))
-                session_scopes = sorted({session_id, *ancestor_sessions}, key=str)
-                agent_scopes = sorted({agent_id, *ancestor_agents})
-                scopes = [("agent", aid) for aid in agent_scopes] + [
-                    ("session", str(sid)) for sid in session_scopes
-                ]
-                # Lock in a fixed order to avoid deadlocks between concurrent
-                # calls for the same agent in different sessions.
-                # Conservative accounting: budget checks count every prior row
-                # (reserved + complete + error). Errored calls keep the
-                # conservative reservation, so excluding them would allow
-                # overspend. Only 'complete'/'reserved' represent live spend,
-                # but counting all statuses is intentionally conservative.
-                for scope, identifier in scopes:
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                        f"llm_usage:{scope}:{identifier}",
-                    )
-                # Combine both scope aggregates into a single query with UNION ALL
-                scope_rows = await conn.fetch(
-                    """
-                    SELECT 'agent' AS scope, identifier, COUNT(usage.id) AS requests,
-                           COALESCE(SUM(usage.accounted_tokens), 0) AS tokens
-                    FROM unnest($1::text[]) AS identifier
-                    LEFT JOIN llm_usage usage ON usage.agent_id = identifier
-                        OR usage.ancestor_agent_ids @> ARRAY[identifier]
-                    GROUP BY identifier
-                    UNION ALL
-                    SELECT 'session' AS scope, identifier::text, COUNT(usage.id) AS requests,
-                           COALESCE(SUM(usage.accounted_tokens), 0) AS tokens
-                    FROM unnest($2::uuid[]) AS identifier
-                    LEFT JOIN llm_usage usage ON usage.session_id = identifier
-                        OR usage.ancestor_session_ids @> ARRAY[identifier]
-                    GROUP BY identifier
-                    """,
-                    agent_scopes,
-                    session_scopes,
-                )
-                for scope_data in scope_rows:
-                    scope = scope_data["scope"]
-                    _check_limit(
-                        scope,
-                        int(scope_data["requests"]),
-                        int(scope_data["tokens"]),
-                        limits[f"usage_{scope}_request_limit"],
-                        limits[f"usage_{scope}_token_limit"],
-                        reserved,
-                    )
                 row = await conn.fetchrow(
                     "INSERT INTO llm_usage "
                     "(session_id, agent_id, provider, model, requested_model, purpose, status, "
