@@ -199,7 +199,7 @@ def chat(
                 # governed headless tool call pauses with an approval this
                 # transport cannot resolve (exit 3).
                 try:
-                    from machina.gateway.features.mode import grant_full_default
+                    from machina.core.session_mode import grant_full_default
 
                     if await grant_full_default(session):
                         output.muted("FULL HOST mode active for this session (saved full default).")

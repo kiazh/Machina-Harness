@@ -469,6 +469,10 @@ DEFAULTS: dict[str, Any] = {
     "terminal_image": "machina-tool-sandbox:latest",
     "terminal_wasm_module": "",
     "approval_timeout": 300,
+    # Factory-built agents start with core schemas and load others via
+    # ``tool_load``. Direct ReActAgent construction defaults to eager schemas
+    # so embedders/tests keep the historical explicit surface.
+    "dynamic_tool_loading": True,
     # Entity/time graph expansion over durable memories. It is additive: when
     # disabled or unavailable, flat hybrid retrieval remains the whole path.
     "memory_graph_enabled": True,
@@ -886,6 +890,7 @@ class Config:
     terminal_image: str = "machina-tool-sandbox:latest"
     terminal_wasm_module: str = ""
     approval_timeout: int = 300
+    dynamic_tool_loading: bool = True
     memory_graph_enabled: bool = True
     # Human-in-the-loop memory writes: ON routes MemoryStore.add to
     # pending_memories (approve/reject via CLI/gateway); OFF writes directly.

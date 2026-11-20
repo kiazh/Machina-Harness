@@ -35,6 +35,7 @@ _TOOL_MODULES = (
     "terminal",  # terminal
     "web_crawl",  # bounded multi-page crawl into session RAG
     "web_research",  # session-scoped public web research
+    "tool_loader",  # on-demand schemas for the rest of the registry
 )
 
 __all__ = [

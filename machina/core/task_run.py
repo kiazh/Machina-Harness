@@ -46,6 +46,9 @@ REPAIR_TOOL_NAMES = frozenset(
         "artifact_read",
         "artifact_search",
         "artifact_describe",
+        # Dynamic schemas may be absent from the initial core surface; keep
+        # the explicit loader available so a repair can request them.
+        "tool_load",
     }
 )
 

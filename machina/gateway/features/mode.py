@@ -309,29 +309,7 @@ def _backend(session_id: str | None = None) -> str:
 
 
 async def grant_full_default(session) -> bool:
-    """Auto-grant full mode for a NEW session under an explicit global default.
+    """Compatibility re-export of :func:`machina.core.session_mode.grant_full_default`."""
+    from machina.core.session_mode import grant_full_default as _grant
 
-    LP-07/13: a persistent `full` default is disclosed consent for future
-    sessions. TUI `/mode full` (session scope) never touches the default;
-    per-session activation stays the authority everywhere else.
-    """
-    try:
-        if (config.get("execution_mode") or "ask").lower() != "full":
-            return False
-    except Exception:
-        return False
-    from machina.permissions import store as _store
-
-    await _store.save_grant(
-        {
-            "session_id": str(session.id),
-            "agent_id": session.agent_id,
-            "mode": "full",
-            "capability": "session",
-            "scope_path": None,
-            "scope_type": "file",
-            "grant_kind": "session",
-            "digest": "full-mode-session",
-        }
-    )
-    return True
+    return await _grant(session)

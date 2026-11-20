@@ -114,6 +114,24 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding_space TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_embedding_space ON memories(embedding_space);
 """
 
+# Runtime migrations are idempotent, but re-reading five SQL files and running
+# DDL on every CLI launch is measurable on a laptop. The marker is advanced
+# only after the whole transaction commits; bump the version whenever the
+# migration set changes.
+_RUNTIME_SCHEMA_VERSION = "2026-11-20.1"
+_SCHEMA_META_DDL = """
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+_SCHEMA_META_UPSERT = """
+INSERT INTO schema_meta (key, value, updated_at)
+VALUES ('runtime_schema_version', $1, now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+"""
+
 # Temporal/entity graph. Keep in sync with the memory graph section of
 # schema.sql; additive and idempotent for existing installations.
 _MEMORY_GRAPH_MIGRATION = """
@@ -456,6 +474,8 @@ class Database:
                             os.path.join(os.path.dirname(__file__), name), encoding="utf-8"
                         ) as f:
                             await conn.execute(f.read())
+                    await conn.execute(_SCHEMA_META_DDL)
+                    await conn.execute(_SCHEMA_META_UPSERT, _RUNTIME_SCHEMA_VERSION)
 
     async def initialize_runtime_schema(self) -> None:
         """Upgrade required runtime features on an initialized native database."""
@@ -463,6 +483,12 @@ class Database:
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended('machina:runtime_migrations', 0))"
             )
+            await conn.execute(_SCHEMA_META_DDL)
+            applied = await conn.fetchval(
+                "SELECT value FROM schema_meta WHERE key = 'runtime_schema_version'"
+            )
+            if applied == _RUNTIME_SCHEMA_VERSION:
+                return
             for name in (
                 "growth_schema.sql",
                 "delegation_schema.sql",
@@ -478,6 +504,7 @@ class Database:
             await conn.execute(_USAGE_LEDGER_MIGRATION)
             await conn.execute(_TOOL_ARTIFACTS_MIGRATION)
             await conn.execute(_OPTIMIZATION_MIGRATION)
+            await conn.execute(_SCHEMA_META_UPSERT, _RUNTIME_SCHEMA_VERSION)
 
     # Standalone growth-migration entry point; migration tests apply it, no production caller. Kept (R4-106).
     async def initialize_growth_schema(self) -> None:

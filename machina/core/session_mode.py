@@ -35,6 +35,37 @@ from machina.permissions import broker as _permissions_broker
 
 MODES = ("ask", "workspace", "sandbox", "full")
 
+
+async def grant_full_default(session) -> bool:
+    """Grant the persisted full-mode default to a newly created session.
+
+    Kept in the lightweight session-mode module so transports do not import
+    the entire gateway feature package just to create a session.
+    """
+    try:
+        from machina.core.config import config
+
+        if (config.get("execution_mode") or "ask").lower() != "full":
+            return False
+    except Exception:
+        return False
+    from machina.permissions import store as _store
+
+    await _store.save_grant(
+        {
+            "session_id": str(session.id),
+            "agent_id": session.agent_id,
+            "mode": "full",
+            "capability": "session",
+            "scope_path": None,
+            "scope_type": "file",
+            "grant_kind": "session",
+            "digest": "full-mode-session",
+        }
+    )
+    return True
+
+
 _lock = threading.Lock()
 _session_modes: dict[str, str] = {}
 

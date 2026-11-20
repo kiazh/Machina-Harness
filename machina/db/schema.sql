@@ -2,6 +2,14 @@
 -- Core tables (sessions, context) plus memory, jobs, usage, audit, and identity.
 
 CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Internal migration marker. It lets repeated CLI launches skip the additive
+-- runtime DDL after the first successful upgrade.
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- required by the gin_trgm_ops index below
 
 -- ─── Sessions ───────────────────────────────────────────────────────────────

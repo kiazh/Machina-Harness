@@ -8,7 +8,7 @@ Machina is a terminal-first coding agent that runs entirely on your own machine 
 
 Most terminal agents are a loop around a chat API. They resend the transcript until it overflows, forget everything when the session ends, run whatever model you hard-coded, and treat a tool's name as its security boundary. That is fine for a quick one-off. It falls apart on long tasks, across days, and on actions you cannot undo.
 
-Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (31 tables) is the source of truth, and the harness manages a bounded, governed, auditable view of it so the agent stays coherent over hours and across sessions.
+Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (32 tables) is the source of truth, and the harness manages a bounded, governed, auditable view of it so the agent stays coherent over hours and across sessions.
 
 **The parts that are automatic, not your job to babysit:**
 
@@ -178,7 +178,7 @@ flowchart TB
         OBS["Observability<br/>audit, traces<br/>metrics, diagnostics"]
     end
 
-    PG[("PostgreSQL 16 + pgvector<br/>31 tables + migrations")]
+    PG[("PostgreSQL 16 + pgvector<br/>32 tables + migrations")]
     EXTERNAL["Cloud APIs, subscription accounts<br/>local models, remote MCP servers"]
 
     TUI --> GW
@@ -364,7 +364,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Tools and commands | 45 built-in tools; 41 top-level CLI commands (86 paths); 53 slash commands |
 | Protocol and API | 166 RPC methods (14 core + 152 feature); 33 REST routes; 25 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
-| Storage | PostgreSQL 16 + pgvector, 31 tables |
+| Storage | PostgreSQL 16 + pgvector, 32 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
 | CLI cold start | `machina version` measured at ~0.5 s on this checkout with a warm filesystem cache; the first run after install is slower |
 
@@ -1081,7 +1081,7 @@ Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `hi
 | **MCP client** | stdio or HTTP | Bring external tools into Machina's catalog |
 | **External harnesses** | MCP registration and delegated child runs | Let OpenCode, Codex, or Hermes orchestrate durable Machina work |
 
-Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams. The installed console script is lazy: `machina --help` renders a static command table, and invoking a command imports only that feature module instead of the full CLI stack.
+Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams. The installed console script is lazy: `machina --help` renders a static command table, and invoking a command imports only that feature module instead of the full CLI stack. Factory-built agents also start with a core tool surface plus `tool_load`; a task can request any remaining schema from the compact catalog on its next step, so ordinary turns and short answers do not pay for all 46 tool schemas.
 
 The mental model is an **adapter over shared semantics**, not an implementation of the harness. The surfaces differ in transport, authentication, and interaction style. They must not differ in what a turn means, what an approval authorizes, or what a usage record contains. The test of a surface is parity: pause the same action in two surfaces and the approval identity should be the same.
 
@@ -2000,7 +2000,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 |---|---|
 | [A](#appendix-a-rpc-method-catalog) | 166 RPC methods |
 | [B](#appendix-b-tool-catalog) | 45 tools and their effects |
-| [C](#appendix-c-database-catalog) | 31 tables and two ER diagrams |
+| [C](#appendix-c-database-catalog) | 32 tables and two ER diagrams |
 | [D](#appendix-d-configuration-reference) | 130 configuration keys |
 | [E](#appendix-e-protocol-events) | 25 protocol events |
 | [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
@@ -2514,6 +2514,7 @@ erDiagram
 | `terminal_sandbox` | `disabled` (or `local`, `docker`, `gvisor`, `kata`, `firecracker`, `wasm`) |
 | `terminal_image` | `machina-tool-sandbox:latest` |
 | `terminal_wasm_module` | `""` (WASI module for the `wasm` backend) |
+| `dynamic_tool_loading` | `true` (core schemas plus `tool_load`; set `MACHINA_DYNAMIC_TOOL_LOADING=0` for eager schemas) |
 | `browser_verification` | `auto` |
 | `approval_timeout` | `300` |
 | `meta_harness_enabled` | `true` |

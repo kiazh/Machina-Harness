@@ -101,7 +101,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "artifacts": ("artifact_describe", "artifact_read", "artifact_search"),
     "MCP": ("mcp_call", "mcp_connect", "mcp_describe", "mcp_disconnect", "mcp_list"),
     "workspace": ("code_intelligence",),
-    "interaction": ("ask_user",),
+    "interaction": ("ask_user", "tool_load"),
 }
 
 VOCABULARIES: dict[str, tuple[str, ...]] = {

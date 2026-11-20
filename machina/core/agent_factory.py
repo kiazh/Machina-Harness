@@ -133,6 +133,7 @@ async def build_agent_for_session(
     """
     from machina.core.agent import ReActAgent
     from machina.core.agent_def import agent_registry
+    from machina.core.config import config
     from machina.core.provider import get_provider
 
     if delegated is None:
@@ -231,6 +232,7 @@ async def build_agent_for_session(
             allowed_tools=allowed_tools,
             soul_spec=soul_spec,
             delegated=delegated,
+            dynamic_tools=bool(config.get("dynamic_tool_loading")),
         )
     except BaseException:
         from machina.core.background_tasks import await_joined

@@ -124,6 +124,8 @@ def compact_capability_context(session: Session, *, tool_names: set[str], growth
         + "\nCurrent configuration (enabled is not proof of successful learning): "
         + json.dumps(flags, separators=(",", ":"))
         + _mcp_connector_summary(tool_names)
+        + "\nCall tool_load with names listed in its catalog when a needed tool is not "
+        "in the current schemas; loaded schemas appear on the next step."
         + "\nAnswer feature questions from this brief; do not infer features from recalled "
         "chat or empty notes, claim unobserved improvement, or invent unavailable tools."
         + catalog
