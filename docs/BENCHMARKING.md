@@ -10,8 +10,15 @@ The evidence is mixed and must be reported that way:
 - [`PORTABLE_HARNESS_BENCHMARK_2026-11-20.md`](verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md):
   two-task harness-overhead probe. Machina used fewer processed tokens and
   passed the external verifier, but OpenCode was faster on code repair.
+- [`HOLDOUT_RERUN_2026-11-20.md`](verification/HOLDOUT_RERUN_2026-11-20.md):
+  current-build ten-task rerun. Machina 9/10, OpenCode 10/10, Hermes 7/10.
+  Machina used 46% fewer processed prompt tokens than OpenCode but was 20.6%
+  slower. One OpenCode patch exceeded the 600-second cap.
+- [`LONG_HORIZON_2026-11-20.md`](verification/LONG_HORIZON_2026-11-20.md):
+  three synthetic multi-stage tasks. All harnesses passed 3/3; Machina used
+  6.4% fewer processed tokens than OpenCode and was 6.4% slower.
 - [`HELDOUT_SWE_2026-11-10.md`](verification/HELDOUT_SWE_2026-11-10.md):
-  held-out SWE-bench Lite result. Machina scored 5/10 with DeepSeek versus
+  the older held-out baseline. Machina scored 5/10 with DeepSeek versus
   OpenCode 9/10 and Hermes 6/10, and was the slowest harness.
 - [`SWE_HOLDOUT_2026-11-12.md`](verification/SWE_HOLDOUT_2026-11-12.md):
   fresh two-task clean-history check. Machina and OpenCode both solved 2/2;
