@@ -57,6 +57,80 @@ FEATURES = {
 }
 
 
+# Compact feature briefs for the always-on prompt. The full ``FEATURES`` map
+# stays available to ``harness_status`` and ``capability_context``; normal
+# turns need orientation, not the whole manual. Keep these terse and stable so
+# the compact section remains useful without becoming a second manual.
+_FEATURE_BRIEFS: dict[str, str] = {
+    "persona": "SoulSpec identity, /persona tone, growth lessons.",
+    "growth": "Per-agent preferences, style and lessons persist; /growth.",
+    "rsi": "Adaptive retrieval/skill/tool ranking from outcomes; no code or weights.",
+    "memory": "remember/recall/session_recall; /memory and optional approval queue.",
+    "sessions": "Persistent sessions; /sessions /resume /new /search /fork.",
+    "context": "Budgeted evidence projection; /context /compress.",
+    "web": "web_search/research/crawl with source URLs saved to session RAG.",
+    "skills": "Catalog-first skills; /skills and skill tools.",
+    "agents": "Delegation and specialists; /agents /delegate.",
+    "jobs": "Interval, cron, heartbeat and script jobs; /jobs.",
+    "usage": "Token/request usage and budgets; /usage.",
+    "models": "Provider/model catalog and routing; /models /provider /routing.",
+    "auth": "Subscription provider sign-in; /auth.",
+    "theme": "UI skins; /theme.",
+    "modes": "ask|workspace|sandbox|full; /mode /approvals.",
+    "controls": "Help, config, status, init and review commands; /help /config /status.",
+    "self_change": "Use offered tools and user-owned settings; no autonomous code/permission rewrite.",
+    "install": "repo_stage/repo_activate install reviewed skills; no repo execution.",
+    "execution": "Offered tools and approvals define access; delegation inherits.",
+    "mcp": "MCP providers and tools; /mcp, browser OAuth, exact approvals.",
+    "harnesses": "External OpenCode/Codex/Hermes detection and delegation; /harnesses.",
+    "images": "Inline PNG/JPEG/GIF/WebP; understanding needs a vision model.",
+    "music": "Now-playing bar and /music controls; local best-effort.",
+    "workspace": "Editor, LSP and read-only code_intelligence; /workspace.",
+}
+
+
+def compact_capability_context(session: Session, *, tool_names: set[str], growth_state: str) -> str:
+    """Bounded capability orientation for ordinary turns.
+
+    The full feature manual is intentionally not repeated in every request.
+    Normal turns get the surfaces, feature names/commands, current flags, and
+    a pointer to ``harness_status``/``harness_catalog`` when those tools are
+    offered. This keeps the stable prefix small without making feature
+    questions unanswerable.
+    """
+    facts = "\n".join(f"- {name}: {brief}" for name, brief in _FEATURE_BRIEFS.items())
+    flags = {**configuration(session), "growth_turn": growth_state}
+    inspection = (
+        " Call harness_status for live settings or learning state."
+        if "harness_status" in tool_names
+        else " Live inspection is unavailable to this agent; offer the relevant UI command."
+    )
+    catalog = (
+        " Call harness_catalog for the full tool/provider/vocabulary catalog."
+        if "harness_catalog" in tool_names
+        else ""
+    )
+    return (
+        "\n\nHarness capabilities (compact; full details on demand):\n"
+        "Surfaces: terminal UI, CLI, HTTP/SSE API, MCP server/client, external harnesses.\n"
+        "Mechanisms: sessions, steering, questions, terminal, context, memory, permissions, "
+        "routing, orchestration, repair, jobs, skills, rag, workspace, web, artifacts, mcp, "
+        "interop, media, observability, accounting.\n"
+        "Tool categories: files/repo, terminal, web/browser, docs/RAG, memory, skills, "
+        "agents/harnesses, routing, MCP, workspace. Use the offered function schemas for "
+        "exact names.\n"
+        "Feature briefs:\n"
+        + facts
+        + "\nCurrent configuration (enabled is not proof of successful learning): "
+        + json.dumps(flags, separators=(",", ":"))
+        + _mcp_connector_summary(tool_names)
+        + "\nAnswer feature questions from this brief; do not infer features from recalled "
+        "chat or empty notes, claim unobserved improvement, or invent unavailable tools."
+        + catalog
+        + inspection
+    )
+
+
 def configuration(session: Session) -> dict:
     """Allowlisted knobs only; enabled configuration does not prove readiness."""
     memory = bool(config.get("memory_enabled"))

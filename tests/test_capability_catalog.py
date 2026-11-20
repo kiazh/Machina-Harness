@@ -10,7 +10,7 @@ import machina.tools  # noqa: F401 — registers every built-in tool
 from machina.core import capability_catalog as catalog_module
 from machina.core.provider import PROVIDERS
 from machina.core.routing.types import COST_TIERS, ORCHESTRATION_MODES, ROLES, TRANSPORTS
-from machina.core.self_knowledge import capability_context
+from machina.core.self_knowledge import capability_context, compact_capability_context
 from machina.core.session_mode import MODES
 from machina.tools.base import registry
 
@@ -54,6 +54,22 @@ def test_prompt_capability_context_carries_the_index() -> None:
     assert "Built-in tools" in text
     assert "harness_catalog" in text
     assert "Feature details" in text
+
+
+def test_compact_prompt_capability_context_is_bounded_but_complete() -> None:
+    from machina.core.assembler import get_token_count
+
+    class FakeSession:
+        execution_mode = "ask"
+
+    text = compact_capability_context(
+        FakeSession(), tool_names={"read_file", "harness_status"}, growth_state="none"
+    )
+    assert "Harness capabilities" in text
+    assert "Feature briefs" in text
+    assert "harness_status" in text
+    assert "Feature details" not in text  # full manual prose is not repeated
+    assert get_token_count(text) < 900
 
 
 def test_catalog_sections_are_present_and_bounded() -> None:

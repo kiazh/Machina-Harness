@@ -452,7 +452,13 @@ class BaseReActAgent:
         from machina.memory.rsi import enabled
 
         weights = (_rsi_choice.get() or {}).get("tool_weights", {}) if enabled() else {}
-        return sorted(defs, key=lambda tool: -max(0.8, min(1.2, weights.get(tool.name, 1))))
+        ordered = sorted(
+            defs,
+            key=lambda tool: -max(0.8, min(1.2, weights.get(tool.name, 1))),
+        )
+        from machina.core.tool_projection import compact_tool_definitions
+
+        return compact_tool_definitions(ordered)
 
     async def _get_rag_context(
         self,

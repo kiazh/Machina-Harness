@@ -334,11 +334,11 @@ def build_capability_section(
 
     Verbatim move of the ``capability_context`` block of ``_prepare_context``.
     """
-    from machina.core.self_knowledge import capability_context
+    from machina.core.self_knowledge import compact_capability_context
 
     return (
         "system",
-        capability_context(
+        compact_capability_context(
             session,
             tool_names=tool_names,
             growth_state=growth_state,
