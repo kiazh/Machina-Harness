@@ -272,6 +272,15 @@ class MemoryStore:
         else:
             row = await insert(db)
         memory = self._row_to_entry(row)
+        if not quarantined:
+            # Graph indexing is a derived retrieval aid. A graph outage must
+            # never turn a successful durable memory write into a failure.
+            try:
+                from machina.memory.graph import memory_graph
+
+                await memory_graph.ingest(memory)
+            except Exception as error:
+                logger.debug("memory graph indexing skipped: %s", type(error).__name__)
         audit_log(
             "memory_add",
             memory_id=str(memory.id),

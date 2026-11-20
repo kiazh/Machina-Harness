@@ -8,7 +8,7 @@ Machina is a terminal-first coding agent that runs entirely on your own machine 
 
 Most terminal agents are a loop around a chat API. They resend the transcript until it overflows, forget everything when the session ends, run whatever model you hard-coded, and treat a tool's name as its security boundary. That is fine for a quick one-off. It falls apart on long tasks, across days, and on actions you cannot undo.
 
-Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (28 tables) is the source of truth, and the harness manages a bounded, governed, auditable view of it so the agent stays coherent over hours and across sessions.
+Machina is built as a **state-management system** instead. The model is the only stateless part; a PostgreSQL + pgvector database (31 tables) is the source of truth, and the harness manages a bounded, governed, auditable view of it so the agent stays coherent over hours and across sessions.
 
 **The parts that are automatic, not your job to babysit:**
 
@@ -178,7 +178,7 @@ flowchart TB
         OBS["Observability<br/>audit, traces<br/>metrics, diagnostics"]
     end
 
-    PG[("PostgreSQL 16 + pgvector<br/>28 tables + migrations")]
+    PG[("PostgreSQL 16 + pgvector<br/>31 tables + migrations")]
     EXTERNAL["Cloud APIs, subscription accounts<br/>local models, remote MCP servers"]
 
     TUI --> GW
@@ -330,7 +330,7 @@ The turn coordinator holds the lease for the sequence. A denial is recorded as a
 | Group | Tables |
 |---|---|
 | **Session and context** | `sessions`, `context_chunks`, `context_archive`, `tool_artifacts`, `session_image_context` |
-| **Memory and identity** | `memories`, `pending_memories`, `memory_provenance`, `shared_memory_deliveries`, `persona_memories`, `user_profiles`, `agent_beliefs`, `agent_belief_history` |
+| **Memory and identity** | `memories`, `memory_entities`, `memory_entity_mentions`, `memory_edges`, `pending_memories`, `memory_provenance`, `shared_memory_deliveries`, `persona_memories`, `user_profiles`, `agent_beliefs`, `agent_belief_history` |
 | **Agents and learning** | `agents`, `agent_messages`, `learning_reviews`, `agent_growth`, `growth_episodes`, `rsi_profiles`, `rsi_revisions`, `rsi_episodes` |
 | **Authority and audit** | `permission_grants`, `permission_approvals`, `audit_events` |
 | **Work and accounting** | `jobs`, `llm_usage`, `semantic_cache_entries`, `optimization_shadow_events` |
@@ -364,7 +364,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Tools and commands | 45 built-in tools; 41 top-level CLI commands (86 paths); 53 slash commands |
 | Protocol and API | 166 RPC methods (14 core + 152 feature); 33 REST routes; 25 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
-| Storage | PostgreSQL 16 + pgvector, 28 tables |
+| Storage | PostgreSQL 16 + pgvector, 31 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
 | CLI cold start | `machina version` measured at ~0.5 s on this checkout with a warm filesystem cache; the first run after install is slower |
 
@@ -622,7 +622,7 @@ They share retrieval machinery where useful, but they are not the same table, th
 
 ### The mental model
 
-Memory is not a second transcript and it is not a knowledge graph of everything. It is a **small set of durable claims** that the system believes are worth carrying forward. Each claim has four properties that matter as much as its text:
+Memory is not a second transcript and it is not an unbounded knowledge graph. It is a **small set of durable claims** that the system believes are worth carrying forward, plus a bounded entity/time index (`memory_entities`, `memory_entity_mentions`, `memory_edges`) used only to expand retrieval through explicit names, relations, and temporal proximity. Each claim has four properties that matter as much as its text:
 
 - **Category** — is this a preference, a decision, a fact, an event, or something transient?
 - **Provenance** — where did it come from, and who or what asserted it?
@@ -709,7 +709,7 @@ Machina also stores agent-owned preferences and lessons ("growth"). These are no
 - It is **not** a transcript archive. Use sessions and documents for that.
 - It is **not** a fine-tune. Nothing here changes model weights.
 - It is **not** infallible. Memories can be incomplete or wrong; the inspection, correction, and forgetting controls exist for that reason.
-- It is **not** shared across installations. Persistence is local to the configured database, and the HTTP surface uses a shared API key rather than per-user accounts.
+- It is **not** shared across installations. Persistence is local to the configured database; the HTTP surface uses a shared API key by default, with optional OIDC verification for external principals.
 
 ### What breaks if a stage is missing
 
@@ -804,7 +804,7 @@ Length-prefixing matters. Separator-joined fields can collide: `["echo", "a|b"]`
 |---|---|
 | `ask` (default) | Routine project actions can proceed; risky or unclassified actions require review |
 | `workspace` | Project work can proceed; actions crossing configured boundaries require review |
-| `sandbox` | Terminal commands run through the configured Docker sandbox |
+| `sandbox` | Terminal commands run through the configured isolated backend (Docker, gVisor, Kata, Kata-Firecracker, or WASI) |
 | `full` | An explicit session grant allows host operations without further approval, including destructive actions |
 
 `ask` does **not** mean "ask before every write." Tools declare effects and the broker checks the specific action. Routine project work is allowed; opaque execution, boundary crossings, and sensitive capabilities are not. Host execution is never a sandbox merely because a workspace is open.
@@ -1081,7 +1081,7 @@ Reasoning effort is provider-specific. Common tiers are `low`, `medium`, and `hi
 | **MCP client** | stdio or HTTP | Bring external tools into Machina's catalog |
 | **External harnesses** | MCP registration and delegated child runs | Let OpenCode, Codex, or Hermes orchestrate durable Machina work |
 
-Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams.
+Every surface shares the same agent factory, turn coordinator, permission broker, routing inventory, and accounting. The gateway is not a second implementation; it is an authenticated message interface to the same core. The terminal UI talks to the gateway over JSON-RPC on stdio: named operations and notifications over the child process's input and output streams. The installed console script is lazy: `machina --help` renders a static command table, and invoking a command imports only that feature module instead of the full CLI stack.
 
 The mental model is an **adapter over shared semantics**, not an implementation of the harness. The surfaces differ in transport, authentication, and interaction style. They must not differ in what a turn means, what an approval authorizes, or what a usage record contains. The test of a surface is parity: pause the same action in two surfaces and the approval identity should be the same.
 
@@ -1219,8 +1219,8 @@ The suite is not just feature coverage. It includes:
 
 ### Design tradeoffs, stated honestly
 
-- **Self-hosted, not multi-tenant.** The HTTP API uses a shared API key. It is not a per-user account system.
-- **Host execution is not a sandbox.** The Docker sandbox is a specific execution backend. A workspace being open does not sandbox language servers or host commands.
+- **Self-hosted, not multi-tenant.** The HTTP API uses a shared API key by default; optional OIDC verifies external principals for approvals. Neither mode provisions per-user accounts or tenants.
+- **Host execution is not a sandbox.** The container/WASI backends are specific execution backends. A workspace being open does not sandbox language servers or host commands.
 - **Summaries are lossy.** Artifacts and archives make recovery honest where enabled; they do not make compaction lossless.
 - **Memory can be wrong.** Inspection, correction, forgetting, provenance, and optional approval exist for that reason.
 - **Routing is only as good as the inventory.** A configured provider without a usable credential is reported, not assumed. Model access and pricing can change between runs.
@@ -1778,7 +1778,7 @@ Common environment groups:
 | Database | `DATABASE_URL` or `MACHINA_DATABASE_URL`; `MACHINA_TEST_DATABASE_URL` for tests |
 | Default model | `MACHINA_PROVIDER`, `MACHINA_MODEL` |
 | Routing | `MACHINA_ORCHESTRATION_MODE`, `MACHINA_MODEL_SELECTION`, `MACHINA_WORKER_COUNT`, `MACHINA_MAX_WORKER_ROUTES`, `MACHINA_COST_TIER`, `MACHINA_WORKER_TRANSPORT` |
-| HTTP authentication | `MACHINA_API_KEY` |
+| HTTP authentication | `MACHINA_API_KEY`, `MACHINA_OIDC_ISSUER`, `MACHINA_OIDC_AUDIENCE`, optional `MACHINA_OIDC_JWKS_URL`, `MACHINA_OIDC_ALGORITHMS`, `MACHINA_OIDC_SUBJECT_CLAIM` |
 | Workspace and scripts | `MACHINA_WORKSPACE_ROOT`, `MACHINA_SCRIPTS_DIR` |
 | Embeddings | `MACHINA_EMBEDDING_BACKEND`, `MACHINA_EMBEDDING_MODEL`, `MACHINA_EMBEDDING_BASE_URL` |
 | Reranking | `MACHINA_RERANKER_BACKEND`, `MACHINA_RERANKER_HTTP_URL`, `COHERE_API_KEY` |
@@ -1818,6 +1818,14 @@ machina serve --host 127.0.0.1 --port 8000
 ```
 
 Authenticate with `Authorization: Bearer <MACHINA_API_KEY>`. `/health` and `/ready` are public; `/metrics` requires authentication.
+
+For an external identity provider, install the optional OIDC extra
+(`pip install -e '.[oidc]'`) and set `MACHINA_OIDC_ISSUER` and
+`MACHINA_OIDC_AUDIENCE` (plus `MACHINA_OIDC_JWKS_URL` when the issuer does not
+advertise one). Bearer JWTs are verified against the issuer's JWKS and resolve
+approvals as `oidc:<subject>`; the local API key remains accepted as a
+fallback. OIDC is a resource-server check, not a user database: identity still
+comes from the token, and Machina does not provision accounts.
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/sessions \
@@ -1874,6 +1882,20 @@ Compose launches PostgreSQL and the HTTP backend on `127.0.0.1:8000`; it does no
 docker build -f Dockerfile.sandbox -t machina-tool-sandbox:latest .
 ```
 
+`terminal_sandbox` selects the isolation backend: `docker` uses runc,
+`gvisor` adds `--runtime runsc`, `kata` adds `--runtime kata-runtime`, and
+`firecracker` uses the host's Kata-Firecracker runtime (override with
+`MACHINA_FIRECRACKER_RUNTIME`; it defaults to `kata-runtime`). Override the
+other runtime names with `MACHINA_GVISOR_RUNTIME` and
+`MACHINA_KATA_RUNTIME`. The container backends keep the same no-network,
+read-only-root, dropped-capability contract.
+
+`wasm` is a separate WASI backend: set `terminal_wasm_module` to a `.wasm`
+command module, install the `wasmtime` CLI, and commands are passed as argv to
+that module with the workspace mounted read/write at `/workspace` and no
+network. It is deliberately a module runner, not a POSIX shell; use it for
+precompiled WASI tools rather than arbitrary host commands.
+
 Use [OPERATIONS.md](OPERATIONS.md) for deployment configuration, migrations, backups, restore checks, monitoring, and upgrades.
 
 ### Development
@@ -1892,7 +1914,7 @@ npm --prefix ui run check
 
 Database-backed tests require a separate test database configured with `MACHINA_TEST_DATABASE_URL`. The DevTools runner isolates `HOME` and `MACHINA_HOME`; do not point test configuration at an application database.
 
-CI covers locked dependencies, style and formatting, security scanning, release artifacts, the backend suite against a test PostgreSQL service, UI typecheck/tests/lint/audit, and Docker image builds.
+CI covers locked dependencies, style and formatting, security scanning, release artifacts, the backend suite against a test PostgreSQL service, UI typecheck/tests/lint/audit, and Docker image builds. Tagged releases additionally produce a CycloneDX SBOM, keyless Sigstore bundles for every artifact, and GitHub SLSA build provenance; the release workflow uploads all three alongside the wheel and source distribution. Generation-quality gates for Promptfoo, Ragas, and DeepEval live in [`evals/`](evals/README.md) and run on demand with a model credential.
 
 ### Source map
 
@@ -1949,6 +1971,7 @@ scripts/            Operator script mount point and setup guidance
 | [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
 | [Benchmarking](docs/BENCHMARKING.md) | Benchmark ledger, lockbox, and held-out verification |
+| [Evaluation gates](evals/README.md) | Promptfoo, Ragas, DeepEval, and metric-baseline regressions |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
 | [Release evidence](docs/verification/RELEASE_READINESS.md) | Verification scope and open operational gates |
@@ -1977,7 +2000,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 |---|---|
 | [A](#appendix-a-rpc-method-catalog) | 166 RPC methods |
 | [B](#appendix-b-tool-catalog) | 45 tools and their effects |
-| [C](#appendix-c-database-catalog) | 28 tables and two ER diagrams |
+| [C](#appendix-c-database-catalog) | 31 tables and two ER diagrams |
 | [D](#appendix-d-configuration-reference) | 130 configuration keys |
 | [E](#appendix-e-protocol-events) | 25 protocol events |
 | [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
@@ -2488,8 +2511,9 @@ erDiagram
 | `workspace_ui_state` | `""` |
 | `machina_home` | `""` |
 | `tmpdir` | `""` |
-| `terminal_sandbox` | `disabled` |
+| `terminal_sandbox` | `disabled` (or `local`, `docker`, `gvisor`, `kata`, `firecracker`, `wasm`) |
 | `terminal_image` | `machina-tool-sandbox:latest` |
+| `terminal_wasm_module` | `""` (WASI module for the `wasm` backend) |
 | `browser_verification` | `auto` |
 | `approval_timeout` | `300` |
 | `meta_harness_enabled` | `true` |

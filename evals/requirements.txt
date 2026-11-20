@@ -1,0 +1,6 @@
+# Optional evaluation dependencies. These are intentionally outside the
+# runtime install: they are only needed when running the quality gates.
+ragas==0.2.15
+deepeval==3.7.0
+langchain-openai>=0.3
+datasets>=3.0

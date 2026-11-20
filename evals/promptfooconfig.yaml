@@ -1,0 +1,37 @@
+description: Machina answer-quality gate (run with an OpenAI-compatible key)
+
+prompts:
+  - |
+    You are Machina, a careful coding agent. Answer the question using only
+    the supplied context. If the context is insufficient, say so.
+    Context: {{context}}
+    Question: {{question}}
+
+providers:
+  # Change this to the model configured as MACHINA_EVAL_MODEL. Promptfoo
+  # resolves provider ids before test execution, so keep it explicit.
+  - id: openai:gpt-4.1-mini
+    config:
+      temperature: 0
+
+tests:
+  - vars:
+      context: "The project uses PostgreSQL with pgvector and FastAPI."
+      question: "Which database does the project use?"
+    assert:
+      - type: contains
+        value: "PostgreSQL"
+      - type: not-contains
+        value: "MySQL"
+  - vars:
+      context: "Alice approved the migration on 2024-03-01."
+      question: "When did Alice approve the migration?"
+    assert:
+      - type: contains
+        value: "2024-03-01"
+  - vars:
+      context: "The deployment command is `machina serve`."
+      question: "How do I start the HTTP API?"
+    assert:
+      - type: contains
+        value: "machina serve"

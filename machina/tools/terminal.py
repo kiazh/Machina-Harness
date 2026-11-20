@@ -16,6 +16,14 @@ from machina.core.config import config
 from machina.core.exceptions import ToolError, ValidationError
 from machina.observability.diagnostics import record_failure
 from machina.tools.base import registry
+from machina.tools.sandbox import (
+    container_backend,
+    is_isolated_backend,
+    is_wasm_backend,
+    isolation_required_error,
+    runtime_args,
+    validate_backend,
+)
 
 logger = logging.getLogger(__name__)
 MAX_OUTPUT_CHARS = 64_000
@@ -404,9 +412,10 @@ async def terminal(
     # action; this layer validates backend availability. Host execution is
     # available in ask/workspace/full modes once approved — Docker sandbox
     # use stays independent of permission policy.
-    sandbox = str(config.get("terminal_sandbox") or "disabled").lower()
-    if sandbox not in {"disabled", "local", "docker"}:
-        raise ValidationError("terminal sandbox must be 'disabled', 'local', or 'docker'")
+    try:
+        sandbox = validate_backend(str(config.get("terminal_sandbox") or "disabled"))
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
     # "disabled" previously hard-rejected everything. With the broker in place,
     # host execution proceeds once approved (mode ask/workspace/full); only
     # sandbox mode forces container isolation.
@@ -415,13 +424,42 @@ async def terminal(
     # to host execution. Snapshot backend wins over re-resolved settings.
     _snap = _approved_snapshot()
     _snap_backend = str((_snap or {}).get("backend") or "").lower()
-    if sandbox == "disabled" and _mode3 == "sandbox":
-        raise ValidationError("sandbox mode requires the Docker backend; Docker is not configured")
-    use_docker = sandbox == "docker" or _mode3 == "sandbox" or _snap_backend == "sandbox"
-    if use_docker and sandbox != "docker" and _mode3 == "sandbox":
-        raise ValidationError("sandbox mode requires the Docker backend; Docker is not configured")
+    is_container = container_backend(sandbox)
+    is_isolated = is_isolated_backend(sandbox)
+    if _mode3 == "sandbox" and not is_isolated:
+        raise ValidationError(isolation_required_error(sandbox))
+    if _snap_backend == "sandbox" and not is_isolated:
+        raise ValidationError(isolation_required_error(sandbox))
+    use_docker = is_container
+    effective_backend = sandbox if is_container else "docker"
     container_name: str | None = None
-    if use_docker:
+    if is_wasm_backend(sandbox):
+        import shutil
+
+        module = str(config.get("terminal_wasm_module") or "").strip()
+        if not module:
+            raise ValidationError(
+                "terminal_sandbox=wasm requires terminal_wasm_module=/path/to/module.wasm"
+            )
+        module_path = Path(module).expanduser()
+        if not module_path.is_absolute():
+            from machina.core.execution_context import execution_context
+
+            module_path = execution_context("terminal").workspace / module_path
+        if not module_path.is_file():
+            raise ValidationError(f"WASM module not found: {module_path}")
+        wasmtime = shutil.which("wasmtime")
+        if wasmtime is None:
+            raise ValidationError("terminal_sandbox=wasm requires the wasmtime CLI on PATH")
+        args = [
+            wasmtime,
+            "run",
+            "--dir",
+            f"{resolved_workdir}::/workspace",
+            str(module_path),
+            *args,
+        ]
+    elif use_docker:
         import uuid as _uuid
 
         # Identifiable handle retained for stop/remove on cancellation,
@@ -436,6 +474,7 @@ async def terminal(
         args = [
             "docker",
             "run",
+            *runtime_args(effective_backend),
             "--rm",
             "--name",
             container_name,

@@ -467,7 +467,11 @@ DEFAULTS: dict[str, Any] = {
     "workspace_root": "",
     "terminal_sandbox": "disabled",
     "terminal_image": "machina-tool-sandbox:latest",
+    "terminal_wasm_module": "",
     "approval_timeout": 300,
+    # Entity/time graph expansion over durable memories. It is additive: when
+    # disabled or unavailable, flat hybrid retrieval remains the whole path.
+    "memory_graph_enabled": True,
     # Feature integration toggles with real enforcement.
     # Human-in-the-loop approval gate for memory writes (R4-089): when on,
     # MemoryStore.add routes writes to pending_memories for approve/reject.
@@ -531,7 +535,7 @@ LEGACY_ENV_VARS: dict[str, str] = {
 #: normalizes case/whitespace once and raises ``"<key> must be a|b|c"``.
 _ENUM_VALIDATORS: dict[str, tuple[str, ...]] = {
     "execution_mode": ("ask", "workspace", "sandbox", "full"),
-    "terminal_sandbox": ("disabled", "local", "docker"),
+    "terminal_sandbox": ("disabled", "local", "docker", "gvisor", "kata", "firecracker", "wasm"),
     "orchestration_mode": ("single_model", "multi_model"),
     "model_selection": ("auto", "pinned"),
     "worker_transport": ("native", "proxy", "mcp"),
@@ -880,7 +884,9 @@ class Config:
     workspace_root: str = ""
     terminal_sandbox: str = "disabled"
     terminal_image: str = "machina-tool-sandbox:latest"
+    terminal_wasm_module: str = ""
     approval_timeout: int = 300
+    memory_graph_enabled: bool = True
     # Human-in-the-loop memory writes: ON routes MemoryStore.add to
     # pending_memories (approve/reject via CLI/gateway); OFF writes directly.
     memory_approval_enabled: bool = False

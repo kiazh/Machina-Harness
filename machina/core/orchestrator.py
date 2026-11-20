@@ -30,6 +30,7 @@ from machina.core.session import session_manager
 from machina.db.connection import db, parse_command_count
 from machina.memory.redaction import redact_diagnostic
 from machina.observability.diagnostics import record_failure
+from machina.tools.sandbox import is_isolated_backend
 
 __all__ = ["DelegationResult", "Orchestrator", "AgentNotFoundError"]
 
@@ -333,7 +334,9 @@ class Orchestrator:
         child_authority = dict(parent)
         child_authority["max_mode"] = parent_mode
         child_authority["tools"] = cap_child_authority(parent, definition_tool_cap(definition))
-        if parent_mode == "sandbox" or config.get("terminal_sandbox") == "docker":
+        if parent_mode == "sandbox" or is_isolated_backend(
+            str(config.get("terminal_sandbox") or "disabled")
+        ):
             child_authority["terminal_backend"] = "sandbox"
 
         inherited_grant = None

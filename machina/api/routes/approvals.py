@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from machina.api.auth import require_api_key
+from machina.api.auth import require_api_key, require_principal
 from machina.api.routes.models import PromptRequest, ResolveApprovalRequest, ResumeApprovalRequest
 from machina.api.routes.streaming import _stream_session
 from machina.core.session import session_manager
@@ -27,8 +27,12 @@ async def list_approvals(sessionId: uuid.UUID) -> dict[str, Any]:
     return {"approvals": await _store.list_pending(str(sessionId))}
 
 
-@router.post("/api/v1/approvals/{request_id}/resolve", dependencies=[Depends(require_api_key)])
-async def resolve_approval(request_id: str, req: ResolveApprovalRequest) -> dict[str, Any]:
+@router.post("/api/v1/approvals/{request_id}/resolve")
+async def resolve_approval(
+    request_id: str,
+    req: ResolveApprovalRequest,
+    principal: str = Depends(require_principal),
+) -> dict[str, Any]:
     """Resolve a pending approval. Ownership enforced via stored session binding."""
     from machina.permissions import store as _store
 
@@ -55,8 +59,8 @@ async def resolve_approval(request_id: str, req: ResolveApprovalRequest) -> dict
     grant = (req.grant or "once").lower()
     if grant not in ("once", "session"):
         raise HTTPException(400, "grant must be once|session")
-    # Authenticated API principal (never agent: prefix).
-    resolved = await _store.resolve_decision(request_id, verdict, principal="http")
+    # Authenticated human principal (never an agent: prefix).
+    resolved = await _store.resolve_decision(request_id, verdict, principal=principal)
     if resolved is None:
         raise HTTPException(409, "approval already consumed or not permitted")
     if verdict == "approved" and grant == "session":

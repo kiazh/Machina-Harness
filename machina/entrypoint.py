@@ -66,9 +66,9 @@ def main() -> None:
 
         raise SystemExit(launch_ui(mode=mode))
 
-    from machina.cli import app
+    from machina.cli.lazy import lazy_app
 
-    app()
+    lazy_app()
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via the console script

@@ -23,6 +23,7 @@ from machina.core.usage import usage_store
 from machina.db.lazy import LazyDb
 from machina.memory.authority import CATALOG_DEMOTION_FACTOR, authority_tier
 from machina.memory.digest import MemoryDigest, build_memory_digest
+from machina.memory.graph import MemoryGraph, memory_graph
 from machina.memory.models import MemoryEntry, RetrievedMemory
 from machina.memory.persona import EmotionTopology, PersonaMemoryStore
 from machina.memory.store import MemoryStore, memory_store
@@ -94,11 +95,13 @@ class MemoryRetriever:
         persona_store: PersonaMemoryStore | None = None,
         persona_enabled: bool | None = None,
         default_emotion: str | None = None,
+        graph: MemoryGraph | None = None,
     ) -> None:
         self.store = store or memory_store
         self.llm = llm_provider
         self.top_k = top_k
         self.rerank = rerank
+        self.graph = graph or memory_graph
         self.emotion_topology = EmotionTopology()
         self.persona_store = persona_store or PersonaMemoryStore()
         # None = resolve from config at call time so runtime toggles apply.
@@ -264,6 +267,30 @@ class MemoryRetriever:
                 if rm.memory.created_at and start <= rm.memory.created_at <= end
             ]
 
+        # Step 4b: Expand through the persistent entity/time graph. Graph
+        # rows are only hints; they were already filtered by the same agent,
+        # category, quarantine, and date constraints inside the graph query.
+        graph_added = 0
+        if self.graph.enabled():
+            seed_ids = [rm.memory.id for rm in candidates[: max(8, wanted)]]
+            graph_rows = await self.graph.expand(
+                seed_ids,
+                query=query,
+                agent_id=agent_id,
+                category=category,
+                date_range=date_range,
+                limit=wanted * 2,
+            )
+            known = {rm.memory.id for rm in candidates}
+            for entry, score in graph_rows:
+                if entry.id in known:
+                    continue
+                known.add(entry.id)
+                candidates.append(RetrievedMemory(memory=entry, score=float(score), source="graph"))
+                graph_added += 1
+            if graph_added:
+                candidates.sort(key=lambda rm: rm.score, reverse=True)
+
         # Step 5: Re-rank
         if self.rerank and len(candidates) > 1:
             candidates = await self._rerank(query, candidates, session_id, agent_id)
@@ -299,6 +326,7 @@ class MemoryRetriever:
             dense_candidates=len(dense_results),
             sparse_candidates=len(sparse_results),
             merged_candidates=len(candidates),
+            graph_candidates=graph_added,
             returned=min(len(candidates), wanted),
             failed_branches=len(failures),
             rerank=bool(self.rerank),

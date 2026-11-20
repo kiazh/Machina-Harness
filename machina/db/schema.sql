@@ -310,6 +310,46 @@ CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
 CREATE INDEX IF NOT EXISTS idx_context_chunks_fts ON context_chunks
     USING GIN (to_tsvector('english', search_text));
 
+-- Temporal/entity graph over durable memories. Entity mentions are the
+-- durable graph nodes per memory; explicit relation edges connect entities
+-- mentioned together in the same memory or by a simple subject-relation-
+-- object extraction. The graph is an additive retrieval expansion, never a
+-- second source of truth for memory content.
+CREATE TABLE IF NOT EXISTS memory_entities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    normalized_name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'term',
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS memory_entity_mentions (
+    memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (memory_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_entity_mentions_entity
+    ON memory_entity_mentions(entity_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_edges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    target_entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    relation TEXT NOT NULL,
+    memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    weight FLOAT NOT NULL DEFAULT 1.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_entity_id, target_entity_id, relation, memory_id),
+    CHECK (source_entity_id <> target_entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_source
+    ON memory_edges(source_entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_target
+    ON memory_edges(target_entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_memory ON memory_edges(memory_id);
+
 -- ─── Pending Memories (Approval Gate) ───────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS pending_memories (

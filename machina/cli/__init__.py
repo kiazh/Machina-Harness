@@ -1,237 +1,128 @@
-"""Machina CLI — the ``machina`` command.
+"""Machina CLI package with lazy, explicit re-exports.
 
-``machina`` with no subcommand (also ``machina repl`` and ``machina chat -i``) launches the
-TypeScript terminal UI in ``ui/``, which drives the agent through the Python
-gateway (``python -m machina.gateway``). Every other subcommand is a one-shot admin
-command rendered with Rich.
+Importing :mod:`machina.cli` must stay cheap for the console entry point and
+for one-shot commands. The eager composition root lives in
+:mod:`machina.cli._app`; this module exposes the historical public names via
+PEP 562 so ``from machina.cli import app`` still builds the full Typer app,
+while ``from machina.cli import output`` imports only the small output module.
 
-This package is the composition root: it creates ``app``, registers every
-command in its original order (help output and the Click command list depend on
-it), and re-exports the command functions and shared helpers. The commands
-themselves live in sibling modules: :mod:`~machina.cli.chat`,
-:mod:`~machina.cli.memory`, :mod:`~machina.cli.sessions`,
-:mod:`~machina.cli.skills`, and :mod:`~machina.cli.maintenance`.
+The console entry point uses :mod:`machina.cli.lazy`, which maps command names
+to modules and imports exactly one command (or command group) on invocation.
 """
 
 from __future__ import annotations
 
-import typer
+import sys
+from importlib import import_module
+from types import ModuleType
+from typing import Any
 
-from machina import interop as interop_mod
-from machina.cli import output
-from machina.cli.audit import audit
-from machina.cli.auth import app as auth_app
-from machina.cli.chat import _report_terminal_response, chat, repl
-from machina.cli.common import (
-    EXIT_FAILED,
-    EXIT_OK,
-    EXIT_PAUSED,
-    VALID_MODES,
-    _apply_cli_mode,
-    _db_connected,
-    _normalize_mode,
-    _parse_uuid,
-    _resolve_session,
-    _run,
-    _sync_env_shadow,
-)
-from machina.cli.growth import app as growth_app
-from machina.cli.host import host_app
-from machina.cli.interop import app as harnesses_app
-from machina.cli.maintenance import (
-    config_set,
-    config_show,
-    doctor,
-    init,
-    serve,
-    set_mode,
-    setup,
-    status,
-    stop_all,
-    uninstall,
-    version,
-)
-from machina.cli.memory import (
-    memory_approve,
-    memory_approve_all,
-    memory_forget,
-    memory_list,
-    memory_pending,
-    memory_reject,
-    memory_reject_all,
-    memory_search,
-    memory_stats,
-    user_profile_cmd,
-    user_profile_list,
-    user_profile_update,
-)
-from machina.cli.optimization import app as optimization_app
-from machina.cli.output import console
-from machina.cli.providers import app as providers_app
-from machina.cli.sessions import (
-    compress,
-    context,
-    delete,
-    export,
-    fork,
-    list_sessions,
-    route_command,
-    routes_command,
-    sessions_search,
-    usage_command,
-)
-from machina.cli.skills import (
-    curator,
-    hub,
-    learn,
-    skills,
-    skills_app,
-    skills_enrich,
-    skills_list,
-)
-from machina.db.connection import db
-from machina.ui_launcher import launch_ui
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    # Composition root
+    "app": ("machina.cli._app", "app"),
+    "main": ("machina.cli._app", "main"),
+    # Shared helpers and constants
+    "EXIT_FAILED": ("machina.cli.common", "EXIT_FAILED"),
+    "EXIT_OK": ("machina.cli.common", "EXIT_OK"),
+    "EXIT_PAUSED": ("machina.cli.common", "EXIT_PAUSED"),
+    "VALID_MODES": ("machina.cli.common", "VALID_MODES"),
+    "_apply_cli_mode": ("machina.cli.common", "_apply_cli_mode"),
+    "_db_connected": ("machina.cli.common", "_db_connected"),
+    "_normalize_mode": ("machina.cli.common", "_normalize_mode"),
+    "_parse_uuid": ("machina.cli.common", "_parse_uuid"),
+    "_resolve_session": ("machina.cli.common", "_resolve_session"),
+    "_run": ("machina.cli.common", "_run"),
+    "_sync_env_shadow": ("machina.cli.common", "_sync_env_shadow"),
+    "_report_terminal_response": ("machina.cli.chat", "_report_terminal_response"),
+    # Commands
+    "audit": ("machina.cli.audit", "audit"),
+    "chat": ("machina.cli.chat", "chat"),
+    "repl": ("machina.cli.chat", "repl"),
+    "compress": ("machina.cli.sessions", "compress"),
+    "context": ("machina.cli.sessions", "context"),
+    "delete": ("machina.cli.sessions", "delete"),
+    "export": ("machina.cli.sessions", "export"),
+    "fork": ("machina.cli.sessions", "fork"),
+    "list_sessions": ("machina.cli.sessions", "list_sessions"),
+    "route_command": ("machina.cli.sessions", "route_command"),
+    "routes_command": ("machina.cli.sessions", "routes_command"),
+    "sessions_search": ("machina.cli.sessions", "sessions_search"),
+    "usage_command": ("machina.cli.sessions", "usage_command"),
+    "curator": ("machina.cli.skills", "curator"),
+    "hub": ("machina.cli.skills", "hub"),
+    "learn": ("machina.cli.skills", "learn"),
+    "skills": ("machina.cli.skills", "skills"),
+    "skills_app": ("machina.cli.skills", "skills_app"),
+    "skills_enrich": ("machina.cli.skills", "skills_enrich"),
+    "skills_list": ("machina.cli.skills", "skills_list"),
+    "config_set": ("machina.cli.maintenance", "config_set"),
+    "config_show": ("machina.cli.maintenance", "config_show"),
+    "doctor": ("machina.cli.maintenance", "doctor"),
+    "init": ("machina.cli.maintenance", "init"),
+    "serve": ("machina.cli.maintenance", "serve"),
+    "set_mode": ("machina.cli.maintenance", "set_mode"),
+    "setup": ("machina.cli.maintenance", "setup"),
+    "status": ("machina.cli.maintenance", "status"),
+    "stop_all": ("machina.cli.maintenance", "stop_all"),
+    "uninstall": ("machina.cli.maintenance", "uninstall"),
+    "version": ("machina.cli.maintenance", "version"),
+    "memory_approve": ("machina.cli.memory", "memory_approve"),
+    "memory_approve_all": ("machina.cli.memory", "memory_approve_all"),
+    "memory_forget": ("machina.cli.memory", "memory_forget"),
+    "memory_list": ("machina.cli.memory", "memory_list"),
+    "memory_pending": ("machina.cli.memory", "memory_pending"),
+    "memory_reject": ("machina.cli.memory", "memory_reject"),
+    "memory_reject_all": ("machina.cli.memory", "memory_reject_all"),
+    "memory_search": ("machina.cli.memory", "memory_search"),
+    "memory_stats": ("machina.cli.memory", "memory_stats"),
+    "user_profile_cmd": ("machina.cli.memory", "user_profile_cmd"),
+    "user_profile_list": ("machina.cli.memory", "user_profile_list"),
+    "user_profile_update": ("machina.cli.memory", "user_profile_update"),
+    # Command groups
+    "host_app": ("machina.cli.host", "host_app"),
+    # Modules and shared objects
+    "console": ("machina.cli.output", "console"),
+    "db": ("machina.db.connection", "db"),
+    "interop_mod": ("machina.interop", ""),
+    "output": ("machina.cli.output", ""),
+}
 
-__all__ = [
-    "EXIT_FAILED",
-    "EXIT_OK",
-    "EXIT_PAUSED",
-    "VALID_MODES",
-    "_apply_cli_mode",
-    "_db_connected",
-    "_normalize_mode",
-    "_parse_uuid",
-    "_report_terminal_response",
-    "_resolve_session",
-    "_run",
-    "_sync_env_shadow",
-    "app",
-    "audit",
-    "chat",
-    "compress",
-    "config_set",
-    "config_show",
-    "console",
-    "context",
-    "curator",
-    "db",
-    "delete",
-    "doctor",
-    "export",
-    "fork",
-    "host_app",
-    "hub",
-    "init",
-    "interop_mod",
-    "learn",
-    "list_sessions",
-    "main",
-    "memory_approve",
-    "memory_approve_all",
-    "memory_forget",
-    "memory_list",
-    "memory_pending",
-    "memory_reject",
-    "memory_reject_all",
-    "memory_search",
-    "memory_stats",
-    "output",
-    "repl",
-    "route_command",
-    "routes_command",
-    "serve",
-    "sessions_search",
-    "set_mode",
-    "setup",
-    "skills",
-    "skills_app",
-    "skills_enrich",
-    "skills_list",
-    "status",
-    "stop_all",
-    "uninstall",
-    "usage_command",
-    "user_profile_cmd",
-    "user_profile_list",
-    "user_profile_update",
-    "version",
-]
-
-app = typer.Typer(
-    name="machina",
-    help="Machina — self-hosted AI agent framework. Run `machina` to open the interactive UI.",
-    invoke_without_command=True,
-)
-app.add_typer(auth_app, name="auth")
-app.add_typer(growth_app, name="growth")
-app.add_typer(host_app, name="host")
-# Primary name is ``harnesses``; ``interop`` stays registered as a kept alias
-# of the same app so existing scripts, the installer and docs keep working.
-app.add_typer(harnesses_app, name="harnesses")
-app.add_typer(harnesses_app, name="interop")
-app.add_typer(providers_app, name="providers")
-app.add_typer(optimization_app, name="optimization")
-app.add_typer(skills_app, name="skills")
+__all__ = sorted(_LAZY_EXPORTS)
 
 
-@app.callback()
-def main(
-    ctx: typer.Context,
-    mode: str = typer.Option(None, "--mode", help="Execution mode: ask|workspace|sandbox|full"),
-) -> None:
-    """Open the interactive UI when no subcommand is given."""
-    if mode is not None:
-        _apply_cli_mode(mode)
-    if ctx.invoked_subcommand is None:
-        from machina.update import auto_update
-
-        auto_update()
-        raise typer.Exit(launch_ui(mode=mode))
+def __getattr__(name: str) -> Any:
+    spec = _LAZY_EXPORTS.get(name)
+    if spec is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = spec
+    module = import_module(module_name)
+    value: Any = module if not attribute else getattr(module, attribute)
+    globals()[name] = value
+    return value
 
 
-# Registration order is part of the CLI's public surface: Click lists commands
-# in insertion order, so this block mirrors the original one-module definition
-# order exactly. Keep new commands in the feature module and register here.
-app.command(name="chat")(chat)
-app.command(name="repl")(repl)
-app.command(name="status")(status)
-app.command(name="audit")(audit)
-app.command(name="mode")(set_mode)
-app.command(name="sessions")(list_sessions)
-app.command(name="sessions-search")(sessions_search)
-app.command(name="usage")(usage_command)
-app.command(name="route")(route_command)
-app.command(name="routes")(routes_command)
-app.command(name="export")(export)
-app.command(name="fork")(fork)
-app.command(name="delete")(delete)
-app.command(name="context")(context)
-app.command(name="compress")(compress)
-app.command(name="learn")(learn)
-app.command(name="curator")(curator)
-app.command(name="hub")(hub)
-app.command(name="doctor")(doctor)
-app.command(name="init")(init)
-app.command(name="setup")(setup)
-app.command(name="version")(version)
-app.command(name="serve")(serve)
-app.command(name="stop")(stop_all)
-app.command(name="config")(config_show)
-app.command(name="config-set")(config_set)
-app.command(name="memory-list")(memory_list)
-app.command(name="memory-search")(memory_search)
-app.command(name="memory-forget")(memory_forget)
-app.command(name="memory-pending")(memory_pending)
-app.command(name="memory-approve")(memory_approve)
-app.command(name="memory-reject")(memory_reject)
-app.command(name="memory-approve-all")(memory_approve_all)
-app.command(name="memory-reject-all")(memory_reject_all)
-app.command(name="memory-stats")(memory_stats)
-app.command(name="user-profile")(user_profile_cmd)
-app.command(name="user-profile-update")(user_profile_update)
-app.command(name="user-profile-list")(user_profile_list)
-app.command(name="uninstall")(uninstall)
+class _LazyModule(ModuleType):
+    """Return the public callable even after Python binds a submodule name.
+
+    ``machina.cli.chat`` names both a command callback and its feature module;
+    importing the module would otherwise make the module object shadow the
+    historical callback re-export.
+    """
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in _LAZY_EXPORTS:
+            module_name, attribute = _LAZY_EXPORTS[name]
+            module = import_module(module_name)
+            value: Any = module if not attribute else getattr(module, attribute)
+            globals()[name] = value
+            return value
+        return object.__getattribute__(self, name)
 
 
-if __name__ == "__main__":
-    app()
+# PEP 562 plus a module subclass: the subclass handles names that the import
+# system has already populated with a submodule object.
+sys.modules[__name__].__class__ = _LazyModule
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_EXPORTS))

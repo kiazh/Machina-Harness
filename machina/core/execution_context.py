@@ -26,6 +26,7 @@ from machina.core.session_mode import (
     resolve_effective_mode,
     turn_scope,
 )
+from machina.tools.sandbox import is_isolated_backend
 
 __all__ = [
     "ExecutionContext",
@@ -83,7 +84,10 @@ def _context(mode: str, tool: str, workspace: Path, backend: str | None = None) 
         backend = (
             "sandbox"
             if tool == "terminal"
-            and (mode == "sandbox" or config.get("terminal_sandbox") == "docker")
+            and (
+                mode == "sandbox"
+                or is_isolated_backend(str(config.get("terminal_sandbox") or "disabled"))
+            )
             else "host"
         )
     if backend not in ("host", "sandbox"):

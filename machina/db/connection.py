@@ -114,6 +114,43 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding_space TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_embedding_space ON memories(embedding_space);
 """
 
+# Temporal/entity graph. Keep in sync with the memory graph section of
+# schema.sql; additive and idempotent for existing installations.
+_MEMORY_GRAPH_MIGRATION = """
+CREATE TABLE IF NOT EXISTS memory_entities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    normalized_name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'term',
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS memory_entity_mentions (
+    memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (memory_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_entity_mentions_entity
+    ON memory_entity_mentions(entity_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS memory_edges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    target_entity_id UUID NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+    relation TEXT NOT NULL,
+    memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    weight FLOAT NOT NULL DEFAULT 1.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_entity_id, target_entity_id, relation, memory_id),
+    CHECK (source_entity_id <> target_entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_source
+    ON memory_edges(source_entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_target
+    ON memory_edges(target_entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_memory ON memory_edges(memory_id);
+"""
+
 # Token-efficiency ledger + artifact store (2026-10-16). schema.sql never runs
 # on an already-initialized database, so existing installations get the same
 # additive DDL here. Keep in sync with the llm_usage / tool_artifacts sections
@@ -437,6 +474,7 @@ class Database:
             await conn.execute(_CONTEXT_EVENT_ORDER_MIGRATION)
             await conn.execute(_CONTEXT_ARCHIVE_EVENT_ORDER_MIGRATION)
             await conn.execute(_MEMORY_EMBEDDING_SPACE_MIGRATION)
+            await conn.execute(_MEMORY_GRAPH_MIGRATION)
             await conn.execute(_USAGE_LEDGER_MIGRATION)
             await conn.execute(_TOOL_ARTIFACTS_MIGRATION)
             await conn.execute(_OPTIMIZATION_MIGRATION)
