@@ -97,6 +97,10 @@ async def _stream_session(
             from machina.protocol import canonical_http_event
 
             data = canonical_http_event(data, session_id, turn_id)
+        if req.eventFormat == "cloudevents":
+            from machina.protocol.cloudevents import wrap_event
+
+            data = wrap_event(data, source=f"/machina/sessions/{session_id}")
         return f"data: {json.dumps(data)}\n\n"
 
     async def event_stream() -> AsyncGenerator[str, None]:

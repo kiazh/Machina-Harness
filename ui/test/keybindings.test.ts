@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { APP_BINDINGS, AppKeybindings, bindingConflicts, parseBindingOverrides } from "../src/keybindings.ts";
+import { APP_BINDINGS, AppKeybindings, bindingConflicts, parseBindingOverrides, platformKeyLabel } from "../src/keybindings.ts";
 import { KeybindingsDialog } from "../src/components/KeybindingsDialog.ts";
 import { TUI_KEYBINDINGS, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -29,6 +29,31 @@ test("daily defaults use a plain control prefix and no function keys", () => {
 	assert.ok(Object.values(TUI_KEYBINDINGS).every((binding) =>
 		!([binding.defaultKeys].flat() as string[]).includes("ctrl+n"),
 	));
+});
+
+test("platform fallbacks cover terminal and input-method reserved keys", () => {
+	const mac = new AppKeybindings("macos");
+	const windows = new AppKeybindings("windows");
+	for (const bindings of [mac, windows]) {
+		assert.equal(bindings.matches("ctrl+n i", "complete"), true);
+		assert.equal(bindings.matches("ctrl+n x", "closeTab"), true);
+		assert.equal(bindings.matches("ctrl+n o", "quickOpen"), true);
+		assert.equal(bindings.matches("ctrl+n v", "attach"), true);
+		assert.deepEqual(bindings.leaders(), ["ctrl+n"]);
+	}
+	assert.equal(platformKeyLabel("ctrl+shift+left", "macos"), "⌃⇧←");
+	assert.equal(platformKeyLabel("ctrl+shift+left", "windows"), "Ctrl+Shift+←");
+	assert.equal(platformKeyLabel("ctrl+n h", "macos"), "⌃N then H");
+	assert.equal(platformKeyLabel("up / ctrl+b", "windows"), "↑ / Ctrl+B");
+});
+
+test("a user override removes platform fallback aliases for that action", () => {
+	const bindings = new AppKeybindings("macos");
+	bindings.set({ complete: "ctrl+n z" });
+	assert.equal(bindings.matches("ctrl+n i", "complete"), false);
+	assert.equal(bindings.matches("ctrl+n z", "complete"), true);
+	assert.deepEqual(bindingConflicts({}, "save", "ctrl+n i", "macos"), ["Inline completion"]);
+	bindings.set({});
 });
 
 test("keybinding dialog captures a key and commits on Escape", () => {

@@ -120,6 +120,12 @@ class RuntimeServices:
             except Exception as e:
                 report["audit"] = f"unavailable: {e}"
             try:
+                from machina.observability.otlp import install_otlp_exporter
+
+                report["otlp"] = "ready" if install_otlp_exporter() else "disabled"
+            except Exception as e:
+                report["otlp"] = f"unavailable: {e}"
+            try:
                 from machina.skills.registry import skill_registry
 
                 skill_registry.load_all()
@@ -271,6 +277,10 @@ class RuntimeServices:
                     )
 
                 await _stage("audit shutdown", _stop_audit)
+
+                from machina.observability.otlp import shutdown_otlp_exporter
+
+                shutdown_otlp_exporter()
 
                 async def _close_embeddings(budget: float) -> None:
                     from machina.rag.embedder import close_shared_embedder

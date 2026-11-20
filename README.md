@@ -361,7 +361,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 6,487 passed, 27 skipped, 8 deselected (DevTools CI snapshot, real PostgreSQL, 2026-10-26) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 74 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 45 built-in tools; 40 top-level CLI commands (85 paths); 53 slash commands |
+| Tools and commands | 45 built-in tools; 41 top-level CLI commands (86 paths); 53 slash commands |
 | Protocol and API | 166 RPC methods (14 core + 152 feature); 33 REST routes; 25 protocol events |
 | Configuration | 130 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 28 tables |
@@ -1168,12 +1168,13 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Send a message / add a new line | `Enter` / `Shift+Enter` |
 | Find commands | `/help` |
 | Open a project | `/workspace open <path>` |
-| Find a file | `Ctrl+P` or `/quickopen` |
-| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` |
+| Find a file | `Ctrl+P`, `Ctrl+N` then `O`, or `/quickopen` |
+| Attach the editor selection | `Ctrl+Shift+A`, `Ctrl+N` then `V`, or `/attach` |
+| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` (or `Ctrl+N` then `X`) |
 | Show or hide the file explorer | `Ctrl+T`, `Ctrl+Shift+E` (browser-safe), `Ctrl+N` then `T`, or `/explorer` |
 | Change pane focus | `Ctrl+N`, then `N` / `P` |
 | Rename symbol | `Ctrl+N`, then `M` |
-| Show code completion | `Ctrl+Space` or `/editor complete` |
+| Show code completion | `Ctrl+Space`, `Ctrl+N` then `I`, or `/editor complete` |
 | Go to definition / find references | `Ctrl+N`, then `G` / `R` |
 | Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
 | Switch between agents | `Ctrl+N`, then `J` / `K` |
@@ -1182,7 +1183,7 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Stop a response | `Esc` after dismissing any open popup |
 | See keyboard shortcuts | `Ctrl+N`, then `H`; or `?` on empty input |
 
-Some terminals or operating systems intercept shortcuts; the slash commands are the fallbacks. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
+Some terminals or operating systems intercept shortcuts; the slash commands and `Ctrl+N`-prefixed fallbacks remain available. On macOS, `Ctrl+Space` may be the input-source switch and `Ctrl+Left/Right` may be Mission Control; use the prefixed forms or `/editor complete`. On Windows, `Ctrl+Space` may be captured by the IME and `Ctrl+T`/`Ctrl+W` may be terminal/browser actions; use the prefixed forms. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
 
 </details>
 
@@ -1511,7 +1512,7 @@ Run `/help` to print the full command reference: every registered command with i
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
-The CLI mirrors these capabilities with 40 top-level commands and 85 invocable paths once grouped subcommands are counted. The main groups are:
+The CLI mirrors these capabilities with 41 top-level commands and 86 invocable paths once grouped subcommands are counted. The main groups are:
 
 | Group | Commands |
 |---|---|
@@ -1519,10 +1520,10 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | **Routing and providers** | `route`, `routes`, `providers`, `auth` |
 | **Memory and identity** | `memory-list`, `memory-search`, `memory-forget`, `memory-pending`, `memory-approve`, `memory-reject`, `memory-approve-all`, `memory-reject-all`, `memory-stats`, `user-profile`, `user-profile-update`, `user-profile-list`, `growth` |
 | **Skills and learning** | `skills`, `learn`, `curator`, `hub` |
-| **Operations** | `setup`, `init`, `doctor`, `serve`, `host`, `stop`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
+| **Operations** | `setup`, `init`, `doctor`, `serve`, `host`, `stop`, `audit`, `config`, `config-set`, `usage`, `optimization`, `harnesses`, `interop`, `uninstall`, `version` |
 
 <details>
-<summary>All 40 top-level CLI commands</summary>
+<summary>All 41 top-level CLI commands</summary>
 
 | Command | Purpose |
 |---|---|
@@ -1558,6 +1559,7 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | `sessions-search` | Full-text search over session titles. |
 | `setup` | First-launch setup — create the .env file and configure API keys. |
 | `status` | Show Machina status: database, sessions, tools and API key. |
+| `audit` | Show recent sanitized audit events, optionally as JSON. |
 | `stop` | Stop Machina clients in order, then stop the managed database. |
 | `uninstall` | Uninstall Machina — answers yes to everything and nothing is left. |
 | `usage` | Show durable LLM usage and remaining budgets. |
@@ -1569,7 +1571,7 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 </details>
 
 <details>
-<summary>All 85 invocable CLI paths, including grouped subcommands</summary>
+<summary>All 86 invocable CLI paths, including grouped subcommands</summary>
 
 | Command path | Purpose |
 |---|---|
@@ -1650,6 +1652,7 @@ The CLI mirrors these capabilities with 40 top-level commands and 85 invocable p
 | `setup` | First-launch setup — create the .env file and configure API keys. |
 | `skills enrich` | Generate missing schema-v2 metadata for installed/local skills. |
 | `status` | Show Machina status: database, sessions, tools and API key. |
+| `audit` | Show recent sanitized audit events from PostgreSQL. |
 | `stop` | Stop Machina clients in order, then stop the managed database. |
 | `uninstall` | Uninstall Machina — answers yes to everything and nothing is left. |
 | `usage` | Show durable LLM usage and remaining budgets. |
@@ -1783,11 +1786,26 @@ Common environment groups:
 | Skill directories | `MACHINA_SKILLS_DIR`, `MACHINA_LEARNED_SKILLS_DIR` |
 | Web services | `SEARXNG_URL`; optional Firecrawl stack settings in config |
 | MCP OAuth storage | `MACHINA_OAUTH_MASTER_KEY` (base64-encoded 32-byte key) |
+| Trace export | `MACHINA_OTLP_ENDPOINT` (optional OTLP/HTTP collector base URL) |
 | Interactive updates | `MACHINA_AUTO_UPDATE` (default `1`; fast-forwards a clean checkout) |
 
 See [.env.example](.env.example) and [`core/config.py`](machina/core/config.py) for the full set.
 
+### Project instructions
+
+The agent loads the global `~/.machina/AGENTS.md` and the selected workspace's
+`AGENTS.md` as bounded project guidance. These files are labeled as untrusted
+project instructions: they can describe conventions and task context, but they
+cannot widen tool permissions, approvals, secrets, or security policy. The
+`machina audit` command reads the durable sanitized audit trail, and setting
+`MACHINA_OTLP_ENDPOINT` exports completed turn traces to an OTLP/HTTP collector.
+
 ### HTTP API
+
+The API's OpenAPI 3.2.1 document and Swagger/ReDoc pages use the same bearer
+key as every data route. The prompt stream accepts
+`{"eventFormat":"cloudevents"}` to wrap each SSE event in a CloudEvents 1.0
+envelope; the default remains the native event shape.
 
 ```bash
 export MACHINA_API_KEY="$(openssl rand -hex 32)"

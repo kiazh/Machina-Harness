@@ -1,5 +1,5 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component, type TuiMouseEvent, type TUI } from "@earendil-works/pi-tui";
-import { bindingConflicts, bindingRows, capturedKey, type BindingOverrides } from "../keybindings.ts";
+import { bindingConflicts, bindingRows, capturedKey, platformKeyLabel, type BindingOverrides } from "../keybindings.ts";
 import { theme } from "../theme.ts";
 
 const VISIBLE_ROWS = 12;
@@ -93,7 +93,9 @@ export class KeybindingsDialog implements Component {
 		for (let i = this.offset; i < Math.min(rows.length, this.offset + VISIBLE_ROWS); i++) {
 			const row = rows[i]!;
 			const labelWidth = Math.max(12, inside - 23);
-			const key = i === this.selected && this.capture ? `[ ${this.pending ?? "press a key"} ]` : `[ ${row.key} ]`;
+			const key = i === this.selected && this.capture
+				? `[ ${this.pending ?? "press a key"} ]`
+				: `[ ${platformKeyLabel(row.key)} ]`;
 			const value = `${i === this.selected ? "›" : " "} ${truncateToWidth(row.label, labelWidth - 2).padEnd(labelWidth - 2)} ${key}`;
 			out.push(line(i === this.selected ? theme.accent(value) : value));
 		}

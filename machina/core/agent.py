@@ -49,6 +49,7 @@ from machina.core.prompt import (
     assemble_turn_prompt,
     build_capability_section,
     build_persona_section,
+    build_project_instruction_section,
     build_skill_section,
     build_system_prompt,
     build_turn_messages,
@@ -942,6 +943,7 @@ class BaseReActAgent:
             system_prompt = self.system_prompt
         else:
             await query_expansion.prepare_turn(user_message)
+            _project_role, project_instructions = build_project_instruction_section(session)
             system_prompt = build_system_prompt(
                 self.soul_spec,
                 self.allowed_tools,
@@ -955,6 +957,7 @@ class BaseReActAgent:
                 {tool.name for tool in self._tool_defs()},
                 triage=getattr(self, "_last_triage", None),  # advisory; None = unchanged
                 meta_route=meta_route_hint,
+                project_instructions=project_instructions,
                 include_repair=False,
             )
         # Keep the task-critical repair protocol outside the truncatable system

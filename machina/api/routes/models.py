@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,7 @@ class PromptRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=20_000)
     verbose: bool = False
     protocolVersion: int = Field(default=1, ge=1, le=2)
+    eventFormat: Literal["native", "cloudevents"] = "native"
 
 
 class CreateMemoryRequest(BaseModel):

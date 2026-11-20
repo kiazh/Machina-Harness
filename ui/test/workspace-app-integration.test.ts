@@ -988,11 +988,11 @@ test("the shortcuts picker lists Ctrl+W, drops /attach and documents the split k
 	assert.ok(values.includes("closetab"), "Ctrl+W row present");
 	assert.equal(values.includes("attach"), false, "/attach removed from the shortcut picker");
 	const closetab = items.find((item) => item.value === "closetab");
-	assert.equal(closetab?.label, "Ctrl+W — close tab");
+	assert.equal(closetab?.label, "Ctrl+W / Ctrl+N then X - close tab");
 	const chatmax = items.find((item) => item.value === "chatmax");
 	assert.equal(chatmax?.label, "Ctrl+N then C chat · E editor · S split");
 	const intel = items.find((item) => item.value === "intel");
-	assert.match(intel?.description ?? "", /macOS may steal Ctrl\+Space/, "the macOS Ctrl+Space caveat names the fallback");
+	assert.match(intel?.description ?? "", /macOS input-source and Windows IME may steal Ctrl\+Space/, "the cross-platform Ctrl+Space caveat names the fallback");
 	assert.match(intel?.description ?? "", /\/editor complete/);
 	const wsroot = items.find((item) => item.value === "wsroot");
 	assert.match(wsroot?.description ?? "", /ratio\|side/, "workspace subcommands stay discoverable");

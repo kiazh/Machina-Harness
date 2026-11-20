@@ -19,6 +19,7 @@ COMMANDS = (
     "chat",
     "repl",
     "status",
+    "audit",
     "mode",
     "sessions",
     "sessions-search",

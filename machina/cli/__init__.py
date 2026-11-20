@@ -19,6 +19,7 @@ import typer
 
 from machina import interop as interop_mod
 from machina.cli import output
+from machina.cli.audit import audit
 from machina.cli.auth import app as auth_app
 from machina.cli.chat import _report_terminal_response, chat, repl
 from machina.cli.common import (
@@ -105,6 +106,7 @@ __all__ = [
     "_run",
     "_sync_env_shadow",
     "app",
+    "audit",
     "chat",
     "compress",
     "config_set",
@@ -193,6 +195,7 @@ def main(
 app.command(name="chat")(chat)
 app.command(name="repl")(repl)
 app.command(name="status")(status)
+app.command(name="audit")(audit)
 app.command(name="mode")(set_mode)
 app.command(name="sessions")(list_sessions)
 app.command(name="sessions-search")(sessions_search)

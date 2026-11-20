@@ -34,23 +34,23 @@ language servers.
 
 | Key | Action | Fallback |
 |---|---|---|
-| Ctrl+P | Quick Open | `/quickopen` |
+| Ctrl+P / Ctrl+N then O | Quick Open | `/quickopen` |
 | Ctrl+S | Save the active document (compare-and-swap; conflicts are shown) | command palette |
-| Ctrl+Space | Completion | `/editor complete` |
+| Ctrl+Shift+A / Ctrl+N then V | Attach the editor selection to the next message | `/attach` |
+| Ctrl+Space / Ctrl+N then I | Completion | `/editor complete` |
 | Ctrl+N, then D / R | Definition / References | command palette |
 | Ctrl+N, then M | Rename preview (only where the server supports it; otherwise an honest notice) | — |
 | Ctrl+N, then N / P | Cycle focus: chat → editor → explorer → problems | commands |
 | Ctrl+N, then C / E / S | Maximize chat / maximize editor / restore the 50/50 split | `/workspace chat\|editor\|split` |
 | Ctrl+T / Ctrl+N then T | Toggle explorer (some terminals use Ctrl+T for a new tab; Ctrl+N then T is the fallback) | `/explorer` |
-| Ctrl+W | Close the active editor tab (dirty → Save/Discard/Cancel). **Not** bound in the chat composer, where it remains delete-word-backward | `/editor close` |
+| Ctrl+W / Ctrl+N then X | Close the active editor tab (dirty → Save/Discard/Cancel). **Not** bound in the chat composer, where it remains delete-word-backward | `/editor close` |
 | Esc | Dismisses the top editor popup first; a second Esc stops a running turn | — |
 
 The pane commands work from either the composer or the editor: `Ctrl+N` then `C`
 maximizes chat, `E` brings the editor in, and `S` restores the split.
 `Ctrl+Left/Right` stays available for
 word motion in text fields. Editor word motion also works with `alt+arrows`.
-All shortcuts can be changed in `/settings` → Keyboard shortcuts. Some terminals intercept `Ctrl+W` (close tab/window) or `Ctrl+T`
-(new tab) before the app sees them; the command fallbacks above always work.
+All shortcuts can be changed in `/settings` → Keyboard shortcuts. Some terminals intercept `Ctrl+W` (close tab/window), `Ctrl+T` (new tab), or `Ctrl+P` (command palette) before the app sees them; the `Ctrl+N`-prefixed forms and command fallbacks above always work. macOS may reserve `Ctrl+Space` for input-source switching and `Ctrl+Left/Right` for Mission Control; Windows IMEs may reserve `Ctrl+Space`. Use the prefixed forms or command fallbacks.
 
 ## Language servers
 

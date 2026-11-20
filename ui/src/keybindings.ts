@@ -38,6 +38,79 @@ export const APP_BINDINGS = {
 
 export type AppBindingId = keyof typeof APP_BINDINGS;
 export type BindingOverrides = Record<string, string>;
+export type KeyPlatform = "macos" | "windows" | "linux";
+
+/** Platform-sensitive fallbacks for keys commonly intercepted by terminals. */
+const PLATFORM_ALIASES: Partial<Record<AppBindingId, Record<KeyPlatform, string[]>>> = {
+	complete: {
+		macos: ["ctrl+n i"],
+		windows: ["ctrl+n i"],
+		linux: ["ctrl+n i"],
+	},
+	closeTab: {
+		macos: ["ctrl+n x"],
+		windows: ["ctrl+n x"],
+		linux: ["ctrl+n x"],
+	},
+	quickOpen: {
+		macos: ["ctrl+n o"],
+		windows: ["ctrl+n o"],
+		linux: ["ctrl+n o"],
+	},
+	attach: {
+		macos: ["ctrl+n v"],
+		windows: ["ctrl+n v"],
+		linux: ["ctrl+n v"],
+	},
+};
+
+export function keyPlatform(platform: NodeJS.Platform = process.platform): KeyPlatform {
+	if (platform === "darwin") return "macos";
+	if (platform === "win32") return "windows";
+	return "linux";
+}
+
+const MODIFIER_LABELS: Record<KeyPlatform, Record<string, string>> = {
+	macos: { ctrl: "⌃", shift: "⇧", alt: "⌥", super: "⌘" },
+	windows: { ctrl: "Ctrl", shift: "Shift", alt: "Alt", super: "Win" },
+	linux: { ctrl: "Ctrl", shift: "Shift", alt: "Alt", super: "Super" },
+};
+const KEY_LABELS: Record<string, string> = {
+	escape: "Esc",
+	left: "←",
+	right: "→",
+	up: "↑",
+	down: "↓",
+	space: "Space",
+	pageup: "PgUp",
+	pagedown: "PgDn",
+	home: "Home",
+	end: "End",
+	tab: "Tab",
+	enter: "Enter",
+	backspace: "Backspace",
+	delete: "Delete",
+};
+
+/** Human label for a binding sequence; the stored key remains platform-neutral. */
+export function platformKeyLabel(key: string, platform: KeyPlatform = keyPlatform()): string {
+	const labels = MODIFIER_LABELS[platform];
+	const formatChord = (chord: string): string => {
+		const parts = chord.split("+");
+		const modifiers = parts.slice(0, -1).map((part) => labels[part.toLowerCase()] ?? part);
+		const base = parts.at(-1) ?? chord;
+		const baseLabel = KEY_LABELS[base.toLowerCase()] ?? base.toUpperCase();
+		return `${modifiers.join(platform === "macos" ? "" : "+")}${modifiers.length && platform !== "macos" ? "+" : ""}${baseLabel}`;
+	};
+	return key
+		.split(" / ")
+		.map((sequence) => sequence.split(/\s+/).filter(Boolean).map(formatChord).join(" then "))
+		.join(" / ");
+}
+
+export function bindingAliases(id: AppBindingId, platform: KeyPlatform = keyPlatform()): string[] {
+	return PLATFORM_ALIASES[id]?.[platform] ?? [];
+}
 
 export function bindingRows(overrides: BindingOverrides): Array<{ id: string; label: string; key: string }> {
 	return [
@@ -66,6 +139,11 @@ export function parseBindingOverrides(raw: unknown): BindingOverrides {
 
 export class AppKeybindings {
 	private overrides: BindingOverrides = {};
+	private readonly platform: KeyPlatform;
+
+	constructor(platform: KeyPlatform = keyPlatform()) {
+		this.platform = platform;
+	}
 
 	set(overrides: BindingOverrides): void {
 		this.overrides = { ...overrides };
@@ -78,13 +156,19 @@ export class AppKeybindings {
 
 	matches(data: string, id: AppBindingId): boolean {
 		const key = this.overrides[id] ?? APP_BINDINGS[id].key;
-		return key.includes(" ") ? data === key : matchesKey(data, key as Parameters<typeof matchesKey>[1]);
+		if (key.includes(" ")) return data === key;
+		if (matchesKey(data, key as Parameters<typeof matchesKey>[1])) return true;
+		return this.overrides[id] === undefined
+			&& bindingAliases(id, this.platform).some((alias) => alias.includes(" ") ? data === alias : matchesKey(data, alias as Parameters<typeof matchesKey>[1]));
 	}
 
 	leaders(): string[] {
-		const sequences = Object.keys(APP_BINDINGS)
-			.map((id) => this.overrides[id] ?? APP_BINDINGS[id as AppBindingId].key)
-			.filter((key) => key.includes(" "));
+		const sequences = Object.keys(APP_BINDINGS).flatMap((id) => {
+			const bindingId = id as AppBindingId;
+			const key = this.overrides[id] ?? APP_BINDINGS[bindingId].key;
+			const aliases = this.overrides[id] === undefined ? bindingAliases(bindingId, this.platform) : [];
+			return [key, ...aliases].filter((candidate) => candidate.includes(" "));
+		});
 		return [...new Set(sequences.map((key) => key.split(" ")[0]!))];
 	}
 }
@@ -95,8 +179,20 @@ export function capturedKey(data: string): string | undefined {
 	return parsed;
 }
 
-export function bindingConflicts(overrides: BindingOverrides, id: string, key: string): string[] {
-	return bindingRows(overrides).filter((row) => row.id !== id && row.key.split(" / ").includes(key)).map((row) => row.label);
+export function bindingConflicts(
+	overrides: BindingOverrides,
+	id: string,
+	key: string,
+	platform: KeyPlatform = keyPlatform(),
+): string[] {
+	return bindingRows(overrides)
+		.filter((row) => {
+			if (row.id === id) return false;
+			if (row.key.split(" / ").includes(key)) return true;
+			return overrides[row.id] === undefined
+				&& bindingAliases(row.id as AppBindingId, platform).includes(key);
+		})
+		.map((row) => row.label);
 }
 
 const SHORTCUT_BINDINGS: Record<string, string[]> = {

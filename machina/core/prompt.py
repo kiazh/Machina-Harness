@@ -318,6 +318,13 @@ def build_persona_section(
     return ("system", system_prompt)
 
 
+def build_project_instruction_section(session) -> tuple[str, str]:
+    """Project ``AGENTS.md`` guidance as a bounded, non-authoritative piece."""
+    from machina.core.project_instructions import build_project_instruction_section as _build
+
+    return ("system", _build(session=session))
+
+
 def build_capability_section(
     session,
     tool_names: set[str],
@@ -537,6 +544,7 @@ def build_system_prompt(
     *,
     triage: str | None = None,
     meta_route: str | None = None,
+    project_instructions: str = "",
     include_repair: bool = True,
 ) -> str:
     """Full system prompt: persona + capability + skills (+ triage hint).
@@ -556,6 +564,8 @@ def build_system_prompt(
     )
     _role, capability_text = build_capability_section(session, tool_names, growth_state)
     system_base = persona_text + capability_text
+    if project_instructions.strip():
+        system_base = f"{system_base}\n\n{project_instructions.strip()}\n\n"
     _role, skill_text = build_skill_section(
         user_message,
         session,

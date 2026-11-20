@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added project instruction loading from global and workspace `AGENTS.md`, platform-aware macOS/Windows keybinding fallbacks and labels, OpenAPI 3.2.1 with protected docs, opt-in CloudEvents SSE envelopes, read-only `machina audit`, optional OTLP/HTTP trace export, and a CycloneDX 1.7 release SBOM.
 - Performance cleanup: `/mcp`/CLI provider imports are lazy, `machina --version` bypasses the Typer stack, status-tab slow sources refresh every 15s instead of every 3s, tool arguments/shell rows are bounded, unchanged now-playing polls no longer repaint, and transcript readers no longer fetch discarded embeddings. Also removed the duplicate `/overview` command, fixed the `/settings` alias shadow, removed dead UI helpers, and added release gates for editor backup files.
 - Removed the built-in `opencode_session` provider and `opencode-proxy` command: the local OpenCode session bridge is text-only, so it is no longer exposed in the `/model` catalog. Grouped model pickers now retain a provider heading for every group that has a matching row during search, including the `Hermes proxy` category.
 - Queued guidance now behaves like steering at the next safe boundary without cancelling already-running tools: the model keeps the current task context, incorporates the new instruction, and replans. Added the `ask_user` tool and `question.asked` / `question.answer` flow for inline multiple-choice questions with an optional custom answer.

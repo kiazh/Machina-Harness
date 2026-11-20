@@ -105,6 +105,9 @@ jobs:
       - name: Check wheel contents and isolated imports
         run: python tools/check_release_artifacts.py dist/*
 
+      - name: Generate CycloneDX SBOM
+        run: python tools/generate_sbom.py --output dist/sbom.cdx.json
+
       # Checkout after packaging so the external suite cannot enter artifacts.
       - name: Checkout backend regression suite
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
