@@ -34,7 +34,7 @@ Machina is built as a **state-management system** instead. The model is the only
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
-**Benchmark status:** token-efficient but not the accuracy leader. The latest 10-task DeepSeek held-out rerun scored Machina **9/10**, OpenCode **10/10**, Hermes **7/10**; Machina used **46% fewer processed prompt tokens** but was **20.6% slower**. See [benchmark evidence](#benchmark-evidence-and-head-to-head-results).
+**Benchmark status:** token-efficient on measured tasks, but there is no valid new held-out ranking. The latest accepted held-out run (2026-11-10) had Machina **5/10** versus OpenCode **9/10**. A 2026-11-20 rerun was excluded after an integrity audit found future-history and live-upstream access. The synthetic long-horizon suite passed 3/3 with a Machina token advantage. See [benchmark evidence](#benchmark-evidence-and-head-to-head-results).
 
 ## Install
 
@@ -1237,13 +1237,13 @@ The suite is not just feature coverage. It includes:
 
 ## Benchmark evidence and head-to-head results
 
-**The honest answer is no, not yet in general.** The current evidence does **not** support the claim that Machina is "better" than OpenCode, Hermes, Pi, or Claude Code across coding work. It supports narrower claims: Machina is substantially more token-efficient, and its code-repair accuracy is competitive; on the latest ten-task held-out SWE-bench Lite rerun it solved **9/10** versus OpenCode's **10/10** and was slower. This section records the negative results alongside the wins.
+**The honest answer is no, not yet in general.** The current evidence does **not** support the claim that Machina is "better" than OpenCode, Hermes, Pi, or Claude Code across coding work. It supports narrower claims: Machina is substantially more token-efficient, and its code-repair accuracy is competitive; the latest accepted held-out run is **5/10 versus OpenCode's 9/10**. A 2026-11-20 rerun was attempted but excluded after an integrity audit. This section records the negative results alongside the wins.
 
 ### Evidence ledger
 
 | Evidence | Result | What it supports |
 |---|---|---|
-| [Held-out SWE-bench Lite, DeepSeek V4.1 Flash, 2026-11-20 rerun](docs/verification/HOLDOUT_RERUN_2026-11-20.md) | Machina **9/10**, OpenCode **10/10**, Hermes **7/10**. Wall 1,731.6 s / 1,375.9 s / 3,831.2 s. Processed prompt 5.11M / 9.52M / 8.21M (Hermes token total incomplete). | **Token efficiency; not accuracy leadership.** OpenCode solved one more task and was faster. |
+| [2026-11-20 held-out attempt: integrity audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md) | **Excluded, no ranking.** Future git history and live upstream access were observed; a controlled rerun was not completed. | Demonstrates the benchmark protocol, not a harness result. |
 | [Held-out SWE-bench Lite, DeepSeek V4.1 Flash, 2026-11-10](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **5/10**, OpenCode **9/10**, Hermes **6/10**. Mean wall 687.8 s / 58.2 s / 285.0 s. Machina hit the 900 s cap on 5 tasks. | Historical negative result before the current repair/tooling build. |
 | [Held-out SWE-bench Lite, Haiku 5.5](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/6**, Kiro **4/6**, Hermes **4/6**. Mean wall 249.0 s / 79.0 s / 229.2 s. | **No general accuracy or speed claim.** |
 | [Fresh four-task post-change check](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/4**, OpenCode **4/4**, Hermes **3/4**. Total wall 964.82 s / 189.43 s / 640.11 s. | Shell and nudge fixes helped, but did not establish a lead. |
@@ -1254,15 +1254,15 @@ The suite is not just feature coverage. It includes:
 | [Multi-stage long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) | Three synthetic tasks; all harnesses **3/3**. Machina used **6.4% fewer** processed prompt tokens than OpenCode and was **6.4% slower**; Hermes was **2.6x slower** and used ~**4.8x** the processed tokens. | Equal accuracy on a small synthetic suite; overhead/latency tradeoff. |
 | [Harbor Terminal-Bench adapter](docs/verification/HELDOUT_SWE_2026-11-10.md#harbor-terminal-bench-adapter) | One task completed, reward **0.0**, no infrastructure exception. | The adapter works; no Terminal-Bench score or comparison is claimed. |
 
-The 2026-11-20 rerun uses the current build and the same ten held-out tasks. It is one trial per task, still F2P-only, and not an official SWE-bench run. OpenCode's 10/10 includes one patch over the 600-second cap; within the cap it is 9/10. Machina is 9/10 with no timeouts. The old 5/10 result remains in the ledger as the pre-build baseline, not as the current result.
+The 2026-11-20 attempt is excluded. The runner exposed future commits and live upstream access was possible; those results cannot be used for a ranking. A valid held-out rerun requires a single-base Git snapshot, an outbound network policy that blocks source hosts while allowing only the model API and test fixture services, and a task environment that does not require live httpbin. The 2026-11-10 result remains the latest accepted held-out baseline, not a claim about the current build.
 
 ### The claim the evidence supports
 
 Machina is a **self-hosted, durable, permissioned harness with low prompt overhead on measured tasks**. That is a real advantage, but it is not the same as being the best coding agent. The defensible scoped sentence is:
 
-> On the 2026-11-20 ten-task held-out rerun, Machina solved 9/10 versus OpenCode 10/10 and Hermes 7/10. Machina used 46% fewer processed prompt tokens than OpenCode but was 20.6% slower. On three synthetic long-horizon tasks all harnesses passed; Machina used 6.4% fewer processed tokens than OpenCode and was 6.4% slower.
+> On the latest accepted held-out set (2026-11-10), Machina solved 5/10 versus OpenCode 9/10. On three synthetic long-horizon tasks all harnesses passed; Machina used 6.4% fewer processed tokens than OpenCode and was 6.4% slower.
 
-Do not shorten that to "Machina is better." The current held-out result is not an accuracy win. Pi and Claude Code were not part of these runs, so they are outside any comparative claim.
+Do not shorten that to "Machina is better." The 2026-11-20 held-out attempt is excluded as contaminated, and the 2026-11-10 result is not an accuracy win. Pi and Claude Code were not part of these runs, so they are outside any comparative claim.
 
 ### Portable microbenchmark (2026-11-20)
 
@@ -2120,7 +2120,7 @@ scripts/            Operator script mount point and setup guidance
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
 | [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
-| [Benchmarking](docs/BENCHMARKING.md) | Ledger, lockbox, and gates; [portable benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [2026-11-20 held-out rerun](docs/verification/HOLDOUT_RERUN_2026-11-20.md), and [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) |
+| [Benchmarking](docs/BENCHMARKING.md) | Ledger, lockbox, and gates; [portable benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out integrity audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md), and [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) |
 | [Evaluation gates](evals/README.md) | Promptfoo, Ragas, DeepEval, and metric-baseline regressions |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
@@ -2941,7 +2941,7 @@ The local suite (`tests/`, 620 passed / 9 skipped at this commit) covers contrac
 | Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
-| Benchmark evidence | [Portable harness benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [2026-11-20 held-out rerun](docs/verification/HOLDOUT_RERUN_2026-11-20.md), [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) | Token efficiency, current accuracy, and failure cases are retained |
+| Benchmark evidence | [Portable harness benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md), [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) | Token efficiency, exclusion decisions, and failure cases are retained |
 | Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py` | Catalog normalization and subscription adapters |
 | MCP and interop | `test_interop_fast.py`, `test_meta_harness.py`, `test_harness_inventory.py`, `test_researcher_mcp_web.py` | Registration, routing, bounded external delegation |
 | Web and browser | `test_web_extract_validation.py`, `test_web_search_fallback.py`, `test_browser_verify.py` | Untrusted extraction, fallback, real browser checks |
