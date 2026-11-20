@@ -372,7 +372,10 @@ def _architecture() -> dict:
     total_loc = sum(len(f.read_text(encoding="utf-8").splitlines()) for f in files)
     god = {}
     for rel, ceiling in GOD_FILE_CEILINGS:
-        god[rel] = {"lines": sum(1 for _ in open(root / rel)), "ceiling": ceiling}
+        god[rel] = {
+            "lines": len((root / rel).read_text(encoding="utf-8").splitlines()),
+            "ceiling": ceiling,
+        }
     return {
         "files": len(files),
         "loc": total_loc,
