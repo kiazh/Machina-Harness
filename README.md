@@ -1807,6 +1807,11 @@ key as every data route. The prompt stream accepts
 `{"eventFormat":"cloudevents"}` to wrap each SSE event in a CloudEvents 1.0
 envelope; the default remains the native event shape.
 
+A2A 1.0 discovery is available at `/.well-known/agent-card.json`. The
+authenticated `/a2a` JSON-RPC surface maps `message/send`, `tasks/get`, and
+`tasks/cancel` onto the existing durable session and turn lifecycle; A2A
+tasks are Machina session IDs and are not a separate execution engine.
+
 ```bash
 export MACHINA_API_KEY="$(openssl rand -hex 32)"
 machina serve --host 127.0.0.1 --port 8000

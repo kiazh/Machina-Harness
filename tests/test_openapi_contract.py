@@ -21,6 +21,7 @@ def test_openapi_document_is_pinned_and_docs_require_a_key(monkeypatch) -> None:
     assert document["openapi"] == "3.2.1"
     assert "/api/v1/sessions" in document["paths"]
     assert "/rpc" in document["paths"]
+    assert "/a2a" in document["paths"]
 
     assert client.get("/docs", headers={"X-API-Key": "test-key"}).status_code == 200
     assert client.get("/redoc", headers={"X-API-Key": "test-key"}).status_code == 200

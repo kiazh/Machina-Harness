@@ -35,6 +35,7 @@ from fastapi import FastAPI
 from machina import __version__
 from machina.api.rate_limit import RateLimitMiddleware
 from machina.api.routes import (
+    a2a,
     agents,
     approvals,
     documents,
@@ -246,7 +247,18 @@ def create_app() -> FastAPI:
     # (path/methods/endpoint), so mount the already-built routes verbatim.
     # Registration order groups by resource; no two same-method routes
     # overlap, so matching is identical to the pre-split inline order.
-    for resource in (health, sessions, memory, jobs, documents, approvals, agents, rpc, openapi):
+    for resource in (
+        health,
+        sessions,
+        memory,
+        jobs,
+        documents,
+        approvals,
+        agents,
+        rpc,
+        openapi,
+        a2a,
+    ):
         app.router.routes.extend(resource.router.routes)
     _mark_changed = getattr(app.router, "_mark_routes_changed", None)
     if callable(_mark_changed):
