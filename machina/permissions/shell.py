@@ -101,6 +101,11 @@ def parse_terminal_command(command: str) -> TerminalCommand:
     if shell:
         if os.name == "nt":
             preference = os.environ.get("MACHINA_TERMINAL_SHELL", "").strip().lower()
+            if not preference and _bash_executable():
+                # Git Bash is the better default for the POSIX-style compound
+                # commands agents write (``;``, ``&&``, ``ls -a``). Simple
+                # commands still use shlex/subprocess without a shell.
+                preference = "bash"
             if preference in {"bash", "sh", "posix"}:
                 bash = _bash_executable()
                 if bash:

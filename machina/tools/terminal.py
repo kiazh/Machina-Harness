@@ -326,7 +326,7 @@ async def terminal_job(action: str = "list", job_id: str = "", wait_seconds: int
 
 @registry.register(
     name="terminal",
-    description="Execute a shell command for git, builds, tests, etc. Set background=true for slow work: it returns a job ID immediately; use terminal_job to check output, verify exit status, or stop it.",
+    description="Execute a shell command for git, builds, tests, etc. Run tests directly without output pipes. Set background=true for slow work: it returns a job ID immediately; use terminal_job to check output, verify exit status, or stop it.",
     parameters={
         "type": "object",
         "properties": {

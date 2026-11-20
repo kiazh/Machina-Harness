@@ -2514,6 +2514,7 @@ erDiagram
 | `terminal_sandbox` | `disabled` (or `local`, `docker`, `gvisor`, `kata`, `firecracker`, `wasm`) |
 | `terminal_image` | `machina-tool-sandbox:latest` |
 | `terminal_wasm_module` | `""` (WASI module for the `wasm` backend) |
+| `MACHINA_TERMINAL_SHELL` | auto-detects Git Bash for POSIX compound commands on Windows; set `cmd` to force cmd.exe |
 | `dynamic_tool_loading` | `true` (core schemas plus `tool_load`; set `MACHINA_DYNAMIC_TOOL_LOADING=0` for eager schemas) |
 | `skill_query_expansion_enabled` | `false` (opt-in extra model call for skill-routing vocabulary) |
 | `browser_verification` | `auto` |
