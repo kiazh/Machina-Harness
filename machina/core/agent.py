@@ -2586,7 +2586,15 @@ async def _react_loop(
                     agent._condense_history(messages)
                 else:
                     agent._condense_history(messages, stale_chars=stale_chars)
-                tool_defs = task_run.filter_tool_defs(agent._tool_defs())
+                # Once a repair has both an edit and passing verification
+                # evidence, force the answer step: exposing tools again lets a
+                # model keep rerunning tests or inspecting the diff, which
+                # costs a full provider round trip without adding evidence.
+                tool_defs = (
+                    []
+                    if task_run.active and task_run.edited and task_run.verified
+                    else task_run.filter_tool_defs(agent._tool_defs())
+                )
                 gate = await evaluate_request(
                     messages,
                     session=session,
