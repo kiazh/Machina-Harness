@@ -362,7 +362,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~130,239 lines across 363 files |
-| Backend tests | 620 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Backend tests | 628 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
 | Tools and commands | 46 built-in tools; 47 top-level CLI commands (39 one-shot + 8 groups); 52 slash commands |
@@ -2930,7 +2930,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 620 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 628 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|
