@@ -96,10 +96,6 @@ TASK_RUN_REPEAT_TEXT = (
     "Repeated identical failed action detected. The turn stopped after the same "
     "failure repeated; change approach before any further run."
 )
-TASK_RUN_NETWORK_TEXT = (
-    "External network access is disabled during repair. The turn stopped after "
-    "repeated network attempts; use the local source and tests."
-)
 TASK_RUN_EDIT_NUDGE = (
     "No source edit has been made after a substantial investigation. Stop widening "
     "the search: use the failure evidence you already have, make the smallest "
@@ -412,8 +408,6 @@ class TaskRunPolicy:
             return None
         current_turns = self.turns if turns is None else max(0, turns)
         current_tools = self.tool_calls if tool_calls is None else max(0, tool_calls)
-        if self.network_attempts >= 2:
-            return TASK_RUN_NETWORK_TEXT
         if self.repeated_failure:
             return TASK_RUN_REPEAT_TEXT
         if self.max_turns > 0 and current_turns >= self.max_turns:

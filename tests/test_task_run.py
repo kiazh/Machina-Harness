@@ -15,7 +15,6 @@ from machina.core.task_run import (
     TASK_RUN_FORCE_EDIT_NUDGE,
     TASK_RUN_JOB_NUDGE,
     TASK_RUN_NETWORK_NUDGE,
-    TASK_RUN_NETWORK_TEXT,
     TASK_RUN_REPEAT_TEXT,
     TASK_RUN_TOOL_LIMIT_TEXT,
     TASK_RUN_TURN_LIMIT_TEXT,
@@ -193,7 +192,7 @@ def test_edit_suppresses_the_no_edit_nudge() -> None:
     assert policy.summary()["edited"] is True
 
 
-def test_network_attempts_nudge_then_stop() -> None:
+def test_network_attempts_nudge_without_aborting_repair() -> None:
     policy = TaskRunPolicy(REPAIR)
     denied = {
         "tool": "terminal",
@@ -203,10 +202,9 @@ def test_network_attempts_nudge_then_stop() -> None:
     }
     policy.observe([denied])
     assert policy.take_nudge() == TASK_RUN_NETWORK_NUDGE
-    assert policy.stop_reason() is None
-
     policy.observe([denied])
-    assert policy.stop_reason() == TASK_RUN_NETWORK_TEXT
+    assert policy.stop_reason() is None
+    assert policy.network_attempts == 2
 
 
 def test_investigation_without_edit_forces_the_write_surface() -> None:
