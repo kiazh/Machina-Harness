@@ -237,6 +237,17 @@ def test_investigation_without_edit_forces_the_write_surface() -> None:
     assert policy.source_edited is True
 
 
+def test_force_edit_is_opt_in() -> None:
+    policy = TaskRunPolicy(REPAIR, edit_nudge_turns=1)
+    read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}
+    policy.observe([read])
+    policy.observe([read])
+
+    assert policy.force_edit is False
+    nudge = policy.take_nudge()
+    assert nudge is None or not nudge.startswith(TASK_RUN_FORCE_EDIT_NUDGE)
+
+
 def test_non_source_probe_does_not_end_forced_edit() -> None:
     policy = TaskRunPolicy(REPAIR, edit_nudge_turns=1, force_edit_turns=2)
     read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}

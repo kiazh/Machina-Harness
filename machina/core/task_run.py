@@ -40,7 +40,7 @@ DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_EDIT_NUDGE_TURNS = 10
-DEFAULT_FORCE_EDIT_TURNS = 20
+DEFAULT_FORCE_EDIT_TURNS = 0
 DEFAULT_ARTIFACT_NUDGE_READS = 3
 DEFAULT_JOB_NUDGE_POLLS = 6
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"
@@ -280,7 +280,7 @@ class TaskRunPolicy:
         )
         self.max_repeats = max(1, max_repeats)
         self.edit_nudge_turns = max(1, edit_nudge_turns)
-        self.force_edit_turns = max(self.edit_nudge_turns, force_edit_turns)
+        self.force_edit_turns = max(0, force_edit_turns)
         self.turns = 0
         self.tool_calls = 0
         self.edited = False
@@ -306,7 +306,8 @@ class TaskRunPolicy:
     def force_edit(self) -> bool:
         """Whether investigation has gone on long enough without an edit."""
         return (
-            self.active
+            self.force_edit_turns > 0
+            and self.active
             and self.lean_tools
             and not self.source_edited
             and self.turns_without_source_edit >= self.force_edit_turns
