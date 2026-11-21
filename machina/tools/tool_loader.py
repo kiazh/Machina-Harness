@@ -7,13 +7,13 @@ from machina.tools.base import registry
 
 
 def _available_catalog() -> str:
-    names = set(registry._registered_tools)
-    if not names:
-        # Direct-module import (without the registry's lazy loader) still gets
-        # a useful catalog from the generated capability inventory.
-        from machina.core.capability_catalog import TOOL_GROUPS
+    # Merge the live registry with the generated inventory. Some import orders
+    # (and lazy tool registration) leave the registry partially populated at
+    # module import; the catalog must still advertise every loadable tool.
+    from machina.core.capability_catalog import TOOL_GROUPS
 
-        names = {name for group in TOOL_GROUPS.values() for name in group}
+    names = set(registry._registered_tools)
+    names |= {name for group in TOOL_GROUPS.values() for name in group}
     names.discard("tool_load")
     return ", ".join(sorted(names - CORE_TOOL_NAMES))
 

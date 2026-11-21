@@ -1028,6 +1028,7 @@ class BaseReActAgent:
         session_id: uuid.UUID,
         verbose: bool,
         pending_chunks: list[dict[str, Any]] | None = None,
+        allowed_tool_names: set[str] | None = None,
     ) -> None:
         """Execute tool calls for the non-streaming loop.
 
@@ -1036,7 +1037,12 @@ class BaseReActAgent:
         """
         async with joined_teardown(
             stream=self._execute_tool_calls_stream(
-                response, messages, tool_calls_made, session_id, pending_chunks
+                response,
+                messages,
+                tool_calls_made,
+                session_id,
+                pending_chunks,
+                allowed_tool_names=allowed_tool_names,
             )
         ) as events:
             async for event in events:
@@ -1056,6 +1062,7 @@ class BaseReActAgent:
         tool_calls_made: list[dict[str, Any]],
         session_id: uuid.UUID,
         pending_chunks: list[dict[str, Any]] | None = None,
+        allowed_tool_names: set[str] | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Execute tool calls from an LLM response, yielding StreamEvents.
 
@@ -1149,6 +1156,33 @@ class BaseReActAgent:
                     session_id=str(session_id),
                     tool_name=tool_name,
                     agent_id=self.agent_id,
+                )
+                planned.append(
+                    {
+                        "tc": tc,
+                        "name": tool_name,
+                        "args": tool_args,
+                        "result": result_str,
+                        "call_id": call_id,
+                    }
+                )
+                continue
+
+            # A model can retain a schema loaded earlier in the turn (for
+            # example via tool_load) after the current step has narrowed the
+            # surface. Enforce the schema actually advertised for this step,
+            # not just the agent's static allow-list.
+            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+                result_str = (
+                    f"Error: tool '{tool_name}' is not in the current tool surface. "
+                    "Use only tools advertised for this step."
+                )
+                audit_log(
+                    "tool_call_denied",
+                    session_id=str(session_id),
+                    tool_name=tool_name,
+                    agent_id=self.agent_id,
+                    reason="not_in_tool_surface",
                 )
                 planned.append(
                     {
@@ -2441,6 +2475,9 @@ async def _react_loop(
     repair_deadline = repair_deadline_seconds()
     token_budget = repair_token_budget()
     task_run = TaskRunPolicy(user_message)
+    from machina.core.task_run import set_repair_network_blocked
+
+    set_repair_network_blocked(task_run.active and task_run.lean_tools)
     async with joined_teardown(cleanup=lambda: agent._flush_pending_chunks(pending_chunks)):
         try:
             session, messages = await agent._prepare_context(
@@ -2595,6 +2632,16 @@ async def _react_loop(
                     if task_run.active and task_run.edited and task_run.verified
                     else task_run.filter_tool_defs(agent._tool_defs())
                 )
+                # Keep the dynamic loader inside the lean repair surface too.
+                # Otherwise tool_load can add web/network tools after the schema
+                # filter has already run, and the stale schema can still be
+                # executed from the model's context.
+                from machina.core.tool_projection import set_dynamic_allowed_tools
+
+                if task_run.active and task_run.lean_tools:
+                    set_dynamic_allowed_tools(sorted(task_run.allowed_tool_names()))
+                else:
+                    set_dynamic_allowed_tools(None)
                 gate = await evaluate_request(
                     messages,
                     session=session,
@@ -2840,6 +2887,11 @@ async def _react_loop(
 
                 await agent._append_assistant_content(session_id, response.content, pending_chunks)
                 batch_start = len(tool_calls_made)
+                advertised_tool_names = {
+                    name
+                    for tool in tool_defs
+                    if (name := getattr(tool, "name", None)) is not None
+                }
                 # AH-015: flush incrementally and, on cancellation, persist what
                 # completed with an explicit interruption marker. (run_stream
                 # previously held all history in pending until the final done
@@ -2848,14 +2900,25 @@ async def _react_loop(
                     if stream:
                         async with joined_teardown(
                             stream=agent._execute_tool_calls_stream(
-                                response, messages, tool_calls_made, session_id, pending_chunks
+                                response,
+                                messages,
+                                tool_calls_made,
+                                session_id,
+                                pending_chunks,
+                                allowed_tool_names=advertised_tool_names,
                             )
                         ) as events:
                             async for event in events:
                                 yield event
                     else:
                         await agent._execute_tool_calls(
-                            response, messages, tool_calls_made, session_id, verbose, pending_chunks
+                            response,
+                            messages,
+                            tool_calls_made,
+                            session_id,
+                            verbose,
+                            pending_chunks,
+                            allowed_tool_names=advertised_tool_names,
                         )
                     await agent._flush_pending_chunks(pending_chunks)
                 except BaseException:

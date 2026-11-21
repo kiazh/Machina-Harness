@@ -12,11 +12,16 @@ from machina.core.task_run import (
     TASK_RUN_ARTIFACT_NUDGE,
     TASK_RUN_EDIT_NUDGE,
     TASK_RUN_FINALIZE_NUDGE,
+    TASK_RUN_FORCE_EDIT_NUDGE,
     TASK_RUN_JOB_NUDGE,
+    TASK_RUN_NETWORK_NUDGE,
+    TASK_RUN_NETWORK_TEXT,
     TASK_RUN_REPEAT_TEXT,
     TASK_RUN_TOOL_LIMIT_TEXT,
     TASK_RUN_TURN_LIMIT_TEXT,
     TaskRunPolicy,
+    repair_network_blocked,
+    set_repair_network_blocked,
 )
 
 REPAIR = "Fix the failing test in the repository."
@@ -186,6 +191,76 @@ def test_edit_suppresses_the_no_edit_nudge() -> None:
 
     assert policy.take_nudge() is None
     assert policy.summary()["edited"] is True
+
+
+def test_network_attempts_nudge_then_stop() -> None:
+    policy = TaskRunPolicy(REPAIR)
+    denied = {
+        "tool": "terminal",
+        "args": {"command": "curl https://example.invalid/source"},
+        "outcome": "failed",
+        "result_preview": "Error: Network access is disabled during a repair turn.",
+    }
+    policy.observe([denied])
+    assert policy.take_nudge() == TASK_RUN_NETWORK_NUDGE
+    assert policy.stop_reason() is None
+
+    policy.observe([denied])
+    assert policy.stop_reason() == TASK_RUN_NETWORK_TEXT
+
+
+def test_investigation_without_edit_forces_the_write_surface() -> None:
+    def tool(name: str) -> SimpleNamespace:
+        return SimpleNamespace(name=name)
+
+    policy = TaskRunPolicy(REPAIR, edit_nudge_turns=1, force_edit_turns=2)
+    read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}
+    tools = [tool("read_file"), tool("terminal"), tool("write_file")]
+    policy.observe([read])
+    policy.observe([read])
+
+    assert policy.force_edit is True
+    assert [item.name for item in policy.filter_tool_defs(tools)] == ["write_file"]
+    nudge = policy.take_nudge()
+    assert nudge is not None and nudge.startswith(TASK_RUN_FORCE_EDIT_NUDGE)
+
+    policy.observe(
+        [
+            {
+                "tool": "write_file",
+                "args": {"path": "src/_pytest/pathlib.py", "content": "fixed"},
+                "outcome": "completed",
+            }
+        ]
+    )
+    assert policy.force_edit is False
+    assert policy.source_edited is True
+
+
+def test_non_source_probe_does_not_end_forced_edit() -> None:
+    policy = TaskRunPolicy(REPAIR, edit_nudge_turns=1, force_edit_turns=2)
+    read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}
+    policy.observe([read])
+    policy.observe([read])
+    policy.observe(
+        [
+            {
+                "tool": "write_file",
+                "args": {"path": "src/package/py.typed", "content": "marker"},
+                "outcome": "completed",
+            }
+        ]
+    )
+
+    assert policy.source_edited is False
+    assert policy.force_edit is True
+
+
+def test_repair_network_policy_is_explicitly_scoped() -> None:
+    set_repair_network_blocked(True)
+    assert repair_network_blocked() is True
+    set_repair_network_blocked(False)
+    assert repair_network_blocked() is False
 
 
 def test_repair_toolset_is_lean_and_fails_open() -> None:

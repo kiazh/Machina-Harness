@@ -16,14 +16,31 @@ import hashlib
 import json
 import os
 import re
+from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from machina.core.repair_gate import has_verification_evidence, is_repair_task
+
+_REPAIR_NETWORK_BLOCKED: ContextVar[bool] = ContextVar(
+    "machina_repair_network_blocked", default=False
+)
+
+
+def set_repair_network_blocked(value: bool) -> None:
+    """Apply the repair-turn network policy to tool execution."""
+    _REPAIR_NETWORK_BLOCKED.set(bool(value))
+
+
+def repair_network_blocked() -> bool:
+    """Whether the current repair turn forbids outbound source fetches."""
+    return _REPAIR_NETWORK_BLOCKED.get()
 
 DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_EDIT_NUDGE_TURNS = 10
+DEFAULT_FORCE_EDIT_TURNS = 20
 DEFAULT_ARTIFACT_NUDGE_READS = 3
 DEFAULT_JOB_NUDGE_POLLS = 6
 MAX_TURNS_ENV = "MACHINA_TASK_RUN_MAX_TURNS"
@@ -79,11 +96,33 @@ TASK_RUN_REPEAT_TEXT = (
     "Repeated identical failed action detected. The turn stopped after the same "
     "failure repeated; change approach before any further run."
 )
+TASK_RUN_NETWORK_TEXT = (
+    "External network access is disabled during repair. The turn stopped after "
+    "repeated network attempts; use the local source and tests."
+)
 TASK_RUN_EDIT_NUDGE = (
     "No source edit has been made after a substantial investigation. Stop widening "
     "the search: use the failure evidence you already have, make the smallest "
     "source-only change, and then run the narrowest relevant verification."
 )
+TASK_RUN_NETWORK_NUDGE = (
+    "External network access is disabled during this repair. Do not retry "
+    "curl/wget, package installs, or VCS fetches. Inspect the local source and "
+    "tests, make a source-only change, then run the narrowest local verification."
+)
+TASK_RUN_FORCE_EDIT_NUDGE = (
+    "Investigation is over. Read and search tools are disabled until a source "
+    "edit exists. Write the smallest source-only patch now; verification tools "
+    "return after the edit."
+)
+
+
+def _force_edit_text() -> str:
+    workspace = os.environ.get("MACHINA_WORKSPACE_ROOT") or os.getcwd()
+    return (
+        f"{TASK_RUN_FORCE_EDIT_NUDGE} The repository root is {workspace}; "
+        "write a path relative to that root."
+    )
 TASK_RUN_ARTIFACT_NUDGE = (
     "You are spending turns paging the same retained artifact. Stop paging: use "
     "the excerpt already visible, make the source change, and verify the behavior."
@@ -146,6 +185,51 @@ def _command(entry: dict[str, Any]) -> str:
     return command if isinstance(command, str) else ""
 
 
+_SOURCE_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".rs",
+        ".go",
+        ".java",
+        ".kt",
+        ".kts",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".scala",
+        ".sh",
+        ".sql",
+    }
+)
+
+
+def _write_path(entry: dict[str, Any]) -> str:
+    args = entry.get("args")
+    if not isinstance(args, dict):
+        return ""
+    path = args.get("path")
+    return path if isinstance(path, str) else ""
+
+
+def _is_source_edit(entry: dict[str, Any]) -> bool:
+    if entry.get("tool") != "write_file" or _failed(entry):
+        return False
+    return Path(_write_path(entry)).suffix.casefold() in _SOURCE_SUFFIXES
+
+
 def _is_edit(entry: dict[str, Any]) -> bool:
     if entry.get("tool") == "write_file":
         return True
@@ -185,6 +269,7 @@ class TaskRunPolicy:
         max_tool_calls: int | None = None,
         max_repeats: int = DEFAULT_MAX_REPEATS,
         edit_nudge_turns: int = DEFAULT_EDIT_NUDGE_TURNS,
+        force_edit_turns: int = DEFAULT_FORCE_EDIT_TURNS,
     ) -> None:
         self.active = is_repair_task(user_message)
         self.lean_tools = lean_tools_enabled()
@@ -195,30 +280,54 @@ class TaskRunPolicy:
         )
         self.max_repeats = max(1, max_repeats)
         self.edit_nudge_turns = max(1, edit_nudge_turns)
+        self.force_edit_turns = max(self.edit_nudge_turns, force_edit_turns)
         self.turns = 0
         self.tool_calls = 0
         self.edited = False
+        self.source_edited = False
         self.reproduced = False
         self.verified = False
         self.turns_without_edit = 0
+        self.turns_without_source_edit = 0
         self.repeated_failure = False
         self.artifact_reads = 0
         self.job_polls = 0
+        self.network_attempts = 0
         self._artifact_counts: dict[str, int] = {}
         self._failure_counts: dict[str, int] = {}
         self._edit_nudged = False
         self._artifact_nudged = False
         self._job_nudged = False
+        self._network_nudged = False
+        self._force_edit_nudged = False
         self._finalize_nudged = False
+
+    @property
+    def force_edit(self) -> bool:
+        """Whether investigation has gone on long enough without an edit."""
+        return (
+            self.active
+            and self.lean_tools
+            and not self.source_edited
+            and self.turns_without_source_edit >= self.force_edit_turns
+        )
+
+    def allowed_tool_names(self) -> frozenset[str]:
+        """Tools a lean repair turn may load or execute."""
+        if not self.active or not self.lean_tools:
+            return frozenset()
+        if self.force_edit:
+            return frozenset({"write_file"})
+        allowed = set(REPAIR_TOOL_NAMES)
+        if any(cue in self._prompt for cue in _COLLABORATION_CUES):
+            allowed |= REPAIR_COLLABORATION_TOOLS
+        return frozenset(allowed)
 
     def filter_tool_defs(self, tool_defs: list[Any]) -> list[Any]:
         """Return the lean repair toolset; fail open if nothing matches."""
         if not self.active or not self.lean_tools:
             return tool_defs
-        wants_collaboration = any(cue in self._prompt for cue in _COLLABORATION_CUES)
-        allowed = REPAIR_TOOL_NAMES
-        if wants_collaboration:
-            allowed = allowed | REPAIR_COLLABORATION_TOOLS
+        allowed = self.allowed_tool_names()
         selected = [tool for tool in tool_defs if getattr(tool, "name", None) in allowed]
         return selected or tool_defs
 
@@ -254,14 +363,25 @@ class TaskRunPolicy:
                     self._artifact_counts[handle] = self._artifact_counts.get(handle, 0) + 1
             if not self.active:
                 continue
-            if _is_edit(entry):
+            if _is_edit(entry) and not _failed(entry):
                 edited_this_turn = True
+            if entry.get("tool") == "write_file":
+                if _failed(entry) or not _is_source_edit(entry):
+                    # A rejected write or a non-source scratch/probe is not
+                    # progress; keep the forced-edit surface and re-nudge.
+                    self._force_edit_nudged = False
+                else:
+                    self.source_edited = True
             if _is_verification(entry):
                 self.reproduced = True
                 if has_verification_evidence([entry]):
                     self.verified = True
             if entry.get("tool") == "terminal_job":
                 self.job_polls += 1
+            if entry.get("tool") == "terminal" and "network access is disabled" in str(
+                entry.get("result_preview") or ""
+            ).casefold():
+                self.network_attempts += 1
             if _failed(entry):
                 digest = _fingerprint(entry)
                 count = self._failure_counts.get(digest, 0) + 1
@@ -274,6 +394,11 @@ class TaskRunPolicy:
             self.turns_without_edit = 0
         elif self.active:
             self.turns_without_edit += 1
+        if self.active:
+            if self.source_edited:
+                self.turns_without_source_edit = 0
+            else:
+                self.turns_without_source_edit += 1
 
     def stop_reason(
         self,
@@ -286,6 +411,8 @@ class TaskRunPolicy:
             return None
         current_turns = self.turns if turns is None else max(0, turns)
         current_tools = self.tool_calls if tool_calls is None else max(0, tool_calls)
+        if self.network_attempts >= 2:
+            return TASK_RUN_NETWORK_TEXT
         if self.repeated_failure:
             return TASK_RUN_REPEAT_TEXT
         if self.max_turns > 0 and current_turns >= self.max_turns:
@@ -307,6 +434,12 @@ class TaskRunPolicy:
         if not self._job_nudged and self.job_polls >= DEFAULT_JOB_NUDGE_POLLS:
             self._job_nudged = True
             return TASK_RUN_JOB_NUDGE
+        if not self._network_nudged and self.network_attempts:
+            self._network_nudged = True
+            return TASK_RUN_NETWORK_NUDGE
+        if not self._force_edit_nudged and self.force_edit:
+            self._force_edit_nudged = True
+            return _force_edit_text()
         if not self._finalize_nudged and self.edited and self.verified:
             self._finalize_nudged = True
             return TASK_RUN_FINALIZE_NUDGE
@@ -326,8 +459,12 @@ class TaskRunPolicy:
             "edited": self.edited,
             "reproduced": self.reproduced,
             "verified": self.verified,
+            "source_edited": self.source_edited,
+            "force_edit": self.force_edit,
             "turns_without_edit": self.turns_without_edit,
+            "turns_without_source_edit": self.turns_without_source_edit,
             "repeated_failure": self.repeated_failure,
             "artifact_reads": self.artifact_reads,
             "job_polls": self.job_polls,
+            "network_attempts": self.network_attempts,
         }

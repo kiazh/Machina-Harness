@@ -15,6 +15,7 @@ from machina.tools.tool_loader import tool_load
 
 
 def test_projection_preserves_names_types_required_and_ranges() -> None:
+    reset_dynamic_tool_state()
     source = registry.get_tool_definitions()
     projected = compact_tool_definitions(source)
     assert [tool.name for tool in projected] == [tool.name for tool in source]

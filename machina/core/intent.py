@@ -60,6 +60,23 @@ _AMBIGUOUS_FOLLOW_ON = re.compile(
     re.I,
 )
 
+_TEST_ONLY_EDIT_CONSTRAINT = re.compile(
+    r"\b(?:don't|dont|do\s+not|never)\s+(?:edit|change|modify|touch)\s+"
+    r"(?:the\s+)?(?:tests?|test\s+files?|specs?)\b[.!;:]?",
+    re.I,
+)
+
+
+def strip_test_only_edit_constraints(text: str) -> str:
+    """Remove a test-only guard before classifying the overall task.
+
+    "Do not edit tests" is a constraint on the test files, not a request for a
+    read-only review. Treating it as the latter suppresses source repair and
+    turns a bug-fix request into a review turn.
+    """
+    return _TEST_ONLY_EDIT_CONSTRAINT.sub(" ", text)
+
+
 _READONLY_MARKERS = re.compile(
     r"(?:just\s+review|review\s+only|(?:don't|dont|do\s+not)\s+implement|"
     r"do\s+not\s+(?:edit|change|modify|touch)|no\s+changes?|"
@@ -278,6 +295,7 @@ def web_build_request(query: str) -> bool:
 
 def detect_constraints(query: str) -> tuple[str, ...]:
     """Canonical read-only/negation constraints stated in *query* (spec §8.3)."""
+    query = strip_test_only_edit_constraints(query)
     found: set[str] = set()
     if _READONLY_CONSTRAINT.search(query):
         found.add("read-only")
@@ -288,6 +306,7 @@ def detect_constraints(query: str) -> tuple[str, ...]:
 
 def released_constraints(query: str) -> frozenset[str]:
     """Constraint tokens explicitly released by *query* (sticky otherwise)."""
+    query = strip_test_only_edit_constraints(query)
     if not (_CONSTRAINT_RELEASE.search(query) or _PARENT_MUTATION.search(query)):
         return frozenset()
     return _RELEASABLE_CONSTRAINTS
@@ -319,6 +338,7 @@ def classify_task(query: str) -> str:
     ``just write the file``) return ``ambiguous`` — the caller resolves
     those against explicit task state instead of guessing.
     """
+    query = strip_test_only_edit_constraints(query)
     if _AMBIGUOUS_FOLLOW_ON.fullmatch(query):
         return "ambiguous"
     parent_mutation = bool(_PARENT_MUTATION.search(query))

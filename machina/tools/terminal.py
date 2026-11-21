@@ -6,10 +6,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from machina.core import child_process
 from machina.core.config import config
@@ -27,6 +29,51 @@ from machina.tools.sandbox import (
 
 logger = logging.getLogger(__name__)
 MAX_OUTPUT_CHARS = 64_000
+
+_NETWORK_URL_RE = re.compile(r"https?://[^\s'\"`]+", re.IGNORECASE)
+_NETWORK_COMMAND_RE = re.compile(
+    r"(?:"
+    r"\bcurl\b|\bwget\b|"
+    r"\bgit\s+(?:fetch|pull|clone|push|remote\s+(?:add|set-url))\b|"
+    r"\b(?:pip|pip3)\s+(?:install|download|index|wheel)\b|"
+    r"\bpython(?:3)?\s+-m\s+pip\s+(?:install|download|index|wheel)\b|"
+    r"\b(?:npm|pnpm|yarn)\s+(?:install|add|update|view|info)\b|"
+    r"\b(?:apt|apt-get|brew|choco|winget)\s+(?:install|update)\b|"
+    r"\b(?:go|cargo)\s+(?:get|install)\b|"
+    r"\b(?:urllib|requests|httpx|aiohttp|http\.client|socket)\b|"
+    r"\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b|"
+    r"\bgh\s+(?:api|repo|pr|issue|release)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_local_network_url(url: str) -> bool:
+    """Local test fixtures are not the external-source leak we guard against."""
+    try:
+        host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost")
+
+
+def _command_uses_external_network(command: str) -> bool:
+    """Best-effort shell-level guard for repair turns.
+
+    This is intentionally narrower than a security sandbox: it stops the common
+    source-fetching paths (curl, wget, VCS/pip/npm, urllib, and PowerShell web
+    cmdlets) while allowing localhost fixtures used by tests.
+    """
+    if not command:
+        return False
+    urls = [match.group(0) for match in _NETWORK_URL_RE.finditer(command)]
+    if any(not _is_local_network_url(url) for url in urls):
+        return True
+    # A localhost fixture request is allowed; a network command without a URL
+    # (curl/wget, package install, VCS fetch) is not.
+    if urls:
+        return False
+    return bool(_NETWORK_COMMAND_RE.search(command))
 
 
 class CommandOutput(str):
@@ -358,6 +405,14 @@ async def terminal(
 
     parsed = parse_terminal_command(command)
     args = parsed.argv
+
+    from machina.core.task_run import repair_network_blocked
+
+    if repair_network_blocked() and _command_uses_external_network(command):
+        raise ValidationError(
+            "Network access is disabled during a repair turn. Use local source "
+            "and tests; do not fetch upstream fixes."
+        )
 
     # The broker already classified or obtained approval for this exact
     # command. Keep the narrow allowlist for direct, unbrokered calls.
