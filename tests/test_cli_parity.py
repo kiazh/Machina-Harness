@@ -18,6 +18,8 @@ def runner() -> CliRunner:
     [
         ["run", "--help"],
         ["models", "--help"],
+        ["update", "--help"],
+        ["upgrade", "--help"],
         ["session", "--help"],
         ["session", "list", "--help"],
         ["session", "diff", "--help"],

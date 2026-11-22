@@ -30,6 +30,8 @@ _SPECS: dict[str, LazySpec] = {
     "run": LazySpec("machina.cli.parity", "run", "Run one prompt headlessly."),
     "repl": LazySpec("machina.cli.chat", "repl", "Start a read-eval-print loop."),
     "models": LazySpec("machina.cli.parity", "models", "List models for a provider."),
+    "update": LazySpec("machina.cli.parity", "update", "Update a source checkout."),
+    "upgrade": LazySpec("machina.cli.parity", "update", "Update a source checkout."),
     "undo": LazySpec("machina.cli.parity", "undo", "Restore the last workspace snapshot."),
     "status": LazySpec(
         "machina.cli.maintenance", "status", "Show database, session, and tool status."

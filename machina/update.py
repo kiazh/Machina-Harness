@@ -198,11 +198,15 @@ class _UpdateSpinner:
         print(message, file=sys.stderr)
 
 
-def auto_update() -> None:
-    """Fast-forward a clean checkout to origin/main and re-exec once."""
+def auto_update(*, force: bool = False) -> None:
+    """Fast-forward a clean checkout to origin/main and re-exec once.
+
+    ``force`` is for the explicit ``machina update`` command; launch-time
+    auto-update stays quiet for CI and non-interactive output.
+    """
     if os.environ.get("MACHINA_AUTO_UPDATE", "1").strip().lower() in {"0", "false", "no", "off"}:
         return
-    if os.environ.get("CI") or not sys.stdout.isatty():
+    if not force and (os.environ.get("CI") or not sys.stdout.isatty()):
         return
     root = _repo_root()
     if root is None:

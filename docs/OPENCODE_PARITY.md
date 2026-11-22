@@ -17,6 +17,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina session diff/undo` | Session-scoped snapshot operations |
 | `machina mcp list/show/add/remove` | Human MCP server administration |
 | `machina debug paths/info` | Path and runtime diagnostics without starting the agent |
+| `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
 
 Existing commands (`chat`, `doctor`, `init`, `serve`, `auth`, `providers`,
@@ -87,6 +88,19 @@ missing or failed formatters instead of failing the turn.
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
-- Full local suite: **649 passed, 9 skipped**.
+- Full local suite: **651 passed, 9 skipped**.
+
+### Project config example
+
+```json
+{
+  "model": "deepseek/deepseek-v4-flash",
+  "provider": "deepseek",
+  "formatter": "auto",
+  "snapshots_enabled": true
+}
+```
+
+The current loader validates the allow-list and value types directly.
 
 No benchmark result is claimed by this document.

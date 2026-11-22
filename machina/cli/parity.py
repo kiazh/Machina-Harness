@@ -55,6 +55,13 @@ def models(
     models_command(provider=provider, refresh=refresh, json_output=json_output)
 
 
+def update() -> None:
+    """Check and fast-forward a clean source checkout explicitly."""
+    from machina.update import auto_update
+
+    auto_update(force=True)
+
+
 session_app = typer.Typer(help="Manage sessions with OpenCode-style subcommands.")
 
 

@@ -20,6 +20,8 @@ COMMANDS = (
     "run",
     "repl",
     "models",
+    "update",
+    "upgrade",
     "undo",
     "status",
     "audit",

@@ -69,7 +69,7 @@ from machina.cli.memory import (
 )
 from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
-from machina.cli.parity import models, run, session_app, undo
+from machina.cli.parity import models, run, session_app, undo, update
 from machina.cli.providers import app as providers_app
 from machina.cli.sessions import (
     compress,
@@ -204,6 +204,8 @@ app.command(name="chat")(chat)
 app.command(name="run")(run)
 app.command(name="repl")(repl)
 app.command(name="models")(models)
+app.command(name="update")(update)
+app.command(name="upgrade")(update)
 app.command(name="undo")(undo)
 app.command(name="status")(status)
 app.command(name="audit")(audit)
