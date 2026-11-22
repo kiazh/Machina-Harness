@@ -20,6 +20,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina api METHOD PATH` | Authenticated local HTTP API request with `--data`, `--header`, and `--url` |
 | `machina acp` | Agent Client Protocol over stdio for editor clients such as Zed |
 | `machina service start/status/stop/restart` | Detached HTTP service with lease-backed status and health checks |
+| `machina completions bash|zsh|fish` | Completion script generated from the installed lazy command table |
 | `machina plugin list/loaded` | Installed entry points and process-loaded plugins |
 | `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
@@ -89,6 +90,12 @@ formatter after `write_file`:
 Formatting is opt-in (`off` by default), never rolls back the write, and reports
 missing or failed formatters instead of failing the turn.
 
+### Shell completions
+
+`machina completions bash|zsh|fish` prints a Click completion script derived
+from the installed lazy command table. Pipe it to the shell's completion
+directory or load it from the shell profile.
+
 ### ACP editor bridge
 
 `machina acp` speaks ACP over stdin/stdout. It creates one durable Machina
@@ -124,7 +131,6 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
 |---|---|---|
 | Plugin install/update and TUI plugins | Entry-point loading exists, but OpenCode's install/update and GUI plugin surfaces do not | Install/update commands, TUI/GUI hooks, and isolation tests |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
-| Shell completions | OpenCode provides bash/zsh/fish/sh | Generated completions match the lazy command table |
 | Upgrade/rollback command | OpenCode manages upgrades without source edits | Signed/versioned install path; rollback is tested |
 | Snapshot coverage for terminal edits | Current snapshots cover file-tool writes only | Git/worktree snapshot strategy with explicit untracked-file semantics |
 | Reference repositories | OpenCode can attach named local/Git references | Bounded read-only references with path/Git revision validation |
@@ -140,7 +146,9 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
   initialization capabilities, and approval mapping.
 - `tests/test_service_cli.py`: lease filtering, metadata fallback, and health
   URL normalization.
-- Full local suite: **666 passed, 9 skipped**.
+- `tests/test_cli_completions.py`: bash/fish generation and unsupported-shell
+  refusal.
+- Full local suite: **670 passed, 9 skipped**.
 
 ### Project config example
 

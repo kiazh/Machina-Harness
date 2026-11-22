@@ -29,6 +29,9 @@ _SPECS: dict[str, LazySpec] = {
     "chat": LazySpec("machina.cli.chat", "chat", "Chat with the agent once or interactively."),
     "api": LazySpec("machina.cli.api", "api", "Call the running Machina HTTP API."),
     "acp": LazySpec("machina.cli.acp", "acp", "Run as an Agent Client Protocol agent."),
+    "completions": LazySpec(
+        "machina.cli.completions", "completions", "Print bash/zsh/fish completions."
+    ),
     "run": LazySpec("machina.cli.parity", "run", "Run one prompt headlessly."),
     "repl": LazySpec("machina.cli.chat", "repl", "Start a read-eval-print loop."),
     "models": LazySpec("machina.cli.parity", "models", "List models for a provider."),

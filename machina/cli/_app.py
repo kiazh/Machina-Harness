@@ -37,6 +37,7 @@ from machina.cli.common import (
     _run,
     _sync_env_shadow,
 )
+from machina.cli.completions import completions
 from machina.cli.debug import app as debug_app
 from machina.cli.growth import app as growth_app
 from machina.cli.host import host_app
@@ -210,6 +211,7 @@ def main(
 app.command(name="chat")(chat)
 app.command(name="api")(api)
 app.command(name="acp")(acp)
+app.command(name="completions")(completions)
 app.command(name="run")(run)
 app.command(name="repl")(repl)
 app.command(name="models")(models)

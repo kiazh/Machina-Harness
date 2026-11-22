@@ -19,6 +19,7 @@ COMMANDS = (
     "chat",
     "api",
     "acp",
+    "completions",
     "run",
     "repl",
     "models",

@@ -19,6 +19,7 @@ def runner() -> CliRunner:
         ["run", "--help"],
         ["api", "--help"],
         ["acp", "--help"],
+        ["completions", "--help"],
         ["models", "--help"],
         ["update", "--help"],
         ["upgrade", "--help"],
