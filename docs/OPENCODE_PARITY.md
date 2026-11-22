@@ -19,6 +19,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina debug paths/info` | Path and runtime diagnostics without starting the agent |
 | `machina api METHOD PATH` | Authenticated local HTTP API request with `--data`, `--header`, and `--url` |
 | `machina acp` | Agent Client Protocol over stdio for editor clients such as Zed |
+| `machina service start/status/stop/restart` | Detached HTTP service with lease-backed status and health checks |
 | `machina plugin list/loaded` | Installed entry points and process-loaded plugins |
 | `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
@@ -50,6 +51,17 @@ Entry-point plugins use the existing `agent_harness.plugins` group and the
 same lifecycle hooks as the gateway. They are opt-in through `MACHINA_PLUGINS`;
 no repository file can load code implicitly. CLI and headless agent turns now
 initialize the plugin registry through the shared agent factory.
+
+### Background service
+
+`machina service start` launches `machina serve` as a detached child process,
+writes a log under the Machina home directory, and waits for the API health
+endpoint. Status and stop prefer the database-client lease for the `serve`
+role; when native PostgreSQL or `MACHINA_DB_MANAGE=0` produces no lease, the
+recorded PID is accepted only while both the process and `/health` agree.
+`stop` leaves a running TUI alone, and an unverified PID requires explicit
+`stop --force`. Restart reuses the recorded host and port when no alternatives
+are supplied.
 
 ### Project config
 
@@ -110,7 +122,6 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
 
 | Gap | Why it matters | Acceptance gate |
 |---|---|---|
-| Background service lifecycle | OpenCode has `service start/status/restart` | Start/stop/restart are idempotent and leave no stale PID |
 | Plugin install/update and TUI plugins | Entry-point loading exists, but OpenCode's install/update and GUI plugin surfaces do not | Install/update commands, TUI/GUI hooks, and isolation tests |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
 | Shell completions | OpenCode provides bash/zsh/fish/sh | Generated completions match the lazy command table |
@@ -125,9 +136,11 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
-- `tests/test_acp_bridge.py`: ACP prompt extraction, mode advertisement, and
-  initialization capabilities.
-- Full local suite: **661 passed, 9 skipped**.
+- `tests/test_acp_bridge.py`: ACP prompt extraction, mode advertisement,
+  initialization capabilities, and approval mapping.
+- `tests/test_service_cli.py`: lease filtering, metadata fallback, and health
+  URL normalization.
+- Full local suite: **666 passed, 9 skipped**.
 
 ### Project config example
 

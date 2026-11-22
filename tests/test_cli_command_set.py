@@ -77,6 +77,7 @@ GROUPS = (
     "mcp",
     "plugin",
     "plugins",
+    "service",
     "debug",
 )
 
