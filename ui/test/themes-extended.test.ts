@@ -1,4 +1,5 @@
-// Extended skin registry (2026-10-15: 12 additions; 2026-11-22: 20 more).
+// Extended skin registry (2026-10-15: 12 additions; 2026-11-22: 22 retained
+// after removing near-duplicate additions).
 // Guards the same invariants the design tests enforce - text/muted/dim clear
 // WCAG AA on their own surface with `dim` below `muted`, every accent role
 // clears AA and stays distinct, selected rows clear AA - and renders each skin
@@ -38,10 +39,7 @@ const NEW_SKINS = [
 	"oceanic",
 	"midnight-rose",
 	"citrus",
-	"lavender-mist",
-	"terracotta",
 	"moss",
-	"arctic",
 	"obsidian",
 	"vaporwave",
 	"clay",
@@ -49,12 +47,17 @@ const NEW_SKINS = [
 	"sorbet",
 	"pine",
 	"cinder",
-	"honey",
 	"iris",
-	"basalt",
 	"coral-reef",
-	"wisteria",
 	"graphite",
+	"abyss",
+	"umber",
+	"nebula",
+	"oxblood",
+	"inkwell",
+	"void",
+	"solar-flare",
+	"moonstone",
 ] as const;
 
 const luminance = (hex: string): number => {
@@ -146,15 +149,13 @@ test("new skins paint a unique background through the terminal harness", () => {
 	}
 });
 
-// The full registry intentionally keeps two alias families: `opencode` and
-// `codex` share the neutral surface (#0b0b0c) as the brand/default pair, and
-// `onedark` is the unhyphenated spelling of `one-dark` (#282c34) kept for
-// saved theme ids. Those pairs are the only allowed surface collisions; every
-// skin's full palette must otherwise be unique so an accidental duplicate
-// cannot land via a future theme wave.
+// The full registry intentionally keeps one alias family: `opencode` and
+// `codex` share the neutral surface (#0b0b0c) as the brand/default pair. That
+// pair is the only allowed surface collision; every skin's full palette must
+// otherwise be unique so an accidental duplicate cannot land via a future
+// theme wave.
 const ALLOWED_SURFACE_ALIASES: ReadonlyArray<readonly string[]> = [
 	["codex", "opencode"],
-	["one-dark", "onedark"],
 ];
 
 test("registry keeps every full palette and every surface distinct (aliases explicit)", () => {

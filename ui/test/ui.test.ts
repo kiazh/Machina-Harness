@@ -546,7 +546,7 @@ test("tool turns use quiet frames and honest markers", async () => {
 test("skins switch palette and art, unknown names throw", async () => {
 	const { SKIN_NAMES, getSkin, setSkin, skinArt, skinDescription } = await import("../src/theme.ts");
 	assert.ok(SKIN_NAMES.includes("default") && SKIN_NAMES.length >= 5);
-	for (const clone of ["tokyonight", "catppuccin", "dracula", "gruvbox", "rosepine", "nord", "everforest", "matrix", "onedark", "monokai", "github", "solarized", "kanagawa", "palenight", "catppuccin-frappe", "catppuccin-macchiato", "cobalt2", "ayu", "nightowl", "one-dark", "flexoki"]) {
+	for (const clone of ["tokyonight", "catppuccin", "dracula", "gruvbox", "rosepine", "nord", "everforest", "matrix", "monokai", "github", "solarized", "kanagawa", "palenight", "catppuccin-frappe", "cobalt2", "ayu", "nightowl", "one-dark", "flexoki"]) {
 		assert.ok(SKIN_NAMES.includes(clone), `missing theme: ${clone}`);
 		assert.ok(skinDescription(clone).length > 0, `${clone} has a description`);
 		assert.doesNotMatch(skinDescription(clone), /cloned exactly/);

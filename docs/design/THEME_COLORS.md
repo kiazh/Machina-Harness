@@ -36,10 +36,7 @@ Foreground roles are adjusted for at least 4.5:1 contrast against the canvas, me
 | `oceanic` | Deep sea ink, teal selections, coral details |
 | `midnight-rose` | Deep plum, blush selections, periwinkle details |
 | `citrus` | Sunlit paper, olive selections, tangerine details |
-| `lavender-mist` | Pale lilac, iris selections, berry details |
-| `terracotta` | Warm clay, slate selections, garden green details |
 | `moss` | Forest shadow, lichen selections, orchid details |
-| `arctic` | Glacier paper, frozen blue selections, indigo details |
 | `obsidian` | Graphite black, ice-blue selections, violet details |
 | `vaporwave` | Ultraviolet, neon pink selections, aqua details |
 | `clay` | Stoneware, slate selections, moss details |
@@ -47,11 +44,16 @@ Foreground roles are adjusted for at least 4.5:1 contrast against the canvas, me
 | `sorbet` | Soft cream, raspberry selections, grape details |
 | `pine` | Evergreen, mint selections, amethyst details |
 | `cinder` | Charred neutral, ember selections, violet smoke |
-| `honey` | Amber paper, umber selections, indigo details |
 | `iris` | Violet dusk, silver-blue selections, blush details |
-| `basalt` | Volcanic grey, steel-blue selections, mauve details |
 | `coral-reef` | Ocean ink, coral selections, lagoon details |
-| `wisteria` | Pale lilac, violet selections, rose and pine details |
 | `graphite` | Cool graphite, slate-blue selections, dusty rose details |
+| `abyss` | Deep ocean ink, seafoam selections, coral details |
+| `umber` | Roasted earth, parchment selections, orchid details |
+| `nebula` | Violet space, aurora cyan selections, starlight details |
+| `oxblood` | Dark wine, rose-lacquer selections, antique gold details |
+| `inkwell` | Blue-black ink, steel-blue selections, soft violet details |
+| `void` | Near-black, violet neon selections, signal cyan details |
+| `solar-flare` | Burnt gold, ultraviolet selections, hot plasma details |
+| `moonstone` | Blue-grey night, pearl-violet selections, sea-glass details |
 
 The canonical registry is `ui/src/design/theme.ts`. Reusable overlays use `surfaceLine()` so nested ANSI resets restore the theme's ink and surface instead of reverting to the terminal profile.
