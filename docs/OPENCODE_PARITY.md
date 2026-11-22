@@ -40,6 +40,17 @@ Limitation: writes made by an opaque terminal child process are outside this
 guarantee. The file tool is the covered path; do not describe snapshots as a
 filesystem sandbox.
 
+### Project config
+
+A repository may add `machina.json` or `.machina.json`. The nearest file is
+applied at launch, before the UI or CLI resolves a model. Accepted keys are
+limited to non-authority behavior: model, provider, reasoning effort,
+formatter, snapshots, compaction, output policy, meta-harness hint, skill
+query expansion, retrieval budget, memory/RAG, and browser verification.
+
+Project files cannot set execution mode, permissions, credentials, or unknown
+keys; those are rejected. `MACHINA_PROJECT_CONFIG=1` disables the layer.
+
 ### Formatters
 
 Set `formatter: auto` with `machina config-set formatter auto` to run a detected
@@ -59,7 +70,6 @@ missing or failed formatters instead of failing the turn.
 
 | Gap | Why it matters | Acceptance gate |
 |---|---|---|
-| Project config file | OpenCode supports `opencode.json(c)` with model, agents, permissions, MCP, formatters, LSP; Machina uses DB/env/config.yaml | A project file changes defaults without DB mutation; schema validation and precedence tests |
 | ACP server | Editor/IDE clients need Agent Client Protocol | `machina acp` handshake plus a real editor smoke test |
 | Background service lifecycle | OpenCode has `service start/status/restart` | Start/stop/restart are idempotent and leave no stale PID |
 | `api` command | OpenCode can call its local API with auth | `machina api get /health` uses the same service discovery/auth as the server |
@@ -77,6 +87,6 @@ missing or failed formatters instead of failing the turn.
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
-- Full local suite: **645 passed, 9 skipped**.
+- Full local suite: **649 passed, 9 skipped**.
 
 No benchmark result is claimed by this document.

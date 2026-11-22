@@ -57,6 +57,15 @@ def main() -> None:
 
         print(f"Machina v{__version__}")
         return
+    # Apply repository-local, non-authority defaults before either the UI or
+    # the Typer command surface resolves a model/provider. Failure is advisory.
+    try:
+        from machina.project_config import apply as _apply_project_config
+
+        _apply_project_config()
+    except Exception:
+        pass
+
     is_ui, mode = _interactive_mode(args)
     if is_ui:
         from machina.update import auto_update

@@ -15,6 +15,7 @@ def _snapshot_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path
     workspace.mkdir()
     monkeypatch.setenv("MACHINA_HOME", str(home))
     monkeypatch.setenv("MACHINA_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("MACHINA_SNAPSHOTS_ENABLED", "1")
     return workspace
 
 
