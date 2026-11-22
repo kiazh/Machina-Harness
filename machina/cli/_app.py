@@ -19,6 +19,7 @@ import typer
 
 from machina import interop as interop_mod
 from machina.cli import output
+from machina.cli.acp import acp
 from machina.cli.api import api
 from machina.cli.audit import audit
 from machina.cli.auth import app as auth_app
@@ -206,6 +207,7 @@ def main(
 # order exactly. Keep new commands in the feature module and register here.
 app.command(name="chat")(chat)
 app.command(name="api")(api)
+app.command(name="acp")(acp)
 app.command(name="run")(run)
 app.command(name="repl")(repl)
 app.command(name="models")(models)

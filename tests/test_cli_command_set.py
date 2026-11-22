@@ -18,6 +18,7 @@ from machina.cli import common
 COMMANDS = (
     "chat",
     "api",
+    "acp",
     "run",
     "repl",
     "models",

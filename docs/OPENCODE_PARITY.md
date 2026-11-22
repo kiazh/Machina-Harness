@@ -18,6 +18,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina mcp list/show/add/remove` | Human MCP server administration |
 | `machina debug paths/info` | Path and runtime diagnostics without starting the agent |
 | `machina api METHOD PATH` | Authenticated local HTTP API request with `--data`, `--header`, and `--url` |
+| `machina acp` | Agent Client Protocol over stdio for editor clients such as Zed |
 | `machina plugin list/loaded` | Installed entry points and process-loaded plugins |
 | `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
@@ -76,11 +77,39 @@ formatter after `write_file`:
 Formatting is opt-in (`off` by default), never rolls back the write, and reports
 missing or failed formatters instead of failing the turn.
 
+### ACP editor bridge
+
+`machina acp` speaks ACP over stdin/stdout. It creates one durable Machina
+session per editor session, advertises the `ask`, `workspace`, `sandbox`, and
+`full` modes, streams text and tool-call updates, and translates approval cards
+into `session/request_permission` requests. ACP `allow_once` decisions use the
+normal one-time approval store; `allow_always` saves a session grant through the
+same permission store as the HTTP API.
+
+Example Zed configuration:
+
+```json title="~/.config/zed/settings.json"
+{
+  "agent_servers": {
+    "Machina": {
+      "command": "machina",
+      "args": ["acp"]
+    }
+  }
+}
+```
+
+Known limitations: ACP `session/load` restores the session identity and mode but
+does not replay transcript history into the editor yet; per-session MCP servers
+and additional workspace roots are reported as unsupported notices; image and
+audio content blocks are not accepted; and no live Zed smoke test was run in
+this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
+`--auto` when a client cannot answer approval prompts.
+
 ## Gaps still open
 
 | Gap | Why it matters | Acceptance gate |
 |---|---|---|
-| ACP server | Editor/IDE clients need Agent Client Protocol | `machina acp` handshake plus a real editor smoke test |
 | Background service lifecycle | OpenCode has `service start/status/restart` | Start/stop/restart are idempotent and leave no stale PID |
 | Plugin install/update and TUI plugins | Entry-point loading exists, but OpenCode's install/update and GUI plugin surfaces do not | Install/update commands, TUI/GUI hooks, and isolation tests |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
@@ -96,14 +125,9 @@ missing or failed formatters instead of failing the turn.
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
-- Full local suite: **655 passed, 9 skipped**.
-
-### Plugins
-
-Entry-point plugins use the existing `agent_harness.plugins` group and the
-same lifecycle hooks as the gateway. They are opt-in through `MACHINA_PLUGINS`;
-no repository file can load code implicitly. CLI and headless agent turns now
-initialize the plugin registry through the shared agent factory.
+- `tests/test_acp_bridge.py`: ACP prompt extraction, mode advertisement, and
+  initialization capabilities.
+- Full local suite: **661 passed, 9 skipped**.
 
 ### Project config example
 
