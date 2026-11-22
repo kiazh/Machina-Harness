@@ -461,6 +461,17 @@ async def terminal(
         raise ValidationError("workdir differs from broker-authorized cwd")
     _validate_workdir(resolved_workdir)
 
+    # Cover terminal edits when the turn has a clean Git baseline. This is
+    # intentionally lazy (first terminal command) and fail-closed; see
+    # machina.workspace.snapshots.begin_terminal_capture. A failed capture
+    # never blocks the command.
+    try:
+        from machina.workspace import snapshots as snapshot_module
+
+        snapshot_module.begin_terminal_capture()
+    except Exception as error:
+        record_failure("terminal.begin_snapshot_capture", error)
+
     # Local subprocesses are not a security boundary: git aliases, find -exec,
     # and test runners can execute commands outside the command allowlist.
     # Phase D: the permission broker (agent loop) already authorized this

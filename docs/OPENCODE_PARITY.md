@@ -42,9 +42,13 @@ tool during a turn.
 - `diff` shows a unified before/after patch.
 - Empty turns leave no snapshot behind.
 
-Limitation: writes made by an opaque terminal child process are outside this
-guarantee. The file tool is the covered path; do not describe snapshots as a
-filesystem sandbox.
+Limitation: clean-Git terminal coverage is additive and narrow. When the turn
+has no prior file-tool write and the worktree is clean, the first terminal
+command records `HEAD`; changed, deleted, and new files are then added to the
+same manifest and restored by `undo`. Dirty worktrees, non-Git workspaces,
+writes after the turn ends (for example a still-running background command),
+and writes outside the workspace remain outside the guarantee. The file tool is
+the normal covered path; do not describe snapshots as a filesystem sandbox.
 
 ### Plugins
 
@@ -132,13 +136,15 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
 | Plugin install/update and TUI plugins | Entry-point loading exists, but OpenCode's install/update and GUI plugin surfaces do not | Install/update commands, TUI/GUI hooks, and isolation tests |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
 | Upgrade/rollback command | OpenCode manages upgrades without source edits | Signed/versioned install path; rollback is tested |
-| Snapshot coverage for terminal edits | Current snapshots cover file-tool writes only | Git/worktree snapshot strategy with explicit untracked-file semantics |
+| Snapshot coverage for dirty/non-Git terminal edits | Clean-Git terminal edits are covered, but dirty worktrees and non-Git workspaces are explicitly skipped | Bounded worktree/index strategy for dirty trees with explicit untracked-file semantics |
 | Reference repositories | OpenCode can attach named local/Git references | Bounded read-only references with path/Git revision validation |
 
 ## Test evidence
 
 - `tests/test_snapshots.py`: restore, new-file deletion, conflict refusal,
   sensitive-file exclusion, outside-workspace exclusion.
+- `tests/test_terminal_snapshots.py`: clean-Git terminal restore, dirty-tree
+  refusal, and file-tool-after-terminal baseline ordering.
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
@@ -148,7 +154,7 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
   URL normalization.
 - `tests/test_cli_completions.py`: bash/fish generation and unsupported-shell
   refusal.
-- Full local suite: **670 passed, 9 skipped**.
+- Full local suite: **673 passed, 9 skipped**.
 
 ### Project config example
 

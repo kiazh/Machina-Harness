@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -94,6 +95,57 @@ def _sha256(path: Path) -> str | None:
         return None
 
 
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _git(workspace: Path, *args: str, timeout: float = 20.0) -> subprocess.CompletedProcess[bytes] | None:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(workspace), *args],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _git_root(workspace: Path) -> Path | None:
+    result = _git(workspace, "rev-parse", "--show-toplevel", timeout=5)
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        return Path(result.stdout.decode("utf-8", "replace").strip()).resolve()
+    except OSError:
+        return None
+
+
+def _git_head(workspace: Path) -> str | None:
+    result = _git(workspace, "rev-parse", "HEAD", timeout=5)
+    if result is None or result.returncode != 0:
+        return None
+    head = result.stdout.decode("utf-8", "replace").strip()
+    return head or None
+
+
+def _git_blob(workspace: Path, head: str, relative: Path) -> tuple[bool, bytes | None]:
+    spec = f"{head}:{relative.as_posix()}"
+    exists = _git(workspace, "cat-file", "-e", spec, timeout=5)
+    if exists is None or exists.returncode != 0:
+        return False, None
+    result = _git(workspace, "show", spec, timeout=20)
+    if result is None or result.returncode != 0:
+        return True, None
+    return True, result.stdout
+
+
+def _git_status_clean(workspace: Path) -> bool:
+    result = _git(workspace, "status", "--porcelain", "--untracked-files=normal", timeout=20)
+    return result is not None and result.returncode == 0 and not result.stdout.strip()
+
+
 def _safe_workspace(path: Path, workspace: Path) -> Path | None:
     try:
         resolved = path.resolve()
@@ -166,6 +218,10 @@ class TurnSnapshot:
     created_at: str = field(default_factory=_now)
     files: dict[str, FileSnapshot] = field(default_factory=dict)
     status: str = "open"
+    #: Clean Git baseline captured lazily before the first terminal command.
+    #: Terminal edits are diffed against this commit at turn end. It is never
+    #: serialized; finished terminal files are ordinary manifest entries.
+    git_head: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -178,28 +234,153 @@ class TurnSnapshot:
             "files": [item.to_dict() for item in self.files.values()],
         }
 
+    def _backup_bytes(self, resolved: Path, payload: bytes) -> str | None:
+        try:
+            backup_dir = self.root / "files"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
+            backup.write_bytes(payload)
+            return str(backup)
+        except OSError:
+            return None
+
+    def _entry_from_git(self, resolved: Path) -> FileSnapshot | None:
+        """Build the pre-turn entry from HEAD for a file-tool write.
+
+        Only called after :meth:`begin_terminal_capture` proved the worktree
+        was clean and recorded ``git_head``. That makes HEAD the correct
+        before-state even if an earlier terminal command changed the file.
+        """
+        if self.git_head is None:
+            return None
+        try:
+            relative = resolved.relative_to(self.workspace)
+        except ValueError:
+            return None
+        exists, payload = _git_blob(self.workspace, self.git_head, relative)
+        item = FileSnapshot(
+            path=str(resolved),
+            backup=None,
+            existed=exists,
+            before_sha=None,
+        )
+        if not exists:
+            return item
+        if payload is None:
+            item.ignored = True
+            return item
+        if len(payload) > MAX_FILE_BYTES:
+            item.ignored = True
+            return item
+        item.before_sha = _sha256_bytes(payload)
+        item.backup = self._backup_bytes(resolved, payload)
+        if item.backup is None:
+            item.ignored = True
+        return item
+
     def record(self, path: Path) -> None:
         resolved = _safe_workspace(path, self.workspace)
         if resolved is None or str(resolved) in self.files:
             return
-        item = FileSnapshot(path=str(resolved), backup=None, existed=resolved.exists(), before_sha=None)
-        try:
-            if item.existed:
-                if not resolved.is_file() or resolved.stat().st_size > MAX_FILE_BYTES:
-                    item.ignored = True
+        item = self._entry_from_git(resolved)
+        if item is None:
+            item = FileSnapshot(path=str(resolved), backup=None, existed=resolved.exists(), before_sha=None)
+            try:
+                if item.existed:
+                    if not resolved.is_file() or resolved.stat().st_size > MAX_FILE_BYTES:
+                        item.ignored = True
+                    else:
+                        item.before_sha = _sha256(resolved)
+                        backup_dir = self.root / "files"
+                        backup_dir.mkdir(parents=True, exist_ok=True)
+                        backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
+                        shutil.copy2(resolved, backup)
+                        item.backup = str(backup)
                 else:
-                    item.before_sha = _sha256(resolved)
-                    backup_dir = self.root / "files"
-                    backup_dir.mkdir(parents=True, exist_ok=True)
-                    backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
-                    shutil.copy2(resolved, backup)
-                    item.backup = str(backup)
-            else:
-                item.before_sha = None
-        except OSError:
-            item.ignored = True
+                    item.before_sha = None
+            except OSError:
+                item.ignored = True
         self.files[str(resolved)] = item
         _write_manifest(self)
+
+    def begin_terminal_capture(self) -> bool:
+        """Enable clean-Git terminal coverage for this turn.
+
+        Fail closed: a dirty worktree, a non-Git workspace, a subdirectory
+        workspace, or an earlier file-tool write leaves terminal coverage
+        disabled. No whole-tree copy or hash is performed.
+        """
+        if self.git_head is not None or self.files:
+            return False
+        root = _git_root(self.workspace)
+        if root is None or root != self.workspace:
+            return False
+        if not _git_status_clean(self.workspace):
+            return False
+        head = _git_head(self.workspace)
+        if head is None:
+            return False
+        self.git_head = head
+        return True
+
+    def capture_terminal(self) -> int:
+        """Add terminal-changed Git paths that are not already recorded."""
+        if self.git_head is None:
+            return 0
+        changed: list[bytes] = []
+        diff = _git(
+            self.workspace,
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            self.git_head,
+        )
+        if diff is not None and diff.returncode == 0:
+            changed.extend(item for item in diff.stdout.split(b"\0") if item)
+        untracked = _git(
+            self.workspace,
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        )
+        if untracked is not None and untracked.returncode == 0:
+            changed.extend(item for item in untracked.stdout.split(b"\0") if item)
+
+        added = 0
+        for raw in changed:
+            relative = Path(os.fsdecode(raw))
+            target = _safe_workspace(self.workspace / relative, self.workspace)
+            if target is None or str(target) in self.files or target.is_symlink():
+                continue
+            exists, payload = _git_blob(self.workspace, self.git_head, relative)
+            if not exists:
+                # New untracked file created during the turn.
+                item = FileSnapshot(
+                    path=str(target),
+                    backup=None,
+                    existed=False,
+                    before_sha=None,
+                )
+            else:
+                if payload is None or len(payload) > MAX_FILE_BYTES:
+                    continue
+                backup = self._backup_bytes(target, payload)
+                if backup is None:
+                    continue
+                item = FileSnapshot(
+                    path=str(target),
+                    backup=backup,
+                    existed=True,
+                    before_sha=_sha256_bytes(payload),
+                )
+            item.after_sha = _sha256(target) if target.exists() else None
+            self.files[str(target)] = item
+            added += 1
+        if added:
+            _write_manifest(self)
+        return added
 
     def finish(self) -> None:
         for item in self.files.values():
@@ -230,11 +411,33 @@ def begin_turn(*, session_id: str | None = None, workspace: Path | None = None) 
 def end_turn(snapshot: TurnSnapshot | None) -> None:
     """Finalize the current snapshot; empty turns leave no manifest behind."""
     if snapshot is not None:
+        if snapshot.git_head is not None:
+            try:
+                snapshot.capture_terminal()
+            except Exception:
+                # Snapshot completion is additive; a terminal diff failure
+                # must not turn a successful agent turn into a failure.
+                pass
         if snapshot.has_changes():
             snapshot.finish()
         else:
             shutil.rmtree(snapshot.root, ignore_errors=True)
     _current.set(None)
+
+
+def begin_terminal_capture() -> bool:
+    """Capture a clean Git baseline before the first terminal command.
+
+    Returns false when terminal coverage is unavailable. This is an explicit
+    conservative boundary, not a claim that every terminal edit is covered.
+    """
+    snapshot = _current.get()
+    if snapshot is None:
+        return False
+    try:
+        return snapshot.begin_terminal_capture()
+    except Exception:
+        return False
 
 
 def record_before_write(path: str | Path) -> None:
