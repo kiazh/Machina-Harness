@@ -35,6 +35,7 @@ from machina.cli.common import (
     _run,
     _sync_env_shadow,
 )
+from machina.cli.debug import app as debug_app
 from machina.cli.growth import app as growth_app
 from machina.cli.host import host_app
 from machina.cli.interop import app as harnesses_app
@@ -51,6 +52,7 @@ from machina.cli.maintenance import (
     uninstall,
     version,
 )
+from machina.cli.mcp import app as mcp_app
 from machina.cli.memory import (
     memory_approve,
     memory_approve_all,
@@ -67,6 +69,7 @@ from machina.cli.memory import (
 )
 from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
+from machina.cli.parity import models, run, session_app, undo
 from machina.cli.providers import app as providers_app
 from machina.cli.sessions import (
     compress,
@@ -89,6 +92,7 @@ from machina.cli.skills import (
     skills_enrich,
     skills_list,
 )
+from machina.cli.snapshots import app as snapshots_app
 from machina.db.connection import db
 from machina.ui_launcher import launch_ui
 
@@ -172,6 +176,10 @@ app.add_typer(harnesses_app, name="interop")
 app.add_typer(providers_app, name="providers")
 app.add_typer(optimization_app, name="optimization")
 app.add_typer(skills_app, name="skills")
+app.add_typer(session_app, name="session")
+app.add_typer(snapshots_app, name="snapshots")
+app.add_typer(mcp_app, name="mcp")
+app.add_typer(debug_app, name="debug")
 
 
 @app.callback()
@@ -193,7 +201,10 @@ def main(
 # in insertion order, so this block mirrors the original one-module definition
 # order exactly. Keep new commands in the feature module and register here.
 app.command(name="chat")(chat)
+app.command(name="run")(run)
 app.command(name="repl")(repl)
+app.command(name="models")(models)
+app.command(name="undo")(undo)
 app.command(name="status")(status)
 app.command(name="audit")(audit)
 app.command(name="mode")(set_mode)

@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 620 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 645 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -362,7 +362,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~130,239 lines across 363 files |
-| Backend tests | 629 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Backend tests | 645 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
 | Tools and commands | 46 built-in tools; 47 top-level CLI commands (39 one-shot + 8 groups); 52 slash commands |
@@ -401,6 +401,8 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Connected-model routing** | A live inventory of credentialed models, role-specific fit, deterministic selection, cost tiers, pins, and fallbacks | [Routing](#connected-model-routing) |
 | **Parallel delegation** | Explicit parallel requests become a validated dependency plan with bounded workers and a supervisor synthesis | [Agent loop](#routing-and-parallel-delegation) |
 | **Repair controller** | Narrow tool catalog, phase/evidence tracking, turn and token caps, repeated-loop stops, and a final verification gate | [Controller](docs/TASK_RUN_CONTROLLER.md) |
+| **Snapshots and undo** | Per-turn file snapshots, conflict-aware restore, unified diff, and a CLI undo path | [Snapshots](docs/OPENCODE_PARITY.md#workspace-snapshots) |
+| **Post-write formatters** | Optional `formatter: auto` runs the repository's detected formatter after file-tool writes | [Parity](docs/OPENCODE_PARITY.md#formatters) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
 | **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
@@ -1642,6 +1644,12 @@ For a single response without the UI:
 machina chat "Summarize the repository layout"
 machina chat -c "Continue from the last session"
 machina chat -s "<session-id>" "Resume this conversation"
+machina run "Run one prompt headlessly"
+machina session list
+machina snapshots list
+machina snapshots diff
+machina undo
+machina mcp list
 machina route "Fix the parser bug and run its tests" --mode multi_model --workers 4
 ```
 
@@ -2930,7 +2938,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 629 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 645 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|

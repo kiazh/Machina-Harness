@@ -37,6 +37,13 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     # Commands
     "audit": ("machina.cli.audit", "audit"),
     "chat": ("machina.cli.chat", "chat"),
+    "run": ("machina.cli.parity", "run"),
+    "models": ("machina.cli.parity", "models"),
+    "undo": ("machina.cli.parity", "undo"),
+    "session_app": ("machina.cli.parity", "session_app"),
+    "snapshots_app": ("machina.cli.snapshots", "app"),
+    "mcp_app": ("machina.cli.mcp", "app"),
+    "debug_app": ("machina.cli.debug", "app"),
     "repl": ("machina.cli.chat", "repl"),
     "compress": ("machina.cli.sessions", "compress"),
     "context": ("machina.cli.sessions", "context"),

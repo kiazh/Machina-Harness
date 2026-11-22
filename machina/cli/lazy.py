@@ -27,13 +27,17 @@ class LazySpec:
 # insertion order, so help output remains stable.
 _SPECS: dict[str, LazySpec] = {
     "chat": LazySpec("machina.cli.chat", "chat", "Chat with the agent once or interactively."),
+    "run": LazySpec("machina.cli.parity", "run", "Run one prompt headlessly."),
     "repl": LazySpec("machina.cli.chat", "repl", "Start a read-eval-print loop."),
+    "models": LazySpec("machina.cli.parity", "models", "List models for a provider."),
+    "undo": LazySpec("machina.cli.parity", "undo", "Restore the last workspace snapshot."),
     "status": LazySpec(
         "machina.cli.maintenance", "status", "Show database, session, and tool status."
     ),
     "audit": LazySpec("machina.cli.audit", "audit", "Show recent sanitized audit events."),
     "mode": LazySpec("machina.cli.maintenance", "set_mode", "Show or set the execution mode."),
     "sessions": LazySpec("machina.cli.sessions", "list_sessions", "List recent sessions."),
+    "session": LazySpec("machina.cli.parity", "session_app", "Manage sessions by subcommand."),
     "sessions-search": LazySpec(
         "machina.cli.sessions", "sessions_search", "Search session titles."
     ),
@@ -83,6 +87,9 @@ _SPECS: dict[str, LazySpec] = {
     "providers": LazySpec("machina.cli.providers", "app", "Manage providers."),
     "optimization": LazySpec("machina.cli.optimization", "app", "Inspect optimization data."),
     "skills": LazySpec("machina.cli.skills", "skills_app", "Manage skills."),
+    "snapshots": LazySpec("machina.cli.snapshots", "app", "Inspect and undo workspace snapshots."),
+    "mcp": LazySpec("machina.cli.mcp", "app", "Manage MCP servers."),
+    "debug": LazySpec("machina.cli.debug", "app", "Debugging and path inspection tools."),
 }
 
 

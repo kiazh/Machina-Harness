@@ -914,6 +914,17 @@ async def write_file(path: str, content: str) -> str:
         raise ToolError(f"{e}") from e
 
     try:
+        # Capture before the write tool changes the file. The snapshot manager
+        # ignores paths outside the active workspace and oversized files.
+        from machina.workspace.snapshots import record_before_write
+
+        record_before_write(file_path)
+    except Exception:
+        # Snapshotting must never prevent the user's write; an unavailable
+        # snapshot store is reported by `machina snapshots`, not by data loss.
+        pass
+
+    try:
 
         def _write():
             inside = file_path.is_relative_to(_base_dir())
@@ -975,7 +986,13 @@ async def write_file(path: str, content: str) -> str:
                         lambda: os.lstat(file_path), lambda: os.unlink(file_path)
                     )
                 raise
-            return f"Successfully wrote {len(content)} characters to {path}"
+            message = f"Successfully wrote {len(content)} characters to {path}"
+            from machina.workspace.formatting import format_file
+
+            formatted = format_file(file_path)
+            if formatted:
+                message = f"{message} ({formatted})"
+            return message
 
         return await _run_worker_joined(_write, capture_result=True)
     except Exception as e:

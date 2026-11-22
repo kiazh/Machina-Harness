@@ -17,7 +17,10 @@ from machina.cli import common
 # Original definition order: Click lists commands in insertion order.
 COMMANDS = (
     "chat",
+    "run",
     "repl",
+    "models",
+    "undo",
     "status",
     "audit",
     "mode",
@@ -65,6 +68,10 @@ GROUPS = (
     "providers",
     "optimization",
     "skills",
+    "session",
+    "snapshots",
+    "mcp",
+    "debug",
 )
 
 

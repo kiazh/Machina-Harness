@@ -465,6 +465,11 @@ DEFAULTS: dict[str, Any] = {
     # Execution modes: ask | workspace | sandbox | full.
     "execution_mode": "ask",
     "workspace_root": "",
+    # Per-turn file snapshots for explicit diff/undo. The store lives outside
+    # the workspace; opaque child-process edits are outside this guarantee.
+    "snapshots_enabled": True,
+    # "off" or "auto": auto runs a detected formatter after file-tool writes.
+    "formatter": "off",
     "terminal_sandbox": "disabled",
     "terminal_image": "machina-tool-sandbox:latest",
     "terminal_wasm_module": "",
@@ -890,6 +895,8 @@ class Config:
     # Execution modes (Phase 5)
     execution_mode: str = "ask"
     workspace_root: str = ""
+    snapshots_enabled: bool = True
+    formatter: str = "off"
     terminal_sandbox: str = "disabled"
     terminal_image: str = "machina-tool-sandbox:latest"
     terminal_wasm_module: str = ""

@@ -2478,7 +2478,15 @@ async def _react_loop(
     from machina.core.task_run import set_repair_network_blocked
 
     set_repair_network_blocked(task_run.active and task_run.lean_tools)
-    async with joined_teardown(cleanup=lambda: agent._flush_pending_chunks(pending_chunks)):
+    turn_snapshot = None
+
+    def _finish_turn() -> None:
+        from machina.workspace.snapshots import end_turn
+
+        end_turn(turn_snapshot)
+        return agent._flush_pending_chunks(pending_chunks)
+
+    async with joined_teardown(cleanup=_finish_turn):
         try:
             session, messages = await agent._prepare_context(
                 session_id,
@@ -2487,6 +2495,24 @@ async def _react_loop(
                 pending_chunks=pending_chunks,
                 images=images,
             )
+            try:
+                from machina.core.execution_context import resolve_execution_context
+                from machina.workspace.snapshots import begin_turn
+
+                context = await resolve_execution_context(str(session_id), "terminal")
+                turn_snapshot = begin_turn(
+                    session_id=str(session_id),
+                    workspace=context.workspace,
+                )
+            except Exception as snapshot_error:
+                # Snapshot support is additive; a failed store must not fail
+                # the turn. The file tool remains authoritative.
+                turn_snapshot = None
+                audit_log(
+                    "agent_snapshot_error",
+                    session_id=str(session_id),
+                    error=str(snapshot_error),
+                )
             # AH-015: persist the user message immediately so cancellation during
             # the first LLM call cannot lose it. Wrapped like the stream path (F3):
             # a CancelledError during this DB write must still persist the user
