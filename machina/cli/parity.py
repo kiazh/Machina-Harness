@@ -60,7 +60,7 @@ def update(
         False,
         "--rollback",
         help="Reset a clean source checkout to the commit recorded before the last update",
-    )
+    ),
 ) -> None:
     """Check and fast-forward a clean source checkout explicitly."""
     from machina.update import auto_update

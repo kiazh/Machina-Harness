@@ -62,13 +62,17 @@ def load(path: Path) -> dict[str, Any]:
         raise ValueError("project config must be a JSON object")
     unknown = sorted(set(payload) - PROJECT_CONFIG_KEYS)
     if unknown:
-        raise ValueError(
-            "project config contains unsupported keys: " + ", ".join(unknown)
-        )
+        raise ValueError("project config contains unsupported keys: " + ", ".join(unknown))
     if payload.get("formatter") is not None and not isinstance(payload["formatter"], str):
         raise ValueError("project config formatter must be a string")
-    for key in ("snapshots_enabled", "auto_compaction_enabled", "meta_harness_hint",
-                "skill_query_expansion_enabled", "memory_enabled", "rag_enabled"):
+    for key in (
+        "snapshots_enabled",
+        "auto_compaction_enabled",
+        "meta_harness_hint",
+        "skill_query_expansion_enabled",
+        "memory_enabled",
+        "rag_enabled",
+    ):
         if key in payload and not isinstance(payload[key], bool):
             raise ValueError(f"project config {key} must be a boolean")
     for key in ("model", "provider", "reasoning_effort", "output_policy", "browser_verification"):

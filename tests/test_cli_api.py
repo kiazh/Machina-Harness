@@ -18,3 +18,13 @@ def test_api_headers_use_environment_key(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_api_headers_reject_invalid_header() -> None:
     with pytest.raises(ValueError):
         _headers(["not-a-header"], "secret")
+
+
+def test_api_headers_can_refuse_an_ambient_key_for_external_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MACHINA_API_KEY", "secret")
+    headers = _headers([], None, allow_default_key=False)
+    assert "X-API-Key" not in headers
+    explicit = _headers([], "explicit", allow_default_key=False)
+    assert explicit["X-API-Key"] == "explicit"

@@ -16,7 +16,6 @@ import asyncio
 import logging
 import os
 import uuid
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -164,9 +163,6 @@ class MachinaACPAgent(Agent):
         self._default_cwd = os.getcwd()
         self._tasks: dict[str, asyncio.Task[PromptResponse]] = {}
         self._schema_ready = False
-        self._active_acp_session: ContextVar[str] = ContextVar(
-            "machina_acp_session", default=""
-        )
 
     def on_connect(self, conn: Client) -> None:
         self._conn = conn
@@ -221,6 +217,40 @@ class MachinaACPAgent(Agent):
             auth_methods=[],
         )
 
+    async def _notify_unsupported_session_features(
+        self,
+        session_id: str,
+        *,
+        mcp_servers: list[Any] | None,
+        additional_directories: list[str] | None,
+    ) -> None:
+        if self._conn is None:
+            return
+        if mcp_servers:
+            await self._conn.session_update(
+                session_id=session_id,
+                update=SessionUpdateNotice(
+                    severity="warning",
+                    title="MCP servers not applied",
+                    description=(
+                        "This Machina ACP build does not attach per-session MCP "
+                        "servers yet. Configure MCP with `machina mcp`."
+                    ),
+                ),
+            )
+        if additional_directories:
+            await self._conn.session_update(
+                session_id=session_id,
+                update=SessionUpdateNotice(
+                    severity="warning",
+                    title="Additional directories not activated",
+                    description=(
+                        "Machina currently executes in the primary workspace. "
+                        "Additional roots are recorded for diagnostics only."
+                    ),
+                ),
+            )
+
     async def new_session(
         self,
         cwd: str,
@@ -247,30 +277,11 @@ class MachinaACPAgent(Agent):
         session_id = str(session.id)
         self._sessions[session_id] = session.id
         self._acp_for_session[str(session.id)] = session_id
-        if mcp_servers and self._conn is not None:
-            await self._conn.session_update(
-                session_id=session_id,
-                update=SessionUpdateNotice(
-                    severity="warning",
-                    title="MCP servers not applied",
-                    description=(
-                        "This Machina ACP build does not attach per-session MCP "
-                        "servers yet. Configure MCP with `machina mcp`."
-                    ),
-                ),
-            )
-        if additional_directories and self._conn is not None:
-            await self._conn.session_update(
-                session_id=session_id,
-                update=SessionUpdateNotice(
-                    severity="warning",
-                    title="Additional directories not activated",
-                    description=(
-                        "Machina currently executes in the primary workspace. "
-                        "Additional roots are recorded for diagnostics only."
-                    ),
-                ),
-            )
+        await self._notify_unsupported_session_features(
+            session_id,
+            mcp_servers=mcp_servers,
+            additional_directories=additional_directories,
+        )
         return NewSessionResponse(
             session_id=session_id,
             modes=_mode_state(session.execution_mode),
@@ -290,6 +301,11 @@ class MachinaACPAgent(Agent):
             await session_manager.update_state_fields(
                 session.id, {"desktop_workspace_root": str(Path(cwd).resolve())}
             )
+        await self._notify_unsupported_session_features(
+            session_id,
+            mcp_servers=mcp_servers,
+            additional_directories=additional_directories,
+        )
         return LoadSessionResponse(modes=_mode_state(session.execution_mode))
 
     async def list_sessions(
@@ -340,9 +356,7 @@ class MachinaACPAgent(Agent):
         session.execution_mode = mode_id
         return SetSessionModeResponse()
 
-    async def authenticate(
-        self, method_id: str, **kwargs: Any
-    ) -> AuthenticateResponse | None:
+    async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
         # Authentication is configured in the Machina environment/credential
         # store before the editor launches the agent. No ACP-local secret flow
         # is exposed.
@@ -353,17 +367,41 @@ class MachinaACPAgent(Agent):
         from machina.permissions import store as permission_store
 
         request_id = str(card.get("request_id") or "")
-        session_id = self._acp_for_session.get(str(card.get("session_id") or ""))
-        if not session_id:
-            session_id = self._active_acp_session.get()
-        if not request_id or not session_id or self._conn is None:
-            if request_id:
-                try:
-                    await permission_store.resolve_decision(
-                        request_id, "cancelled", principal="acp"
-                    )
-                except Exception as error:
-                    record_failure("acp.resolve_missing_session", error)
+        machina_session_id = str(card.get("session_id") or "")
+        turn_id = str(card.get("turn_id") or "")
+        session_id = self._acp_for_session.get(machina_session_id)
+        if not request_id or not machina_session_id:
+            return "denied"
+
+        try:
+            record = await permission_store.get_approval(request_id)
+        except Exception as error:
+            record_failure("acp.load_approval", error)
+            return "denied"
+        if record is None or str(record.get("session_id") or "") != machina_session_id:
+            record_failure(
+                "acp.approval_session_mismatch",
+                RuntimeError("approval record does not belong to the ACP session"),
+            )
+            return "denied"
+        if str(record.get("status") or "") != "pending":
+            return "denied"
+        record_turn = str(record.get("turn_id") or "")
+        if turn_id and record_turn and record_turn != turn_id:
+            record_failure(
+                "acp.approval_turn_mismatch",
+                RuntimeError("approval record does not belong to the ACP turn"),
+            )
+            return "denied"
+
+        if not session_id or self._conn is None:
+            # Delegated child sessions are not directly addressable by the
+            # editor. Retire the owned pending row instead of leaving a cardless
+            # approval that poisons later identical actions.
+            try:
+                await permission_store.resolve_decision(request_id, "cancelled", principal="acp")
+            except Exception as error:
+                record_failure("acp.resolve_unaddressable", error)
             return "denied"
 
         tool_call = ToolCallUpdate(
@@ -384,17 +422,13 @@ class MachinaACPAgent(Agent):
             },
         )
         options = [
-            PermissionOption(
-                option_id="allow_once", name="Allow once", kind="allow_once"
-            ),
+            PermissionOption(option_id="allow_once", name="Allow once", kind="allow_once"),
             PermissionOption(
                 option_id="allow_always",
                 name="Allow for this session",
                 kind="allow_always",
             ),
-            PermissionOption(
-                option_id="reject_once", name="Reject", kind="reject_once"
-            ),
+            PermissionOption(option_id="reject_once", name="Reject", kind="reject_once"),
         ]
         try:
             response = await self._conn.request_permission(
@@ -405,9 +439,7 @@ class MachinaACPAgent(Agent):
         except Exception as error:
             record_failure("acp.request_permission", error)
             try:
-                await permission_store.resolve_decision(
-                    request_id, "cancelled", principal="acp"
-                )
+                await permission_store.resolve_decision(request_id, "cancelled", principal="acp")
             except Exception as resolve_error:
                 record_failure("acp.resolve_cancelled", resolve_error)
             return "denied"
@@ -466,9 +498,7 @@ class MachinaACPAgent(Agent):
             update=AgentMessageChunk(content=TextContentBlock(text=text)),
         )
 
-    async def _run_prompt(
-        self, session_id: str, session: Session, text: str
-    ) -> PromptResponse:
+    async def _run_prompt(self, session_id: str, session: Session, text: str) -> PromptResponse:
         turn_id = uuid.uuid4().hex[:12]
         token = await TurnLifecycle.acquire_claim(session.id, turn_id=turn_id)
         if not token:
@@ -490,7 +520,6 @@ class MachinaACPAgent(Agent):
         cancelled = False
         sent_text = False
         result: PromptResponse | None = None
-        context_token = self._active_acp_session.set(session_id)
         lifecycle.start()
         try:
             with turn_scope():
@@ -523,9 +552,7 @@ class MachinaACPAgent(Agent):
                                 update=ToolCallProgress(
                                     tool_call_id=call_id,
                                     status=(
-                                        "failed"
-                                        if event.payload.get("isError")
-                                        else "completed"
+                                        "failed" if event.payload.get("isError") else "completed"
                                     ),
                                     raw_output=event.payload.get("result"),
                                 ),
@@ -551,7 +578,6 @@ class MachinaACPAgent(Agent):
             cancelled = True
             return PromptResponse(stop_reason="cancelled")
         finally:
-            self._active_acp_session.reset(context_token)
             try:
                 await lifecycle.close(cancelled=cancelled)
             except Exception as error:
@@ -591,18 +617,14 @@ class MachinaACPAgent(Agent):
         if task is not None and not task.done():
             task.cancel()
 
-    async def close_session(
-        self, session_id: str, **kwargs: Any
-    ) -> CloseSessionResponse | None:
+    async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse | None:
         task = self._tasks.get(session_id)
         if task is not None and not task.done():
             task.cancel()
         self._sessions.pop(session_id, None)
         return CloseSessionResponse()
 
-    async def delete_session(
-        self, session_id: str, **kwargs: Any
-    ) -> DeleteSessionResponse:
+    async def delete_session(self, session_id: str, **kwargs: Any) -> DeleteSessionResponse:
         session = await self._load(session_id)
         await session_manager.delete(session.id)
         self._acp_for_session.pop(str(session.id), None)

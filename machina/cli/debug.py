@@ -31,7 +31,9 @@ def _paths() -> dict[str, str]:
     if database:
         try:
             parts = urlsplit(database)
-            db_label = f"{parts.hostname or '?'}:{parts.port or 5432}/{parts.path.lstrip('/') or '?'}"
+            db_label = (
+                f"{parts.hostname or '?'}:{parts.port or 5432}/{parts.path.lstrip('/') or '?'}"
+            )
         except ValueError:
             db_label = "(configured)"
     return {

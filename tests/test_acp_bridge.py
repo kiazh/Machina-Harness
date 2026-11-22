@@ -48,9 +48,7 @@ class _FakeConnection:
 
     async def request_permission(self, **kwargs):
         self.requests.append(kwargs)
-        return SimpleNamespace(
-            outcome=SimpleNamespace(option_id=self.option_id)
-        )
+        return SimpleNamespace(outcome=SimpleNamespace(option_id=self.option_id))
 
 
 def test_approval_maps_allow_once_to_durable_decision(monkeypatch) -> None:
@@ -62,7 +60,16 @@ def test_approval_maps_allow_once_to_durable_decision(monkeypatch) -> None:
         resolved.append((request_id, verdict, principal))
         return {"request_id": request_id, "status": verdict}
 
+    async def fake_get(request_id: str):
+        return {
+            "request_id": request_id,
+            "session_id": "machina-session",
+            "turn_id": "",
+            "status": "pending",
+        }
+
     monkeypatch.setattr(store, "resolve_decision", fake_resolve)
+    monkeypatch.setattr(store, "get_approval", fake_get)
     agent = MachinaACPAgent(default_mode="ask")
     fake = _FakeConnection("allow_once")
     agent._conn = fake  # type: ignore[assignment]
@@ -96,7 +103,16 @@ def test_approval_rejects_when_editor_declines(monkeypatch) -> None:
         resolved.append((request_id, verdict))
         return {"request_id": request_id, "status": verdict}
 
+    async def fake_get(request_id: str):
+        return {
+            "request_id": request_id,
+            "session_id": "machina-session",
+            "turn_id": "",
+            "status": "pending",
+        }
+
     monkeypatch.setattr(store, "resolve_decision", fake_resolve)
+    monkeypatch.setattr(store, "get_approval", fake_get)
     agent = MachinaACPAgent(default_mode="ask")
     agent._conn = _FakeConnection("reject_once")  # type: ignore[assignment]
     agent._acp_for_session["machina-session"] = "acp-session"
@@ -113,3 +129,66 @@ def test_approval_rejects_when_editor_declines(monkeypatch) -> None:
     assert result == "denied"
     assert resolved == [("req-2", "denied")]
 
+
+def test_approval_refuses_a_record_from_another_session(monkeypatch) -> None:
+    from machina.permissions import store
+
+    async def fake_get(request_id: str):
+        return {
+            "request_id": request_id,
+            "session_id": "other-session",
+            "turn_id": "",
+            "status": "pending",
+        }
+
+    monkeypatch.setattr(store, "get_approval", fake_get)
+    agent = MachinaACPAgent(default_mode="ask")
+    fake = _FakeConnection("allow_once")
+    agent._conn = fake  # type: ignore[assignment]
+    agent._acp_for_session["machina-session"] = "acp-session"
+    result = asyncio.run(
+        agent._approve(
+            {
+                "request_id": "req-3",
+                "session_id": "machina-session",
+                "operation": "file.write",
+            }
+        )
+    )
+    assert result == "denied"
+    assert fake.requests == []
+
+
+def test_approval_cancels_an_unaddressable_owned_child(monkeypatch) -> None:
+    from machina.permissions import store
+
+    resolved: list[tuple[str, str]] = []
+
+    async def fake_get(request_id: str):
+        return {
+            "request_id": request_id,
+            "session_id": "child-session",
+            "turn_id": "",
+            "status": "pending",
+        }
+
+    async def fake_resolve(request_id: str, verdict: str, principal: str):
+        resolved.append((request_id, verdict))
+        return {"request_id": request_id, "status": verdict}
+
+    monkeypatch.setattr(store, "get_approval", fake_get)
+    monkeypatch.setattr(store, "resolve_decision", fake_resolve)
+    agent = MachinaACPAgent(default_mode="ask")
+    agent._conn = _FakeConnection("allow_once")  # type: ignore[assignment]
+    # The child session is intentionally not in the ACP session map.
+    result = asyncio.run(
+        agent._approve(
+            {
+                "request_id": "req-child",
+                "session_id": "child-session",
+                "operation": "file.write",
+            }
+        )
+    )
+    assert result == "denied"
+    assert resolved == [("req-child", "cancelled")]

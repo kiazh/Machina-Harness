@@ -1,16 +1,18 @@
 """Foreground API server lifecycle commands.
 
-Machina already records a database lease for every live client, including the
-``serve`` role. Service management uses those leases as the source of truth
-instead of keeping a second, independently stale PID file. The metadata file
-only records where the detached wrapper wrote its log and which port it was
-asked to bind.
+Detached starts record their own PID and health endpoint under the Machina
+home directory. Service management trusts that metadata only while the process
+and ``/health`` agree; database-client leases are used to detect foreground
+``serve`` instances, which service stop must never kill. This gives native
+PostgreSQL and managed-container installs one safe lifecycle path without a
+second, independently stale PID authority.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -35,7 +37,58 @@ _START_TIMEOUT_SECONDS = 20.0
 
 def _home() -> Path:
     raw = os.environ.get("MACHINA_HOME", "").strip()
-    return Path(raw).expanduser() if raw else Path.home() / ".machina"
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve()
+    return Path.home() / ".machina"
+
+
+def _trusted_executable(name: str) -> str | None:
+    path = shutil.which(name)
+    if not path:
+        return None
+    resolved = Path(path).resolve()
+    return str(resolved) if resolved.is_absolute() else None
+
+
+def _process_start_marker(pid: int) -> str | None:
+    """Stable process birth marker used to reject a recycled PID."""
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return None
+            try:
+                creation = wintypes.FILETIME()
+                exited = wintypes.FILETIME()
+                kernel = wintypes.FILETIME()
+                user = wintypes.FILETIME()
+                if not kernel32.GetProcessTimes(
+                    handle,
+                    ctypes.byref(creation),
+                    ctypes.byref(exited),
+                    ctypes.byref(kernel),
+                    ctypes.byref(user),
+                ):
+                    return None
+                return str((creation.dwHighDateTime << 32) | creation.dwLowDateTime)
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return None
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        fields = stat.rsplit(") ", 1)[1].split()
+        return fields[19]
+    except (OSError, IndexError):
+        return None
 
 
 def _metadata_path() -> Path:
@@ -76,28 +129,12 @@ def _metadata_pid() -> int:
         return 0
 
 
-def _verified_metadata_client(host: str, port: int) -> dict[str, Any] | None:
-    """Use the launch metadata when no database lease exists.
-
-    ``MACHINA_DB_MANAGE=0`` (native PostgreSQL) produces no lifecycle lease,
-    so the metadata PID is the only handle. It is accepted only while the
-    process exists *and* the service health endpoint answers, which prevents a
-    recycled PID from being treated as a Machina server.
-    """
-    pid = _metadata_pid()
-    if pid <= 0 or not lifecycle._alive(pid):
-        return None
-    if not _health(host, port).startswith("healthy"):
-        return None
-    return {"pid": pid, "role": "serve", "child_pid": 0, "source": "metadata"}
-
-
-def _service_clients(host: str, port: int) -> list[dict[str, Any]]:
-    clients = _serve_clients()
-    if clients:
-        return clients
-    metadata = _verified_metadata_client(host, port)
-    return [metadata] if metadata is not None else []
+def _metadata_start_matches(metadata: dict[str, Any], pid: int) -> bool:
+    expected = str(metadata.get("start_marker") or "")
+    if not expected:
+        return True
+    current = _process_start_marker(pid)
+    return current is not None and current == expected
 
 
 def _serve_pid(item: dict[str, Any]) -> int:
@@ -105,7 +142,7 @@ def _serve_pid(item: dict[str, Any]) -> int:
 
 
 def _health_url(host: str, port: int) -> str:
-    probe_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
+    probe_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host  # nosec B104 - probe alias, not a bind
     return f"http://{probe_host}:{port}/health"
 
 
@@ -128,12 +165,19 @@ def _wait_until_ready(process: subprocess.Popen[Any], host: str, port: int) -> b
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False
-        if _serve_clients():
-            return True
         if _health(host, port).startswith("healthy"):
             return True
         time.sleep(0.2)
     return process.poll() is None
+
+
+def _wait_until_stopped(host: str, port: int, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _health(host, port).startswith("healthy"):
+            return True
+        time.sleep(0.2)
+    return not _health(host, port).startswith("healthy")
 
 
 def _log_tail(path: Path, lines: int = 12) -> str:
@@ -149,7 +193,7 @@ def _spawn(host: str, port: int) -> subprocess.Popen[Any]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("a", encoding="utf-8")
     command = [
-        sys.executable,
+        str(Path(sys.executable).resolve()),
         "-m",
         "machina",
         "serve",
@@ -166,9 +210,8 @@ def _spawn(host: str, port: int) -> subprocess.Popen[Any]:
         "close_fds": True,
     }
     if os.name == "nt":
-        kwargs["creationflags"] = (
-            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
         )
     else:
         kwargs["start_new_session"] = True
@@ -183,6 +226,7 @@ def _spawn(host: str, port: int) -> subprocess.Popen[Any]:
             "port": port,
             "log": str(log_path),
             "started_at": time.time(),
+            "start_marker": _process_start_marker(process.pid),
         }
     )
     return process
@@ -193,13 +237,22 @@ def _start(host: str, port: int, *, quiet: bool = False) -> bool:
     if clients:
         if not quiet:
             output.muted(
-                "Machina service is already running: "
+                "A serve process is already running (PIDs "
                 + ", ".join(str(_serve_pid(item)) for item in clients)
+                + "); service start will not create a second one."
             )
         return False
     metadata_pid = _metadata_pid()
     if metadata_pid > 0 and lifecycle._alive(metadata_pid):
         metadata = _read_metadata()
+        if not _metadata_start_matches(metadata, metadata_pid):
+            _clear_metadata()
+            if not quiet:
+                output.error(
+                    "Recorded service PID was recycled by another process; "
+                    "stale metadata was cleared."
+                )
+            return False
         meta_host = str(metadata.get("host") or host)
         try:
             meta_port = int(metadata.get("port") or port)
@@ -213,6 +266,13 @@ def _start(host: str, port: int, *, quiet: bool = False) -> bool:
             output.error(
                 "A service process is recorded but is not healthy. "
                 "Run `machina service stop --force` before starting again."
+            )
+        return False
+    if _health(host, port).startswith("healthy"):
+        if not quiet:
+            output.error(
+                "A server is already listening on the requested address but is "
+                "not managed by `machina service`; refusing to start a duplicate."
             )
         return False
     process = _spawn(host, port)
@@ -237,7 +297,12 @@ def _terminate(pid: int, *, force: bool = False) -> None:
     if pid <= 0:
         return
     if os.name == "nt":
-        command = ["taskkill", "/PID", str(pid), "/T"]
+        taskkill = _trusted_executable("taskkill")
+        if taskkill is None:
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGTERM)
+            return
+        command = [taskkill, "/PID", str(pid), "/T"]
         if force:
             command.append("/F")
         subprocess.run(command, capture_output=True, check=False)
@@ -267,35 +332,46 @@ def _stop(*, quiet: bool = False, force: bool = False) -> bool:
         check_port = int(metadata.get("port") or DEFAULT_PORT)
     except (TypeError, ValueError):
         check_port = DEFAULT_PORT
-    clients = _serve_clients()
-    pids = {_serve_pid(item) for item in clients if _serve_pid(item) > 0}
-    if not pids and metadata_pid > 0 and lifecycle._alive(metadata_pid):
-        if force or _health(check_host, check_port).startswith("healthy"):
-            pids = {metadata_pid}
-        else:
-            if not quiet:
-                output.error(
-                    "Recorded service process is not healthy; refusing to kill "
-                    "an unverified PID. Use --force only if you are sure."
-                )
-            return False
-    if not pids:
+    if metadata_pid <= 0:
         if not quiet:
-            output.muted("No Machina service is running.")
-        _clear_metadata()
+            output.muted("No managed Machina service is running.")
         return False
+    if not lifecycle._alive(metadata_pid):
+        _clear_metadata()
+        if not quiet:
+            output.muted("No managed Machina service is running.")
+        return False
+    if not _metadata_start_matches(metadata, metadata_pid):
+        _clear_metadata()
+        if not quiet:
+            output.error(
+                "Recorded service PID no longer matches the process that was "
+                "started; refusing to terminate an unrelated process."
+            )
+        return False
+    if not force and not _health(check_host, check_port).startswith("healthy"):
+        if not quiet:
+            output.error(
+                "Recorded service process is not healthy; refusing to kill "
+                "an unverified PID. Use --force only if you are sure."
+            )
+        return False
+    pids = {metadata_pid}
     for pid in pids:
         _terminate(pid)
     remaining = _wait_gone(pids)
     for pid in remaining:
         _terminate(pid, force=True)
     remaining = _wait_gone(remaining, timeout=3.0)
+    stopped = _wait_until_stopped(check_host, check_port)
     if remaining and not quiet:
         output.error(f"Service process(es) did not exit: {sorted(remaining)}")
+    elif not stopped and not quiet:
+        output.error("Service process exited but its health endpoint still responds.")
     elif not quiet:
         console.print("[green]Machina service stopped.[/green]")
     _clear_metadata()
-    return not remaining
+    return not remaining and stopped
 
 
 @app.command("start")
@@ -320,24 +396,44 @@ def service_status(
         actual_port = int(port or metadata.get("port") or DEFAULT_PORT)
     except (TypeError, ValueError):
         actual_port = DEFAULT_PORT
-    clients = _service_clients(actual_host, actual_port)
-    if not clients:
-        metadata_pid = _metadata_pid()
-        if metadata_pid > 0 and lifecycle._alive(metadata_pid):
-            output.error(
-                f"Recorded service PID {metadata_pid} is alive but its health "
-                "endpoint is unreachable; refusing to report it as running."
-            )
-        else:
-            output.muted("Machina service is not running.")
+    metadata_pid = _metadata_pid()
+    if metadata_pid > 0 and lifecycle._alive(metadata_pid):
+        if not _metadata_start_matches(metadata, metadata_pid):
             _clear_metadata()
+            output.error(
+                "Recorded service PID was recycled by another process; stale metadata was cleared."
+            )
+            raise typer.Exit(1)
+        health = _health(actual_host, actual_port)
+        if not health.startswith("healthy"):
+            output.error(
+                f"Recorded service PID {metadata_pid} is alive but {health}; "
+                "refusing to report it as running."
+            )
+            raise typer.Exit(1)
+        console.print("[green]Machina service is running[/green]")
+        console.print(f"  PID: {metadata_pid}")
+        console.print(f"  Health: {health}")
+        if metadata.get("log"):
+            console.print(f"  Log: {metadata['log']}")
+        return
+    foreground = _serve_clients()
+    if foreground:
+        output.error(
+            "A foreground `machina serve` process is running (PIDs "
+            + ", ".join(str(_serve_pid(item)) for item in foreground)
+            + "); `machina service` manages only detached instances."
+        )
         raise typer.Exit(1)
-    console.print("[green]Machina service is running[/green]")
-    for item in clients:
-        console.print(f"  PID: {_serve_pid(item)}")
-        console.print(f"  Health: {_health(actual_host, actual_port)}")
-    if metadata.get("log"):
-        console.print(f"  Log: {metadata['log']}")
+    if _health(actual_host, actual_port).startswith("healthy"):
+        output.error(
+            "An unmanaged server is listening on the requested address; "
+            "`machina service` manages only detached instances."
+        )
+        raise typer.Exit(1)
+    output.muted("Machina service is not running.")
+    _clear_metadata()
+    raise typer.Exit(1)
 
 
 @app.command("stop")

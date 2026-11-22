@@ -36,6 +36,7 @@ def repair_network_blocked() -> bool:
     """Whether the current repair turn forbids outbound source fetches."""
     return _REPAIR_NETWORK_BLOCKED.get()
 
+
 DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
@@ -119,6 +120,8 @@ def _force_edit_text() -> str:
         f"{TASK_RUN_FORCE_EDIT_NUDGE} The repository root is {workspace}; "
         "write a path relative to that root."
     )
+
+
 TASK_RUN_ARTIFACT_NUDGE = (
     "You are spending turns paging the same retained artifact. Stop paging: use "
     "the excerpt already visible, make the source change, and verify the behavior."
@@ -375,9 +378,11 @@ class TaskRunPolicy:
                     self.verified = True
             if entry.get("tool") == "terminal_job":
                 self.job_polls += 1
-            if entry.get("tool") == "terminal" and "network access is disabled" in str(
-                entry.get("result_preview") or ""
-            ).casefold():
+            if (
+                entry.get("tool") == "terminal"
+                and "network access is disabled"
+                in str(entry.get("result_preview") or "").casefold()
+            ):
                 self.network_attempts += 1
             if _failed(entry):
                 digest = _fingerprint(entry)

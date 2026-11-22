@@ -2914,9 +2914,7 @@ async def _react_loop(
                 await agent._append_assistant_content(session_id, response.content, pending_chunks)
                 batch_start = len(tool_calls_made)
                 advertised_tool_names = {
-                    name
-                    for tool in tool_defs
-                    if (name := getattr(tool, "name", None)) is not None
+                    name for tool in tool_defs if (name := getattr(tool, "name", None)) is not None
                 }
                 # AH-015: flush incrementally and, on cancellation, persist what
                 # completed with an explicit interruption marker. (run_stream

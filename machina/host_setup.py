@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from machina import host as local_host
 
@@ -862,22 +863,23 @@ def _setup_windows(
     env_file = shlex.quote(_env_file_wsl())
     allow_flag = " --allow-full" if allow_full and mode == "full" else ""
     session_flag = f" --machina-session {shlex.quote(machina_session)}" if machina_session else ""
+    apt_refresh = "apt-get update"  # nosec B608 - package index command, not SQL
     script = f"""
 set -euo pipefail
 mkdir -p "$HOME/.local/bin" "$HOME/.machina-host"
 if ! command -v curl >/dev/null 2>&1 || ! command -v tmux >/dev/null 2>&1; then
   if sudo -n true 2>/dev/null; then
-    sudo -n apt-get update -y >/dev/null 2>&1 || true
+    sudo -n {apt_refresh} -y >/dev/null 2>&1 || true
     command -v curl >/dev/null 2>&1 || sudo -n apt-get install -y curl >/dev/null 2>&1 || true
     command -v tmux >/dev/null 2>&1 || sudo -n apt-get install -y tmux >/dev/null 2>&1 || true
   fi
 fi
 if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required inside WSL. Run: sudo apt-get update && sudo apt-get install -y curl" >&2
+  echo "curl is required inside WSL. Run: sudo {apt_refresh} && sudo apt-get install -y curl" >&2
   exit 1
 fi
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "tmux is required inside WSL. Run: sudo apt-get update && sudo apt-get install -y tmux" >&2
+  echo "tmux is required inside WSL. Run: sudo {apt_refresh} && sudo apt-get install -y tmux" >&2
   exit 1
 fi
 if [ ! -x "$HOME/.local/bin/ttyd" ]; then
@@ -1046,8 +1048,11 @@ def _capture(command: list[str], timeout: float) -> tuple[int, str]:
 
 
 def _download(url: str, destination: Path, *, timeout: float = 120.0) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise HostSetupError("host setup downloads require an HTTPS URL")
     request = urllib.request.Request(url, headers={"User-Agent": "Machina-Host-Setup"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - HTTPS-only check above
         destination.write_bytes(response.read())
 
 
@@ -1111,20 +1116,28 @@ def _install_tailscale(op: _SetupOperation) -> None:
             "then run host setup again."
         )
     _step(op, "tailscale", "Downloading the Tailscale installer…")
-    installer = _windows_temp_dir() / "tailscale-setup-latest.exe"
     try:
-        installer.parent.mkdir(parents=True, exist_ok=True)
+        temp_dir = _windows_temp_dir()
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        descriptor, installer_text = tempfile.mkstemp(
+            prefix="tailscale-setup-", suffix=".exe", dir=temp_dir
+        )
+        os.close(descriptor)
+        installer = Path(installer_text)
         _download("https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe", installer)
     except Exception as error:
-        try:
-            installer.unlink()
-        except OSError:
-            pass
+        if "installer" in locals():
+            try:
+                installer.unlink()
+            except OSError:
+                pass
         raise HostSetupError(f"Could not download the Tailscale installer: {error}") from None
     _step(op, "tailscale", "Approve the Windows administrator prompt to install Tailscale…")
     try:
         _run_elevated_powershell(
-            f"""Start-Process -FilePath {_ps_quote(_powershell_path(installer))} -ArgumentList `
+            f"""$sig = Get-AuthenticodeSignature -FilePath {_ps_quote(_powershell_path(installer))}
+if ($sig.Status -ne 'Valid') {{ throw "Tailscale installer signature is not valid: $($sig.Status)" }}
+Start-Process -FilePath {_ps_quote(_powershell_path(installer))} -ArgumentList `
   '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
 Start-Service -Name Tailscale -ErrorAction SilentlyContinue
 """,

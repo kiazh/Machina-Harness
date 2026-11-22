@@ -75,7 +75,7 @@ def workspace_root() -> Path:
 
 
 def _store_root(workspace: Path) -> Path:
-    home = Path(config.get("machina_home") or Path.home() / ".machina").expanduser()
+    home = Path(config.get("machina_home") or Path.home() / ".machina").expanduser().resolve()
     digest = hashlib.sha256(str(workspace).casefold().encode("utf-8")).hexdigest()[:16]
     return home / "snapshots" / digest
 
@@ -99,14 +99,56 @@ def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _git(workspace: Path, *args: str, timeout: float = 20.0) -> subprocess.CompletedProcess[bytes] | None:
+def _trusted_executable(name: str) -> str | None:
+    path = shutil.which(name)
+    if not path:
+        return None
+    resolved = Path(path).resolve()
+    return str(resolved) if resolved.is_absolute() else None
+
+
+def _git(
+    workspace: Path, *args: str, timeout: float = 20.0
+) -> subprocess.CompletedProcess[bytes] | None:
+    git = _trusted_executable("git")
+    if git is None:
+        return None
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_NAMESPACE",
+        }
+    }
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         return subprocess.run(
-            ["git", "-C", str(workspace), *args],
+            [
+                git,
+                "-C",
+                str(workspace),
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "-c",
+                "diff.external=",
+                "-c",
+                "core.pager=cat",
+                *args,
+            ],
             capture_output=True,
             timeout=timeout,
             check=False,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            env=environment,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -135,10 +177,52 @@ def _git_blob(workspace: Path, head: str, relative: Path) -> tuple[bool, bytes |
     exists = _git(workspace, "cat-file", "-e", spec, timeout=5)
     if exists is None or exists.returncode != 0:
         return False, None
-    result = _git(workspace, "show", spec, timeout=20)
+    # Read the raw stored bytes. Applying checkout filters here would execute
+    # repository-configured smudge/filter programs; ``checkout_attributes_safe``
+    # rejects such paths before this helper is used.
+    result = _git(workspace, "cat-file", "blob", spec, timeout=20)
     if result is None or result.returncode != 0:
         return True, None
     return True, result.stdout
+
+
+def _checkout_attributes_safe(workspace: Path, relative: Path) -> bool:
+    """True when restoring the raw blob reproduces the worktree bytes.
+
+    ``git check-attr`` only reads attribute files; it never runs filters. A
+    set filter, eol rule, text conversion, or working-tree encoding makes the
+    raw blob an unsafe undo source, so the caller must disclose the path as
+    ignored instead of restoring the wrong bytes.
+    """
+    result = _git(
+        workspace,
+        "check-attr",
+        "-z",
+        "filter",
+        "eol",
+        "text",
+        "working-tree-encoding",
+        "--",
+        relative.as_posix(),
+        timeout=5,
+    )
+    if result is None or result.returncode != 0:
+        return False
+    fields = result.stdout.split(b"\0")
+    # Output is path\0attribute\0value\0 triples.
+    for index in range(2, len(fields), 3):
+        value = fields[index].strip().lower()
+        if value not in {b"unspecified", b"unset", b""}:
+            return False
+    return True
+
+
+def _core_autocrlf_safe(workspace: Path) -> bool:
+    result = _git(workspace, "config", "--get", "core.autocrlf", timeout=5)
+    if result is None:
+        return False
+    value = result.stdout.strip().lower()
+    return value not in {b"true", b"input"}
 
 
 def _git_status_clean(workspace: Path) -> bool:
@@ -257,6 +341,14 @@ class TurnSnapshot:
             relative = resolved.relative_to(self.workspace)
         except ValueError:
             return None
+        if not _checkout_attributes_safe(self.workspace, relative):
+            return FileSnapshot(
+                path=str(resolved),
+                backup=None,
+                existed=False,
+                before_sha=None,
+                ignored=True,
+            )
         exists, payload = _git_blob(self.workspace, self.git_head, relative)
         item = FileSnapshot(
             path=str(resolved),
@@ -284,7 +376,9 @@ class TurnSnapshot:
             return
         item = self._entry_from_git(resolved)
         if item is None:
-            item = FileSnapshot(path=str(resolved), backup=None, existed=resolved.exists(), before_sha=None)
+            item = FileSnapshot(
+                path=str(resolved), backup=None, existed=resolved.exists(), before_sha=None
+            )
             try:
                 if item.existed:
                     if not resolved.is_file() or resolved.stat().st_size > MAX_FILE_BYTES:
@@ -316,6 +410,8 @@ class TurnSnapshot:
         if root is None or root != self.workspace:
             return False
         if not _git_status_clean(self.workspace):
+            return False
+        if not _core_autocrlf_safe(self.workspace):
             return False
         head = _git_head(self.workspace)
         if head is None:
@@ -354,27 +450,62 @@ class TurnSnapshot:
             target = _safe_workspace(self.workspace / relative, self.workspace)
             if target is None or str(target) in self.files or target.is_symlink():
                 continue
-            exists, payload = _git_blob(self.workspace, self.git_head, relative)
-            if not exists:
-                # New untracked file created during the turn.
+            if not _checkout_attributes_safe(self.workspace, relative):
                 item = FileSnapshot(
                     path=str(target),
                     backup=None,
                     existed=False,
                     before_sha=None,
+                    ignored=True,
                 )
+                item.after_sha = _sha256(target) if target.exists() else None
+                self.files[str(target)] = item
+                added += 1
+                continue
+            exists, payload = _git_blob(self.workspace, self.git_head, relative)
+            if not exists:
+                # New untracked file created during the turn.
+                if target.exists() and target.stat().st_size > MAX_FILE_BYTES:
+                    item = FileSnapshot(
+                        path=str(target),
+                        backup=None,
+                        existed=False,
+                        before_sha=None,
+                        ignored=True,
+                    )
+                else:
+                    item = FileSnapshot(
+                        path=str(target),
+                        backup=None,
+                        existed=False,
+                        before_sha=None,
+                    )
             else:
                 if payload is None or len(payload) > MAX_FILE_BYTES:
-                    continue
-                backup = self._backup_bytes(target, payload)
-                if backup is None:
-                    continue
-                item = FileSnapshot(
-                    path=str(target),
-                    backup=backup,
-                    existed=True,
-                    before_sha=_sha256_bytes(payload),
-                )
+                    item = FileSnapshot(
+                        path=str(target),
+                        backup=None,
+                        existed=True,
+                        before_sha=None,
+                        ignored=True,
+                    )
+                else:
+                    backup = self._backup_bytes(target, payload)
+                    if backup is None:
+                        item = FileSnapshot(
+                            path=str(target),
+                            backup=None,
+                            existed=True,
+                            before_sha=None,
+                            ignored=True,
+                        )
+                    else:
+                        item = FileSnapshot(
+                            path=str(target),
+                            backup=backup,
+                            existed=True,
+                            before_sha=_sha256_bytes(payload),
+                        )
             item.after_sha = _sha256(target) if target.exists() else None
             self.files[str(target)] = item
             added += 1
@@ -392,7 +523,9 @@ class TurnSnapshot:
         return bool(self.files)
 
 
-def begin_turn(*, session_id: str | None = None, workspace: Path | None = None) -> TurnSnapshot | None:
+def begin_turn(
+    *, session_id: str | None = None, workspace: Path | None = None
+) -> TurnSnapshot | None:
     """Open a snapshot for the current agent turn and bind it to the context."""
     if not _enabled():
         return None
@@ -469,12 +602,16 @@ def _manifests(workspace: Path, session_id: str | None = None) -> list[tuple[dic
     return found
 
 
-def list_snapshots(*, workspace: Path | None = None, session_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def list_snapshots(
+    *, workspace: Path | None = None, session_id: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
     root_workspace = (workspace or workspace_root()).resolve()
     return [dict(payload) for payload, _ in _manifests(root_workspace, session_id)[: max(1, limit)]]
 
 
-def latest_snapshot(*, workspace: Path | None = None, session_id: str | None = None) -> tuple[dict[str, Any], Path] | None:
+def latest_snapshot(
+    *, workspace: Path | None = None, session_id: str | None = None
+) -> tuple[dict[str, Any], Path] | None:
     root_workspace = (workspace or workspace_root()).resolve()
     for payload, path in _manifests(root_workspace, session_id):
         if payload.get("status") == "complete":
@@ -510,6 +647,20 @@ def _read_text(path: Path) -> str:
         return ""
 
 
+def _backup_path(raw: Any, workspace: Path) -> Path | None:
+    """Only restore backups stored under this workspace's snapshot root."""
+    if not raw:
+        return None
+    try:
+        path = Path(str(raw)).expanduser().resolve()
+        root = _store_root(workspace)
+        if not path.is_relative_to(root) or not path.is_file():
+            return None
+        return path
+    except (OSError, ValueError):
+        return None
+
+
 def diff_snapshot(payload: dict[str, Any]) -> str:
     """Return a unified diff from the snapshot's before state to current files."""
     workspace = Path(str(payload.get("workspace") or ""))
@@ -520,7 +671,8 @@ def diff_snapshot(payload: dict[str, Any]) -> str:
         target = _safe_workspace(Path(str(raw.get("path") or "")), workspace)
         if target is None:
             continue
-        before = _read_text(Path(str(raw["backup"]))) if raw.get("backup") else ""
+        backup = _backup_path(raw.get("backup"), workspace)
+        before = _read_text(backup) if backup is not None else ""
         after = _read_text(target) if target.exists() else ""
         diff = difflib.unified_diff(
             before.splitlines(keepends=True),
@@ -560,8 +712,8 @@ def undo_snapshot(
     for entry in entries:
         target: Path = entry["target"]
         if entry.get("existed"):
-            backup = Path(str(entry.get("backup") or ""))
-            if not backup.is_file():
+            backup = _backup_path(entry.get("backup"), workspace)
+            if backup is None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(backup, target)

@@ -181,7 +181,9 @@ def rollback() -> bool:
         )
         return False
     current = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
-    current_commit = current.stdout.strip() if current is not None and current.returncode == 0 else ""
+    current_commit = (
+        current.stdout.strip() if current is not None and current.returncode == 0 else ""
+    )
     if current_commit != str(state.get("updated_commit") or ""):
         print(
             "Rollback refused: HEAD no longer matches the recorded update.",
@@ -388,7 +390,9 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
 
     status.set(f"Updating ({behind} new {noun})...")
     previous = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
-    previous_commit = previous.stdout.strip() if previous is not None and previous.returncode == 0 else ""
+    previous_commit = (
+        previous.stdout.strip() if previous is not None and previous.returncode == 0 else ""
+    )
     previous_version = __version__
     pulled = _run(
         ["git", "pull", "--ff-only", "--quiet", "origin", "main"],
@@ -401,7 +405,9 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
         status.finish(message)
         return
     updated = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
-    updated_commit = updated.stdout.strip() if updated is not None and updated.returncode == 0 else ""
+    updated_commit = (
+        updated.stdout.strip() if updated is not None and updated.returncode == 0 else ""
+    )
     if previous_commit and updated_commit:
         _write_update_state(
             root,

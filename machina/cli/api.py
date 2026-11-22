@@ -4,25 +4,49 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 import typer
 
 from machina.cli import output
 from machina.cli.common import EXIT_FAILED
+from machina.security.secrets import get_secret
 
 DEFAULT_URL = "http://127.0.0.1:8000"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
-def _headers(raw: list[str], api_key: str | None) -> dict[str, str]:
+def _is_loopback_url(url: str) -> bool:
+    try:
+        host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    except ValueError:
+        return False
+    return host in _LOOPBACK_HOSTS
+
+
+def _configured_key(explicit: str | None) -> str:
+    if explicit and explicit.strip():
+        return explicit.strip()
+    try:
+        value = get_secret("MACHINA_API_KEY")
+    except Exception:
+        value = None
+    if value and value.strip():
+        return value.strip()
+    return os.environ.get("MACHINA_API_KEY", "").strip()
+
+
+def _headers(
+    raw: list[str], api_key: str | None, *, allow_default_key: bool = True
+) -> dict[str, str]:
     headers: dict[str, str] = {"Accept": "application/json"}
     for item in raw:
         name, separator, value = item.partition(":")
         if not separator or not name.strip():
             raise ValueError(f"invalid header {item!r}; expected 'Name: value'")
         headers[name.strip()] = value.strip()
-    key = api_key or os.environ.get("MACHINA_API_KEY", "").strip()
+    key = _configured_key(api_key) if (api_key or allow_default_key) else ""
     if key:
         headers.setdefault("X-API-Key", key)
     return headers
@@ -41,11 +65,17 @@ def api(
     raw: bool = typer.Option(False, "--raw", help="Print the body without JSON formatting"),
 ) -> None:
     """Make one request to a running Machina server."""
-    target = path if path.startswith(("http://", "https://")) else urljoin(
-        url.rstrip("/") + "/", path.lstrip("/")
+    target = (
+        path
+        if path.startswith(("http://", "https://"))
+        else urljoin(url.rstrip("/") + "/", path.lstrip("/"))
     )
     try:
-        headers = _headers(header, api_key)
+        headers = _headers(
+            header,
+            api_key,
+            allow_default_key=_is_loopback_url(target) and _is_loopback_url(url),
+        )
     except ValueError as error:
         output.error(str(error))
         raise typer.Exit(EXIT_FAILED) from None

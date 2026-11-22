@@ -19,9 +19,7 @@ def _snapshot_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path
     return workspace
 
 
-def test_snapshot_restores_existing_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_snapshot_restores_existing_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     workspace = _snapshot_workspace(monkeypatch, tmp_path)
     target = workspace / "app.py"
     target.write_text("before\n", encoding="utf-8")
@@ -66,9 +64,7 @@ def test_snapshot_deletes_new_file_and_refuses_later_edits(
     snapshots.mark_undone(payload, manifest)
 
 
-def test_sensitive_paths_are_not_copied(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_sensitive_paths_are_not_copied(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     workspace = _snapshot_workspace(monkeypatch, tmp_path)
     secret = workspace / ".env"
     secret.write_text("TOKEN=secret\n", encoding="utf-8")

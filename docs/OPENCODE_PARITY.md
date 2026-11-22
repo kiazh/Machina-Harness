@@ -19,7 +19,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina debug paths/info` | Path and runtime diagnostics without starting the agent |
 | `machina api METHOD PATH` | Authenticated local HTTP API request with `--data`, `--header`, and `--url` |
 | `machina acp` | Agent Client Protocol over stdio for editor clients such as Zed |
-| `machina service start/status/stop/restart` | Detached HTTP service with lease-backed status and health checks |
+| `machina service start/status/stop/restart` | Detached HTTP service with health-verified status and foreground-serve detection |
 | `machina completions bash|zsh|fish` | Completion script generated from the installed lazy command table |
 | `machina plugin list/loaded` | Installed entry points and process-loaded plugins |
 | `machina update` / `upgrade` | Explicit source-checkout fast-forward; `--rollback` resets a clean checkout to the commit recorded before the last update |
@@ -45,7 +45,12 @@ tool during a turn.
 Limitation: clean-Git terminal coverage is additive and narrow. When the turn
 has no prior file-tool write and the worktree is clean, the first terminal
 command records `HEAD`; changed, deleted, and new files are then added to the
-same manifest and restored by `undo`. Dirty worktrees, non-Git workspaces,
+same manifest and restored by `undo`. Files above the 8 MiB backup cap are
+disclosed as ignored and left changed rather than risking a destructive undo.
+Paths with `core.autocrlf=true/input`, eol/text conversion, filter, or
+working-tree-encoding attributes are also disclosed as ignored: restoring a raw
+blob would either produce the wrong bytes or require executing a repository
+filter. Git-ignored files are outside coverage. Dirty worktrees, non-Git workspaces,
 writes after the turn ends (for example a still-running background command),
 and writes outside the workspace remain outside the guarantee. The file tool is
 the normal covered path; do not describe snapshots as a filesystem sandbox.
@@ -61,12 +66,12 @@ initialize the plugin registry through the shared agent factory.
 
 `machina service start` launches `machina serve` as a detached child process,
 writes a log under the Machina home directory, and waits for the API health
-endpoint. Status and stop prefer the database-client lease for the `serve`
-role; when native PostgreSQL or `MACHINA_DB_MANAGE=0` produces no lease, the
-recorded PID is accepted only while both the process and `/health` agree.
-`stop` leaves a running TUI alone, and an unverified PID requires explicit
-`stop --force`. Restart reuses the recorded host and port when no alternatives
-are supplied.
+endpoint. Status and stop use the detached-start metadata PID and require a
+healthy `/health` response; a native-PostgreSQL or `MACHINA_DB_MANAGE=0` install
+still works through that metadata. Foreground `serve` leases are detected but
+are never killed by `service stop`. `stop --force` is required for an unhealthy
+recorded PID. Restart reuses the recorded host and port when no alternatives are
+supplied.
 
 ### Project config
 
@@ -134,8 +139,8 @@ Known limitations: ACP `session/load` restores the session identity and mode but
 does not replay transcript history into the editor yet; per-session MCP servers
 and additional workspace roots are reported as unsupported notices; image and
 audio content blocks are not accepted; and no live Zed smoke test was run in
-this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
-`--auto` when a client cannot answer approval prompts.
+this checkout. Use `--mode full` or `--auto` when a client cannot answer approval
+prompts; workspace and sandbox still request approval for sensitive actions.
 
 ## Gaps still open
 
@@ -164,7 +169,7 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
   refusal.
 - `tests/test_update.py`: fast-forward, dirty/local-commit refusal, launch
   cache, and clean-only one-step rollback.
-- Full local suite: **675 passed, 9 skipped**.
+- Full local suite: **686 passed, 9 skipped**.
 
 ### Project config example
 

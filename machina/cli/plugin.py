@@ -18,8 +18,7 @@ app = typer.Typer(help="Inspect opt-in Machina plugins.")
 
 def _catalog() -> list[dict[str, object]]:
     available = {
-        entry.name: getattr(entry, "value", "")
-        for entry in entry_points(group=ENTRY_POINT_GROUP)
+        entry.name: getattr(entry, "value", "") for entry in entry_points(group=ENTRY_POINT_GROUP)
     }
     loaded = set(plugin_registry.list())
     return [
