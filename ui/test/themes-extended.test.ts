@@ -1,7 +1,7 @@
-// Extended skin registry (2026-10-15): 12 new skins layered on the prior 29.
-// Guards the same invariants the design tests enforce — text/muted/dim clear
+// Extended skin registry (2026-10-15: 12 additions; 2026-11-22: 20 more).
+// Guards the same invariants the design tests enforce - text/muted/dim clear
 // WCAG AA on their own surface with `dim` below `muted`, every accent role
-// clears AA and stays distinct, selected rows clear AA — and renders each skin
+// clears AA and stays distinct, selected rows clear AA - and renders each skin
 // through the existing ThemeBackground fake-terminal harness so the surface
 // paint resolves per skin.
 
@@ -35,6 +35,26 @@ const NEW_SKINS = [
 	"high-contrast-dark",
 	"high-contrast-light",
 	"sunset-drive",
+	"oceanic",
+	"midnight-rose",
+	"citrus",
+	"lavender-mist",
+	"terracotta",
+	"moss",
+	"arctic",
+	"obsidian",
+	"vaporwave",
+	"clay",
+	"midnight",
+	"sorbet",
+	"pine",
+	"cinder",
+	"honey",
+	"iris",
+	"basalt",
+	"coral-reef",
+	"wisteria",
+	"graphite",
 ] as const;
 
 const luminance = (hex: string): number => {

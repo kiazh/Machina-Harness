@@ -116,7 +116,7 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Themes
 
-- 53 skins (`SKINS` in `ui/src/design/theme.ts`); `codex` is the fresh-install
+- 73 skins (`SKINS` in `ui/src/design/theme.ts`); `codex` is the fresh-install
   default, explicit saved themes (including legacy `default`) are respected.
   `/theme` previews live with cancel-restore and persists exactly once; failed
   saves report temporary.

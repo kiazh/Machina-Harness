@@ -46,6 +46,9 @@ test("theme_registry_preserves_all_saved_ids", () => {
 		"opencode", "light", "linen", "lagoon", "afterglow",
 		"aurora", "ember", "forest", "glacier", "neon-grid", "paper", "sepia-crt",
 		"blueprint", "rose-quartz", "high-contrast-dark", "high-contrast-light", "sunset-drive",
+		"oceanic", "midnight-rose", "citrus", "lavender-mist", "terracotta", "moss",
+		"arctic", "obsidian", "vaporwave", "clay", "midnight", "sorbet", "pine",
+		"cinder", "honey", "iris", "basalt", "coral-reef", "wisteria", "graphite",
 	]) {
 		assert.ok(SKIN_NAMES.includes(id), `missing added theme: ${id}`);
 	}

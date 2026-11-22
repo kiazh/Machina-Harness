@@ -1,6 +1,6 @@
 # Terminal theme colors
 
-Use `/theme` to preview the 53 palettes. Arrow keys preview immediately, Enter saves, and Escape restores the previous theme. A theme can also be selected directly, for example `/theme matcha`.
+Use `/theme` to preview the 73 palettes. Arrow keys preview immediately, Enter saves, and Escape restores the previous theme. A theme can also be selected directly, for example `/theme matcha`.
 
 ## Color roles
 
@@ -33,5 +33,25 @@ Foreground roles are adjusted for at least 4.5:1 contrast against the canvas, me
 | `velvet` | Aubergine, jewel pink selections, champagne details |
 | `deep-sea` | Ocean ink, luminous cyan selections, coral details |
 | `copper` | Deep mineral green, oxidized teal selections, copper details |
+| `oceanic` | Deep sea ink, teal selections, coral details |
+| `midnight-rose` | Deep plum, blush selections, periwinkle details |
+| `citrus` | Sunlit paper, olive selections, tangerine details |
+| `lavender-mist` | Pale lilac, iris selections, berry details |
+| `terracotta` | Warm clay, slate selections, garden green details |
+| `moss` | Forest shadow, lichen selections, orchid details |
+| `arctic` | Glacier paper, frozen blue selections, indigo details |
+| `obsidian` | Graphite black, ice-blue selections, violet details |
+| `vaporwave` | Ultraviolet, neon pink selections, aqua details |
+| `clay` | Stoneware, slate selections, moss details |
+| `midnight` | Navy depth, electric blue selections, lavender details |
+| `sorbet` | Soft cream, raspberry selections, grape details |
+| `pine` | Evergreen, mint selections, amethyst details |
+| `cinder` | Charred neutral, ember selections, violet smoke |
+| `honey` | Amber paper, umber selections, indigo details |
+| `iris` | Violet dusk, silver-blue selections, blush details |
+| `basalt` | Volcanic grey, steel-blue selections, mauve details |
+| `coral-reef` | Ocean ink, coral selections, lagoon details |
+| `wisteria` | Pale lilac, violet selections, rose and pine details |
+| `graphite` | Cool graphite, slate-blue selections, dusty rose details |
 
 The canonical registry is `ui/src/design/theme.ts`. Reusable overlays use `surfaceLine()` so nested ANSI resets restore the theme's ink and surface instead of reverting to the terminal profile.
