@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 673 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 675 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -362,7 +362,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~130,239 lines across 363 files |
-| Backend tests | 673 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Backend tests | 675 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
 | Tools and commands | 46 built-in tools; 47 top-level CLI commands (39 one-shot + 8 groups); 52 slash commands |
@@ -407,6 +407,7 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Opt-in plugins** | Package entry points load only when named in `MACHINA_PLUGINS`; CLI/headless turns now use the same hooks as the gateway | [Parity](docs/OPENCODE_PARITY.md#plugins) |
 | **ACP editor bridge** | `machina acp` exposes sessions, streaming updates, modes, and approval cards to ACP clients such as Zed | [Parity](docs/OPENCODE_PARITY.md#acp-editor-bridge) |
 | **Background service** | `machina service start/status/stop/restart` runs the HTTP API detached with lease-backed status and health checks | [Parity](docs/OPENCODE_PARITY.md#background-service) |
+| **Update and rollback** | `machina update` fast-forwards a clean source checkout and `--rollback` returns to the previous recorded commit | [Parity](docs/OPENCODE_PARITY.md#update-rollback) |
 | **Shell completions** | `machina completions bash|zsh|fish` prints a script generated from the installed lazy command table | [Parity](docs/OPENCODE_PARITY.md#shell-completions) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
@@ -1659,6 +1660,7 @@ machina api GET /health
 machina acp
 machina service start
 machina completions bash
+machina update --rollback
 machina route "Fix the parser bug and run its tests" --mode multi_model --workers 4
 ```
 

@@ -55,10 +55,22 @@ def models(
     models_command(provider=provider, refresh=refresh, json_output=json_output)
 
 
-def update() -> None:
+def update(
+    rollback: bool = typer.Option(
+        False,
+        "--rollback",
+        help="Reset a clean source checkout to the commit recorded before the last update",
+    )
+) -> None:
     """Check and fast-forward a clean source checkout explicitly."""
     from machina.update import auto_update
 
+    if rollback:
+        from machina.update import rollback as rollback_update
+
+        if not rollback_update():
+            raise typer.Exit(1)
+        return
     auto_update(force=True)
 
 

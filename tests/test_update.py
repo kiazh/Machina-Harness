@@ -269,3 +269,45 @@ def test_update_cache_ignores_foreign_fetches(tmp_path: Path) -> None:
     (checkout / ".git" / "FETCH_HEAD").write_text("", encoding="utf-8")
 
     assert not update._check_is_fresh(checkout)
+
+
+def test_rollback_restores_the_recorded_commit(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    checkout = _repo_pair(tmp_path)
+    previous = _git(checkout, "rev-parse", "HEAD").stdout.strip()
+    _git(checkout, "pull", "--ff-only")
+    updated = _git(checkout, "rev-parse", "HEAD").stdout.strip()
+    update._write_update_state(
+        checkout,
+        previous_commit=previous,
+        updated_commit=updated,
+        previous_version="1.0.0",
+    )
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+
+    assert update.rollback() is True
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 1\n"
+    assert "Rolled back" in capsys.readouterr().err
+    assert update._read_update_state(checkout) is None
+
+
+def test_rollback_refuses_a_dirty_checkout(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    checkout = _repo_pair(tmp_path)
+    previous = _git(checkout, "rev-parse", "HEAD").stdout.strip()
+    _git(checkout, "pull", "--ff-only")
+    updated = _git(checkout, "rev-parse", "HEAD").stdout.strip()
+    update._write_update_state(
+        checkout,
+        previous_commit=previous,
+        updated_commit=updated,
+        previous_version="1.0.0",
+    )
+    (checkout / "app.py").write_text("local work\n", encoding="utf-8")
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+
+    assert update.rollback() is False
+    assert "local changes" in capsys.readouterr().err
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "local work\n"

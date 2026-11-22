@@ -21,6 +21,7 @@ _VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 #: result of a recent fetch/check for this long before asking origin again.
 _CHECK_INTERVAL_SECONDS = 15 * 60.0
 _CHECK_MARKER = "machina-auto-update-check"
+_UPDATE_STATE = "machina-update-state.json"
 
 
 def _run(args: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess[str] | None:
@@ -110,6 +111,105 @@ def _cached_check(root: Path) -> dict[str, object] | None:
 def _check_is_fresh(root: Path) -> bool:
     """True when Machina's own recent check already answered the question."""
     return _cached_check(root) is not None
+
+
+def _state_path(root: Path) -> Path | None:
+    git_dir = _git_dir(root)
+    return git_dir / _UPDATE_STATE if git_dir is not None else None
+
+
+def _read_update_state(root: Path) -> dict[str, object] | None:
+    path = _state_path(root)
+    if path is None:
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if not isinstance(payload.get("previous_commit"), str):
+        return None
+    if not isinstance(payload.get("updated_commit"), str):
+        return None
+    return payload
+
+
+def _write_update_state(
+    root: Path, *, previous_commit: str, updated_commit: str, previous_version: str
+) -> None:
+    path = _state_path(root)
+    if path is None:
+        return
+    try:
+        path.write_text(
+            json.dumps(
+                {
+                    "previous_commit": previous_commit,
+                    "updated_commit": updated_commit,
+                    "previous_version": previous_version,
+                    "updated_at": time.time(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def rollback() -> bool:
+    """Reset a clean source checkout to the commit captured by the last update.
+
+    This is intentionally source-checkout-only. It refuses dirty worktrees and
+    a HEAD that no longer matches the recorded post-update commit, so a later
+    local commit cannot be silently discarded.
+    """
+    root = _repo_root()
+    if root is None:
+        print("Rollback is only available from a source checkout.", file=sys.stderr)
+        return False
+    state = _read_update_state(root)
+    if state is None:
+        print("No recorded update to roll back.", file=sys.stderr)
+        return False
+    dirty = _run(["git", "status", "--porcelain"], cwd=root, timeout=5)
+    if dirty is None or dirty.returncode != 0 or dirty.stdout.strip():
+        print(
+            "Rollback refused: this checkout has local changes.",
+            file=sys.stderr,
+        )
+        return False
+    current = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
+    current_commit = current.stdout.strip() if current is not None and current.returncode == 0 else ""
+    if current_commit != str(state.get("updated_commit") or ""):
+        print(
+            "Rollback refused: HEAD no longer matches the recorded update.",
+            file=sys.stderr,
+        )
+        return False
+    previous = str(state.get("previous_commit") or "")
+    exists = _run(["git", "cat-file", "-e", previous], cwd=root, timeout=5)
+    if exists is None or exists.returncode != 0:
+        print("Rollback refused: the previous commit is no longer present.", file=sys.stderr)
+        return False
+    reset = _run(["git", "reset", "--hard", previous], cwd=root, timeout=45)
+    if reset is None or reset.returncode != 0:
+        print("Rollback failed while resetting the checkout.", file=sys.stderr)
+        return False
+    path = _state_path(root)
+    if path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    version = str(state.get("previous_version") or "previous version")
+    print(f"Rolled back to {previous[:12]} ({version}).", file=sys.stderr)
+    print(
+        "Dependencies were not changed; reinstall from the checkout if packaging changed.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _age_text(seconds: float) -> str:
@@ -287,6 +387,9 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
         return
 
     status.set(f"Updating ({behind} new {noun})...")
+    previous = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
+    previous_commit = previous.stdout.strip() if previous is not None and previous.returncode == 0 else ""
+    previous_version = __version__
     pulled = _run(
         ["git", "pull", "--ff-only", "--quiet", "origin", "main"],
         cwd=root,
@@ -297,6 +400,15 @@ def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
         _mark_checked(root, "error", message)
         status.finish(message)
         return
+    updated = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
+    updated_commit = updated.stdout.strip() if updated is not None and updated.returncode == 0 else ""
+    if previous_commit and updated_commit:
+        _write_update_state(
+            root,
+            previous_commit=previous_commit,
+            updated_commit=updated_commit,
+            previous_version=previous_version,
+        )
     # Editable installs see source changes immediately; refresh dependency
     # metadata only when packaging files changed. Failure is non-fatal: the
     # updated code may still run with the existing environment.

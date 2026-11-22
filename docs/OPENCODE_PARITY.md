@@ -22,7 +22,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina service start/status/stop/restart` | Detached HTTP service with lease-backed status and health checks |
 | `machina completions bash|zsh|fish` | Completion script generated from the installed lazy command table |
 | `machina plugin list/loaded` | Installed entry points and process-loaded plugins |
-| `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
+| `machina update` / `upgrade` | Explicit source-checkout fast-forward; `--rollback` resets a clean checkout to the commit recorded before the last update |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
 
 Existing commands (`chat`, `doctor`, `init`, `serve`, `auth`, `providers`,
@@ -94,6 +94,14 @@ formatter after `write_file`:
 Formatting is opt-in (`off` by default), never rolls back the write, and reports
 missing or failed formatters instead of failing the turn.
 
+### Update rollback
+
+A successful source-checkout update records the previous and updated commits.
+`machina update --rollback` resets only when the checkout is clean, the current
+HEAD is still the recorded updated commit, and the previous object still
+exists. It does not reinstall dependencies, does not run on a timer, and never
+overwrites local changes.
+
 ### Shell completions
 
 `machina completions bash|zsh|fish` prints a Click completion script derived
@@ -135,7 +143,7 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
 |---|---|---|
 | Plugin install/update and TUI plugins | Entry-point loading exists, but OpenCode's install/update and GUI plugin surfaces do not | Install/update commands, TUI/GUI hooks, and isolation tests |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
-| Upgrade/rollback command | OpenCode manages upgrades without source edits | Signed/versioned install path; rollback is tested |
+| Signed/versioned upgrade path | Source fast-forward and one-step rollback exist; OpenCode manages installed versions | Signed release artifacts and cross-version rollback |
 | Snapshot coverage for dirty/non-Git terminal edits | Clean-Git terminal edits are covered, but dirty worktrees and non-Git workspaces are explicitly skipped | Bounded worktree/index strategy for dirty trees with explicit untracked-file semantics |
 | Reference repositories | OpenCode can attach named local/Git references | Bounded read-only references with path/Git revision validation |
 
@@ -154,7 +162,9 @@ this checkout. Use `--mode workspace`, `--mode sandbox`, `--mode full`, or
   URL normalization.
 - `tests/test_cli_completions.py`: bash/fish generation and unsupported-shell
   refusal.
-- Full local suite: **673 passed, 9 skipped**.
+- `tests/test_update.py`: fast-forward, dirty/local-commit refusal, launch
+  cache, and clean-only one-step rollback.
+- Full local suite: **675 passed, 9 skipped**.
 
 ### Project config example
 
