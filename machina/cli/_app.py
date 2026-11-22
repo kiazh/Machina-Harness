@@ -19,6 +19,7 @@ import typer
 
 from machina import interop as interop_mod
 from machina.cli import output
+from machina.cli.api import api
 from machina.cli.audit import audit
 from machina.cli.auth import app as auth_app
 from machina.cli.chat import _report_terminal_response, chat, repl
@@ -201,6 +202,7 @@ def main(
 # in insertion order, so this block mirrors the original one-module definition
 # order exactly. Keep new commands in the feature module and register here.
 app.command(name="chat")(chat)
+app.command(name="api")(api)
 app.command(name="run")(run)
 app.command(name="repl")(repl)
 app.command(name="models")(models)

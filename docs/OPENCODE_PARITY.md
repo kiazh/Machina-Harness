@@ -17,6 +17,7 @@ behavior and explicit remaining gaps; it is not a claim of full parity.
 | `machina session diff/undo` | Session-scoped snapshot operations |
 | `machina mcp list/show/add/remove` | Human MCP server administration |
 | `machina debug paths/info` | Path and runtime diagnostics without starting the agent |
+| `machina api METHOD PATH` | Authenticated local HTTP API request with `--data`, `--header`, and `--url` |
 | `machina update` / `upgrade` | Explicit source-checkout fast-forward with local-change refusal |
 | `machina --help` / lazy command table | New commands are registered in the installed CLI, not only the eager test app |
 
@@ -73,7 +74,6 @@ missing or failed formatters instead of failing the turn.
 |---|---|---|
 | ACP server | Editor/IDE clients need Agent Client Protocol | `machina acp` handshake plus a real editor smoke test |
 | Background service lifecycle | OpenCode has `service start/status/restart` | Start/stop/restart are idempotent and leave no stale PID |
-| `api` command | OpenCode can call its local API with auth | `machina api get /health` uses the same service discovery/auth as the server |
 | Plugin ecosystem | OpenCode plugins can extend server, TUI, and GUI | Load/unload isolation, versioned hook API, failure containment |
 | Full TUI keybind/theme parity | OpenCode exposes a deeply configurable terminal UI | Exportable theme/keybind config and visual regression coverage |
 | Shell completions | OpenCode provides bash/zsh/fish/sh | Generated completions match the lazy command table |
@@ -88,7 +88,7 @@ missing or failed formatters instead of failing the turn.
 - `tests/test_formatting.py`: disabled, successful, and failed formatter paths.
 - `tests/test_cli_parity.py`: new command/help surface.
 - `tests/test_cli_command_set.py`: registration order.
-- Full local suite: **651 passed, 9 skipped**.
+- Full local suite: **654 passed, 9 skipped**.
 
 ### Project config example
 

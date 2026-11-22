@@ -17,6 +17,7 @@ from machina.cli import common
 # Original definition order: Click lists commands in insertion order.
 COMMANDS = (
     "chat",
+    "api",
     "run",
     "repl",
     "models",

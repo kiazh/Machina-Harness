@@ -17,6 +17,7 @@ def runner() -> CliRunner:
     "args",
     [
         ["run", "--help"],
+        ["api", "--help"],
         ["models", "--help"],
         ["update", "--help"],
         ["upgrade", "--help"],

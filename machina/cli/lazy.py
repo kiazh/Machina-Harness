@@ -27,6 +27,7 @@ class LazySpec:
 # insertion order, so help output remains stable.
 _SPECS: dict[str, LazySpec] = {
     "chat": LazySpec("machina.cli.chat", "chat", "Chat with the agent once or interactively."),
+    "api": LazySpec("machina.cli.api", "api", "Call the running Machina HTTP API."),
     "run": LazySpec("machina.cli.parity", "run", "Run one prompt headlessly."),
     "repl": LazySpec("machina.cli.chat", "repl", "Start a read-eval-print loop."),
     "models": LazySpec("machina.cli.parity", "models", "List models for a provider."),
