@@ -74,6 +74,8 @@ GROUPS = (
     "session",
     "snapshots",
     "mcp",
+    "plugin",
+    "plugins",
     "debug",
 )
 

@@ -28,6 +28,7 @@ def runner() -> CliRunner:
         ["snapshots", "--help"],
         ["undo", "--help"],
         ["mcp", "--help"],
+        ["plugin", "--help"],
     ],
 )
 def test_parity_commands_are_registered(runner: CliRunner, args: list[str]) -> None:

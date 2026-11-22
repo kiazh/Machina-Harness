@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 654 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 655 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -362,7 +362,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~130,239 lines across 363 files |
-| Backend tests | 654 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Backend tests | 655 passed, 9 skipped in this checkout; 1,264 UI tests (1,254 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
 | Tools and commands | 46 built-in tools; 47 top-level CLI commands (39 one-shot + 8 groups); 52 slash commands |
@@ -404,6 +404,7 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Snapshots and undo** | Per-turn file snapshots, conflict-aware restore, unified diff, and a CLI undo path | [Snapshots](docs/OPENCODE_PARITY.md#workspace-snapshots) |
 | **Post-write formatters** | Optional `formatter: auto` runs the repository's detected formatter after file-tool writes | [Parity](docs/OPENCODE_PARITY.md#formatters) |
 | **Project defaults** | Nearest `machina.json`/`.machina.json` chooses model, provider, formatter, snapshots, compaction, and retrieval without granting authority or storing secrets | [Parity](docs/OPENCODE_PARITY.md#project-config) |
+| **Opt-in plugins** | Package entry points load only when named in `MACHINA_PLUGINS`; CLI/headless turns now use the same hooks as the gateway | [Parity](docs/OPENCODE_PARITY.md#plugins) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
 | **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
@@ -2940,7 +2941,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 654 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 655 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|

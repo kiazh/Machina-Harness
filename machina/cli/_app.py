@@ -71,6 +71,7 @@ from machina.cli.memory import (
 from machina.cli.optimization import app as optimization_app
 from machina.cli.output import console
 from machina.cli.parity import models, run, session_app, undo, update
+from machina.cli.plugin import app as plugin_app
 from machina.cli.providers import app as providers_app
 from machina.cli.sessions import (
     compress,
@@ -180,6 +181,8 @@ app.add_typer(skills_app, name="skills")
 app.add_typer(session_app, name="session")
 app.add_typer(snapshots_app, name="snapshots")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(plugin_app, name="plugin")
+app.add_typer(plugin_app, name="plugins")
 app.add_typer(debug_app, name="debug")
 
 

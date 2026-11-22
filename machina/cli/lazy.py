@@ -92,6 +92,8 @@ _SPECS: dict[str, LazySpec] = {
     "skills": LazySpec("machina.cli.skills", "skills_app", "Manage skills."),
     "snapshots": LazySpec("machina.cli.snapshots", "app", "Inspect and undo workspace snapshots."),
     "mcp": LazySpec("machina.cli.mcp", "app", "Manage MCP servers."),
+    "plugin": LazySpec("machina.cli.plugin", "app", "Inspect opt-in Machina plugins."),
+    "plugins": LazySpec("machina.cli.plugin", "app", "Inspect opt-in Machina plugins."),
     "debug": LazySpec("machina.cli.debug", "app", "Debugging and path inspection tools."),
 }
 

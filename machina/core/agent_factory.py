@@ -133,6 +133,12 @@ async def build_agent_for_session(
     """
     from machina.core.agent import ReActAgent
     from machina.core.agent_def import agent_registry
+    from machina.plugins.loader import load_plugins
+
+    # CLI/headless turns use the same opt-in entry-point plugins as the
+    # gateway and HTTP surfaces. Loading is idempotent and does nothing unless
+    # MACHINA_PLUGINS explicitly names a plugin.
+    load_plugins()
     from machina.core.config import config
     from machina.core.provider import get_provider
 
