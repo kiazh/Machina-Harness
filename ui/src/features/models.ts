@@ -17,7 +17,7 @@
 // `/models catalog` prints the selected provider's catalog as a table.
 
 import type { SelectItem } from "@earendil-works/pi-tui";
-import { keyValues, table } from "../format.ts";
+import { keyValues, markdownTable } from "../format.ts";
 import type { ConfigSetResult, ModelsListResult, ProvidersListResult } from "../protocol.ts";
 import { RpcError } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
@@ -471,7 +471,7 @@ async function printCatalog(host: FeatureHost): Promise<void> {
 		formatContextWindow(entry.contextWindow),
 		entry.source ?? result.source,
 	]);
-	let body = table(["Model", "Efforts", "Context", "Source"], rows, 48);
+	let body = markdownTable(["Model", "Efforts", "Context", "Source"], rows, 48);
 	body += `\n\nProvider: ${result.provider} · source: ${result.source}`;
 	if (result.fetchError) body += ` · live fetch failed: ${result.fetchError}`;
 	host.print(body, "plain");

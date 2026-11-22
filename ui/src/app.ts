@@ -719,7 +719,14 @@ export class App implements FeatureHost {
 	}
 
 	print(text: string, kind: NoticeKind = "info"): void {
-		this.transcript.addNotice(text, kind);
+		// Plain command output is a report, not a one-line status: render it
+		// through Markdown so headings, lists, tables and inline code are
+		// parsed consistently instead of appearing as literal source text.
+		// The one exception is the pinned U07 `/skills` fallback, whose
+		// byte-identical fixed-width table is already a readable report.
+		if (kind === "plain" && !/^[ \t]*[─]{3,}[ \t]{2}/m.test(text))
+			this.transcript.addMarkdown(text, "output");
+		else this.transcript.addNotice(text, kind);
 		this.tui.requestRender();
 	}
 
@@ -1057,7 +1064,7 @@ export class App implements FeatureHost {
 	}
 
 	printMarkdown(text: string): void {
-		this.transcript.addMarkdown(text);
+		this.transcript.addMarkdown(text, "output");
 		this.tui.requestRender();
 	}
 

@@ -1,7 +1,7 @@
 // Agent commands: agents (list, show, save, history, delete, sessions) and
 // delegate (run a task on another agent).
 
-import { keyValues, shortId, table, when } from "../format.ts";
+import { keyValues, shortId, markdownTable, when } from "../format.ts";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import type { AgentInfo, AgentHistoryResult, AgentSaveResult, DelegationResult, ResumeResult, SessionInfo } from "../protocol.ts";
 import { familyRootOf, listFamilySessions } from "../family.ts";
@@ -46,7 +46,7 @@ export const agentsCommand: Command = {
 			case "list": {
 				const { agents } = await host.request<{ agents: AgentInfo[] }>("agents.list");
 				host.print(
-					table(
+					markdownTable(
 						["Name", "Source", "Tools", "Description"],
 						agents.map((a) => [a.name, a.source, a.tools.length ? String(a.tools.length) : "all", a.description]),
 						60,
@@ -120,7 +120,7 @@ export const agentsCommand: Command = {
 					return;
 				}
 				host.print(
-					table(
+					markdownTable(
 						["From", "To", "Status", "Tokens", "When"],
 						messages.map((m) => [m.fromAgent, m.toAgent, m.status, String(m.tokens), when(m.createdAt)]),
 						60,
@@ -236,7 +236,7 @@ async function reportPausedDelegation(agent: string, result: DelegationResult, h
 	);
 	if (pauses.length) {
 		host.print(
-			table(
+			markdownTable(
 				["Request", "Operation", "Target"],
 				pauses.map((p) => [shortId(p.requestId!), p.operation ?? "", p.target ?? ""]),
 				40,

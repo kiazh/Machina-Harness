@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { Component, OverlayHandle, SelectItem, TUI } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, type Component, type OverlayHandle, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import { App } from "../src/app.ts";
 import { JsonRpcChannel } from "../src/gateway.ts";
 import type { GatewayClient } from "../src/gateway.js";
@@ -219,6 +219,25 @@ test("start() enables shrink-clearing so closed menus leave no ghost rows", asyn
 	await app.start();
 	assert.equal(tui.clearOnShrink, true);
 	await app.exit();
+});
+
+test("plain command reports render through Markdown", async () => {
+	const { app } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		app.print("## Growth report\n\n- **RSI:** on\n\n| Decision | Rating |\n|---|---|\n| `abcdef12` | unrated |", "plain");
+		const transcript = (app as unknown as {
+			transcript: { container: { children: Component[] } };
+		}).transcript;
+		const report = transcript.container.children.at(-1)!;
+		const rendered = stripTerminalSequences(report.render(80).join("\n"));
+		assert.match(rendered, /Growth report/);
+		assert.match(rendered, /output/);
+		assert.match(rendered, /RSI:/);
+		assert.match(rendered, /unrated/);
+	} finally {
+		await app.exit();
+	}
 });
 
 test("Ctrl+N then an arrow opens and closes the full-page status tab", async () => {

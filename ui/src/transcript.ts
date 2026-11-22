@@ -121,8 +121,8 @@ export class Transcript {
 		this.retain(new Notice(text, kind));
 	}
 
-	addMarkdown(text: string): void {
-		this.retain(new AssistantTurn(text));
+	addMarkdown(text: string, label = "assistant"): void {
+		this.retain(new AssistantTurn(text, undefined, label));
 	}
 
 	/**

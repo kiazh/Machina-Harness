@@ -3,9 +3,10 @@ import { test } from "node:test";
 import { stripTerminalSequences, type SelectItem } from "@earendil-works/pi-tui";
 import { parseCommand } from "../src/commands.ts";
 import { type AskTextOptions, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS } from "../src/features/index.ts";
+import { formatGrowthReport } from "../src/features/growth.ts";
 import { CURATED_MODELS, buildModelPickerRows, fetchModelGroups, filterCuratedModels, filterModelGroups } from "../src/features/models.ts";
 import { Menu } from "../src/components/Menu.ts";
-import { resolvePrefix, table } from "../src/format.ts";
+import { markdownTable, resolvePrefix } from "../src/format.ts";
 import { listAllSessions, type SessionListHost } from "../src/features/sessions.ts";
 import { RpcError, type ConfigResult, type HistoryEntry, type SessionInfo } from "../src/protocol.ts";
 import type { OAuthProgressHandle, OAuthProgressOptions } from "../src/features/types.ts";
@@ -328,9 +329,25 @@ test("/growth show distinguishes operational observations, human feedback, and a
 	const host = new FakeHost();
 	host.responses["growth.get"] = { growth: { notes: {}, interactions: 3, feedback_count: 1 }, episodes: [], rsi: { enabled: true, revision: 2, observations: 2, automatic_observations: 2, human_ratings: 1, trial: { revision: 2, ratings: 1, required: 3 }, history: [] } };
 	await run("/growth show", host);
+	assert.match(host.last().text, /^## Personality growth/m);
+	assert.match(host.last().text, /### Runtime adaptation/);
 	assert.match(host.last().text, /operational observations/);
 	assert.match(host.last().text, /human ratings/);
 	assert.match(host.last().text, /1\/3/);
+});
+
+test("growth reports use structured Markdown for notes and decisions", () => {
+	const report = formatGrowthReport({
+		growth: { notes: { "style:verbosity": "Prefer concise answers" }, interactions: 4, feedback_count: 0 },
+		episodes: [
+			{ id: "abcdef12-3456-7890-abcd-ef1234567890", action: "retrieve", completed: true, reward: null },
+		],
+		rsi: { enabled: true, revision: 12, trial: null, observations: 65, automatic_observations: 65, human_ratings: 0, skill_weights: {}, tool_weights: {}, history: [] },
+	});
+	assert.match(report, /### Learned notes/);
+	assert.match(report, /\*\*style:verbosity:\*\* Prefer concise answers/);
+	assert.match(report, /\| Decision \| Memory search \| Rating \|/);
+	assert.match(report, /`abcdef12` \| used memory search \| unrated/);
 });
 
 test("/recall searches transcript evidence and opens an anchored window", async () => {
@@ -681,12 +698,12 @@ test("/config sets a value and --save persists it", async () => {
 	assert.match(host.last().text, /turn_timeout = 7 \(saved\)/);
 
 	await run("/config", host);
-	assert.match(host.last().text, /openrouter_api_key\s+set \(in \.env\)/);
+	assert.match(host.last().text, /openrouter_api_key:\*\* set \(in \.env\)/);
 	// `/config list` is the explicit text dump (bare /config opens the menu on
 	// hosts that implement uiSettings; this FakeHost does not, so it falls
 	// back to the same dump — both paths are covered here).
 	await run("/config list", host);
-	assert.match(host.last().text, /openrouter_api_key\s+set \(in \.env\)/);
+	assert.match(host.last().text, /openrouter_api_key:\*\* set \(in \.env\)/);
 	await run("/config bogus 1", host);
 	assert.match(host.last().text, /Unknown setting/);
 });
@@ -917,8 +934,10 @@ test("format helpers", () => {
 	assert.equal(resolvePrefix("ab", ["abc", "xyz"], "thing"), "abc");
 	assert.throws(() => resolvePrefix("a", ["abc", "abd"], "thing"), /matches 2 things/);
 	assert.throws(() => resolvePrefix("q", ["abc"], "thing"), /No thing starts with/);
-	const t = table(["A", "B"], [["1", "two"], ["three", "4"]]);
+	const t = markdownTable(["A", "B"], [["1", "two"], ["three", "4"]]);
 	assert.equal(t.split("\n").length, 4);
+	assert.equal(t.split("\n")[0], "| A | B |");
+	assert.equal(t.split("\n")[1], "| --- | --- |");
 });
 
 test("/keys list shows status without ever echoing values", async () => {

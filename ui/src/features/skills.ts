@@ -7,7 +7,7 @@
 // bounded deterministic `skills.search` table (U07 fallback). `/skills show`
 // stays byte-compatible for existing callers.
 
-import { keyValues, resolvePrefix, shortId, table } from "../format.ts";
+import { keyValues, markdownTable, resolvePrefix, shortId, table } from "../format.ts";
 import type { LearningReviewInfo, SkillInfo } from "../protocol.ts";
 import { classificationLabel, type SkillsSearchResult } from "../components/SkillsMenu.ts";
 import { splitSub } from "../commands.ts";
@@ -41,7 +41,7 @@ async function printSkillSearch(host: FeatureHost, query: string): Promise<void>
 		return;
 	}
 	host.print(
-		table(
+		markdownTable(
 			["Name", "State", "Source", "Why"],
 			result.candidates.map((candidate) => [
 				candidate.name,
@@ -131,7 +131,7 @@ export const skillsCommand: Command = {
 					(review) => review.status === "pending" || (review.status === "approved" && review.autoApplied),
 				);
 				host.print(shown.length
-					? table(
+					? markdownTable(
 							["ID", "Status", "Name", "Description"],
 							shown.map((review) => [
 								shortId(review.id),

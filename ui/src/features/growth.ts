@@ -1,11 +1,67 @@
 import { splitSub } from "../commands.ts";
+import { shortId } from "../format.ts";
 import type { RsiStatus } from "../protocol.ts";
 import { type Command, confirm, options, requireArgs, requireSession } from "./types.ts";
 
-interface GrowthResult {
+export interface GrowthResult {
 	growth: { notes: Record<string, string>; interactions: number; feedback_count: number };
 	episodes: Array<{ id: string; action: string; completed: boolean; reward: number | null }>;
 	rsi?: RsiStatus;
+}
+
+/**
+ * Render the growth report as Markdown. Kept separate from the command so the
+ * presentation can be tested without a live gateway, and so every datum has a
+ * stable, readable place instead of being concatenated into one paragraph.
+ */
+export function formatGrowthReport({ growth, episodes, rsi }: GrowthResult): string {
+	const notes = Object.entries(growth.notes)
+		.map(([key, value]) => `- **${key}:** ${value}`)
+		.join("\n");
+	const decisions = episodes
+		.filter((episode) => episode.completed)
+		.slice(0, 5)
+		.map((episode) => {
+			const action = episode.action === "retrieve" ? "used memory search" : "skipped memory search";
+			const rating = episode.reward === null ? "unrated" : String(episode.reward);
+			return `| \`${shortId(episode.id)}\` | ${action} | ${rating} |`;
+		});
+	const sections = [
+		"## Personality growth",
+		"",
+		`**${growth.interactions}** completed conversations · **${growth.feedback_count}** ratings`,
+	];
+	if (rsi) {
+		sections.push(
+			"",
+			"### Runtime adaptation",
+			"",
+			`- RSI: **${rsi.enabled ? "on" : "off"}** · revision **${rsi.revision}**`,
+			`- **${rsi.automatic_observations}** operational observations · **${rsi.human_ratings}** human ratings`,
+			rsi.trial
+				? `- Persona trial: revision **${rsi.trial.revision}** · **${rsi.trial.ratings}/${rsi.trial.required}** ratings before evaluation`
+				: "- Persona trial: none pending",
+		);
+	}
+	sections.push(
+		"",
+		"### Learned notes",
+		"",
+		notes || "_No learned notes yet. Teach one with `/growth teach`._",
+		"",
+		"### Recent memory decisions",
+		"",
+	);
+	if (decisions.length) {
+		sections.push(
+			"| Decision | Memory search | Rating |",
+			"|---|---|---|",
+			...decisions,
+		);
+	} else {
+		sections.push("_No completed memory decisions yet._");
+	}
+	return sections.join("\n");
 }
 
 export const growthCommand: Command = {
@@ -34,10 +90,8 @@ export const growthCommand: Command = {
 			sub = action.value;
 		}
 		if (sub === "show") {
-			const { growth, episodes, rsi } = await host.request<GrowthResult>("growth.get", { sessionId });
-			const notes = Object.entries(growth.notes).map(([key, value]) => `${key}: ${value}`).join("\n");
-			const progress = rsi ? `\nRSI ${rsi.enabled ? "on" : "off"} · revision ${rsi.revision}\n${rsi.automatic_observations} operational observations · ${rsi.human_ratings} human ratings\n${rsi.trial ? `Persona trial ${rsi.trial.revision} · ${rsi.trial.ratings}/${rsi.trial.required} ratings before evaluation` : "No persona trial pending"}\n` : "";
-			host.print(`${growth.interactions} completed conversations · ${growth.feedback_count} ratings${progress}\n${notes || "No learned notes yet. Choose Teach a note to add one."}\n\nRecent memory decisions:\n${episodes.filter(e => e.completed).slice(0, 5).map(e => `${e.id} · ${e.action === "retrieve" ? "used memory search" : "skipped memory search"} · ${e.reward === null ? "unrated" : e.reward}`).join("\n") || "None yet"}`, "plain");
+			const result = await host.request<GrowthResult>("growth.get", { sessionId });
+			host.print(formatGrowthReport(result), "plain");
 			return;
 		}
 		if (sub === "teach") {

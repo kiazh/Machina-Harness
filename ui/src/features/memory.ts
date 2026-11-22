@@ -1,6 +1,6 @@
 // Memory commands: list, search, add, forget, share, pending, approve, reject, stats.
 
-import { keyValues, resolvePrefix, shortId, table } from "../format.ts";
+import { keyValues, resolvePrefix, shortId, markdownTable } from "../format.ts";
 import type { MemoryInfo, PendingMemoryInfo } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
 import { options, requireArgs, requireSession, type Command, type FeatureHost } from "./types.ts";
@@ -30,7 +30,7 @@ export function scopedMiss(error: unknown, window: string): Error {
 
 function memoryTable(memories: MemoryInfo[], withScore = false): string {
 	const headers = withScore ? ["ID", "Category", "Score", "Content"] : ["ID", "Category", "Imp.", "Content"];
-	return table(
+	return markdownTable(
 		headers,
 		memories.map((m) => [
 			shortId(m.id),
@@ -178,7 +178,7 @@ export const memoryCommand: Command = {
 				const { pending } = await host.request<{ pending: PendingMemoryInfo[] }>("memory.pending", { limit: 50 });
 				host.print(
 					pending.length
-						? table(
+						? markdownTable(
 								["ID", "Category", "Redacted", "Content"],
 								pending.map((p) => [shortId(p.id), p.category, p.redactions.join(", ") || "—", p.content]),
 								70,

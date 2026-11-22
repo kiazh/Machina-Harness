@@ -42,10 +42,27 @@ export function table(headers: string[], rows: string[][], maxCell = 48): string
 	return [line(headers), widths.map((w) => "─".repeat(w)).join("  "), ...cells.map(line)].join("\n");
 }
 
-/** `key: value` lines with aligned values. */
+/**
+ * Markdown table for command reports. Cells are clipped so a hostile or very
+ * long value cannot make the terminal table unreadable; pipes are escaped so
+ * the Markdown renderer keeps one cell per column.
+ */
+export function markdownTable(headers: string[], rows: string[][], maxCell = 48): string {
+	const cell = (value: unknown) => clip(String(value ?? ""), maxCell).replace(/\|/g, "\\|");
+	const header = headers.map(cell);
+	const body = rows.map((row) => headers.map((_, i) => cell(row[i])));
+	const line = (row: string[]) => `| ${row.join(" | ")} |`;
+	return [line(header), line(header.map(() => "---")), ...body.map(line)].join("\n");
+}
+
+/** Markdown key/value bullets, with missing values shown honestly as `-`. */
 export function keyValues(pairs: Array<[string, unknown]>): string {
-	const width = Math.max(...pairs.map(([k]) => k.length));
-	return pairs.map(([k, v]) => `${k.padEnd(width)}  ${v === undefined || v === null || v === "" ? "—" : String(v)}`).join("\n");
+	return pairs
+		.map(([key, value]) => {
+			const shown = value === undefined || value === null || value === "" ? "-" : String(value);
+			return `- **${key}:** ${shown}`;
+		})
+		.join("\n");
 }
 
 /** Resolve an id or unique id prefix among *ids*. Throws a readable error otherwise. */

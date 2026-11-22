@@ -184,8 +184,8 @@ test("/harnesses Status shows version, registration, scope and the state file", 
 	assert.equal(status.kind, "plain");
 	assert.match(status.text, /OpenCode/);
 	assert.match(status.text, /opencode v2\.0\.26/);
-	assert.match(status.text, /Registered\s+yes \(project\)/);
-	assert.match(status.text, /State file\s+\/tmp\/interop-state\.json/);
+	assert.match(status.text, /Registered:\*\* yes \(project\)/);
+	assert.match(status.text, /State file:\*\* \/tmp\/interop-state\.json/);
 	assert.match(status.text, /unsupported/);
 });
 

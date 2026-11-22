@@ -1,6 +1,6 @@
 // Job commands: list, add, script, heartbeat, cron, on, off, delete.
 
-import { resolvePrefix, shortId, table, when } from "../format.ts";
+import { resolvePrefix, shortId, markdownTable, when } from "../format.ts";
 import type { JobInfo } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
 import { options, requireArgs, requireSession, type Command, type FeatureHost } from "./types.ts";
@@ -79,7 +79,7 @@ export const jobsCommand: Command = {
 				const { jobs } = await host.request<{ jobs: JobInfo[] }>("jobs.list", { sessionId: current.id });
 				host.print(
 					jobs.length
-						? table(
+						? markdownTable(
 								["ID", "Kind", "Every", "Model", "On", "Runs", "Next"],
 								jobs.map((j) => [
 									shortId(j.id),

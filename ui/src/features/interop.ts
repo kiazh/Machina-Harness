@@ -6,7 +6,7 @@
 // nothing is written. Outcomes are printed exactly as reported — ok=false is
 // a warning, never a fake success.
 
-import { table } from "../format.ts";
+import { markdownTable } from "../format.ts";
 import type { InteropActionResult, InteropPlatformRow, InteropStatusResult } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
 import { withDelayedNotice } from "./progress.ts";
@@ -97,7 +97,7 @@ function labelOf(row: InteropPlatformRow): string {
 function renderStatus(body: InteropStatusResult): string {
 	const rows = body.platforms ?? [];
 	if (!rows.length) return "No harness platforms reported.";
-	const rendered = table(
+	const rendered = markdownTable(
 		["Platform", "Installed", "Version", "Running", "Registered", "Enabled", "Scope"],
 		rows.map((row) => [
 			labelOf(row),

@@ -1,6 +1,6 @@
 // Mode + approvals commands: /mode, /approvals.
 
-import { shortId, table } from "../format.ts";
+import { shortId, markdownTable } from "../format.ts";
 import { splitSub } from "../commands.ts";
 import { options, requireSession, type Command, type FeatureHost } from "./types.ts";
 import type { ApprovalsListResult, ModeResult } from "../protocol.ts";
@@ -120,7 +120,7 @@ export const approvalsCommand: Command = {
 			return;
 		}
 		host.print(
-			`${table(
+			`${markdownTable(
 				["ID", "Operation", "Target", "Agent"],
 				approvals.map((a) => [shortId(a.request_id), a.operation, a.target, a.agent_id]),
 				40,

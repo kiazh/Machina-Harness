@@ -12,7 +12,7 @@
 // non-editable "no key (local endpoint)" row (nothing to set or clear).
 // Ordering stays stable: catalog keys, then named providers in list order.
 
-import { table } from "../format.ts";
+import { markdownTable } from "../format.ts";
 import type { EffectiveCredentialState, ProvidersListResult, SecretsListResult, SecretsSetResult } from "../protocol.ts";
 import { splitSub } from "../commands.ts";
 import { confirm, options, type Command, type FeatureHost } from "./types.ts";
@@ -73,7 +73,7 @@ export interface KeyRow {
 }
 
 function statusTable(rows: KeyRow[]): string {
-	return table(
+	return markdownTable(
 		["Key", "Status", "Description"],
 		rows.map((row) => [row.key, row.status, row.description]),
 		40,

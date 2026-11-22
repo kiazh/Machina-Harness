@@ -95,6 +95,7 @@ function safeEscapeBoundary(text: string): number {
 
 export class AssistantTurn implements Component {
 	private readonly md: Markdown;
+	private readonly label: string;
 	private content: string;
 	/** Sanitized projection of `content`; measurement only ever sees this. */
 	private display = "";
@@ -113,9 +114,10 @@ export class AssistantTurn implements Component {
 	private streaming = false;
 	private startedAt = 0;
 
-	constructor(text = "", activity?: ActivitySource) {
+	constructor(text = "", activity?: ActivitySource, label = "assistant") {
 		this.content = text;
 		this.activity = activity;
+		this.label = label;
 		// Untrusted content path: assistant prose can echo repo files, web
 		// pages, model output. Sanitize the ASSEMBLED content (not per-delta)
 		// so a control sequence split across deltas cannot evade the filter
@@ -233,12 +235,18 @@ export class AssistantTurn implements Component {
 			: " ";
 		const output = [
 			...BLOCK_GAP,
-			...renderAssistantFrame(rows, geometry, theme.accent(frame), {
-				border: theme.border,
-				accentBold: theme.accentBold,
-				fill: (line) => repairFill("assistantBg", theme.assistantBg(line)),
-				dim: theme.dim,
-			}),
+			...renderAssistantFrame(
+				rows,
+				geometry,
+				theme.accent(frame),
+				{
+					border: theme.border,
+					accentBold: theme.accentBold,
+					fill: (line) => repairFill("assistantBg", theme.assistantBg(line)),
+					dim: theme.dim,
+				},
+				{ label: this.label },
+			),
 		];
 		if (!this.streaming) {
 			if (this.cachedRows.size >= 4) this.cachedRows.clear();

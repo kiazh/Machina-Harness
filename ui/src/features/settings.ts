@@ -1,7 +1,7 @@
 // Settings commands: config, settings, profile, status, model, provider.
 
 import type { SelectItem } from "@earendil-works/pi-tui";
-import { keyValues, table } from "../format.ts";
+import { keyValues, markdownTable } from "../format.ts";
 import type {
 	ConfigGetResult,
 	ConfigSetResult,
@@ -142,7 +142,7 @@ function providerRow(p: ProviderInfo): string[] {
 async function printProviders(host: FeatureHost): Promise<void> {
 	const result = await host.request<ProvidersListResult>("providers.list");
 	const rows = result.providers.map(providerRow);
-	const body = table(["Provider", "Kind", "Base URL", "Key", "Models"], rows, 36);
+	const body = markdownTable(["Provider", "Kind", "Base URL", "Key", "Models"], rows, 36);
 	host.print(
 		`${body}\n\nCurrent model route: ${result.selected}\nUser-added provider keys live in .env (never shown; manage with /provider).`,
 		"plain",
@@ -926,7 +926,7 @@ export const settingsCommands: Command[] = [
 			}
 			const current = host.profileId();
 			host.print(
-				table(
+				markdownTable(
 					["User", "Interactions", "Top topics"],
 					profiles.map((p) => [
 						`${p.userId}${p.userId === current ? " (current)" : ""}`,
