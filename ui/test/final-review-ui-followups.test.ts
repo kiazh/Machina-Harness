@@ -1,5 +1,5 @@
 // Final-review UI follow-up fix lane. Evidence for
-// docs/verification/proofs/final_review_2026-10-15/line_ui.md:
+// internal/docs/verification/proofs/final_review_2026-10-15/line_ui.md:
 //   P3-2 residual: the runtime-default `codex` skin's `dim` (and every other
 //        skin's) clears WCAG AA while staying below `muted`;
 //   P3-3: the write-only `App.inFlightSessionId` dead state is gone;

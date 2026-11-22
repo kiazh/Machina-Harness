@@ -3,9 +3,9 @@
 
 Runs real journeys against real components (PostgreSQL, DeepSeek, live web,
 the self-hosted Firecrawl MCP stack) and records the observed end state in
-`docs/verification/proofs/<UTC date>-e2e-gate.{json,md}`.
+`internal/docs/verification/proofs/<UTC date>-e2e-gate.{json,md}`.
 
-Policy: `docs/verification/E2E_PROTOCOL.md`. Journeys assert OBSERVABLE end
+Policy: `internal/docs/verification/E2E_PROTOCOL.md`. Journeys assert OBSERVABLE end
 state (DB rows, indexed chunks, tool outcomes, CLI exit/error surface) — never
 unit-test counts. Every "fixed/passes" claim must carry the recorded command
 and observed output this tool writes.
@@ -2787,7 +2787,7 @@ def render_markdown(doc: dict) -> str:
         f"- **Summary:** {doc['summary']['passed']} PASS, {doc['summary']['failed']} FAIL, "
         f"{doc['summary']['skipped']} SKIP of {doc['summary']['total']} journey(s)"
     )
-    lines.append("- **Policy:** `docs/verification/E2E_PROTOCOL.md`")
+    lines.append("- **Policy:** `internal/docs/verification/E2E_PROTOCOL.md`")
     lines.append("")
     for journey in doc["journeys"]:
         lines.append(f"## {journey['journey']} — {journey['title']} — {journey['status']}")

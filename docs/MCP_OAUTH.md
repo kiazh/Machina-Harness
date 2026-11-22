@@ -110,4 +110,4 @@ times out. Consequences, by design:
   real gateway wrapper over stdio).
 - Full suite plus `npm run check`, Ruff, Bandit (zero medium/high
   severity), `uv lock --check`, isolated wheel build with OAuth modules.
-- Progress log: `docs/archive/plans/MCP_OAUTH_PROGRESS.md`.
+- Progress log: `../internal/docs/archive/plans/MCP_OAUTH_PROGRESS.md`.

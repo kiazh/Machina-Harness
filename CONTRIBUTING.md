@@ -55,8 +55,8 @@ tests were run and paste the exact pass/fail counts in the PR.
 
 Use the frozen task manifest and record model, reasoning effort, harness,
 trials, tokens, cost, latency, and verifier integrity. Do not tune on the
-locked test split. See `docs/BENCHMARKING.md` and
-`docs/verification/SWE_HOLDOUT_2026-11-12.md`.
+locked test split. See `internal/docs/BENCHMARKING.md` and
+`internal/docs/verification/SWE_HOLDOUT_2026-11-12.md`.
 
 ## Reporting security issues
 

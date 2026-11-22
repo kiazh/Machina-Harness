@@ -42,7 +42,7 @@ ECC is MIT licensed: Copyright (c) 2026 Affaan Mustafa. The full notice is prese
 
 ## Verification
 
-Current debloat verification: **122 focused tests passed**, including real Git fixture importer tests, retained defaults, routing, workflows, resource integrity, cache behavior, and permissions. See [OpenCode continuation](OPENCODE_CONTINUATION.md) for packaging/full-suite results. The larger-bundle results below are historical, not current resource counts.
+Current debloat verification: **122 focused tests passed**, including real Git fixture importer tests, retained defaults, routing, workflows, resource integrity, cache behavior, and permissions. See [OpenCode continuation](../internal/docs/OPENCODE_CONTINUATION.md) for packaging/full-suite results. The larger-bundle results below are historical, not current resource counts.
 
 Historical full-bundle verification passed **132 tests**, read all 302 instruction bodies, and checked 4,293 hashes. This was before the user requested curation; these counts do not describe the current distribution. Backend lint/format checks and UI typecheck/lint passed in that earlier phase; the UI feature suite passed 47 tests.
 

@@ -32,7 +32,7 @@ concurrency:
 # bump those by hand — they are deliberate. Do not rewrite any pin back to a
 # moving tag. The SHA/tag mapping was resolved from the GitHub API on
 # 2026-10-14 and is recorded in
-# docs/verification/proofs/codebase_review_round4_2026-10-14/R4-095_infra.md.
+# internal/docs/verification/proofs/codebase_review_round4_2026-10-14/R4-095_infra.md.
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest

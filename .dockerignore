@@ -61,7 +61,7 @@ docs/
 tests/
 ui/
 packages/
-research/
+internal/
 integrations/
 communications/
 .agents/

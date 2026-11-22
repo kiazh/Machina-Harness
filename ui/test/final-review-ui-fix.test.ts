@@ -1,5 +1,5 @@
 // Final-review UI fix lane. Evidence for
-// docs/verification/proofs/final_review_2026-10-15/line_ui.md:
+// internal/docs/verification/proofs/final_review_2026-10-15/line_ui.md:
 //   P3-1 OutputViewer header sanitizes an untrusted provider tool name/id;
 //   P3-2 every skin's `dim` token clears WCAG AA and stays below `muted`
 //        (default/mono fixed first; codex/opencode/tokyonight + the rest of

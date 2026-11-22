@@ -439,7 +439,7 @@ DEFAULTS: dict[str, Any] = {
     # ON since the Track B rollout gate: a real deepseek/deepseek-chat turn
     # through run() and run_stream() accepted the projected payload (pins-first
     # system messages plus verified ``[machina view: …]`` units); see
-    # docs/verification/DETERMINISTIC_SKILLS_B3_EVIDENCE.md §10. Off reverts to
+    # internal/docs/verification/DETERMINISTIC_SKILLS_B3_EVIDENCE.md §10. Off reverts to
     # shadow-only (bounded comparison log, byte-identical outgoing payloads).
     "request_projection_enabled": True,
     # Evidence projection: exact-duplicate removal plus token-budgeted

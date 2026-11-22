@@ -153,5 +153,5 @@ an oversized remaining snapshot is refused rather than truncated into invalid
 JSON. This mutable, agent-specific result is never cached globally.
 
 The screenshot supersedes the earlier borderless-tool/two-footer-row direction.
-See [visual verification](../verification/TUI_OVERHAUL_REVIEW.md) and the
-[renderer capture](../archive/artifacts/tui-reference.png).
+See [visual verification](../../internal/docs/verification/TUI_OVERHAUL_REVIEW.md) and the
+[renderer capture](../../internal/docs/archive/artifacts/tui-reference.png).

@@ -211,6 +211,7 @@ include = [
     "uv.lock",
 ]
 exclude = [
+    "internal/**",
     "docs/verification/**",
     "docs/archive/**",
     "docs/HANDOFF.md",

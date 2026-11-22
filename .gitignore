@@ -63,12 +63,11 @@ Thumbs.db
 # Internal research and development files
 _dump/
 .locomo10.json
-docs/superpowers/
 docs/research-*.md
 docs/roadmap.md
 docs/plugins.md
 communications/
-research/results/
+internal/research/results/
 verify_issues.py
 # Host-side operator scripts (see scripts/README.md); keep the directory
 # itself present for the compose bind mount, ignore its contents.
@@ -118,8 +117,8 @@ playwright-report/
 .pytest-run-*/
 .impeccable/
 
-# Proof artifacts: evidence logs under docs/verification/proofs/ are tracked
-!docs/verification/proofs/**/*.log
+# Proof artifacts: evidence logs under internal/docs/verification/proofs/ are tracked
+!internal/docs/verification/proofs/**/*.log
 
 # Machine-specific MCP registration (create via: opencode mcp add machina -- <python> -m machina.mcp_server)
 opencode.json

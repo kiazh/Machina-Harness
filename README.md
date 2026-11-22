@@ -62,7 +62,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
-**Release status:** **1.2.14 open-source release.** `main` also carries post-release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](docs/verification/RELEASE_1.2.14.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **1.2.14 open-source release.** `main` also carries post-release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [1.2.14 release notes](internal/docs/verification/RELEASE_1.2.14.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -372,7 +372,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
 | CLI cold start | `machina --version` measured at ~0.12 s; `machina --help` at ~0.24 s on this checkout with a warm filesystem cache; first run after install is slower |
 
-Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](CHANGELOG.md); historical release-gate evidence is in [RELEASE_READINESS.md](docs/verification/RELEASE_READINESS.md).
+Counts are snapshots, not promises. Current release status is in [CHANGELOG.md](CHANGELOG.md); historical release-gate evidence is in [RELEASE_READINESS.md](internal/docs/verification/RELEASE_READINESS.md).
 
 ## One session, end to end
 
@@ -401,14 +401,14 @@ That is the whole thesis: **the transcript is an event log, the prompt is a proj
 | **Connected-model routing** | A live inventory of credentialed models, role-specific fit, deterministic selection, cost tiers, pins, and fallbacks | [Routing](#connected-model-routing) |
 | **Parallel delegation** | Explicit parallel requests become a validated dependency plan with bounded workers and a supervisor synthesis | [Agent loop](#routing-and-parallel-delegation) |
 | **Repair controller** | Narrow tool catalog, phase/evidence tracking, turn and token caps, repeated-loop stops, and a final verification gate | [Controller](docs/TASK_RUN_CONTROLLER.md) |
-| **Snapshots and undo** | Per-turn file snapshots plus clean-Git terminal command coverage, conflict-aware restore, unified diff, and a CLI undo path | [Snapshots](docs/OPENCODE_PARITY.md#workspace-snapshots) |
-| **Post-write formatters** | Optional `formatter: auto` runs the repository's detected formatter after file-tool writes | [Parity](docs/OPENCODE_PARITY.md#formatters) |
-| **Project defaults** | Nearest `machina.json`/`.machina.json` chooses model, provider, formatter, snapshots, compaction, and retrieval without granting authority or storing secrets | [Parity](docs/OPENCODE_PARITY.md#project-config) |
-| **Opt-in plugins** | Package entry points load only when named in `MACHINA_PLUGINS`; CLI/headless turns now use the same hooks as the gateway | [Parity](docs/OPENCODE_PARITY.md#plugins) |
-| **ACP editor bridge** | `machina acp` exposes sessions, streaming updates, modes, and approval cards to ACP clients such as Zed | [Parity](docs/OPENCODE_PARITY.md#acp-editor-bridge) |
-| **Background service** | `machina service start/status/stop/restart` runs the HTTP API detached with health-verified PID and foreground-serve detection | [Parity](docs/OPENCODE_PARITY.md#background-service) |
-| **Update and rollback** | `machina update` fast-forwards a clean source checkout and `--rollback` returns to the previous recorded commit | [Parity](docs/OPENCODE_PARITY.md#update-rollback) |
-| **Shell completions** | `machina completions bash|zsh|fish` prints a script generated from the installed lazy command table | [Parity](docs/OPENCODE_PARITY.md#shell-completions) |
+| **Snapshots and undo** | Per-turn file snapshots plus clean-Git terminal command coverage, conflict-aware restore, unified diff, and a CLI undo path | [Snapshots](internal/docs/OPENCODE_PARITY.md#workspace-snapshots) |
+| **Post-write formatters** | Optional `formatter: auto` runs the repository's detected formatter after file-tool writes | [Parity](internal/docs/OPENCODE_PARITY.md#formatters) |
+| **Project defaults** | Nearest `machina.json`/`.machina.json` chooses model, provider, formatter, snapshots, compaction, and retrieval without granting authority or storing secrets | [Parity](internal/docs/OPENCODE_PARITY.md#project-config) |
+| **Opt-in plugins** | Package entry points load only when named in `MACHINA_PLUGINS`; CLI/headless turns now use the same hooks as the gateway | [Parity](internal/docs/OPENCODE_PARITY.md#plugins) |
+| **ACP editor bridge** | `machina acp` exposes sessions, streaming updates, modes, and approval cards to ACP clients such as Zed | [Parity](internal/docs/OPENCODE_PARITY.md#acp-editor-bridge) |
+| **Background service** | `machina service start/status/stop/restart` runs the HTTP API detached with health-verified PID and foreground-serve detection | [Parity](internal/docs/OPENCODE_PARITY.md#background-service) |
+| **Update and rollback** | `machina update` fast-forwards a clean source checkout and `--rollback` returns to the previous recorded commit | [Parity](internal/docs/OPENCODE_PARITY.md#update-rollback) |
+| **Shell completions** | `machina completions bash|zsh|fish` prints a script generated from the installed lazy command table | [Parity](internal/docs/OPENCODE_PARITY.md#shell-completions) |
 | **Provider layer** | One runtime across cloud APIs, subscription accounts, and local models | [Providers](#deep-dive-5-providers-and-accounting) |
 | **Skills** | Instruction packages loaded by task stage instead of stuffing every procedure into every prompt | [Surfaces](#skills-catalog-first-bodies-on-demand) |
 | **MCP, both directions** | Bring external tools in, or expose Machina to another assistant as a bounded tool server | [Surfaces](#mcp-catalog-first-tool-use) |
@@ -1251,16 +1251,16 @@ The suite is not just feature coverage. It includes:
 
 | Evidence | Result | What it supports |
 |---|---|---|
-| [2026-11-20 held-out attempt: integrity audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md) | **Excluded, no ranking.** Future git history and live upstream access were observed; a controlled rerun was not completed. | Demonstrates the benchmark protocol, not a harness result. |
-| [Held-out SWE-bench Lite, DeepSeek V4.1 Flash, 2026-11-10](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **5/10**, OpenCode **9/10**, Hermes **6/10**. Mean wall 687.8 s / 58.2 s / 285.0 s. Machina hit the 900 s cap on 5 tasks. | Historical negative result before the current repair/tooling build. |
-| [Held-out SWE-bench Lite, Haiku 5.5](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/6**, Kiro **4/6**, Hermes **4/6**. Mean wall 249.0 s / 79.0 s / 229.2 s. | **No general accuracy or speed claim.** |
-| [Fresh four-task post-change check](docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/4**, OpenCode **4/4**, Hermes **3/4**. Total wall 964.82 s / 189.43 s / 640.11 s. | Shell and nudge fixes helped, but did not establish a lead. |
-| [Fresh two-task clean-history check](docs/verification/SWE_HOLDOUT_2026-11-12.md) | All **2/2**. Machina 205.4 s and **279,735 tokens**; OpenCode 166.1 s and **996,249 tokens**; Hermes 374.0 s. | **Token efficiency**; OpenCode still faster. One trial per task. |
-| [Easy seven-task suite](docs/verification/HARNESS_HEAD_TO_HEAD_2026-11-08.md) | All **7/7**. Kiro 124.34 s, Machina 375.59 s, Hermes 454.84 s. | Suite hit its ceiling; it ranks neither correctness nor general capability. |
-| [Development SWE-bench subset](docs/verification/SWE_BENCH_LITE_SUBSET_2026-11-08.md) | Machina **5/6**, Kiro **3/6**, Hermes **3/6**. | Development-set only. The same tasks guided harness changes; not held-out evidence. |
+| [2026-11-20 held-out attempt: integrity audit](internal/docs/verification/HOLDOUT_RERUN_2026-11-20.md) | **Excluded, no ranking.** Future git history and live upstream access were observed; a controlled rerun was not completed. | Demonstrates the benchmark protocol, not a harness result. |
+| [Held-out SWE-bench Lite, DeepSeek V4.1 Flash, 2026-11-10](internal/docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **5/10**, OpenCode **9/10**, Hermes **6/10**. Mean wall 687.8 s / 58.2 s / 285.0 s. Machina hit the 900 s cap on 5 tasks. | Historical negative result before the current repair/tooling build. |
+| [Held-out SWE-bench Lite, Haiku 5.5](internal/docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/6**, Kiro **4/6**, Hermes **4/6**. Mean wall 249.0 s / 79.0 s / 229.2 s. | **No general accuracy or speed claim.** |
+| [Fresh four-task post-change check](internal/docs/verification/HELDOUT_SWE_2026-11-10.md) | Machina **3/4**, OpenCode **4/4**, Hermes **3/4**. Total wall 964.82 s / 189.43 s / 640.11 s. | Shell and nudge fixes helped, but did not establish a lead. |
+| [Fresh two-task clean-history check](internal/docs/verification/SWE_HOLDOUT_2026-11-12.md) | All **2/2**. Machina 205.4 s and **279,735 tokens**; OpenCode 166.1 s and **996,249 tokens**; Hermes 374.0 s. | **Token efficiency**; OpenCode still faster. One trial per task. |
+| [Easy seven-task suite](internal/docs/verification/HARNESS_HEAD_TO_HEAD_2026-11-08.md) | All **7/7**. Kiro 124.34 s, Machina 375.59 s, Hermes 454.84 s. | Suite hit its ceiling; it ranks neither correctness nor general capability. |
+| [Development SWE-bench subset](internal/docs/verification/SWE_BENCH_LITE_SUBSET_2026-11-08.md) | Machina **5/6**, Kiro **3/6**, Hermes **3/6**. | Development-set only. The same tasks guided harness changes; not held-out evidence. |
 | [Portable microbenchmark](#portable-microbenchmark-2026-11-20) | Exact and one-file repair tasks: equal pass rates. Machina uses **59% fewer** processed prompt tokens on the exact task and **39% fewer** on code repair than OpenCode; exact is faster, code is **13% slower**. | **Overhead/token efficiency** on two small task shapes. Not a coding benchmark. |
-| [Multi-stage long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) | Three synthetic tasks; all harnesses **3/3**. Machina used **6.4% fewer** processed prompt tokens than OpenCode and was **6.4% slower**; Hermes was **2.6x slower** and used ~**4.8x** the processed tokens. | Equal accuracy on a small synthetic suite; overhead/latency tradeoff. |
-| [Harbor Terminal-Bench adapter](docs/verification/HELDOUT_SWE_2026-11-10.md#harbor-terminal-bench-adapter) | One task completed, reward **0.0**, no infrastructure exception. | The adapter works; no Terminal-Bench score or comparison is claimed. |
+| [Multi-stage long-horizon suite](internal/docs/verification/LONG_HORIZON_2026-11-20.md) | Three synthetic tasks; all harnesses **3/3**. Machina used **6.4% fewer** processed prompt tokens than OpenCode and was **6.4% slower**; Hermes was **2.6x slower** and used ~**4.8x** the processed tokens. | Equal accuracy on a small synthetic suite; overhead/latency tradeoff. |
+| [Harbor Terminal-Bench adapter](internal/docs/verification/HELDOUT_SWE_2026-11-10.md#harbor-terminal-bench-adapter) | One task completed, reward **0.0**, no infrastructure exception. | The adapter works; no Terminal-Bench score or comparison is claimed. |
 
 The 2026-11-20 attempt is excluded. The runner exposed future commits and live upstream access was possible; those results cannot be used for a ranking. A valid held-out rerun requires a single-base Git snapshot, an outbound network policy that blocks source hosts while allowing only the model API and test fixture services, and a task environment that does not require live httpbin. The 2026-11-10 result remains the latest accepted held-out baseline, not a claim about the current build.
 
@@ -1318,7 +1318,7 @@ Reply with exactly one line: TEST: PASS or TEST: FAIL.
 - **Code repair:** Machina uses **~39% fewer processed prompt tokens than OpenCode** and **~81% fewer than Hermes**. OpenCode is **~13% faster in wall time**; Hermes is ~33% slower than Machina.
 - **Accuracy:** all code trials passed the external verifier for every harness. Machina passed 5/5; OpenCode and Hermes passed 3/3. This does **not** show an accuracy advantage.
 
-The raw trial values, fixture, and limitations are in [the portable benchmark report](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md).
+The raw trial values, fixture, and limitations are in [the portable benchmark report](internal/docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md).
 
 **Reproducing**
 
@@ -1345,7 +1345,7 @@ Use `git diff` and pytest for the code task; do not accept the agent's claimed P
 
 Run a pre-registered suite with at least 10 fresh held-out tasks, 3 trials each, the same model, reasoning effort, tool policy, and network policy, external verifiers, and untouched test splits. Report pass@1, pass^3, tokens per resolved task, cache-hit ratio, known cost, p50/p95 latency, timeout rate, and verifier integrity. Include Pi and Claude Code adapters if they are part of the comparison. Use an official harness where feasible (SWE-bench, Terminal-Bench, OSWorld, tau3) and keep failure cases in the result.
 
-[`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) defines the ledger, lockbox, and gates. The current bar is explicit: a pass-rate gain that costs more than 1.5x the best same-model harness's tokens per resolved task is not a competitive gain, and a latency claim needs a fair distribution, not one fast run. Until those gates are met, this README keeps the scoped claim and the negative evidence visible.
+[`internal/docs/BENCHMARKING.md`](internal/docs/BENCHMARKING.md) defines the ledger, lockbox, and gates. The current bar is explicit: a pass-rate gain that costs more than 1.5x the best same-model harness's tokens per resolved task is not a competitive gain, and a latency claim needs a fair distribution, not one fast run. Until those gates are met, this README keeps the scoped claim and the negative evidence visible.
 
 ## Ecosystem integration status
 
@@ -2098,7 +2098,7 @@ npm --prefix ui run check
 
 Database-backed tests require a separate test database configured with `MACHINA_TEST_DATABASE_URL`. The DevTools runner isolates `HOME` and `MACHINA_HOME`; do not point test configuration at an application database.
 
-CI covers locked dependencies, style and formatting, security scanning, release artifacts, the backend suite against a test PostgreSQL service, UI typecheck/tests/lint/audit, and Docker image builds. Tagged releases additionally produce a CycloneDX SBOM, keyless Sigstore bundles for every artifact, and GitHub SLSA build provenance; the release workflow uploads all three alongside the wheel and source distribution. Generation-quality gates for Promptfoo, Ragas, and DeepEval live in [`evals/`](evals/README.md) and run on demand with a model credential.
+CI covers locked dependencies, style and formatting, security scanning, release artifacts, the backend suite against a test PostgreSQL service, UI typecheck/tests/lint/audit, and Docker image builds. Tagged releases additionally produce a CycloneDX SBOM, keyless Sigstore bundles for every artifact, and GitHub SLSA build provenance; the release workflow uploads all three alongside the wheel and source distribution. Generation-quality gates for Promptfoo, Ragas, and DeepEval live in [`internal/evals/`](internal/evals/README.md) and run on demand with a model credential.
 
 ### Source map
 
@@ -2126,18 +2126,18 @@ machina/
   desktop/          Desktop-shell bootstrap around the gateway
   plugins/          Plugin loading and registry
   repomap/          Repository map and symbol navigation
-  research/         Benchmarks, evaluation, and workflow trials
   soulspec/         Reviewed persona/identity schema and lifecycle
   bundled_agents/   Shipped specialist definitions
 skills/             Bundled instruction packages, including curated ECC skills
 ui/                 TypeScript UI source and Node tests
 communications/     Gateway protocol reference
-docs/               Feature guides, design details, and verification records
+docs/               User-facing feature guides and design details
+internal/           Engineering history, audits, proofs, and evaluation tooling (not shipped)
 tools/              Release checks and repository maintenance tools
 scripts/            Operator script mount point and setup guidance
 ```
 
-[pyproject.toml](pyproject.toml) defines packaging and extras; `uv.lock` records the dependency resolution. [FEATURE_LEDGER.md](FEATURE_LEDGER.md) maps implementation surfaces, and [CHANGELOG.md](CHANGELOG.md) records release changes.
+[pyproject.toml](pyproject.toml) defines packaging and extras; `uv.lock` records the dependency resolution. [FEATURE_LEDGER.md](internal/FEATURE_LEDGER.md) maps implementation surfaces, and [CHANGELOG.md](CHANGELOG.md) records release changes.
 
 ### Documentation
 
@@ -2145,7 +2145,7 @@ scripts/            Operator script mount point and setup guidance
 |---|---|
 | [Context and token efficiency](docs/TOKEN_EFFICIENCY.md) | Summaries, artifacts, reducers, projection, recovery, accounting |
 | [Connected-model routing](docs/ROUTING.md) | Modes, role selection, transports, cost tiers, route explanation |
-| [Full repository audit](docs/audits/2026-11-16-full-repo-audit.md) | Dead code, performance, bloat, CI and release hardening |
+| [Full repository audit](internal/docs/audits/2026-11-16-full-repo-audit.md) | Dead code, performance, bloat, CI and release hardening |
 | [TaskRun controller](docs/TASK_RUN_CONTROLLER.md) | Repair phases, caps, evidence, and verification gates |
 | [Memory digest](docs/MEMORY_DIGEST.md) | Query-conditioned multi-fact memory selection |
 | [Workspace](docs/design/WORKSPACE.md) | Editor, files, language servers, layout, shortcuts |
@@ -2154,11 +2154,11 @@ scripts/            Operator script mount point and setup guidance
 | [MCP](docs/MCP.md) / [MCP OAuth](docs/MCP_OAUTH.md) | Tool connections and browser sign-in |
 | [Meta-harness routing](docs/META_HARNESS.md) | Local prompt-to-harness routing and approval-gated external runs |
 | [Gateway protocol](communications/ui-gateway-protocol.md) | JSON-RPC methods, events, client integration |
-| [Benchmarking](docs/BENCHMARKING.md) | Ledger, lockbox, and gates; [portable benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out integrity audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md), and [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) |
-| [Evaluation gates](evals/README.md) | Promptfoo, Ragas, DeepEval, and metric-baseline regressions |
+| [Benchmarking](internal/docs/BENCHMARKING.md) | Ledger, lockbox, and gates; [portable benchmark](internal/docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out integrity audit](internal/docs/verification/HOLDOUT_RERUN_2026-11-20.md), and [long-horizon suite](internal/docs/verification/LONG_HORIZON_2026-11-20.md) |
+| [Evaluation gates](internal/evals/README.md) | Promptfoo, Ragas, DeepEval, and metric-baseline regressions |
 | [Security](SECURITY.md) | Permissions, secrets, trust boundaries |
 | [Operations](OPERATIONS.md) | Deployment, backups, migrations, recovery |
-| [Release evidence](docs/verification/RELEASE_READINESS.md) | Verification scope and open operational gates |
+| [Release evidence](internal/docs/verification/RELEASE_READINESS.md) | Verification scope and open operational gates |
 | [Changelog](CHANGELOG.md) | Release changes |
 
 ### Troubleshooting
@@ -2975,7 +2975,7 @@ The local suite (`tests/`, 686 passed / 9 skipped at this commit) covers contrac
 | Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
-| Benchmark evidence | [Portable harness benchmark](docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out audit](docs/verification/HOLDOUT_RERUN_2026-11-20.md), [long-horizon suite](docs/verification/LONG_HORIZON_2026-11-20.md) | Token efficiency, exclusion decisions, and failure cases are retained |
+| Benchmark evidence | [Portable harness benchmark](internal/docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out audit](internal/docs/verification/HOLDOUT_RERUN_2026-11-20.md), [long-horizon suite](internal/docs/verification/LONG_HORIZON_2026-11-20.md) | Token efficiency, exclusion decisions, and failure cases are retained |
 | Providers | `test_provider_catalog_fast.py`, `test_kiro_provider.py`, `test_kiro_gateway.py` | Catalog normalization and subscription adapters |
 | MCP and interop | `test_interop_fast.py`, `test_meta_harness.py`, `test_harness_inventory.py`, `test_researcher_mcp_web.py` | Registration, routing, bounded external delegation |
 | Web and browser | `test_web_extract_validation.py`, `test_web_search_fallback.py`, `test_browser_verify.py` | Untrusted extraction, fallback, real browser checks |

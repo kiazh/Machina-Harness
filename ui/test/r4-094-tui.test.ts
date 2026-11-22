@@ -1,6 +1,6 @@
 // R4-094 TUI cluster (round-4 review). Each test was written RED-first
 // against the unfixed tree (see
-// docs/verification/proofs/codebase_review_round4_2026-10-14/R4-094_tui.md):
+// internal/docs/verification/proofs/codebase_review_round4_2026-10-14/R4-094_tui.md):
 //  (a) same-id re-resume of the visible session must not erase live output
 //      or strand running-tool completions;
 //  (b) a hidden session's turn-failure notice must survive completion and

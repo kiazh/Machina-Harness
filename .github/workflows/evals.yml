@@ -49,7 +49,7 @@ jobs:
       - name: Install evaluation dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r evals/requirements.txt
+          python -m pip install -r internal/evals/requirements.txt
 
       - name: Refuse to run without a model credential
         run: |
@@ -61,12 +61,12 @@ jobs:
       - name: Promptfoo grounded-answer gate
         if: ${{ inputs.run_promptfoo }}
         run: |
-          npx --yes promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar
+          npx --yes promptfoo@latest eval -c internal/evals/promptfooconfig.yaml --no-progress-bar
 
       - name: Ragas metric gate
         if: ${{ inputs.run_ragas }}
-        run: python evals/ragas_gate.py --baseline evals/ragas_baseline.json
+        run: python internal/evals/ragas_gate.py --baseline internal/evals/ragas_baseline.json
 
       - name: DeepEval answer-quality gate
         if: ${{ inputs.run_deepeval }}
-        run: python -m deepeval test run evals/test_agent.py
+        run: python -m deepeval test run internal/evals/test_agent.py

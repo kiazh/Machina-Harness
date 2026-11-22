@@ -977,7 +977,7 @@ def decide(req: ActionRequest, grants: list[dict] | None = None) -> Decision:
         # SECURITY.md:45) must state exactly this — a full grant authorizes
         # credential reads, privilege escalation, and destructive operations
         # in this session without further approval. See
-        # docs/verification/proofs/codebase_review_round5_2026-10-15/R5-A_mcp_authority.md
+        # internal/docs/verification/proofs/codebase_review_round5_2026-10-15/R5-A_mcp_authority.md
         # for the exact grant-path semantics R5-D must disclose.
         return Decision("allowed", "full-mode session grant", req)
     if req.mode == "full":

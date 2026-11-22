@@ -73,7 +73,7 @@ This is the scalable interop direction: the external harness keeps its own plann
 
 The reverse direction (Machina as planner over OpenCode child sessions) is not exposed through MCP because OpenCode's subagent surface is its internal Task/session API and ACP/HTTP server, not an MCP server. `machina harnesses run opencode "<prompt>"` remains the one-shot bridge; a true reverse control plane would need an OpenCode server/ACP adapter rather than pretending the MCP registration is symmetric.
 
-The `j9` gate journey proves the OpenCode → shim → Machina-session roundtrip end to end and SKIPs unless `opencode` is installed and the project has a registered `machina` server; the recorded round trip, database token check and unit + stdio-handshake coverage are in the [interop proof](verification/proofs/interop_2026-10-14/README.md).
+The `j9` gate journey proves the OpenCode → shim → Machina-session roundtrip end to end and SKIPs unless `opencode` is installed and the project has a registered `machina` server; the recorded round trip, database token check and unit + stdio-handshake coverage are in the [interop proof](../internal/docs/verification/proofs/interop_2026-10-14/README.md).
 
 ## Scope and remaining work
 
@@ -83,9 +83,9 @@ Supported: stdio and Streamable HTTP, tools, interactive configuration/authoriza
 
 Not supported: HTTP credential-profile authentication, legacy SSE, remote resources/prompts, catalog subscriptions, server-initiated model/filesystem callbacks, automatic executable installation, shared-process connections or complete transport-level DNS-rebinding defenses. Stdio is host execution and is refused in sandbox mode. HTTP disables redirects and inherited proxies and rechecks destinations; normalized result caps do not bound every SDK receive allocation.
 
-SDK fixture tests prove transport and harness pipeline behavior. No particular external MCP vendor or live-provider quality gain is implied. See [release evidence](verification/RELEASE_READINESS.md) and the historical [connector progress](archive/plans/MCP_CONNECTORS_PROGRESS.md).
+SDK fixture tests prove transport and harness pipeline behavior. No particular external MCP vendor or live-provider quality gain is implied. See [release evidence](../internal/docs/verification/RELEASE_READINESS.md) and the historical [connector progress](../internal/docs/archive/plans/MCP_CONNECTORS_PROGRESS.md).
 
-OAuth is implemented per the [implementation handoff](archive/plans/MCP_OAUTH_IMPLEMENTATION_HANDOFF.md) with progress in [MCP OAuth progress](archive/plans/MCP_OAUTH_PROGRESS.md). Remote hosted callbacks, device-code grants, OIDC user login, all-vendor certification and total DNS-rebinding defense remain deferred.
+OAuth is implemented per the [implementation handoff](../internal/docs/archive/plans/MCP_OAUTH_IMPLEMENTATION_HANDOFF.md) with progress in [MCP OAuth progress](../internal/docs/archive/plans/MCP_OAUTH_PROGRESS.md). Remote hosted callbacks, device-code grants, OIDC user login, all-vendor certification and total DNS-rebinding defense remain deferred.
 
 ## Remote-call consent
 

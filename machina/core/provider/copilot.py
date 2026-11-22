@@ -3,7 +3,7 @@
 Speaks the OpenAI-compatible endpoint the Copilot CLI / VS Code use against
 ``https://api.githubcopilot.com`` with the user's GitHub token (see
 :mod:`machina.security.copilot_auth`). Wire facts confirmed live on
-2026-10-14 (see ``docs/verification/proofs/oauth_research_2026-10-14/``):
+2026-10-14 (see ``internal/docs/verification/proofs/oauth_research_2026-10-14/``):
 
 * The API accepts the GitHub OAuth token directly as
   ``Authorization: Bearer <gho_…>``; the legacy

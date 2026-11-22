@@ -42,7 +42,13 @@ def check_source(archive_path: Path) -> None:
         }
         if missing := required - names:
             raise ValueError(f"Missing source resources: {sorted(missing)}")
-        forbidden_prefixes = ("docs/verification/", "docs/archive/", "tests/", ".agents/")
+        forbidden_prefixes = (
+            "internal/",
+            "docs/verification/",
+            "docs/archive/",
+            "tests/",
+            ".agents/",
+        )
         shipped = sorted(name for name in names if name.startswith(forbidden_prefixes))
         if shipped:
             raise ValueError(f"Source archive contains review/test bloat: {shipped[:5]}")

@@ -90,11 +90,11 @@ def main(argv: list[str] | None = None) -> int:
         "--promptfoo-config",
         help="run Promptfoo instead of the JSON baseline (requires npx)",
     )
-    parser.add_argument("--ragas", action="store_true", help="run evals/ragas_gate.py")
+    parser.add_argument("--ragas", action="store_true", help="run internal/evals/ragas_gate.py")
     parser.add_argument(
         "--deepeval",
         action="store_true",
-        help="run the DeepEval suite in evals/test_agent.py",
+        help="run the DeepEval suite in internal/evals/test_agent.py",
     )
     args = parser.parse_args(argv)
 
@@ -106,12 +106,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         failures = [] if result.returncode == 0 else ["promptfoo: evaluation failed"]
     if args.ragas:
-        result = subprocess.run([sys.executable, "evals/ragas_gate.py"], check=False)
+        result = subprocess.run([sys.executable, "internal/evals/ragas_gate.py"], check=False)
         if result.returncode != 0:
             failures.append("ragas: evaluation failed")
     if args.deepeval:
         result = subprocess.run(
-            [sys.executable, "-m", "deepeval", "test", "run", "evals/test_agent.py"],
+            [sys.executable, "-m", "deepeval", "test", "run", "internal/evals/test_agent.py"],
             check=False,
         )
         if result.returncode != 0:

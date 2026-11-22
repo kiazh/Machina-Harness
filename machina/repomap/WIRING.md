@@ -34,7 +34,7 @@ Mirror hook: `ReActAgent.run_stream` loop starting at
 
 - `history` must live in durable task state (survive compaction/interrupt/
   resume), NOT in semantic recall — see incident P0 in
-  `docs/verification/OPENCODE_SESSION_5F625662_ISSUES.md` lines 104-129.
+  `internal/docs/verification/OPENCODE_SESSION_5F625662_ISSUES.md` lines 104-129.
 - `artifact_bytes`: bytes newly written toward the requested deliverable
   this batch (0 for recall/read-only evidence gathering).
 - `target` for coverage: file path for read/write/search tools; normalized

@@ -3,7 +3,7 @@
 Speaks the Responses API shape the Codex CLI uses against
 ``https://chatgpt.com/backend-api/codex/responses`` with a ChatGPT OAuth
 access token (see :mod:`machina.security.chatgpt_auth`). Wire facts confirmed
-live on 2026-10-14 (see ``docs/verification/proofs/chatgpt_auth_2026-10-14/``):
+live on 2026-10-14 (see ``internal/docs/verification/proofs/chatgpt_auth_2026-10-14/``):
 
 * Required headers: ``Authorization: Bearer <access_token>``,
   ``Accept: text/event-stream``, ``originator`` (self-identifying), the

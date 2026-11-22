@@ -7,7 +7,7 @@ last-resort fallback for offline first runs and is refreshed by live
 discovery whenever the account is reachable.
 
 Wire facts, verified live on 2026-10-14 (see
-``docs/verification/proofs/model_catalog_2026-10-14/``):
+``internal/docs/verification/proofs/model_catalog_2026-10-14/``):
 
 * ``GET {base}/models?client_version=<v>`` with ``Authorization: Bearer
   <access_token>`` and ``ChatGPT-Account-ID`` returns
