@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import machina.core.provider.kiro_proxy as kiro_proxy
 from machina.core.config import config
-from machina.core.provider import kiro_proxy
 
 __all__ = [
     "KiroGatewayError",

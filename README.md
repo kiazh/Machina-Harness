@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 687 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 683 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -62,7 +62,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
-**Release status:** **2.0.0 open-source release.** `main` carries the 2.0 release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.0.0 release notes](internal/docs/verification/RELEASE_2.0.0.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **2.0.1 open-source patch release.** `main` carries the 2.0 release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.0.1 release notes](internal/docs/verification/RELEASE_2.0.1.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -362,7 +362,7 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Metric | This checkout |
 |---|---|
 | Python backend | ~130,239 lines across 363 files |
-| Backend tests | 687 passed, 9 skipped in this checkout; 1,266 UI tests (1,256 passed, 10 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Backend tests | 683 passed, 18 skipped in this checkout; 1,266 UI tests (1,260 passed, 6 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
 | Tools and commands | 46 built-in tools; 62 top-level CLI commands (47 one-shot + 15 groups); 52 slash commands |
@@ -2851,7 +2851,7 @@ The gateway speaks newline-delimited JSON-RPC 2.0 over stdio. The HTTP API uses 
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "version": "2.0.0",
+    "version": "2.0.1",
     "protocolVersion": 2,
     "model": "openrouter/free",
     "provider": "openrouter",
@@ -2964,7 +2964,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 687 passed / 9 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 683 passed / 18 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|

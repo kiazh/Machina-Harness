@@ -106,6 +106,16 @@ def _local_owner(session_id: object) -> dict | None:
         return dict(rec) if rec is not None else None
 
 
+def _local_reset_for_tests() -> None:
+    """Clear process-local claims between tests (test isolation only).
+
+    The registry is module state; a test that seeds or abandons a claim must
+    not leak ownership into the next test. Production code never calls this.
+    """
+    with _guard:
+        _local_claims.clear()
+
+
 def _note_lock_contention(site: str) -> None:
     """Observe a stale-mutex release race (control flow unchanged).
 

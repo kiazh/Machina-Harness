@@ -96,9 +96,13 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "host_app": ("machina.cli.host", "host_app"),
     # Modules and shared objects
     "console": ("machina.cli.output", "console"),
+    "config": ("machina.core.config", "config"),
+    "context_manager": ("machina.core.context", "context_manager"),
     "db": ("machina.db.connection", "db"),
+    "drain_background_tasks": ("machina.core.background_tasks", "drain_background_tasks"),
     "interop_mod": ("machina.interop", ""),
     "output": ("machina.cli.output", ""),
+    "session_manager": ("machina.core.session", "session_manager"),
 }
 
 __all__ = sorted(_LAZY_EXPORTS)

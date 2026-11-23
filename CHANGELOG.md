@@ -1,5 +1,28 @@
 # Release notes
 
+## 2.0.1 - 2026-11-22
+
+**Verification and diagnostics patch.** See the [2.0.1 release notes](internal/docs/verification/RELEASE_2.0.1.md).
+
+### Fixed
+
+- Connector ids derived from Windows executable paths now work on every host, not only on Windows.
+- The host setup plan follows the inspected host platform, so Windows/WSL autostart and SSH steps are planned consistently from Linux, macOS, and tests.
+- Config validation failures now raise a typed `ValidationError` (still `ValueError`-compatible), so the gateway can show the actionable message instead of a bare `ValueError`.
+- Invalid `MACHINA_DB_MIN_POOL`, `MACHINA_DB_MAX_POOL`, and `MACHINA_DB_TIMEOUT` values now fail with a named, typed error.
+- The external regression suite follows the 2.0 typed `Gateway.call` seam instead of importing the removed private `_RpcGateway`.
+
+### Added
+
+- `machina debug logs` prints the tail of a Machina log file (`gateway.log` by default), so a hidden turn traceback is one command away on Windows, macOS, and Linux.
+- Untyped turn failures now point at `machina debug logs` instead of reporting only the exception class.
+
+### Verification
+
+- Repository smoke suite green on macOS.
+- External suite updated for the typed gateway seam and run against PostgreSQL + pgvector.
+- CI pin advanced to the matching DevTools commit.
+
 ## 2.0.0 - 2026-11-22
 
 **The daily-driver major release.** See the [2.0.0 release notes](internal/docs/verification/RELEASE_2.0.0.md).

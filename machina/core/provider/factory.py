@@ -145,7 +145,7 @@ def get_provider(
             # The upstream Kiro login lives in the local proxy's credential
             # store. This bearer value is only the proxy's loopback password
             # (default: the documented dummy-local-only), never an AWS key.
-            from machina.core.provider import kiro_proxy
+            import machina.core.provider.kiro_proxy as kiro_proxy
 
             spec = _kiro_spec()
             api_key = kiro_proxy.api_key()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import tempfile
 from pathlib import Path
@@ -69,6 +70,39 @@ def info(
         return
     for key, value in values.items():
         output.status_line(key, value)
+
+
+@app.command("logs")
+def logs(
+    lines: int = typer.Option(
+        80, "--lines", "-n", min=1, max=2000, help="Number of trailing lines to print"
+    ),
+    name: str = typer.Option(
+        "gateway.log", "--name", help="Log file name under the Machina log directory"
+    ),
+) -> None:
+    """Print the tail of a Machina log file.
+
+    Turn failures log their full traceback to ``gateway.log`` while the UI
+    shows only a short, redacted message. This is the supported way to read
+    that traceback on Windows, macOS, and Linux.
+    """
+    log_dir = Path(_paths()["log"])
+    if not name or Path(name).name != name:
+        output.error("--name must be a file name, not a path")
+        raise typer.Exit(EXIT_FAILED)
+    path = log_dir / name
+    if not path.is_file():
+        output.error(f"No log file at {path}")
+        raise typer.Exit(EXIT_FAILED)
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            tail = collections.deque(handle, maxlen=lines)
+    except OSError as error:
+        output.error(f"Could not read {path}: {error}")
+        raise typer.Exit(EXIT_FAILED) from None
+    for line in tail:
+        typer.echo(line.rstrip("\n"))
 
 
 @app.command("paths")

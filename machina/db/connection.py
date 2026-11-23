@@ -13,11 +13,21 @@ from contextlib import asynccontextmanager
 import asyncpg
 
 from machina.core.config import config
-from machina.core.exceptions import DatabaseError
+from machina.core.exceptions import DatabaseError, ValidationError
 from machina.core.metrics import metrics
 from machina.db.lazy import parse_command_count  # noqa: F401  (single impl; re-export)
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer pool setting with a typed, actionable failure."""
+    raw = os.environ.get(name, str(default))
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as error:
+        raise ValidationError(f"{name} must be an integer, got {raw!r}") from error
+
 
 # HELD-55: additive runtime migration for existing databases. schema.sql never
 # runs on an already-initialized database, so this must be applied by
@@ -322,9 +332,9 @@ class Database:
                 raise ValueError(
                     "Database DSN not configured. Set DATABASE_URL or database_url in config."
                 )
-            min_size = int(os.environ.get("MACHINA_DB_MIN_POOL", "2"))
-            max_size = int(os.environ.get("MACHINA_DB_MAX_POOL", "10"))
-            command_timeout = int(os.environ.get("MACHINA_DB_TIMEOUT", "30"))
+            min_size = _env_int("MACHINA_DB_MIN_POOL", 2)
+            max_size = _env_int("MACHINA_DB_MAX_POOL", 10)
+            command_timeout = _env_int("MACHINA_DB_TIMEOUT", 30)
 
             self._pool = await asyncpg.create_pool(
                 dsn=self.dsn,

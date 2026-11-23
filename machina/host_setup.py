@@ -1808,7 +1808,10 @@ def open_url(url: str) -> bool:
 def plan_setup(options: SetupOptions = SetupOptions()) -> dict[str, Any]:
     """Return the missing setup work without changing the host."""
     current = status()
-    if _is_windows() or _is_wsl():
+    # Follow the inspected host, not the interpreter's own platform: WSL
+    # reports ``platform="windows"`` even though ``_is_windows()`` is false.
+    windows_host = current.platform == "windows"
+    if windows_host:
         ssh_ready = _ssh_firewall_ready()
     else:
         ssh_ready = current.sshd_running
@@ -1861,7 +1864,7 @@ def plan_setup(options: SetupOptions = SetupOptions()) -> dict[str, Any]:
                 "detail": "Creates the private HTTPS URL for the browser terminal.",
             }
         )
-    if (_is_windows() or _is_wsl()) and not _autostart_ready():
+    if windows_host and not _autostart_ready():
         steps.append(
             {
                 "id": "autostart",

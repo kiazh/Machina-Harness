@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import ntpath
 import re
 import shutil
 from dataclasses import asdict, replace
@@ -93,7 +94,14 @@ def derive_connector_name(url: str = "", command: str = "") -> str:
                 segments.append(segment)
         raw = "-".join(segments) or "mcp"
     else:
-        raw = Path(command).stem if command else "mcp"
+        # ``command`` may be a Windows path even when the process is not on
+        # Windows (tests, remote configs, and pasted MCP specs). ``Path`` only
+        # understands the host separator, so split with ``ntpath`` first.
+        raw = (
+            ntpath.splitext(ntpath.basename(command.strip().strip('"' + "'")))[0]
+            if command
+            else "mcp"
+        )
     raw = re.sub(r"[^a-z0-9_-]+", "-", raw.lower())
     raw = re.sub(r"-{2,}", "-", raw).strip("-_")[:64].rstrip("-_")
     if not raw:

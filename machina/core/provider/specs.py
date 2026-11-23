@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from machina.core.provider import kiro_proxy as kiro
+import machina.core.provider.kiro_proxy as kiro
 
 
 # ---------------------------------------------------------------------------

@@ -1514,7 +1514,9 @@ class Gateway:
                 else:
                     # Type-only context helps diagnose an untied failure without
                     # exposing an arbitrary exception's potentially sensitive text.
-                    suffix = f" ({type(exc).__name__})"
+                    # Point at the supported traceback surface so the user is not
+                    # left with a bare class name.
+                    suffix = f" ({type(exc).__name__}); run `machina debug logs` for the traceback"
                 emit("error", message="agent turn failed" + suffix)
             finally:
                 if turn_scope_token is not None:

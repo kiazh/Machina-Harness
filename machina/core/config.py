@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+from machina.core.exceptions import ValidationError
 from machina.observability.diagnostics import record_failure
 from machina.security.env_file import find_env_file, read_env_values, set_env_values
 
@@ -564,7 +565,7 @@ _ENUM_VALIDATORS: dict[str, tuple[str, ...]] = {
 }
 
 
-def validate_value(key: str, value: Any) -> Any:
+def _validate_value(key: str, value: Any) -> Any:
     """Coerce and bounds-check *value* for *key* (AH-AUDIT-042).
 
     Returns the coerced value. Raises ValueError with an actionable message
@@ -674,6 +675,23 @@ def validate_value(key: str, value: Any) -> Any:
         raise ValueError(f"{key} must be {type(default_value).__name__}, got {value!r}") from e
     except (TypeError, AttributeError) as e:
         raise ValueError(f"{key} must be {type(default_value).__name__}, got {value!r}") from e
+
+
+def validate_value(key: str, value: Any) -> Any:
+    """Validate one config value, surfacing failures as typed errors.
+
+    The coercion rules live in :func:`_validate_value`; this wrapper preserves
+    their ``ValueError`` contract (``ValidationError`` subclasses it) while
+    giving transports a typed failure they may report to the user. Without
+    this, a malformed ``MACHINA_*`` override aborts a turn as a bare
+    ``ValueError`` whose actionable message is deliberately hidden.
+    """
+    try:
+        return _validate_value(key, value)
+    except ValidationError:
+        raise
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
 
 
 def _check_int_bounds(key: str, val: int) -> None:
