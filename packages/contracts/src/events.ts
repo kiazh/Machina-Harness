@@ -10,7 +10,7 @@ export type CanonicalEvent = { protocolVersion: 2; sessionId: string; turnId: st
 	| { type: "growth.status"; stage: string; detail?: string }
 	| { type: "agent.child"; childSessionId: string; phase: string; value: string }
 	| { type: "steering.update"; items: Record<string, unknown>[]; delivered: Record<string, unknown>[] }
-	| { type: "question.asked"; requestId: string; question: string; options: { id: string; label: string; description?: string }[]; allowOther: boolean }
+	| { type: "question.asked"; requestId: string; question: string; options: Record<string, unknown>[]; allowOther: boolean }
 	| { type: "shell.job"; job: Record<string, unknown> }
 	| { type: "message.complete"; text: string; tokens: number; iterations: number; toolCalls: number; cancelled: boolean; needsApproval?: Record<string, unknown>[] }
 	| { type: "error"; message: string }
@@ -37,7 +37,7 @@ export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnI
 	| { type: "growth.status"; stage: string; detail?: string }
 	| { type: "agent.child"; childSessionId: string; phase: string; value: string }
 	| { type: "steering.update"; items: Record<string, unknown>[]; delivered: Record<string, unknown>[] }
-	| { type: "question.asked"; requestId: string; question: string; options: { id: string; label: string; description?: string }[]; allowOther: boolean }
+	| { type: "question.asked"; requestId: string; question: string; options: Record<string, unknown>[]; allowOther: boolean }
 	| { type: "shell.job"; job: Record<string, unknown> }
 	| { type: "message.complete"; text: string; tokens: number; iterations: number; toolCalls: number; cancelled: boolean; needsApproval?: Record<string, unknown>[] }
 	| { type: "error"; message: string }
