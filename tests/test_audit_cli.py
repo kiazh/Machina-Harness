@@ -16,7 +16,7 @@ def test_audit_since_accepts_iso_timestamps() -> None:
 
 
 def test_audit_help_exposes_limit_since_and_json() -> None:
-    result = CliRunner().invoke(app, ["audit", "--help"])
+    result = CliRunner().invoke(app, ["audit", "--help"], terminal_width=200)
     assert result.exit_code == 0
     assert "--limit" in result.stdout
     assert "--since" in result.stdout
