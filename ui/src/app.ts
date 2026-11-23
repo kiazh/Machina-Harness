@@ -4121,11 +4121,13 @@ export class App implements FeatureHost {
 		}
 		this.openQuestions.add(event.requestId);
 		try {
-			const options = event.options.map((option) => ({
-				value: option.id,
-				label: option.label,
-				...(option.description ? { description: option.description } : {}),
-			}));
+			const options = event.options.map(
+				(option): SelectItem => ({
+					value: String(option.id),
+					label: String(option.label),
+					...(option.description ? { description: String(option.description) } : {}),
+				}),
+			);
 			if (event.allowOther) {
 				options.push({ value: "__other__", label: "Other…", description: "Type a different answer" });
 			}
