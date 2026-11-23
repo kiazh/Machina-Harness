@@ -138,7 +138,8 @@ test("readline interfaces are closed after stop()", { skip, timeout: 90_000 }, a
 	assert.equal(internal.stderrInterface?.closed, true, "stderr readline interface closed");
 });
 
-test("slash commands work against the real gateway and database", { skip, timeout: 120_000 }, async () => {
+const heavyE2E = process.env.MACHINA_UI_E2E === "1" ? skip : "set MACHINA_UI_E2E=1 to run the real-gateway slash-command e2e";
+test("slash commands work against the real gateway and database", { skip: heavyE2E, timeout: 120_000 }, async () => {
 	const { client, crashed } = startClient();
 	const dir = await mkdtemp(join(tmpdir(), "machina-ui-e2e-"));
 	const printed: Array<{ text: string; kind: NoticeKind }> = [];
