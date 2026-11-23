@@ -19,8 +19,8 @@ async def test_gateway_observer_receives_live_child_and_settlement(monkeypatch, 
         module.agent_registry, "get", AsyncMock(return_value=AgentDef(name="coder"))
     )
     monkeypatch.setattr(module.session_manager, "create", AsyncMock(return_value=child))
-    delete = AsyncMock(return_value=True)
-    monkeypatch.setattr(module.session_manager, "delete", delete)
+    delete = AsyncMock(return_value=None)
+    monkeypatch.setattr(module.session_manager, "archive", delete)
     monkeypatch.setattr(
         "machina.core.session_mode.resolve_effective_mode", AsyncMock(return_value="ask")
     )

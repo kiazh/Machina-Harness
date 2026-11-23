@@ -143,8 +143,13 @@ def resolve_path(path: str, *, allow_outside: bool = False, probe: bool = True) 
     if allow_outside and _full_mode() and raw.is_absolute():
         candidate = raw.resolve()
     else:
-        # Resolve the candidate path (handles .., symlinks, etc.)
-        candidate = (base / path).resolve()
+        # Resolve the candidate path (handles .., symlinks, etc.). A
+        # concurrent symlink swap can make realpath fail with EINVAL; that is
+        # a refused path, not an internal error.
+        try:
+            candidate = (base / path).resolve()
+        except OSError as error:
+            raise ValueError(f"Path '{path}' cannot be resolved safely") from error
 
         # Ensure the resolved path is within the allowed root
         if not candidate.is_relative_to(base):
