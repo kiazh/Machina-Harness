@@ -45,6 +45,8 @@ async def harness_status() -> str:
             # restriction on the session. Keep the name explicit so a model
             # does not read it as "the whole turn is read-only".
             "tool_effect": "read-only inspection",
+            # Compatibility alias for older callers/tests; the tool never writes.
+            "read_only": True,
             "session": {
                 "agent_id": agent_id,
                 "session_id": str(session_id),

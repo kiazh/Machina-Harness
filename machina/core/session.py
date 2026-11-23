@@ -338,6 +338,14 @@ class SessionManager:
         )
         await self._cache_invalidate(session_id)
 
+    async def activate(self, session_id: uuid.UUID) -> None:
+        """Reactivate an archived session for a resumed delegated follow-up."""
+        await db.execute(
+            "UPDATE sessions SET status = 'active', last_activity = now() WHERE id = $1",
+            session_id,
+        )
+        await self._cache_invalidate(session_id)
+
     async def delete(self, session_id: uuid.UUID) -> bool:
         """Permanently delete a session and its active and archived context."""
         async with db.acquire() as conn:

@@ -297,8 +297,10 @@ async def delegate(
         if result.status == "waiting_approval"
         else "responded"
     )
+    child_session = getattr(result, "session_id", None)
+    child_line = f"\nChild session: {child_session}" if child_session else ""
     receipt = DelegationToolResult(
-        f"[{agent} {label}]\nChild session: {result.session_id}\n{result.response}",
+        f"[{agent} {label}]{child_line}\n{result.response}",
         needs_approval=getattr(result, "needs_approval", []),
         tokens_used=getattr(result, "tokens", 0),
         delegation_status=result.status,

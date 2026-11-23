@@ -373,9 +373,13 @@ class Orchestrator:
                 or child.parent_session_id != parent_session_id
                 or child.agent_id != agent_name
                 or child.is_fork
-                or child.status != "active"
+                or child.status not in {"active", "archived"}
             ):
                 raise ValueError("follow-up session is not this parent's delegated agent")
+            if child.status == "archived":
+                # A completed delegated child is archived (not deleted) so its
+                # status/history survives; resuming it reactivates the session.
+                await session_manager.activate(child.id)
             child_authority = merge_authority(child.delegation_authority, child_authority)
         else:
             # A delegated worker must inherit the parent turn's explicit route
@@ -727,13 +731,18 @@ class Orchestrator:
     async def _delete_finished_child(
         self, child_id: uuid.UUID, parent_id: uuid.UUID | None = None
     ) -> None:
-        """Discard a completed child chat after its result and usage are recorded."""
+        """Retire a completed child chat after its result and usage are recorded.
+
+        Archive rather than delete: the durable ``agent_messages`` row keeps
+        the child session id (``ON DELETE SET NULL`` would erase it), and
+        ``delegate_status``/follow-up delegation can still resolve the worker.
+        """
         try:
             if parent_id is not None:
                 from machina.core.shell_jobs import shell_jobs
 
                 shell_jobs.transfer(child_id, parent_id)
-            await session_manager.delete(child_id)
+            await session_manager.archive(child_id)
         except Exception as error:
             record_failure("orchestrator.child_cleanup", error)
 
