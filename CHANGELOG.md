@@ -1,6 +1,25 @@
 # Release notes
 
-## Unreleased
+## 2.0.0 - 2026-11-22
+
+**The daily-driver major release.** See the [2.0.0 release notes](internal/docs/verification/RELEASE_2.0.0.md).
+
+### Highlights
+
+- OpenCode-parity workflow: snapshots/undo, opt-in formatters, project config, MCP administration, ACP, background service lifecycle, shell completions, authenticated API client, plugins, update, and rollback.
+- Runtime improvements: compact prompts, on-demand tool schemas, memory graph, growth/RSI revisions and feedback, deterministic model routing, parallel delegation, steering, `ask_user`, and repair-controller safeguards.
+- Provider and integration work: provider-first MCP with OAuth and exact approvals, OIDC, OpenAPI 3.2.1, A2A 1.0, CloudEvents, OTLP traces, SBOMs, and account management for ChatGPT, Grok, Copilot, and Kiro.
+- UI and operations: Status tab, command reports rendered as Markdown, 73 deduplicated themes, cross-platform installers, host setup, and release-artifact hygiene.
+- Auto-update now handles shallow installer clones, dirty checkouts, local commits, dependency refreshes, re-exec, and rollback.
+
+### Breaking and compatibility changes
+
+- The built-in `opencode_session` provider and `opencode-proxy` command were removed.
+- Multi Auto is the default routing mode; explicit model/provider pins remain authoritative.
+- The `onedark` alias and `catppuccin-macchiato` theme were removed; `one-dark` and the remaining Catppuccin variants stay.
+- Internal evidence, audits, parity notes, and evaluation tooling moved under `internal/` and are excluded from release artifacts.
+
+### Full change list
 
 - Repository hygiene: moved engineering evidence, audits, parity notes, benchmark/evaluation tooling, and research fixtures under `internal/`, and excluded that tree from wheel, sdist, and Docker build contexts. No runtime behavior changed.
 - Added project instruction loading from global and workspace `AGENTS.md`, platform-aware macOS/Windows keybinding fallbacks and labels, OpenAPI 3.2.1 with protected docs, opt-in CloudEvents SSE envelopes, A2A 1.0 agent-card and task bridge, read-only `machina audit`, optional OTLP/HTTP trace export, and a CycloneDX 1.7 release SBOM.

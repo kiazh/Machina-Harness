@@ -46,6 +46,29 @@ def _repo_root() -> Path | None:
     return None
 
 
+def _is_shallow_repository(root: Path) -> bool:
+    """True for the shallow clone made by the installer.
+
+    A shallow checkout has no local merge base with a newer ``origin/main``,
+    so the normal ahead/behind comparison can report local commits that are
+    not actually local. Unshallow once before comparing histories.
+    """
+    result = _run(["git", "rev-parse", "--is-shallow-repository"], cwd=root, timeout=5)
+    return bool(
+        result is not None and result.returncode == 0 and result.stdout.strip().lower() == "true"
+    )
+
+
+def _fetch_origin(root: Path) -> subprocess.CompletedProcess[str] | None:
+    if _is_shallow_repository(root):
+        return _run(
+            ["git", "fetch", "--unshallow", "--quiet", "origin", "main"],
+            cwd=root,
+            timeout=90,
+        )
+    return _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root, timeout=15)
+
+
 def _git_dir(root: Path) -> Path | None:
     """Resolve the repository metadata directory, including worktrees."""
     dotgit = root / ".git"
@@ -326,7 +349,7 @@ def auto_update(*, force: bool = False) -> None:
 
 
 def _check_and_apply_update(root: Path, status: _UpdateSpinner) -> None:
-    fetched = _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root, timeout=3)
+    fetched = _fetch_origin(root)
     if fetched is None or fetched.returncode != 0:
         message = "Could not check for updates; continuing on the local version."
         _mark_checked(root, "error", message)

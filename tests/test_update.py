@@ -20,7 +20,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _repo_pair(tmp_path: Path, *, bump_version: bool = True) -> Path:
+def _repo_pair(tmp_path: Path, *, bump_version: bool = True, shallow: bool = False) -> Path:
     """A clean checkout one commit behind ``origin/main``."""
     remote = tmp_path / "remote"
     remote.mkdir()
@@ -42,7 +42,11 @@ def _repo_pair(tmp_path: Path, *, bump_version: bool = True) -> Path:
     _git(remote, "push", "-u", "origin", "main")
 
     checkout = tmp_path / "checkout"
-    _git(tmp_path, "clone", str(origin), str(checkout))
+    clone_args = ["clone"]
+    if shallow:
+        clone_args += ["--depth", "1"]
+    clone_args += [origin.as_uri() if shallow else str(origin), str(checkout)]
+    _git(tmp_path, *clone_args)
     _git(checkout, "config", "user.email", "test@example.com")
     _git(checkout, "config", "user.name", "Test")
 
@@ -107,6 +111,23 @@ def test_update_fast_forwards_and_reexecs_the_new_entrypoint(monkeypatch, tmp_pa
     assert executable == sys.executable
     assert args[:3] == [sys.executable, "-m", "machina"]
     assert args[3:] == ["--mode", "full"]
+
+
+def test_update_fast_forwards_a_shallow_installer_clone(monkeypatch, tmp_path: Path) -> None:
+    checkout = _repo_pair(tmp_path, shallow=True)
+    assert update._is_shallow_repository(checkout)
+    _enable_tty(monkeypatch)
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
+    exec_calls = _capture_exec(monkeypatch)
+    _skip_pip(monkeypatch)
+
+    update.auto_update()
+
+    assert not update._is_shallow_repository(checkout)
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 2\n"
+    assert 'version = "99.0.0"' in (checkout / "pyproject.toml").read_text(encoding="utf-8")
+    assert len(exec_calls) == 1
 
 
 def test_update_fast_forwards_commits_without_a_version_bump(

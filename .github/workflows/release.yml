@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release (for example v1.2.14)"
+        description: "Existing tag to release (for example v2.0.0)"
         required: true
 
 permissions:
@@ -69,6 +69,12 @@ jobs:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" >/dev/null 2>&1 || \
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            :
+          elif [ -f "internal/docs/verification/RELEASE_${TAG#v}.md" ]; then
+            gh release create "$TAG" --title "Machina $TAG" \
+              --notes-file "internal/docs/verification/RELEASE_${TAG#v}.md"
+          else
             gh release create "$TAG" --generate-notes --title "Machina $TAG"
+          fi
           gh release upload "$TAG" dist/* --clobber

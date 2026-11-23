@@ -21,7 +21,7 @@ From the Machina repository:
 ```bash
 uv build --wheel
 export PYTHONPATH="$PWD/integrations/harbor"
-export MACHINA_HARBOR_WHEEL="$PWD/dist/machina-1.2.14-py3-none-any.whl"
+export MACHINA_HARBOR_WHEEL="$PWD/dist/machina-2.0.0-py3-none-any.whl"
 export DEEPSEEK_API_KEY=...
 
 harbor run -p /path/to/terminal-bench-task \

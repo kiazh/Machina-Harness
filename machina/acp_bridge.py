@@ -53,6 +53,7 @@ from acp.schema import (
     ToolCallUpdate,
 )
 
+from machina import __version__ as machina_version
 from machina.core.models import Session
 from machina.core.session import session_manager
 from machina.core.session_mode import (
@@ -212,7 +213,7 @@ class MachinaACPAgent(Agent):
             agent_info=Implementation(
                 name="machina",
                 title="Machina",
-                version="1.2.14",
+                version=machina_version,
             ),
             auth_methods=[],
         )
