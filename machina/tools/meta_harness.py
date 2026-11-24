@@ -124,7 +124,7 @@ async def harness_delegate(
         session_id = current_session_id.get()
         if session_id:
             try:
-                job = harness_jobs.start(
+                job = await harness_jobs.start(
                     session_id=str(session_id),
                     platform=requested,
                     task=run_text,
@@ -246,7 +246,7 @@ async def harness_job(action: str = "list", job_id: str = "", wait_seconds: int 
     if not identifier:
         raise ToolError(f"job_id is required for action={mode}")
     job = harness_jobs.get(identifier)
-    if job is None or str(job.get("session_id")) != str(session_id):
+    if job is None or str(job.get("owner_session_id")) != str(session_id):
         raise ToolError("background harness job not found in this session")
     if mode == "wait":
         try:

@@ -19,6 +19,13 @@ def _reset_jobs():
     harness_jobs.reset_for_tests()
 
 
+def test_question_like_harness_output_is_flagged_for_notification():
+    assert harness_jobs._looks_like_question(
+        "I need a bit more direction here. Research planes could mean a few things — which one?"
+    )
+    assert not harness_jobs._looks_like_question("Research complete. Three sources summarized.")
+
+
 def test_harness_workspace_falls_back_when_the_session_has_no_pin(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
@@ -53,7 +60,7 @@ async def test_background_job_records_bounded_result(monkeypatch):
         ),
     )
 
-    job = harness_jobs.start(session_id="session-a", platform="hermes", task="hi", timeout=30)
+    job = await harness_jobs.start(session_id="session-a", platform="hermes", task="hi", timeout=30)
     assert job["status"] == "running"
 
     for _ in range(100):
@@ -77,11 +84,12 @@ async def test_harness_delegate_background_requires_and_uses_the_session(monkeyp
     from machina.tools import agents as agent_tools
 
     started: dict = {}
-    monkeypatch.setattr(
-        harness_jobs,
-        "start",
-        lambda **kwargs: started.update(kwargs) or {"id": "job-1"},
-    )
+
+    async def _start(**kwargs):
+        started.update(kwargs)
+        return {"id": "job-1"}
+
+    monkeypatch.setattr(harness_jobs, "start", _start)
     token = agent_tools.current_session_id.set("session-a")
     try:
         payload = json.loads(
@@ -109,7 +117,12 @@ async def test_harness_job_reads_only_the_current_sessions_jobs(monkeypatch):
         harness_jobs,
         "get",
         lambda job_id: (
-            {"id": job_id, "session_id": "session-a", "status": "complete"}
+            {
+                "id": job_id,
+                "owner_session_id": "session-a",
+                "session_id": "child-a",
+                "status": "complete",
+            }
             if job_id == "job-1"
             else None
         ),

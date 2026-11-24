@@ -247,10 +247,12 @@ function sanitizeAskTextOptions(options: AskTextOptions): AskTextOptions {
 
 interface HarnessJobView {
 	id: string;
+	owner_session_id: string;
 	session_id: string;
 	platform: string;
 	task: string;
 	status: string;
+	needs_input: boolean;
 	started_at: string | null;
 	ended_at: string | null;
 	exit_code: number | null;
@@ -478,7 +480,9 @@ export class App implements FeatureHost {
 				? id.slice("agent:".length)
 				: id.startsWith("session:")
 					? id.slice("session:".length)
-					: "";
+					: id.startsWith("harness-job:")
+						? (this.harnessJobs.get(id.slice("harness-job:".length))?.session_id ?? "")
+						: "";
 			if (!sessionId) return false;
 			if (sessionId === this.current?.id) {
 				this.closeStatusTab();
@@ -1501,21 +1505,34 @@ export class App implements FeatureHost {
 		const visible = new Set(this.familyRows().map((row) => row.session.id));
 		if (this.current) visible.add(this.current.id);
 		return [...this.harnessJobs.values()]
-			.filter(job => visible.size === 0 || visible.has(job.session_id))
+			.filter(
+				job =>
+					visible.size === 0
+					|| visible.has(job.owner_session_id)
+					|| job.session_id === this.current?.id,
+			)
 			.sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))
 			.slice(0, 24)
 			.map(job => ({
 				id: `harness-job:${job.id}`,
 				label: `${job.platform} · ${job.task.slice(0, 48)}`,
-				detail: job.status === "running" ? "background subagent" : (job.command[0] ?? `${job.platform} run`),
-				state: job.status,
+				detail:
+					job.status === "running"
+						? "background subagent"
+						: job.needs_input
+							? "needs direction"
+							: (job.command[0] ?? `${job.platform} run`),
+				state: job.needs_input && job.status !== "running" ? "needs input" : job.status,
 				running: job.status === "running",
 				updatedAt: job.ended_at ?? job.started_at ?? undefined,
 				logs: [
 					`Job: ${job.id}`,
 					`Harness: ${job.platform}`,
+					`Session: ${job.session_id}`,
+					`Owner: ${job.owner_session_id}`,
 					`Task: ${job.task}`,
 					`Status: ${job.status}`,
+					...(job.needs_input ? ["Needs input: the harness asked a question."] : []),
 					`Exit: ${job.exit_code ?? "pending"}`,
 					...(job.error ? [`Error: ${job.error}`] : []),
 					...(job.stdout ? ["", "Output:", ...job.stdout.split(/\r?\n/).slice(0, 12)] : []),
@@ -3964,12 +3981,25 @@ export class App implements FeatureHost {
 		if (event.type === "harness.job") {
 			const job = event.job as unknown as HarnessJobView;
 			this.harnessJobs.set(job.id, job);
-			if (job.session_id === this.current?.id && job.status !== "running") {
+			// The child chat exists as soon as the job starts; refresh the
+			// family so Activity/agent tabs can open it.
+			if (job.session_id) this.refreshFamily();
+			if (
+				job.status !== "running"
+				&& (job.owner_session_id === this.current?.id || job.session_id === this.current?.id)
+			) {
 				const detail = (job.stdout || job.stderr || job.error || "").trim().split(/\r?\n/)[0] ?? "";
-				this.transcript.addNotice(
-					`Harness ${job.platform} ${job.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
-					job.status === "complete" ? "success" : job.status === "stopped" ? "warning" : "error",
-				);
+				if (job.needs_input) {
+					this.transcript.addNotice(
+						`Harness ${job.platform} is asking${detail ? `: ${detail.slice(0, 160)}` : " for direction"} — open it from Activity or reply in chat.`,
+						"warning",
+					);
+				} else {
+					this.transcript.addNotice(
+						`Harness ${job.platform} ${job.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
+						job.status === "complete" ? "success" : job.status === "stopped" ? "warning" : "error",
+					);
+				}
 			}
 			this.tui.requestRender();
 			return;

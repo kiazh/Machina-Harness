@@ -1,5 +1,20 @@
 # Release notes
 
+## 2.3.0 - 2026-11-24
+
+**Harness jobs become real child chats.**
+
+### Added
+
+- Every background harness job now creates a child chat session parented to the session that started it. The task and bounded result are stored as transcript chunks, so Activity → Agents/Sessions can open the run and read what happened.
+- Activity Enter on a harness job row opens its child chat; the child also appears as an agent row after the family refresh.
+- Question notifications: a harness completion that reads like a request for direction ("which one?", "need more direction", etc.) is flagged `needs_input`, shown as **“Harness X is asking: …”**, and marked `needs input` in Activity.
+- `harness.job` snapshots now include `owner_session_id`, `session_id`, and `needs_input`.
+
+### Changed
+
+- `harness_jobs.start` is async (it creates the child session first). The tool and gateway background paths await it; the run still starts immediately after.
+
 ## 2.2.2 - 2026-11-24
 
 **Session-workspace validation fix.**

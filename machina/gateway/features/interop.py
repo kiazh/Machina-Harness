@@ -373,7 +373,7 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         from machina.core import harness_jobs
 
         try:
-            job = harness_jobs.start(
+            job = await harness_jobs.start(
                 session_id=str(session_id),
                 platform=spec.key,
                 task=prompt,
