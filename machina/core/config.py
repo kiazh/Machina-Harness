@@ -483,7 +483,7 @@ DEFAULTS: dict[str, Any] = {
     "terminal_sandbox": "disabled",
     "terminal_image": "machina-tool-sandbox:latest",
     "terminal_wasm_module": "",
-    "approval_timeout": 300,
+    "approval_timeout": 0,
     # Factory-built agents start with core schemas and load others via
     # ``tool_load``. Direct ReActAgent construction defaults to eager schemas
     # so embedders/tests keep the historical explicit surface.
@@ -711,7 +711,9 @@ def validate_value(key: str, value: Any) -> Any:
 def _check_int_bounds(key: str, val: int) -> None:
     bounds: dict[str, tuple[int, int | None]] = {
         "turn_timeout": (0, 3600),
-        "approval_timeout": (1, 3600),
+        # 0 waits for the human indefinitely (an away-from-keyboard approval
+        # must still be there when they return).
+        "approval_timeout": (0, None),
         "context_budget": (100, None),
         "max_tokens": (1, MAX_TOKENS),
         "max_delegate_concurrency": (1, 64),
@@ -937,7 +939,7 @@ class Config:
     terminal_sandbox: str = "disabled"
     terminal_image: str = "machina-tool-sandbox:latest"
     terminal_wasm_module: str = ""
-    approval_timeout: int = 300
+    approval_timeout: int = 0
     dynamic_tool_loading: bool = True
     skill_query_expansion_enabled: bool = False
     memory_graph_enabled: bool = True

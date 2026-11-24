@@ -10,6 +10,10 @@
 - **Provider failures say what happened.** A failed turn now reports the HTTP status, provider/model and the fix ("Check the provider credential", "Add credits or switch provider/model") instead of the generic "LLM provider error. Check server logs."
 - Test isolation: the local `MACHINA_HARNESS_MODEL*` overrides no longer leak into command-shape tests.
 
+### Changed
+
+- **Approvals no longer expire by default.** `approval_timeout` now defaults to `0`, meaning Machina waits for the human until they approve, deny, or stop the turn. Leave the screen for an hour and the card is still there. Set a positive value only when you deliberately want an unattended timeout; the previous 300-second default expired pending approvals. The setting accepts `0` through unbounded seconds.
+
 ## 2.4.1 - 2026-11-24
 
 **Harness chats keep the conversation.**

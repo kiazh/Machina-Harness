@@ -328,13 +328,19 @@ class PermissionBroker:
         try:
             from machina.core.config import config
 
-            timeout = float(config.get("approval_timeout") or 300)
-        except Exception:
-            timeout = 300.0
+            timeout = float(config.get("approval_timeout"))
+        except (TypeError, ValueError):
+            timeout = 0.0
         try:
-            verdict = await asyncio.wait_for(
-                handler(_approval_view(req, approval)), timeout=timeout
-            )
+            if timeout > 0:
+                verdict = await asyncio.wait_for(
+                    handler(_approval_view(req, approval)), timeout=timeout
+                )
+            else:
+                # 0 means "wait for the human": an approval must survive a
+                # lunch break or a meeting. Only an explicit decision (or
+                # turn cancellation) retires the card.
+                verdict = await handler(_approval_view(req, approval))
         except TimeoutError:
             return await self._approval_deadline(req, approval, principal)
         except asyncio.CancelledError:

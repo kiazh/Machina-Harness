@@ -867,7 +867,7 @@ The same pause semantics exist on every surface:
 - **Headless CLI:** exits with code `3` and a structured pause instead of waiting forever.
 - **Scheduler jobs:** park in a durable `paused_approval` state, excluded from due claims, and resume only through `jobs.resume`.
 
-No SQL transaction is held across a human wait. Compute and approval deadlines are tracked separately: a human thinking for ten minutes does not consume the turn's compute budget, but the approval itself is still bounded by `approval_timeout`.
+No SQL transaction is held across a human wait. Compute and approval deadlines are tracked separately: a human thinking for ten minutes does not consume the turn's compute budget. `approval_timeout` bounds the approval wait only when set above `0`; the default `0` waits for the human until they approve, deny, or stop the turn.
 
 ### Why each control exists
 
@@ -1931,7 +1931,7 @@ Precedence: explicit overrides > environment variables > saved configuration > d
 | `cost_tier` | `balanced` | `low`, `balanced`, or `high` route ranking |
 | `single_model_auto_parallel` | `false` | Fan explicit parallel work out on one route |
 | `execution_mode` | `ask` | Default authority preset for new sessions |
-| `turn_timeout` / `approval_timeout` | `0` / `300` | Optional turn limit (`0` disables it) and approval-wait limit, in seconds |
+| `turn_timeout` / `approval_timeout` | `0` / `0` | Optional turn limit and approval-wait limit, in seconds (`0` disables the limit) |
 | `rate_limit_calls_per_minute` | `10` | Model-call throttle; `0` disables |
 | `compression_enabled` | `true` | Allow older context to be compressed |
 | `compression_threshold` / `compression_target_ratio` | `0.8` / `0.5` | Trigger and target proportions |
@@ -2710,7 +2710,7 @@ erDiagram
 | `dynamic_tool_loading` | `true` (core schemas plus `tool_load`; set `MACHINA_DYNAMIC_TOOL_LOADING=0` for eager schemas) |
 | `skill_query_expansion_enabled` | `false` (opt-in extra model call for skill-routing vocabulary) |
 | `browser_verification` | `auto` |
-| `approval_timeout` | `300` |
+| `approval_timeout` | `0` |
 | `meta_harness_enabled` | `true` |
 | `meta_harness_hint` | `true` |
 | `database_url` | `""` |
@@ -2949,7 +2949,7 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 | Projection fits nothing at zero budget | The first protected entry is kept rather than silently erased |
 | Embedding backend is off | Retrieval degrades to keyword-only and reports the mode |
 | Retrieval is entirely unavailable | A typed error is raised, distinct from a legitimate empty result |
-| Approval wait exceeds `approval_timeout` | Approval becomes `expired`; execution refuses it |
+| Approval wait exceeds a non-zero `approval_timeout` | Approval becomes `expired`; execution refuses it |
 | Action changed after approval | Digest mismatch fails closed and requires a fresh decision |
 | Approval is replayed after consumption | `approval.unavailable` / denied; the effect cannot run twice |
 | An agent tries to approve its own action | Rejected; resolution requires a human principal bound to the session |

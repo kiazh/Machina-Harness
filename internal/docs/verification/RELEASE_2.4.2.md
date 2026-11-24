@@ -30,6 +30,14 @@ Delegation survives a broken provider key.
   Hermes parent: the child ran on `hermes/meituan/longcat-2.5:free`, returned
   `OK`, and finished `complete`.
 
+### Approvals
+
+- `approval_timeout` defaults to `0` and now means "wait for the human".
+  Pending approvals no longer expire after five minutes: walk away for an hour
+  and the card is still waiting on return. A positive value restores a bounded
+  wait; the config accepts `0` and no upper bound. Cancelling the turn is still
+  the explicit way to retire a card without a decision.
+
 ## Operational note
 
 The machine that produced the failure has two unusable credentials:

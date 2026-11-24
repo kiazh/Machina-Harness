@@ -439,3 +439,29 @@ async def test_parallel_review_budget_counts_escaped_wire_bytes_and_rejects_only
     assert sorted(row["status"] for row in final["result"]["results"]) == ["complete", "error"]
     assert not final.get("approvals")
     assert not workflow.gateway._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_zero_timeout_keeps_the_card_until_the_human_answers(workflow):
+    """An away-from-keyboard approval must not expire on its own."""
+    workflow.settings["approval_timeout"] = 0
+    operation = await start(workflow, agents=("second",))
+    approval = (await pending(workflow, operation))["approvals"][0]
+
+    # Far longer than the expiry test's 20ms: the durable row and the operation
+    # card must both still be live.
+    await asyncio.sleep(0.15)
+    live = workflow.gateway.operations.get({"id": operation["id"]})
+    assert live["status"] == "running"
+    assert live["approvals"]
+    assert (await store.get_approval(approval["requestId"]))["status"] == "pending"
+    assert not workflow.executions
+
+    await resolve(workflow, approval)
+    final = await settled(workflow, operation)
+    assert workflow.executions
+    assert final["status"] == "completed"
+    assert (await store.get_approval(approval["requestId"]))["status"] in {
+        "approved",
+        "completed",
+    }
