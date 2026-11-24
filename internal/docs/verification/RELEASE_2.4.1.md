@@ -38,10 +38,22 @@ Harness chats keep the conversation — and stop garbling the answer.
   events render as `→ tool: input` / `← output`; the answer is the
   concatenated text events.
 
+### Activity screen
+
+- New header (`Machina · Activity`, live/idle, freshness), filled filter pills,
+  uppercase section bands with counts, aligned `STATUS` / `UPDATED` columns,
+  relative timestamps, and a `❯` selection marker.
+- The inspector shows title, state/section/age chips, project/detail/runtime/
+  queue rows, and a count-labelled log block; one hint line says whether Enter
+  opens the conversation or toggles logs.
+- `1–7` switches filters, the footer lists the keys, and narrow terminals get
+  a list plus an inline Inspector instead of a single scrolling column.
+- Empty sections and inspectors explain what they are waiting for.
+
 ## Verification
 
 - Repository suite: `726 passed, 18 skipped`; ruff check and format clean.
-- UI suite: `1,264 passed, 6 skipped`; typecheck and lint clean.
+- UI suite: `1,266 passed, 6 skipped`; typecheck and lint clean.
 - Architecture ratchet: 26 passed (deferred-import cap unchanged).
 - Real OpenCode run with a DeepSeek model (`opencode/deepseek-v4.1-flash-free`):
   turn 1 streamed `→ shell: echo hi` / `← hi` and answered `done` in 21.5s;

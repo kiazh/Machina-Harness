@@ -17,6 +17,13 @@
 - **Model policy: DeepSeek only.** Machina never silently switches to another vendor's model to recover a run. The automatic replacement list only considers DeepSeek ids, and a provider-suggested model is adopted only when it is DeepSeek. `MACHINA_HARNESS_MODEL` (or `MACHINA_HARNESS_MODEL_<PLATFORM>`) pins the model used for a harness run.
 - OpenCode runs now use `--format json`, so Machina captures the session id and renders `→ tool` / `← output` progress; the final answer is the concatenated text events.
 
+### Activity screen
+
+- Rebuilt the Activity surface for scanning: a `Machina · Activity` header with live/idle and freshness, filled filter pills, uppercase section bands with per-section counts, aligned `STATUS`/`UPDATED` columns, relative timestamps, and a `❯` selection marker.
+- The inspector is now a proper details pane: title, state/section/age chips, project/detail/runtime/queue rows, and a count-labelled log block with a one-line hint that says whether Enter opens the conversation or toggles logs.
+- Number keys `1–7` switch filters, the footer shows the current key map, and narrow terminals split into a list plus an inline Inspector instead of one long scrolling column.
+- Empty sections and empty inspectors explain what they are waiting for instead of showing blank space.
+
 ## 2.4.0 - 2026-11-24
 
 **Two-way harness chats.**
