@@ -114,14 +114,20 @@ function age(iso: string | undefined): string {
 export class StatusPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => StatusSnapshot;
+	private readonly onOpen?: (row: StatusRow, section: string | undefined) => boolean;
 	private filter: StatusFilter = "all";
 	private selectedKey: string | undefined;
 	private readonly expanded = new Set<string>();
 	private hitboxes: Hitbox[] = [];
 
-	constructor(tui: TUI, snapshot: () => StatusSnapshot) {
+	constructor(
+		tui: TUI,
+		snapshot: () => StatusSnapshot,
+		onOpen?: (row: StatusRow, section: string | undefined) => boolean,
+	) {
 		this.tui = tui;
 		this.snapshot = snapshot;
+		this.onOpen = onOpen;
 	}
 
 	/** Kept as the tab-switch entry point; page swaps are intentionally
@@ -153,7 +159,22 @@ export class StatusPage implements Component {
 			this.moveSelection(data);
 			return true;
 		}
-		if (matchesKey(data, Key.enter) || data === " ") {
+		if (matchesKey(data, Key.enter)) {
+			if (!this.selectedKey) this.selectFirst();
+			const selected = this.buildPanels(this.snapshot())
+				.left.lines.find(line => line.key === this.selectedKey);
+			if (selected?.row && this.onOpen?.(selected.row, selected.section)) {
+				this.tui.requestRender();
+				return true;
+			}
+			if (this.selectedKey) {
+				if (this.expanded.has(this.selectedKey)) this.expanded.delete(this.selectedKey);
+				else this.expanded.add(this.selectedKey);
+			}
+			this.tui.requestRender();
+			return true;
+		}
+		if (data === " ") {
 			if (!this.selectedKey) this.selectFirst();
 			else if (this.expanded.has(this.selectedKey)) this.expanded.delete(this.selectedKey);
 			else this.expanded.add(this.selectedKey);
@@ -276,7 +297,7 @@ export class StatusPage implements Component {
 		}
 		while (out.length < rows - 1) push(" ".repeat(width));
 		push(truncateToWidth(
-			` ${theme.dim("↑↓ move · Enter inspect/logs · Tab filter · Esc chat · refresh 3s")}`,
+			` ${theme.dim("↑↓ move · Enter open/inspect · Space logs · Tab filter · Esc chat")}`,
 			width,
 			"…",
 			true,

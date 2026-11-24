@@ -51,6 +51,23 @@ test("status rows expand local logs with Enter and collapse again", () => {
 	assert.doesNotMatch(page.render(96).map(stripTerminalSequences).join("\n"), /Third detail/);
 });
 
+test("Enter opens agent and session rows instead of expanding their logs", () => {
+	const tui = {
+		terminal: { columns: 96, rows: 28 },
+		requestRender() {},
+	} as unknown as TUI;
+	const opened: Array<[string | undefined, string | undefined]> = [];
+	const page = new StatusPage(tui, () => snapshot, (row, section) => {
+		opened.push([row.id, section]);
+		return section === "Agents" || section === "Sessions";
+	});
+	page.render(96);
+	assert.equal(page.handleInput("\r"), true);
+	assert.deepEqual(opened, [["agent:main", "Agents"]]);
+	// Opening navigates; it must not also expand the inspector logs.
+	assert.doesNotMatch(page.render(96).map(stripTerminalSequences).join("\n"), /Third detail/);
+});
+
 test("status rows and filter tabs are clickable", () => {
 	const tui = {
 		terminal: { columns: 96, rows: 28 },

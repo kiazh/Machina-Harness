@@ -93,6 +93,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "delegate_status",
         "list_agents",
         "harness_delegate",
+        "harness_job",
         "harness_status",
         "harness_features",
         "harness_catalog",

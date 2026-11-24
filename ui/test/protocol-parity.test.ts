@@ -33,6 +33,7 @@ export const TS_EVENT_TYPES = [
 	"steering.update",
 	"question.asked",
 	"shell.job",
+	"harness.job",
 	"message.complete",
 	"error",
 	"needs_approval",

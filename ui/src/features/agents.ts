@@ -178,37 +178,53 @@ export const delegateCommand: Command = {
 				return;
 			}
 		}
-		host.print(`Delegating to ${agent}…`, "plain");
-		// The reply is untrusted wire data: a child that fails before producing
-		// a result, a server-side short-circuit or a malformed frame can leave
-		// `results` empty or absent. Report that honestly instead of dereferencing
-		// a non-existent result (P0-22).
-		const reply = await host.request<{ results?: unknown } | undefined>("agents.run", {
-			sessionId: host.session()?.id,
-			steps: [{ agent, task }],
+		host.print(
+			`Delegating to ${agent} in the background. Keep using the main agent; the result appears here when it finishes.`,
+			"plain",
+		);
+		// Never await a long delegation inside the slash command: commandRunning
+		// would consume every key until the child exits, which reads as a frozen
+		// keyboard. The RPC continues while the composer stays live.
+		void dispatchDelegation(host, agent, task).catch((error) => {
+			host.print(
+				`Delegation failed: ${error instanceof Error ? error.message : String(error)}`,
+				"error",
+			);
 		});
-		const results = Array.isArray(reply?.results) ? reply.results : [];
-		if (!results.length) {
-			host.print(
-				`Delegation returned no result. ${agent} may have failed before responding; try again, or inspect it with /agents history.`,
-				"error",
-			);
-			return;
-		}
-		const first: unknown = results[0];
-		if (!isDelegationResult(first)) {
-			host.print(
-				`Delegation returned an invalid result (missing status). Nothing was applied; check /agents history.`,
-				"error",
-			);
-			return;
-		}
-		const r = first;
-		if (r.status === "error") host.print(`${agent} failed: ${r.response}`, "error");
-		else if (r.status === "waiting_approval") await reportPausedDelegation(agent, r, host);
-		else host.printMarkdown(`**${agent}** (${r.tokens} tokens):\n\n${r.response}`);
 	},
 };
+
+/** Await one `agents.run` delegation and report its validated result. */
+async function dispatchDelegation(host: FeatureHost, agent: string, task: string): Promise<void> {
+	// The reply is untrusted wire data: a child that fails before producing
+	// a result, a server-side short-circuit or a malformed frame can leave
+	// `results` empty or absent. Report that honestly instead of dereferencing
+	// a non-existent result (P0-22).
+	const reply = await host.request<{ results?: unknown } | undefined>("agents.run", {
+		sessionId: host.session()?.id,
+		steps: [{ agent, task }],
+	});
+	const results = Array.isArray(reply?.results) ? reply.results : [];
+	if (!results.length) {
+		host.print(
+			`Delegation returned no result. ${agent} may have failed before responding; try again, or inspect it with /agents history.`,
+			"error",
+		);
+		return;
+	}
+	const first: unknown = results[0];
+	if (!isDelegationResult(first)) {
+		host.print(
+			`Delegation returned an invalid result (missing status). Nothing was applied; check /agents history.`,
+			"error",
+		);
+		return;
+	}
+	const r = first;
+	if (r.status === "error") host.print(`${agent} failed: ${r.response}`, "error");
+	else if (r.status === "waiting_approval") await reportPausedDelegation(agent, r, host);
+	else host.printMarkdown(`**${agent}** (${r.tokens} tokens):\n\n${r.response}`);
+}
 
 /**
  * Runtime shape check for one `agents.run` step result. The gateway can answer

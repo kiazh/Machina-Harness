@@ -258,6 +258,18 @@ class Gateway:
             }
         )
         shell_jobs.listeners.add(self._shell_listener)
+        from machina.core import harness_jobs as harness_job_store
+
+        self._harness_listener = lambda job: self._write(
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": self.event_payload(
+                    "harness.job", str(job.session_id), job.id, job=job.snapshot()
+                ),
+            }
+        )
+        harness_job_store.listeners.add(self._harness_listener)
         self._turn_tokens: dict[str, str] = {}
         self._turn_ownership_lost: dict[str, asyncio.Event] = {}
         self._turn_progress: dict[str, dict[str, int]] = {}
@@ -523,6 +535,9 @@ class Gateway:
         from machina.core.shell_jobs import shell_jobs
 
         shell_jobs.listeners.discard(self._shell_listener)
+        from machina.core import harness_jobs as harness_job_store
+
+        harness_job_store.listeners.discard(self._harness_listener)
         shell_jobs.closing = True
         tasks = [t for t in self._turns.values() if not t.done()]
         if tasks:

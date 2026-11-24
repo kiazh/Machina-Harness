@@ -245,6 +245,21 @@ function sanitizeAskTextOptions(options: AskTextOptions): AskTextOptions {
 	};
 }
 
+interface HarnessJobView {
+	id: string;
+	session_id: string;
+	platform: string;
+	task: string;
+	status: string;
+	started_at: string | null;
+	ended_at: string | null;
+	exit_code: number | null;
+	command: string[];
+	stdout: string;
+	stderr: string;
+	error: string;
+}
+
 export class App implements FeatureHost {
 	readonly exited: Promise<void>;
 
@@ -303,6 +318,7 @@ export class App implements FeatureHost {
 	private statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
 	private statusRefreshing = false;
 	private statusHarnesses: StatusRow[] = [];
+	private readonly harnessJobs = new Map<string, HarnessJobView>();
 	private statusMcp: StatusRow[] = [];
 	private statusSessions: StatusRow[] = [];
 	private statusDefaultPending = false;
@@ -455,7 +471,23 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.family.open(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
-		this.statusPage = new StatusPage(tui, () => this.statusSnapshot());
+		this.statusPage = new StatusPage(tui, () => this.statusSnapshot(), (row) => {
+			const id = row.id ?? "";
+			const sessionId = id.startsWith("agent:")
+				? id.slice("agent:".length)
+				: id.startsWith("session:")
+					? id.slice("session:".length)
+					: "";
+			if (!sessionId) return false;
+			if (sessionId === this.current?.id) {
+				this.closeStatusTab();
+				return true;
+			}
+			void this.family.open(sessionId).then(() => {
+				if (this.view === "status") this.closeStatusTab();
+			});
+			return true;
+		});
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -1451,16 +1483,44 @@ export class App implements FeatureHost {
 			project: project || undefined,
 			agents,
 			sessions: this.statusSessions,
+			harnesses: [...this.statusHarnesses, ...this.harnessJobRows()],
 			shells,
 			tools,
 			mcp: this.statusMcp,
-			harnesses: this.statusHarnesses,
 			queued,
 			approvals: this.turnSession.approvalDialogCount(),
 			updatedAt: this.statusUpdatedAt,
 			error: this.statusError,
 			running: this.running,
 		};
+	}
+
+	/** Background harness runs, rendered beside detected harnesses. */
+	private harnessJobRows(): StatusRow[] {
+		const visible = new Set(this.familyRows().map((row) => row.session.id));
+		if (this.current) visible.add(this.current.id);
+		return [...this.harnessJobs.values()]
+			.filter(job => visible.size === 0 || visible.has(job.session_id))
+			.sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))
+			.slice(0, 24)
+			.map(job => ({
+				id: `harness-job:${job.id}`,
+				label: `${job.platform} · ${job.task.slice(0, 48)}`,
+				detail: job.status === "running" ? "background subagent" : (job.command[0] ?? `${job.platform} run`),
+				state: job.status,
+				running: job.status === "running",
+				updatedAt: job.ended_at ?? job.started_at ?? undefined,
+				logs: [
+					`Job: ${job.id}`,
+					`Harness: ${job.platform}`,
+					`Task: ${job.task}`,
+					`Status: ${job.status}`,
+					`Exit: ${job.exit_code ?? "pending"}`,
+					...(job.error ? [`Error: ${job.error}`] : []),
+					...(job.stdout ? ["", "Output:", ...job.stdout.split(/\r?\n/).slice(0, 12)] : []),
+					...(job.stderr ? ["", "Stderr:", ...job.stderr.split(/\r?\n/).slice(0, 8)] : []),
+				],
+			}));
 	}
 
 	private async refreshStatusData(): Promise<void> {
@@ -1470,11 +1530,14 @@ export class App implements FeatureHost {
 		const slow = Date.now() - this.statusSlowRefreshAt >= 15_000;
 		if (slow) this.statusSlowRefreshAt = Date.now();
 		try {
-			const [interop, mcp, jobs, steering, sessionsResult] = await Promise.allSettled([
+			const [interop, mcp, jobs, harnessJobs, steering, sessionsResult] = await Promise.allSettled([
 				slow ? this.request<InteropStatusResult>("interop.status") : Promise.resolve(null),
 				slow ? this.request<{ servers?: MCPServerView[] }>("mcp.list") : Promise.resolve(null),
 				sessionId
 					? this.request<{ jobs?: ShellJob[] }>("shell.jobs", { sessionId })
+					: Promise.resolve({ jobs: [] }),
+				sessionId
+					? this.request<{ jobs?: HarnessJobView[] }>("interop.jobs", { sessionId })
 					: Promise.resolve({ jobs: [] }),
 				sessionId
 					? this.request<{ items?: SteeringItem[] }>("prompt.steering", { sessionId })
@@ -1488,6 +1551,9 @@ export class App implements FeatureHost {
 				}
 				if (steering.status === "fulfilled") {
 					this.activity.setQueue(sessionId, steering.value.items ?? []);
+				}
+				if (harnessJobs.status === "fulfilled") {
+					for (const job of harnessJobs.value.jobs ?? []) this.harnessJobs.set(job.id, job);
 				}
 			}
 			if (sessionsResult.status === "fulfilled" && sessionsResult.value) {
@@ -3880,6 +3946,19 @@ export class App implements FeatureHost {
 		for (const handler of [...this.featureEventHandlers]) handler(event);
 		if (event.type === "shell.job") {
 			this.activity.setJob(event.sessionId, event.job as unknown as ShellJob);
+			this.tui.requestRender();
+			return;
+		}
+		if (event.type === "harness.job") {
+			const job = event.job as unknown as HarnessJobView;
+			this.harnessJobs.set(job.id, job);
+			if (job.session_id === this.current?.id && job.status !== "running") {
+				const detail = (job.stdout || job.stderr || job.error || "").trim().split(/\r?\n/)[0] ?? "";
+				this.transcript.addNotice(
+					`Harness ${job.platform} ${job.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
+					job.status === "complete" ? "success" : job.status === "stopped" ? "warning" : "error",
+				);
+			}
 			this.tui.requestRender();
 			return;
 		}

@@ -1,5 +1,23 @@
 # Release notes
 
+## 2.2.0 - 2026-11-24
+
+**Background harness subagents and Activity navigation.**
+
+### Added
+
+- Activity screen: Enter on an agent or persisted-session row opens that session; Space still expands the retained logs. The footer says which key does what.
+- External harnesses can run as background subagents. `harness_delegate` defaults to `background=true`, returns a job id immediately, and keeps the main agent usable; `harness_job` lists/reads/waits for jobs. Jobs appear in Activity under Harnesses with bounded output, and a `harness.job` event posts a completion notice in the visible session.
+- `/harnesses` Run a task now starts a background job and returns immediately instead of blocking the client for the whole harness deadline.
+
+### Changed
+
+- `/delegate` is fire-and-forget: the command returns at once and prints the validated child result when it finishes, instead of holding `commandRunning` (and swallowing every key) until the delegation completes.
+
+### Fixed
+
+- Harness runs enforce one overall deadline across model-hint/free-model retries instead of granting each attempt the full timeout.
+
 ## 2.1.1 - 2026-11-24
 
 **Dynamic tool loading and Hermes delegation patch.**

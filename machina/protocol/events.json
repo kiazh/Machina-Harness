@@ -50,6 +50,9 @@
     "shell.job": {
       "job": "object"
     },
+    "harness.job": {
+      "job": "object"
+    },
     "message.complete": {
       "text": "string",
       "tokens": "number",

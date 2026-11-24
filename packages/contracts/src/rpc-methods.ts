@@ -56,6 +56,7 @@ export const RPC_METHODS = [
   "interop.communications",
   "interop.disable",
   "interop.enable",
+  "interop.jobs",
   "interop.list",
   "interop.run",
   "interop.status",

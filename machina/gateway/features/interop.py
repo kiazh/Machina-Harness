@@ -346,9 +346,32 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     prompt = _str(params, "prompt", max_len=MAX_RUN_PROMPT_CHARS)
     timeout = _run_timeout(params)
     options: dict[str, Any] = {"timeout": timeout}
-    if params.get("sessionId") is not None:
+    session_id = params.get("sessionId")
+    if session_id is not None:
         gw.require_db()
         options["cwd"] = _workspace_cwd(await gw.get_session(params))
+    if _bool(params, "background"):
+        if session_id is None:
+            raise RpcError(INVALID_PARAMS, "background harness runs require a sessionId")
+        from machina.core import harness_jobs
+
+        try:
+            job = harness_jobs.start(
+                session_id=str(session_id),
+                platform=spec.key,
+                task=prompt,
+                timeout=float(timeout),
+                cwd=options.get("cwd"),
+            )
+        except ValueError as exc:
+            raise RpcError(INVALID_PARAMS, str(exc)) from None
+        return {
+            "background": True,
+            "status": "started",
+            "jobId": job["id"],
+            "platform": spec.key,
+            "timeout": timeout,
+        }
     from machina.core.harness_communications import (
         async_finish_exchange,
         async_start_exchange,
@@ -445,6 +468,14 @@ async def _run_harness(platform: str, prompt: str, options: dict[str, Any]) -> d
         elapsed_ms=round((time.perf_counter() - started) * 1000.0, 1),
     )
     return payload
+
+
+async def interop_jobs(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """List this session's background harness jobs (bounded, no spawns)."""
+    from machina.core import harness_jobs
+
+    session = str(_uuid(params, "sessionId")) if params.get("sessionId") is not None else None
+    return {"jobs": harness_jobs.list_jobs(session)}
 
 
 async def interop_communications(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:

@@ -29,7 +29,9 @@ _DEFAULT_TIMEOUT = 120
     description=(
         "Run one bounded task in an installed external agent harness. Omit "
         "platform to let the local meta-harness router choose from OpenCode, "
-        "Codex, and Hermes. Requires normal execution approval."
+        "Codex, and Hermes. Background jobs return immediately and keep the "
+        "main agent usable; check them with harness_job. Requires normal "
+        "execution approval."
     ),
     parameters={
         "type": "object",
@@ -48,6 +50,14 @@ _DEFAULT_TIMEOUT = 120
                 "maximum": _MAX_TIMEOUT,
                 "description": "Deadline in seconds; defaults to 120",
             },
+            "background": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "Run as a background subagent and return a job id immediately "
+                    "(default true). Set false to wait for the result inline."
+                ),
+            },
         },
         "required": ["task"],
         "additionalProperties": False,
@@ -58,6 +68,7 @@ async def harness_delegate(
     task: str,
     platform: str = "",
     timeout: int = _DEFAULT_TIMEOUT,
+    background: bool = True,
 ) -> str:
     """Route and execute one external harness task through the bounded runner."""
     text = str(task or "").strip()
@@ -106,6 +117,49 @@ async def harness_delegate(
     service = active_workspace_service()
     identity = service.identity if service is not None else None
     cwd = Path(identity.resolved_root) if identity is not None else None
+    if background:
+        from machina.core import harness_jobs
+        from machina.tools.agents import current_session_id
+
+        session_id = current_session_id.get()
+        if session_id:
+            try:
+                job = harness_jobs.start(
+                    session_id=str(session_id),
+                    platform=requested,
+                    task=run_text,
+                    timeout=float(seconds),
+                    cwd=cwd,
+                )
+            except ValueError as error:
+                raise ToolError(str(error)) from None
+            from machina.core.provider import audit_log
+
+            audit_log(
+                "harness_delegate",
+                platform=requested,
+                routed=routed,
+                background=True,
+                job_id=job["id"],
+                timeout_s=seconds,
+            )
+            return json.dumps(
+                {
+                    "status": "started",
+                    "job_id": job["id"],
+                    "platform": requested,
+                    "task": run_text,
+                    "routed": routed,
+                    "selected_intent": run_text if routed else None,
+                    "route": route_payload,
+                    "message": (
+                        "Running in the background. Keep working; check it with "
+                        "harness_job(action='status', job_id=...) or the Activity tab."
+                    ),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
     started = time.perf_counter()
     result = await asyncio.to_thread(
         interop.run_task,
@@ -139,3 +193,70 @@ async def harness_delegate(
         "route": route_payload,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+@registry.register(
+    name="harness_job",
+    description=(
+        "Check background external-harness jobs started by harness_delegate. "
+        "List this session's jobs or read one job's status and bounded output."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "status", "wait"],
+                "default": "list",
+                "description": "list this session's jobs, read one job, or wait for it",
+            },
+            "job_id": {
+                "type": "string",
+                "description": "Job id returned by harness_delegate (status/wait)",
+            },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 300,
+                "default": 120,
+                "description": "Maximum seconds to wait for action=wait",
+            },
+        },
+        "additionalProperties": False,
+    },
+)
+async def harness_job(action: str = "list", job_id: str = "", wait_seconds: int = 120) -> str:
+    """Read background harness jobs for the active session (never spawns)."""
+    from machina.core import harness_jobs
+    from machina.tools.agents import current_session_id
+
+    session_id = current_session_id.get()
+    if session_id is None:
+        raise ToolError("harness_job requires an owned active session")
+    mode = str(action or "list").strip().lower()
+    if mode == "list":
+        return json.dumps(
+            {"jobs": harness_jobs.list_jobs(str(session_id))},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    if mode not in {"status", "wait"}:
+        raise ToolError("action must be list, status, or wait")
+    identifier = str(job_id or "").strip()
+    if not identifier:
+        raise ToolError(f"job_id is required for action={mode}")
+    job = harness_jobs.get(identifier)
+    if job is None or str(job.get("session_id")) != str(session_id):
+        raise ToolError("background harness job not found in this session")
+    if mode == "wait":
+        try:
+            seconds = int(wait_seconds)
+        except (TypeError, ValueError):
+            raise ToolError("wait_seconds must be an integer") from None
+        if not 1 <= seconds <= 300:
+            raise ToolError("wait_seconds must be between 1 and 300")
+        deadline = time.monotonic() + seconds
+        while job is not None and job.get("status") == "running" and time.monotonic() < deadline:
+            await asyncio.sleep(0.5)
+            job = harness_jobs.get(identifier)
+    return json.dumps(job, ensure_ascii=False, separators=(",", ":"))

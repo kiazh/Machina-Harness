@@ -1745,20 +1745,32 @@ def run_task(
             ok=False,
         )
     env = _child_env(spec)
+    # One deadline across the first attempt and any model-hint/free retries:
+    # giving each attempt the full timeout can triple the billed wait.
+    deadline = time.monotonic() + max(1.0, float(timeout))
+    first_attempt = True
 
     def _invoke(argv: list[str], input_text: str | None) -> _ProcessResult:
+        nonlocal first_attempt
+        if first_attempt:
+            # Preserve the caller's exact first deadline (typed contracts and
+            # tests read it); only retries share the remaining budget.
+            remaining = float(timeout)
+            first_attempt = False
+        else:
+            remaining = max(1.0, deadline - time.monotonic())
         if cancel_event is not None:
             return _run(
                 argv,
                 env=env,
-                timeout=timeout,
+                timeout=remaining,
                 stdin_text=input_text,
                 cwd=cwd,
                 cancel_event=cancel_event,
             )
         if cwd is None:
-            return _run(argv, env=env, timeout=timeout, stdin_text=input_text)
-        return _run(argv, env=env, timeout=timeout, stdin_text=input_text, cwd=cwd)
+            return _run(argv, env=env, timeout=remaining, stdin_text=input_text)
+        return _run(argv, env=env, timeout=remaining, stdin_text=input_text, cwd=cwd)
 
     proc = _invoke(command, stdin_text)
     stdout = _redact_output(proc.output)

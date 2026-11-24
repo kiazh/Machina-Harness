@@ -26,6 +26,11 @@ const MAIN: SessionInfo = {
 const CHILD = "22222222-3333-4444-5555-666666666666";
 const CHILD_SHORT = "22222222";
 
+const settle = async () => {
+	for (let index = 0; index < 8; index++) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+
+
 class FakeHost implements FeatureHost {
 	calls: Array<{ method: string; params: Record<string, unknown> }> = [];
 	printed: Array<{ text: string; kind: NoticeKind }> = [];
@@ -133,6 +138,7 @@ test("/delegate renders a paused child as a distinct approval state", async () =
 	host.responses["agents.run"] = pausedPayload();
 	host.picks.push(undefined);
 	await run("/delegate researcher find X", host);
+	await settle();
 
 	// Not an ordinary (finished) answer.
 	assert.equal(host.markdown.length, 0, "a paused child is not a finished answer");
@@ -160,6 +166,7 @@ test("/delegate paused state offers approval and continuation actions", async ()
 	host.responses["agents.run"] = pausedPayload();
 	host.picks.push(undefined);
 	await run("/delegate researcher find X", host);
+	await settle();
 	const values = host.pickItems.at(-1)!.map((i) => i.value);
 	assert.ok(values.includes("allow:aaaaaaaa-1111-4000-a000-000000000001"), "approve action");
 	assert.ok(values.includes("deny:aaaaaaaa-1111-4000-a000-000000000001"), "deny action");
@@ -172,6 +179,7 @@ test("/delegate approving a paused child resolves against the child session", as
 	host.responses["approvals.resolve"] = {};
 	host.picks.push("allow:aaaaaaaa-1111-4000-a000-000000000001");
 	await run("/delegate researcher find X", host);
+	await settle();
 	const resolve = host.calls.find((c) => c.method === "approvals.resolve");
 	assert.ok(resolve, "approval must be resolved through the gateway");
 	assert.deepEqual(resolve.params, {
@@ -189,6 +197,7 @@ test("/delegate denying a paused child resolves a denial against the child sessi
 	host.responses["approvals.resolve"] = {};
 	host.picks.push("deny:aaaaaaaa-1111-4000-a000-000000000001");
 	await run("/delegate researcher find X", host);
+	await settle();
 	const resolve = host.calls.find((c) => c.method === "approvals.resolve");
 	assert.deepEqual(resolve!.params, {
 		requestId: "aaaaaaaa-1111-4000-a000-000000000001",
@@ -207,6 +216,7 @@ test("/delegate switching to the paused child resumes it as the current session"
 	};
 	host.picks.push("switch");
 	await run("/delegate researcher find X", host);
+	await settle();
 	const resume = host.calls.find((c) => c.method === "session.resume");
 	assert.deepEqual(resume!.params, { sessionId: CHILD });
 	assert.equal(host.switched.at(-1)!.session.id, CHILD);
@@ -218,6 +228,7 @@ test("/delegate leaving the pause keeps the child-session continuation target", 
 	host.responses["agents.run"] = pausedPayload();
 	host.picks.push("leave");
 	await run("/delegate researcher find X", host);
+	await settle();
 	assert.equal(host.calls.filter((c) => c.method === "approvals.resolve").length, 0);
 	assert.match(host.last().text, /[Pp]aused/);
 	assert.match(host.last().text, new RegExp(CHILD_SHORT));
@@ -229,6 +240,7 @@ test("/delegate complete and error states keep their existing rendering", async 
 		results: [{ agent: "researcher", task: "find X", response: "found X", sessionId: CHILD, tokens: 20, iterations: 1, status: "complete" }],
 	};
 	await run("/delegate researcher find X", done);
+	await settle();
 	assert.match(done.markdown.at(-1)!, /found X/);
 	assert.equal(done.printed.at(-1)!.kind, "plain");
 
@@ -237,6 +249,7 @@ test("/delegate complete and error states keep their existing rendering", async 
 		results: [{ agent: "researcher", task: "find X", response: "boom", sessionId: CHILD, tokens: 0, iterations: 0, status: "error" }],
 	};
 	await run("/delegate researcher find X", failed);
+	await settle();
 	assert.match(failed.last().text, /researcher failed: boom/);
 	assert.equal(failed.last().kind, "error");
 });

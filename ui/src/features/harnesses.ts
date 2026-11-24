@@ -19,6 +19,15 @@ import type {
 import { withDelayedNotice } from "./progress.ts";
 import { confirm, type Command, type FeatureHost } from "./types.ts";
 
+/** Gateway answer for a background harness run (returns immediately). */
+interface HarnessBackgroundStart {
+	background: true;
+	status: string;
+	jobId: string;
+	platform: string;
+	timeout: number;
+}
+
 /** Positive finite run-deadline seconds, or undefined when not reported (H22). */
 function runDeadlineSeconds(body: HarnessListResult): number | undefined {
 	const value = body.runTimeoutSeconds;
@@ -143,6 +152,22 @@ async function runTask(
 		`Run this prompt inside ${row.label}? It executes in the external harness ` +
 		"with host access (files, network, tools).";
 	if (!(await confirm(host, warning, "Run task"))) return;
+	const sessionId = host.session()?.id;
+	if (sessionId) {
+		const started = await host.request<HarnessBackgroundStart>("interop.run", {
+			platform: row.key,
+			prompt,
+			timeout: runTimeoutSeconds,
+			background: true,
+			sessionId,
+		});
+		host.print(
+			`${row.label} started in the background (job ${started.jobId}). ` +
+				"Keep working; the Activity tab and a completion notice show the result.",
+			"success",
+		);
+		return;
+	}
 	const result = await withDelayedNotice(
 		host,
 		`Consulting ${row.label}. Waiting for its bounded run to finish...`,

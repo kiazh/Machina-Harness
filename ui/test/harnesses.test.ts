@@ -126,15 +126,6 @@ function hostWithRows(): HarnessesFakeHost {
 	return host;
 }
 
-const RUN_RESULT = {
-	ok: true,
-	exitCode: 0,
-	command: "codex exec --prompt-text",
-	stdout: "done\n",
-	stderr: "",
-	unsupportedReason: null,
-};
-
 test("/harnesses opens the picker with a state summary per harness", async () => {
 	const host = hostWithRows();
 	host.answerQueue.push("codex");
@@ -237,25 +228,36 @@ test("/harnesses Unregister confirms, then calls interop.disable and surfaces fa
 	assert.match(host.text(), /no MCP remove subcommand/);
 });
 
-test("/harnesses Run a task prompts, warns, calls interop.run and renders bounded output", async () => {
+test("/harnesses Run a task starts a background job and returns immediately", async () => {
 	const host = hostWithRows();
 	host.answerQueue.push("codex", "run", "yes");
 	host.textQueue.push("summarize the repo");
-	host.responses["interop.run"] = RUN_RESULT;
+	host.responses["interop.run"] = {
+		background: true,
+		status: "started",
+		jobId: "job-1",
+		platform: "codex",
+		timeout: 300,
+	};
 	await run("/harnesses", host);
 
-	// H22: the gateway-surfaced deadline rides along as the explicit timeout,
-	// so the client clock (app.ts) is aligned with the backend's own deadline.
+	// The gateway-surfaced deadline rides along as the explicit timeout and
+	// the run is started in the background, so a hung CLI never freezes keys.
 	assert.deepEqual(host.calls.at(-1), {
 		method: "interop.run",
-		params: { platform: "codex", prompt: "summarize the repo", timeout: 300 },
+		params: {
+			platform: "codex",
+			prompt: "summarize the repo",
+			timeout: 300,
+			background: true,
+			sessionId: SESSION.id,
+		},
 	});
 	const confirmTitle = host.pickCalls.at(-1)!.title;
 	assert.match(confirmTitle, /Run this prompt inside Codex\?/);
 	assert.match(confirmTitle, /host access/);
-	assert.match(host.text(), /Codex: completed · exit code 0/);
-	assert.match(host.text(), /command: codex exec --prompt-text/);
-	assert.match(host.text(), /done/);
+	assert.match(host.text(), /started in the background/);
+	assert.match(host.text(), /job-1/);
 });
 
 test("/harnesses Run a task refuses when the gateway does not report its deadline", async () => {
