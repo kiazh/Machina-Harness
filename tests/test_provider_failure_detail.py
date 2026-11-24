@@ -6,8 +6,7 @@ from types import SimpleNamespace
 
 from httpx import HTTPStatusError, Request, Response
 
-from machina.core.agent import _provider_failure_detail
-from machina.core.turn_flow import failed_response
+from machina.core.turn_flow import failed_response, provider_failure_detail
 
 
 def test_http_402_names_status_provider_model_and_fix():
@@ -19,7 +18,7 @@ def test_http_402_names_status_provider_model_and_fix():
     )
     agent = SimpleNamespace(provider=SimpleNamespace(name="deepseek", model="deepseek-v4-pro"))
 
-    detail = _provider_failure_detail(error, agent)
+    detail = provider_failure_detail(error, agent.provider)
 
     assert "HTTP 402" in detail
     assert "deepseek/deepseek-v4-pro" in detail
@@ -39,7 +38,7 @@ def test_http_401_points_at_the_credential():
     )
     agent = SimpleNamespace(provider=SimpleNamespace(model="minimax/minimax-m3.1-flash:free"))
 
-    detail = _provider_failure_detail(error, agent)
+    detail = provider_failure_detail(error, agent.provider)
 
     assert "HTTP 401" in detail
     assert "Check the provider credential" in detail

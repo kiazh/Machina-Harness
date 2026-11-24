@@ -106,6 +106,30 @@ def stopped_response(
     )
 
 
+def provider_failure_detail(error: Exception, provider: Any) -> str:
+    """One bounded, redaction-safe line naming the HTTP status and route."""
+    status = getattr(getattr(error, "response", None), "status_code", None)
+    model = str(getattr(provider, "model", "") or "")
+    name = str(
+        getattr(getattr(provider, "spec", None), "name", "")
+        or getattr(provider, "name", "")
+        or type(provider).__name__
+    )
+    message = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+    parts: list[str] = []
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    parts.append(message[:180])
+    where = "/".join(part for part in (name, model) if part)
+    if where:
+        parts.append(f"({where})")
+    if status in (401, 403):
+        parts.append("Check the provider credential.")
+    elif status == 402:
+        parts.append("Add credits or switch provider/model.")
+    return " ".join(parts)[:320]
+
+
 def failed_response(
     tool_calls: list[dict[str, Any]],
     tokens: int,
@@ -127,6 +151,36 @@ def failed_response(
         tool_calls=tool_calls,
         tokens_used=tokens,
         iterations=iterations,
+    )
+
+
+async def provider_failure_response(
+    agent: Any,
+    error: Exception,
+    *,
+    session_id: Any,
+    pending_chunks: list,
+    tool_calls: list[dict[str, Any]],
+    tokens: int,
+    iterations: int,
+    audit: Callable[..., Any],
+    label: str,
+) -> AgentResponse:
+    """Flush, audit and shape the provider-failure terminal for either loop."""
+    await agent._flush_pending_chunks(pending_chunks)
+    logger.exception(label)
+    audit(
+        "agent_run_llm_error",
+        session_id=str(session_id),
+        error=str(error),
+        iteration=iterations,
+    )
+    agent._schedule_memory_consolidation(session_id)
+    return failed_response(
+        tool_calls,
+        tokens,
+        iterations + 1,
+        provider_failure_detail(error, getattr(agent, "provider", None)),
     )
 
 
