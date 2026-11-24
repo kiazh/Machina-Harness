@@ -783,6 +783,10 @@ async def status_summary() -> dict[str, Any]:
     try:
         from machina.core.runtime import runtime_services
 
+        # Every status surface (CLI, MCP, HTTP) shares this path. Startup is
+        # idempotent; without it a first status call reports every capability
+        # as "unknown" even though the provider/proxy checks are available.
+        await runtime_services.startup()
         runtime = runtime_services.status()
     except Exception as _boundary_error:
         # Optional fallback preserves the primary outcome; report no payload.

@@ -30,6 +30,88 @@ def test_suggested_retry_command_parses_the_provider_hint():
     assert interop._suggested_retry_command("codex", command, "", stderr) is None
 
 
+def test_run_task_does_not_retry_or_annotate_an_unrelated_failure(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run(argv, **_kwargs):
+        calls.append(list(argv))
+        return SimpleNamespace(
+            returncode=1,
+            output="",
+            stderr="Error loading config.toml: key with no value",
+            timed_out=False,
+            truncated=False,
+        )
+
+    monkeypatch.setattr(interop, "resolve_platform", lambda key: SimpleNamespace(label="Codex"))
+    monkeypatch.setattr(interop, "_which", lambda spec: "/usr/bin/codex")
+    monkeypatch.setattr(
+        interop,
+        "_literal_prompt_invocation",
+        lambda key, prefix, binary, prompt: ([binary, "exec", "-"], prompt),
+    )
+    monkeypatch.setattr(interop, "_child_env", lambda spec: {})
+    monkeypatch.setattr(interop, "_run", _run)
+
+    result = interop.run_task("codex", "hello")
+
+    assert result.ok is False
+    assert len(calls) == 1
+    assert "Retried" not in result.stderr
+
+
+def test_run_task_falls_back_to_a_free_model_when_credits_are_exhausted(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run(argv, **_kwargs):
+        calls.append(list(argv))
+        if len(calls) == 1:
+            return SimpleNamespace(
+                returncode=2,
+                output="",
+                stderr="HTTP 404: free period ended. switch to 'stepfun/step-5-preview'.",
+                timed_out=False,
+                truncated=False,
+            )
+        if len(calls) == 2:
+            return SimpleNamespace(
+                returncode=2,
+                output="",
+                stderr="requires available credits. add credits or pick a free model.",
+                timed_out=False,
+                truncated=False,
+            )
+        return SimpleNamespace(
+            returncode=0,
+            output="free result",
+            stderr="",
+            timed_out=False,
+            truncated=False,
+        )
+
+    monkeypatch.setattr(interop, "resolve_platform", lambda key: SimpleNamespace(label="Hermes"))
+    monkeypatch.setattr(interop, "_which", lambda spec: "/usr/bin/hermes")
+    monkeypatch.setattr(
+        interop,
+        "_literal_prompt_invocation",
+        lambda key, prefix, binary, prompt: ([binary, f"--oneshot={prompt}"], None),
+    )
+    monkeypatch.setattr(interop, "_child_env", lambda spec: {})
+    monkeypatch.setattr(interop, "_run", _run)
+    monkeypatch.setattr(interop, "_hermes_free_models", lambda: ["stepfun/step-3.7-flash:free"])
+
+    result = interop.run_task("hermes", "research planes")
+
+    assert result.ok is True
+    assert result.stdout == "free result"
+    assert calls[2] == [
+        "/usr/bin/hermes",
+        "-m",
+        "stepfun/step-3.7-flash:free",
+        "--oneshot=research planes",
+    ]
+
+
 def test_run_task_retries_hermes_with_the_suggested_model(monkeypatch):
     calls: list[list[str]] = []
 

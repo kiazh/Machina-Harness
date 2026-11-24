@@ -277,6 +277,29 @@ def test_spawn_injects_utf8_and_profile_environment(tmp_path, monkeypatch) -> No
     )
 
 
+def test_spawn_injects_the_detected_cli_db_and_proxy_password(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "data.sqlite3"
+    database.write_bytes(b"sqlite")
+    monkeypatch.setattr(kiro_gateway, "login_database_path", lambda: database)
+    monkeypatch.setattr(kiro_gateway.kiro_proxy, "api_key", lambda: "dummy-local-only")
+    monkeypatch.delenv("KIRO_CLI_DB_FILE", raising=False)
+    monkeypatch.delenv("PROXY_API_KEY", raising=False)
+    captured: dict[str, Any] = {}
+
+    class _CapturePopen(_FakeProcess):
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            super().__init__()
+            captured.update(kwargs)
+
+    monkeypatch.setattr(kiro_gateway.subprocess, "Popen", _CapturePopen)
+    spec = kiro_gateway.LaunchSpec(("python", "main.py"), tmp_path, "configured")
+
+    kiro_gateway._spawn(spec)
+
+    assert captured["env"]["KIRO_CLI_DB_FILE"] == str(database)
+    assert captured["env"]["PROXY_API_KEY"] == "dummy-local-only"
+
+
 def test_spawn_does_not_override_a_checkout_profile_arn(tmp_path, monkeypatch) -> None:
     (tmp_path / ".env").write_text(
         'PROFILE_ARN="arn:aws:codewhisperer:us-east-1:444444444444:profile/envfile"\n',

@@ -206,6 +206,41 @@ def test_direct_tool_free_tasks_use_utility_fit_workers() -> None:
     assert decision.workers[0].key == decision.candidates["utility"][0].route.key
 
 
+def test_free_hermes_session_keeps_routing_on_free_models() -> None:
+    from types import SimpleNamespace
+
+    from machina.core.routing.router import prefer_free_hermes_routes
+
+    free = SimpleNamespace(profile=SimpleNamespace(provider="hermes", free=True))
+    paid = SimpleNamespace(profile=SimpleNamespace(provider="hermes", free=False))
+    other = SimpleNamespace(profile=SimpleNamespace(provider="openrouter", free=False))
+
+    assert list(prefer_free_hermes_routes([paid, free, other], "hermes", "x:free")) == [
+        free,
+        other,
+    ]
+    # A paid session route opts back into the full catalog.
+    assert list(prefer_free_hermes_routes([paid, free], "hermes", "paid-model")) == [paid, free]
+
+
+def test_free_proxy_catalog_rows_are_marked_free_and_zero_cost() -> None:
+    from machina.core.routing.catalog import profile_from_row
+
+    free = profile_from_row(
+        "hermes",
+        {"id": "tencent/hy4-flash:free", "description": "Hermes proxy", "free": True},
+    )
+    paid = profile_from_row(
+        "hermes",
+        {"id": "~z-ai/glm-flash-latest", "description": "Hermes proxy", "free": False},
+    )
+
+    assert free.free is True
+    assert free.input_cost_per_mtok == 0.0
+    assert free.output_cost_per_mtok == 0.0
+    assert paid.free is False
+
+
 def test_family_task_priors_keep_kiro_aliases_differentiated() -> None:
     from machina.core.routing.catalog import profile_from_row
 

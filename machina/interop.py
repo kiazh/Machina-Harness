@@ -73,6 +73,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -1525,6 +1526,80 @@ def supported_runs() -> dict[str, str]:
 # that id is the difference between a dead delegation and a working one.
 _SUGGESTED_MODEL_RE = re.compile(r"switch to ['\"]([^'\"]{1,200})['\"]", re.IGNORECASE)
 
+# When the suggested model is paid and the account has no credits, Hermes
+# tells the user to "pick a free model". These are verified Nous Portal free
+# chat ids; the live proxy catalog can add more.
+_KNOWN_FREE_HERMES_MODELS = (
+    "stepfun/step-3.7-flash:free",
+    "tencent/hy4-flash:free",
+    "upstage/solar-mini4:free",
+)
+_CREDIT_FAILURE_HINTS = (
+    "requires available credits",
+    "no active subscription",
+    "add credits",
+    "pick a free model",
+    "billing or credits exhausted",
+    "credit balance is too low",
+)
+
+
+def _hermes_free_models() -> list[str]:
+    """Known free chat ids, then any live ``:free`` ids the local proxy lists."""
+    models = list(_KNOWN_FREE_HERMES_MODELS)
+    port = os.environ.get("MACHINA_HERMES_PROXY_PORT", "8645").strip() or "8645"
+    try:
+        request = Request(
+            f"http://127.0.0.1:{port}/v1/models",
+            headers={"Authorization": "Bearer machina", "User-Agent": "Machina/harness"},
+        )
+        with urlopen(request, timeout=2) as response:  # nosec B310 - fixed loopback URL
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return models
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return models
+    live: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        model = str(row.get("id") or "").strip()
+        if not model.endswith(":free") or model in models:
+            continue
+        params = row.get("supported_parameters")
+        # Prefer chat/tool-capable models over free embedding endpoints.
+        if isinstance(params, list) and "tools" in params:
+            live.insert(0, model)
+        else:
+            live.append(model)
+    return models + live
+
+
+def _is_credit_failure(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(hint in lowered for hint in _CREDIT_FAILURE_HINTS)
+
+
+def _command_with_model(command: list[str], model: str) -> list[str]:
+    """Replace an existing ``-m`` value or insert one after the binary."""
+    updated: list[str] = []
+    replaced = False
+    skip = False
+    for part in command:
+        if skip:
+            skip = False
+            continue
+        if part in {"-m", "--model"}:
+            updated.extend((part, model))
+            replaced = True
+            skip = True
+            continue
+        updated.append(part)
+    if not replaced:
+        updated = [command[0], "-m", model, *command[1:]]
+    return updated
+
 
 def _suggested_retry_command(
     key: str, command: list[str], stdout: str, stderr: str
@@ -1689,20 +1764,44 @@ def run_task(
     stdout = _redact_output(proc.output)
     stderr = _redact_output(proc.stderr)
     if proc.returncode not in (0, None) and not proc.timed_out:
-        retry = _suggested_retry_command(key, command, stdout, stderr)
-        if retry is not None:
-            original_error = stderr
-            retry_proc = _invoke(retry, stdin_text)
-            command = retry
+        original_error = stderr or stdout
+        retried = False
+        suggested = _suggested_retry_command(key, command, stdout, stderr)
+        if suggested is not None:
+            retried = True
+            retry_proc = _invoke(suggested, stdin_text)
+            command = suggested
             proc = retry_proc
             stdout = _redact_output(proc.output)
             stderr = _redact_output(proc.stderr)
-            if not (proc.returncode == 0 and not proc.timed_out):
-                stderr = (
-                    f"{stderr}\n"
-                    "Retried once with the model the harness suggested. "
-                    f"Original error: {original_error}"
-                ).strip()
+            if proc.returncode == 0 and not proc.timed_out:
+                original_error = ""
+        if (
+            proc.returncode not in (0, None)
+            and not proc.timed_out
+            and key == "hermes"
+            and (
+                suggested is not None or _is_credit_failure(f"{stdout}\n{stderr}\n{original_error}")
+            )
+        ):
+            for model in _hermes_free_models()[:2]:
+                candidate = _command_with_model(command, model)
+                if candidate == command:
+                    continue
+                retried = True
+                retry_proc = _invoke(candidate, stdin_text)
+                command = candidate
+                proc = retry_proc
+                stdout = _redact_output(proc.output)
+                stderr = _redact_output(proc.stderr)
+                if proc.returncode == 0 and not proc.timed_out:
+                    break
+        if retried and proc.returncode not in (0, None) and not proc.timed_out and original_error:
+            stderr = (
+                f"{stderr}\n"
+                "Retried with a model named by the harness/provider. "
+                f"Original error: {original_error}"
+            ).strip()
     if proc.timed_out:
         note = f"timed out after {timeout:g}s (process tree killed)"
         stderr = f"{stderr}\n{note}".strip() if stderr else note

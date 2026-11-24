@@ -251,6 +251,30 @@ def _score_route(
     return RouteCandidate(route=route, score=score, quality=quality, cost=cost, reason=reason)
 
 
+def prefer_free_hermes_routes(
+    routes: Iterable[ModelRoute],
+    session_provider: str | None,
+    session_model: str | None,
+) -> tuple[ModelRoute, ...]:
+    """Keep a free Hermes session from routing onto paid Nous models.
+
+    The catalog advertises paid Nous models that an account without credits
+    cannot call. When the user explicitly chose a ``:free`` Hermes route, every
+    planner/supervisor/worker candidate stays on free Hermes rows (other
+    providers are unaffected). A paid session model opts back into the full
+    catalog.
+    """
+    candidates = tuple(routes)
+    if not (
+        session_provider == "hermes" and session_model and str(session_model).endswith(":free")
+    ):
+        return candidates
+    free_only = tuple(
+        route for route in candidates if route.profile.provider != "hermes" or route.profile.free
+    )
+    return free_only or candidates
+
+
 def _version_key(model: str) -> tuple[int, ...]:
     """Newer numeric revisions sort before older ones on a score tie."""
     numbers = [int(part) for part in re.findall(r"\d+", str(model or ""))[:4]]
@@ -405,6 +429,12 @@ def route_task(
     if config is not None and _cfg(config, "worker_transport", "native") == "mcp":
         allowed = (*allowed, "mcp")
     routes = _eligible_routes(inventory, task, allowed_transports=allowed)
+    # MCP/headless callers may not carry a session; the effective route is
+    # then the global config, and its free-tier choice must still constrain
+    # the worker/planner candidates.
+    effective_provider = session_provider or str(_cfg(config, "provider", "") or "")
+    effective_model = session_model or str(_cfg(config, "model", "") or "")
+    routes = prefer_free_hermes_routes(routes, effective_provider, effective_model)
     warnings: list[str] = list(inventory.warnings)
     if not routes:
         current = _current_route(inventory, session_provider or "", session_model or "")

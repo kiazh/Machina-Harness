@@ -884,6 +884,15 @@ def _spawn(spec: LaunchSpec) -> subprocess.Popen[Any]:
         child_env.setdefault("PYTHONIOENCODING", "utf-8")
         child_env.setdefault("PYTHONUTF8", "1")
         child_env.setdefault("PYTHONUNBUFFERED", "1")
+        # The gateway cannot find the Kiro CLI credential DB on its own in
+        # every layout, and the seeded .env may carry a placeholder proxy
+        # password. Pass both explicitly; the dotenv loader does not override
+        # process environment.
+        login_db = login_database_path()
+        if login_db is not None and not child_env.get("KIRO_CLI_DB_FILE"):
+            child_env["KIRO_CLI_DB_FILE"] = str(login_db)
+        if not child_env.get("PROXY_API_KEY"):
+            child_env["PROXY_API_KEY"] = kiro_proxy.api_key()
         if not child_env.get("PROFILE_ARN") and not _checkout_profile_arn(spec.cwd):
             arn = profile_arn()
             if arn:

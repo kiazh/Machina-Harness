@@ -54,6 +54,13 @@ def status():
                 output.status_line("OpenRouter API key", "not set", "warning")
             # Real capability reporting (never healthy-by-flag alone).
             try:
+                # `status` is often the first command a user runs; the shared
+                # runtime has not started its provider/sandbox probes yet.
+                # Startup is idempotent and lets the report be real rather
+                # than "unknown".
+                from machina.core.runtime import runtime_services
+
+                await runtime_services.startup()
                 summary = await services.status_summary()
                 # Shared subset comes from services.format_status_lines (one
                 # source of truth with the MCP shim); this surface keeps its

@@ -147,7 +147,7 @@ async def _hermes_models(provider: str, refresh: bool, *, fast: bool = False) ->
         # A proxy may already be running from an earlier Machina process or
         # an external launch, so ownership is not a precondition. The catalog
         # is one bounded loopback request; a refused port answers instantly.
-        if hermes_proxy.reaches(timeout=0.4):
+        if hermes_proxy.reaches(timeout=1.5):
             try:
                 models = await asyncio.to_thread(hermes_proxy.fetch_models)
                 return _models_payload(provider, source="live", models=models)

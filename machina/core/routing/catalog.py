@@ -512,6 +512,12 @@ def profile_from_row(provider: str, row: dict[str, Any]) -> ModelProfile:
         for token in ("vision", "multimodal", "image", "visual")
     )
     input_cost, output_cost = _costs_for(family, model)
+    # Local proxy catalogs can mark a row free (``:free`` ids) even though
+    # models.dev has no price entry for that vendor.
+    free_row = bool(row.get("free"))
+    if free_row:
+        input_cost = 0.0
+        output_cost = 0.0
     source = str(row.get("source") or "models.dev")
     confidence = "high" if source in {"live", "models.dev"} else "medium"
     quota = 0.10 if provider in _QUOTA_SENSITIVE else 0.0
@@ -533,7 +539,7 @@ def profile_from_row(provider: str, row: dict[str, Any]) -> ModelProfile:
         output_cost_per_mtok=output_cost,
         cache_read_per_mtok=None,
         cache_write_per_mtok=None,
-        free=_is_free(model, input_cost, output_cost),
+        free=free_row or _is_free(model, input_cost, output_cost),
         quota_pressure=quota,
         source=source,
         confidence=confidence,
@@ -602,7 +608,7 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
             cached = hermes_proxy.cached_models()
             if cached:
                 return True, "cached proxy catalog"
-            if hermes_proxy.reaches(timeout=0.25):
+            if hermes_proxy.reaches(timeout=1.0):
                 return True, "proxy reachable"
             return False, "proxy not running; use /auth hermes Setup"
         except Exception as exc:
@@ -688,7 +694,7 @@ def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
             cached = hermes_proxy.cached_models()
             if cached:
                 return cached
-            if hermes_proxy.reaches(timeout=0.25):
+            if hermes_proxy.reaches(timeout=1.0):
                 return hermes_proxy.fetch_models()
             return []
         except Exception:

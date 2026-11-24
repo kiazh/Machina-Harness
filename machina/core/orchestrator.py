@@ -122,6 +122,31 @@ class DelegationResult:
     needs_approval: list[dict] = field(default_factory=list)
 
 
+def keep_free_hermes_parent_route(
+    parent_provider: str | None,
+    parent_model: str | None,
+    routed_provider: str | None,
+    routed_model: str | None,
+) -> tuple[str | None, str | None]:
+    """Keep a free Hermes parent's route for delegated children.
+
+    The connected-model router can rank a paid Nous model above the user's
+    explicitly chosen free model. An account without credits then fails every
+    child at the provider before any work happens. A paid Hermes parent may
+    still be routed across the catalog; only the free-tier choice is sticky.
+    """
+    if (
+        parent_provider == "hermes"
+        and routed_provider == "hermes"
+        and parent_model
+        and str(parent_model).endswith(":free")
+        and routed_model
+        and not str(routed_model).endswith(":free")
+    ):
+        return parent_provider, parent_model
+    return routed_provider, routed_model
+
+
 class Orchestrator:
     """Runs tasks on named agents and records them in ``agent_messages``."""
 
@@ -425,6 +450,12 @@ class Orchestrator:
                         routed_model = worker_route.profile.model
                 except Exception as _route_error:
                     record_failure("orchestrator.model_route", _route_error)
+            routed_provider, routed_model = keep_free_hermes_parent_route(
+                parent_provider,
+                parent_model,
+                routed_provider,
+                routed_model,
+            )
             child_provider, child_model = resolve_provider_model(
                 definition=definition,
                 provider_override=routed_provider,

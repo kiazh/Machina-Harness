@@ -397,6 +397,9 @@ def _parse_models(payload: Any) -> list[dict[str, Any]]:
                 "description": f"{PROVIDER_LABEL}" + (f" · {owner}" if owner else ""),
                 "contextWindow": None,
                 "efforts": [],
+                # Nous free-tier ids carry the suffix; routing uses this to
+                # avoid selecting a paid model the account cannot call.
+                "free": model_id.endswith(":free"),
                 "source": "live",
             }
         )

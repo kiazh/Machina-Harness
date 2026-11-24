@@ -7,7 +7,10 @@
 ### Fixed
 
 - `tool_load` now actually widens the next model step's schema surface. Tool execution runs in a child `asyncio` task, so the old `ContextVar` assignment was discarded when that task finished; the loaded set is now a shared per-turn value, and a regression test crosses the task boundary.
-- `machina harnesses run hermes` retries once with the model Hermes itself names when a provider reports a retired/free-period-ended model (for example `switch to 'stepfun/step-5-preview'`), instead of failing the delegation immediately.
+- `machina harnesses run hermes` now recovers from retired/paid model failures: it retries once with the replacement Hermes names (for example `switch to 'stepfun/step-5-preview'`), and when the account has no credits for that model it retries with a live `:free` Nous model instead of failing the delegation.
+- Delegated children keep a free Hermes parent's route, and `route_task` filters paid Hermes candidates for any free session/global route (including MCP/headless callers). Free proxy rows are zero-cost in the routing inventory.
+- Kiro one-click startup injects the detected `KIRO_CLI_DB_FILE` and the loopback `PROXY_API_KEY` into the gateway child, so a freshly provisioned checkout starts instead of failing with "No Kiro credentials configured".
+- `machina status`, MCP `machina_status`, and HTTP status now start the idempotent runtime probes before reporting, so a first call shows `chat provider: ready` instead of `unknown`.
 
 ## 2.1.0 - 2026-11-23
 

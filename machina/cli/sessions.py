@@ -134,6 +134,8 @@ def route_command(
             prompt,
             config=config,
             mode=mode,
+            session_provider=config.get("provider"),
+            session_model=config.get("model"),
             worker_count=workers or None,
         )
     except RoutingError as error:
