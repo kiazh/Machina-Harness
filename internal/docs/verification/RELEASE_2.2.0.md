@@ -34,6 +34,8 @@ Background harness subagents and Activity navigation.
 
 - Repository smoke suite: `720 passed, 18 skipped`.
 - UI suite: `1,263 passed, 6 skipped`; typecheck and lint clean.
+- External suite: `6,548 passed, 13 skipped, 2 xfailed`. The first-attempt
+  timeout contract is preserved exactly; retries share the remaining budget.
 - Manual: background `harness_delegate` starts and reaches a terminal state;
   timeout is enforced at the overall deadline; `/delegate` returns before the
   child completes; Activity Enter callback is unit-covered.
