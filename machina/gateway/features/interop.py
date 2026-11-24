@@ -34,6 +34,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from machina.core.execution_context import configured_workspace
 from machina.core.provider import audit_log
 from machina.gateway.errors import INVALID_PARAMS, RpcError
 from machina.gateway.features._common import _bool, _int, _str, _uuid
@@ -138,7 +139,6 @@ def _workspace_cwd(session: Session) -> Path:
     relative pin is normalized against the configured root, and only an
     unavailable pinned folder asks the user to select it again.
     """
-    from machina.core.execution_context import configured_workspace
     from machina.gateway.features.desktop_workspace import WORKSPACE_STATE_KEY
 
     pinned = session.state.get(WORKSPACE_STATE_KEY)
