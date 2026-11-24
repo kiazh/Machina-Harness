@@ -80,6 +80,29 @@ def test_dynamic_agent_starts_with_a_core_surface_and_loads_one_tool() -> None:
     reset_dynamic_tool_state()
 
 
+def test_tool_load_widens_the_next_step_across_the_tool_task_boundary() -> None:
+    """Tool execution runs in a child asyncio task; the load must survive it.
+
+    Regression: tool_load assigned a new ContextVar value inside the child
+    task, the parent never saw it, and the next step denied the tool as
+    "not in the current tool surface" even though it had just been loaded.
+    """
+    import asyncio
+
+    reset_dynamic_tool_state()
+    agent = ReActAgent(provider=object(), dynamic_tools=True)
+    assert "delegate" not in {tool.name for tool in agent._tool_defs()}
+
+    async def run_tool() -> str:
+        return await asyncio.create_task(registry.execute("tool_load", tools=["delegate"]))
+
+    result = asyncio.run(run_tool())
+
+    assert "Loaded schemas for: delegate" in result
+    assert "delegate" in {tool.name for tool in agent._tool_defs()}
+    reset_dynamic_tool_state()
+
+
 def test_dynamic_loader_respects_an_explicit_allow_list() -> None:
     from machina.core.tool_projection import set_dynamic_allowed_tools
 

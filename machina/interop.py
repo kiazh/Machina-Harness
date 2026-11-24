@@ -1520,6 +1520,29 @@ def supported_runs() -> dict[str, str]:
     return {key: _RUN_DESCRIPTIONS[key] for key in RUN_PLATFORMS}
 
 
+# A provider can retire a model between runs. Hermes prints the replacement
+# explicitly ("... switch to 'stepfun/step-5-preview'"); retrying once with
+# that id is the difference between a dead delegation and a working one.
+_SUGGESTED_MODEL_RE = re.compile(r"switch to ['\"]([^'\"]{1,200})['\"]", re.IGNORECASE)
+
+
+def _suggested_retry_command(
+    key: str, command: list[str], stdout: str, stderr: str
+) -> list[str] | None:
+    """Insert the model named by the harness's own retry hint, once."""
+    if key != "hermes":
+        return None
+    match = _SUGGESTED_MODEL_RE.search(f"{stdout}\n{stderr}")
+    if match is None:
+        return None
+    model = match.group(1).strip()
+    if not model or model.startswith("-"):
+        return None
+    if any(part in {"-m", "--model"} for part in command):
+        return None
+    return [command[0], "-m", model, *command[1:]]
+
+
 def _literal_prompt_invocation(
     key: str, prefix: list[str], binary: str, prompt: str
 ) -> tuple[list[str], str | None] | None:
@@ -1646,21 +1669,40 @@ def run_task(
             stderr=f"{spec.label} is not installed ({spec.binaries[0]} not on PATH)",
             ok=False,
         )
-    if cancel_event is not None:
-        proc = _run(
-            command,
-            env=_child_env(spec),
-            timeout=timeout,
-            stdin_text=stdin_text,
-            cwd=cwd,
-            cancel_event=cancel_event,
-        )
-    elif cwd is None:
-        proc = _run(command, env=_child_env(spec), timeout=timeout, stdin_text=stdin_text)
-    else:
-        proc = _run(command, env=_child_env(spec), timeout=timeout, stdin_text=stdin_text, cwd=cwd)
+    env = _child_env(spec)
+
+    def _invoke(argv: list[str], input_text: str | None) -> _ProcessResult:
+        if cancel_event is not None:
+            return _run(
+                argv,
+                env=env,
+                timeout=timeout,
+                stdin_text=input_text,
+                cwd=cwd,
+                cancel_event=cancel_event,
+            )
+        if cwd is None:
+            return _run(argv, env=env, timeout=timeout, stdin_text=input_text)
+        return _run(argv, env=env, timeout=timeout, stdin_text=input_text, cwd=cwd)
+
+    proc = _invoke(command, stdin_text)
     stdout = _redact_output(proc.output)
     stderr = _redact_output(proc.stderr)
+    if proc.returncode not in (0, None) and not proc.timed_out:
+        retry = _suggested_retry_command(key, command, stdout, stderr)
+        if retry is not None:
+            original_error = stderr
+            retry_proc = _invoke(retry, stdin_text)
+            command = retry
+            proc = retry_proc
+            stdout = _redact_output(proc.output)
+            stderr = _redact_output(proc.stderr)
+            if not (proc.returncode == 0 and not proc.timed_out):
+                stderr = (
+                    f"{stderr}\n"
+                    "Retried once with the model the harness suggested. "
+                    f"Original error: {original_error}"
+                ).strip()
     if proc.timed_out:
         note = f"timed out after {timeout:g}s (process tree killed)"
         stderr = f"{stderr}\n{note}".strip() if stderr else note

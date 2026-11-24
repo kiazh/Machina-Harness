@@ -41,8 +41,13 @@ CORE_TOOL_NAMES = frozenset(
     }
 )
 
-_loaded_tool_names: ContextVar[frozenset[str]] = ContextVar(
-    "machina_loaded_tool_names", default=frozenset()
+# A mutable per-turn set, never a frozenset. Tool execution runs in a child
+# asyncio task; child tasks copy the context, so assigning a new value there
+# would be invisible to the parent. Mutating the inherited set in place is
+# visible across that boundary, which is what lets tool_load widen the next
+# model step's schema surface.
+_loaded_tool_names: ContextVar[set[str] | None] = ContextVar(
+    "machina_loaded_tool_names", default=None
 )
 _allowed_tool_names: ContextVar[frozenset[str] | None] = ContextVar(
     "machina_allowed_tool_names", default=None
@@ -51,7 +56,7 @@ _allowed_tool_names: ContextVar[frozenset[str] | None] = ContextVar(
 
 def reset_dynamic_tool_state() -> None:
     """Start a turn with only the core schemas; tool_load adds more."""
-    _loaded_tool_names.set(frozenset())
+    _loaded_tool_names.set(set())
     _allowed_tool_names.set(None)
 
 
@@ -70,13 +75,17 @@ def mark_tools_loaded(names: list[str], available: set[str]) -> tuple[list[str],
         else:
             rejected.append(name)
     if loaded:
-        _loaded_tool_names.set(_loaded_tool_names.get() | frozenset(loaded))
+        loaded_names = _loaded_tool_names.get()
+        if loaded_names is None:
+            loaded_names = set()
+            _loaded_tool_names.set(loaded_names)
+        loaded_names.update(loaded)
     return loaded, rejected
 
 
 def active_tool_definitions(definitions: list[ToolDefinition]) -> list[ToolDefinition]:
     """Project a registry definition list to the current turn's tool surface."""
-    loaded = _loaded_tool_names.get()
+    loaded = _loaded_tool_names.get() or frozenset()
     selected = [
         definition
         for definition in definitions

@@ -1,5 +1,14 @@
 # Release notes
 
+## 2.1.1 - 2026-11-24
+
+**Dynamic tool loading and Hermes delegation patch.**
+
+### Fixed
+
+- `tool_load` now actually widens the next model step's schema surface. Tool execution runs in a child `asyncio` task, so the old `ContextVar` assignment was discarded when that task finished; the loaded set is now a shared per-turn value, and a regression test crosses the task boundary.
+- `machina harnesses run hermes` retries once with the model Hermes itself names when a provider reports a retired/free-period-ended model (for example `switch to 'stepfun/step-5-preview'`), instead of failing the delegation immediately.
+
 ## 2.1.0 - 2026-11-23
 
 **Hermes proxy detection and a more forgiving Kiro launcher.** See the [2.1.0 release notes](internal/docs/verification/RELEASE_2.1.0.md).
