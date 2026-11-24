@@ -1064,6 +1064,15 @@ class Gateway:
 
         emit("message.start")
         body = ""
+        streamed: list[str] = []
+        status_note = ""
+
+        def on_progress(chunk: str) -> None:
+            # The live log is the transcript: keep it visible instead of
+            # replacing it with the short final answer when the job ends.
+            streamed.append(chunk)
+            emit("message.delta", text=chunk)
+
         try:
             from machina.core import harness_jobs
             from machina.gateway.features.interop import _workspace_cwd
@@ -1080,7 +1089,7 @@ class Gateway:
                 cwd=cwd,
                 reuse_session=True,
                 record_user=False,
-                on_progress=lambda chunk: emit("message.delta", text=chunk),
+                on_progress=on_progress,
             )
             final = await harness_jobs.wait(job["id"], timeout=310.0)
             if final is None:
@@ -1093,13 +1102,25 @@ class Gateway:
                     or "(no output)"
                 )
                 if final.get("status") != "complete":
-                    body = f"Harness {platform} {final.get('status')}: {body}"
+                    status_note = f"Harness {platform} {final.get('status')}"
         except asyncio.CancelledError:
-            body = "Harness turn cancelled."
+            status_note = "Harness turn cancelled."
             raise
         except Exception as exc:
-            body = f"Harness {platform} failed: {type(exc).__name__}: {exc}"
+            status_note = f"Harness {platform} failed: {type(exc).__name__}: {exc}"
         finally:
+            logged = "".join(streamed)
+            answer = body.strip()
+            if logged.strip():
+                body = logged.rstrip()
+                # Keep the live "what it is doing" log and append the final
+                # answer when the stream itself did not already end with it.
+                if answer and answer not in body:
+                    body = f"{body}\n\n{answer}"
+                if status_note and status_note not in body:
+                    body = f"{body}\n\n{status_note}"
+            elif status_note:
+                body = status_note if not answer else f"{status_note}: {answer}"
             try:
                 emit(
                     "message.complete",

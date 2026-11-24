@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from machina import interop
+
+
+@pytest.fixture(autouse=True)
+def _clear_hermes_model_cache():
+    """The last-good model is process state; each test starts fresh."""
+    interop._LAST_GOOD_HERMES_MODEL.clear()
+    yield
+    interop._LAST_GOOD_HERMES_MODEL.clear()
 
 
 def test_suggested_retry_command_parses_the_provider_hint():
@@ -73,14 +83,6 @@ def test_run_task_falls_back_to_a_free_model_when_credits_are_exhausted(monkeypa
                 timed_out=False,
                 truncated=False,
             )
-        if len(calls) == 2:
-            return SimpleNamespace(
-                returncode=2,
-                output="",
-                stderr="requires available credits. add credits or pick a free model.",
-                timed_out=False,
-                truncated=False,
-            )
         return SimpleNamespace(
             returncode=0,
             output="free result",
@@ -104,11 +106,11 @@ def test_run_task_falls_back_to_a_free_model_when_credits_are_exhausted(monkeypa
 
     assert result.ok is True
     assert result.stdout == "free result"
-    assert calls[2] == [
-        "/usr/bin/hermes",
-        "-m",
-        "stepfun/step-3.7-flash:free",
-        "--oneshot=research planes",
+    # The provider's suggested model is paid ("stepfun/step-5-preview"), so a
+    # credit failure skips it and goes straight to a free model.
+    assert calls == [
+        ["/usr/bin/hermes", "--oneshot=research planes"],
+        ["/usr/bin/hermes", "-m", "stepfun/step-3.7-flash:free", "--oneshot=research planes"],
     ]
 
 

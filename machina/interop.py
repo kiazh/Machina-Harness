@@ -349,6 +349,10 @@ def _child_env(spec: PlatformSpec) -> dict[str, str]:
     """
     env = _child_process().sanitized_env(None)
     env["NO_COLOR"] = "1"
+    if spec.key == "hermes":
+        # Hermes is a Python CLI: without this its JSONL progress sits in a
+        # block buffer until the child exits, which defeats live output.
+        env["PYTHONUNBUFFERED"] = "1"
     for name in spec.env_passthrough:
         value = os.environ.get(name)
         if value:
@@ -1497,10 +1501,10 @@ def enable_detected(
 #     Codex non-interactively"); ``codex exec --help`` documents ``-`` as the
 #     form where "instructions are read from stdin" — the prompt never appears
 #     in argv at all.
-#   * ``Hermes Agent v0.21.6`` documents ``-z/--oneshot PROMPT`` ("One-shot
-#     mode ... Intended for scripts / pipes"); its argparse surface binds
-#     ``--oneshot=<prompt>`` literally even when the prompt starts with ``-``
-#     (the split ``-z <prompt>`` form refuses option-like values).
+#   * ``Hermes Agent`` documents ``chat --query-file PATH`` (``-`` reads
+#     stdin) and ``--format stream-json`` for newline-delimited progress
+#     events. The prompt never appears in argv, and the events give Machina a
+#     live "what it is doing" log; ``--quiet``/non-TTY imply one-shot mode.
 # The entry point is the executable plus its headless subcommand; ``run_task``
 # delivers the prompt through each platform's literal mechanism (never as a
 # bare argv token that could be parsed as an option, finding H09):
@@ -1508,13 +1512,16 @@ def enable_detected(
 RUN_PLATFORMS: dict[str, list[str]] = {
     "opencode": ["opencode", "run"],
     "codex": ["codex", "exec"],
-    "hermes": ["hermes"],  # one-shot mode inlines the prompt: --oneshot=<prompt>
+    "hermes": ["hermes", "chat"],  # --query-file - (stdin) + stream-json
 }
 
 _RUN_DESCRIPTIONS: dict[str, str] = {
     "opencode": 'opencode run -- "<prompt>" — OpenCode headless message (v2 CLI)',
     "codex": "codex exec - (prompt on stdin) — Codex non-interactive execution",
-    "hermes": 'hermes --oneshot="<prompt>" — Hermes one-shot mode (scripts/pipes)',
+    "hermes": (
+        "hermes chat --query-file - --format stream-json — structured headless "
+        "run (prompt on stdin, live tool events)"
+    ),
 }
 
 
@@ -1531,10 +1538,14 @@ _SUGGESTED_MODEL_RE = re.compile(r"switch to ['\"]([^'\"]{1,200})['\"]", re.IGNO
 # When the suggested model is paid and the account has no credits, Hermes
 # tells the user to "pick a free model". These are verified Nous Portal free
 # chat ids; the live proxy catalog can add more.
+#: Ordered best-effort: models that answered in seconds first, slower ones
+#: last. ``stepfun/step-3.7-flash:free`` can stall for minutes without output,
+#: so it is a last resort that the retry budget deliberately skips.
 _KNOWN_FREE_HERMES_MODELS = (
-    "stepfun/step-3.7-flash:free",
     "tencent/hy4-flash:free",
     "upstage/solar-mini4:free",
+    "meituan/longcat-2.5:free",
+    "stepfun/step-3.7-flash:free",
 )
 _CREDIT_FAILURE_HINTS = (
     "requires available credits",
@@ -1543,11 +1554,13 @@ _CREDIT_FAILURE_HINTS = (
     "pick a free model",
     "billing or credits exhausted",
     "credit balance is too low",
+    "free period has ended",
+    "free period ended",
 )
 
 
 def _hermes_free_models() -> list[str]:
-    """Known free chat ids, then any live ``:free`` ids the local proxy lists."""
+    """Live ``:free`` ids the local proxy lists, then the known fallbacks."""
     models = list(_KNOWN_FREE_HERMES_MODELS)
     port = os.environ.get("MACHINA_HERMES_PROXY_PORT", "8645").strip() or "8645"
     try:
@@ -1575,12 +1588,90 @@ def _hermes_free_models() -> list[str]:
             live.insert(0, model)
         else:
             live.append(model)
-    return models + live
+    ordered: list[str] = []
+    for model in [*models, *live]:
+        if model not in ordered:
+            ordered.append(model)
+    return ordered
 
 
 def _is_credit_failure(text: str) -> bool:
     lowered = (text or "").lower()
     return any(hint in lowered for hint in _CREDIT_FAILURE_HINTS)
+
+
+#: Last model that produced a successful Hermes run in this process.
+_LAST_GOOD_HERMES_MODEL: dict[str, str] = {}
+
+
+def _hermes_tool_detail(value: Any, limit: int = 160) -> str:
+    """One compact human line for a Hermes tool input/output payload."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                output = parsed.get("output")
+                if output is not None:
+                    text = " ".join(str(output).split())
+                    code = parsed.get("exit_code")
+                    if code not in (None, 0):
+                        text = f"{text} (exit {code})"
+                    if len(text) > limit:
+                        text = text[: limit - 1].rstrip() + "…"
+                    return text
+                value = parsed
+    if isinstance(value, dict):
+        for key in ("command", "file_path", "path", "pattern", "query", "url", "name"):
+            if key in value:
+                value = value[key]
+                break
+        else:
+            try:
+                value = json.dumps(value, ensure_ascii=False)
+            except Exception:
+                value = str(value)
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _hermes_stream_event(payload: dict[str, Any]) -> str | None:
+    """Render one ``--format stream-json`` event as a readable log line."""
+    kind = payload.get("type")
+    if kind == "system":
+        model = str(payload.get("model") or "").strip()
+        return f"model: {model}" if model else None
+    if kind == "tool_use":
+        name = str(payload.get("name") or "tool")
+        detail = _hermes_tool_detail(payload.get("input"))
+        return f"→ {name}: {detail}" if detail else f"→ {name}"
+    if kind == "tool_result":
+        name = str(payload.get("name") or "tool")
+        output = _hermes_tool_detail(payload.get("output"), 240)
+        mark = " (error)" if payload.get("is_error") else ""
+        return f"← {name}{mark}: {output}" if output else f"← {name}{mark}"
+    if kind == "text":
+        text = str(payload.get("text") or "").strip()
+        return text or None
+    if kind == "error":
+        message = str(payload.get("message") or payload.get("text") or "").strip()
+        return f"error: {message}" if message else "error"
+    return None
+
+
+class _EitherEvent:
+    """Cancellation view that trips on any of several caller/worker events."""
+
+    def __init__(self, *events: threading.Event) -> None:
+        self._events = events
+
+    def is_set(self) -> bool:
+        return any(event.is_set() for event in self._events)
 
 
 def _command_with_model(command: list[str], model: str) -> list[str]:
@@ -1632,8 +1723,9 @@ def _literal_prompt_invocation(
       ``run``'s variadic message argument.
     * codex — the documented ``exec -`` stdin form; the prompt is never an
       argv token.
-    * hermes — argparse's ``--oneshot=<prompt>`` binding; ``=`` keeps a
-      leading ``-`` inside the value.
+    * hermes — ``chat --query-file -`` reads the prompt from stdin, so a
+      leading ``-`` is literal text and ``--format stream-json`` supplies
+      machine-readable progress.
 
     ``None`` means no literal mechanism is registered for *key*: callers must
     refuse the run rather than spawn an option-interpretable prompt.
@@ -1644,7 +1736,7 @@ def _literal_prompt_invocation(
     if key == "codex":
         return [*entry, "-"], prompt
     if key == "hermes":
-        return [binary, f"--oneshot={prompt}"], None
+        return [binary, "chat", "--query-file", "-", "--format", "stream-json"], prompt
     return None
 
 
@@ -1738,6 +1830,9 @@ def run_task(
             ),
         )
     command, stdin_text = invocation
+    cached_model = _LAST_GOOD_HERMES_MODEL.get(key)
+    if cached_model and key == "hermes":
+        command = _command_with_model(command, cached_model)
     if binary is None:
         return RunResult(
             platform=key,
@@ -1752,6 +1847,72 @@ def run_task(
     # giving each attempt the full timeout can triple the billed wait.
     deadline = time.monotonic() + max(1.0, float(timeout))
     first_attempt = True
+    # A provider that has already said the account cannot use the model is not
+    # going to recover inside this run: stop the child as soon as that line
+    # appears instead of waiting out the whole deadline.
+    terminal = threading.Event()
+    stream_state: dict[str, Any] = {"buf": "", "answer": "", "errors": [], "saw": False}
+
+    def _absorb(source: str, text: str) -> str:
+        """Turn raw Hermes ``stream-json`` lines into readable progress."""
+        if key != "hermes" or source != "stdout":
+            return text
+        *lines, stream_state["buf"] = (stream_state["buf"] + text).split("\n")
+        shown: list[str] = []
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception:
+                shown.append(line)
+                continue
+            if not isinstance(payload, dict):
+                shown.append(line)
+                continue
+            stream_state["saw"] = True
+            if payload.get("type") == "result":
+                answer = str(payload.get("text") or "").strip()
+                if answer:
+                    stream_state["answer"] = answer
+                    if payload.get("exit_code") not in (0, None):
+                        stream_state["errors"].append(answer)
+                continue
+            rendered = _hermes_stream_event(payload)
+            if rendered:
+                shown.append(rendered)
+        return "\n".join(shown) + "\n" if shown else ""
+
+    def _flush_stream() -> None:
+        leftover, stream_state["buf"] = stream_state["buf"], ""
+        if leftover.strip():
+            _absorb("stdout", leftover + "\n")
+
+    def _outcome(result: Any) -> tuple[str, str]:
+        _flush_stream()
+        out = _redact_output(result.output)
+        err = _redact_output(result.stderr)
+        if key == "hermes" and stream_state["saw"]:
+            answer = stream_state["answer"].strip()
+            if result.returncode == 0:
+                out = _redact_output(answer)
+            else:
+                errors = "\n".join(dict.fromkeys(stream_state["errors"])).strip()
+                if errors:
+                    err = _redact_output(errors)
+                out = ""
+        return out, err
+
+    def _watch(source: str, text: str) -> None:
+        if _is_credit_failure(text):
+            terminal.set()
+        shown = _absorb(source, text)
+        if on_output is not None and shown:
+            try:
+                on_output(source, shown)
+            except Exception:
+                pass
 
     def _invoke(argv: list[str], input_text: str | None) -> _ProcessResult:
         nonlocal first_attempt
@@ -1762,43 +1923,39 @@ def run_task(
             first_attempt = False
         else:
             remaining = max(1.0, deadline - time.monotonic())
-        if cancel_event is not None:
-            return _run(
-                argv,
-                env=env,
-                timeout=remaining,
-                stdin_text=input_text,
-                cwd=cwd,
-                cancel_event=cancel_event,
-                on_output=on_output,
-            )
-        if cwd is None:
-            return _run(
-                argv, env=env, timeout=remaining, stdin_text=input_text, on_output=on_output
-            )
+        terminal.clear()
+        stream_state.update(buf="", answer="", errors=[], saw=False)
+        cancellation = (
+            _EitherEvent(cancel_event, terminal) if cancel_event is not None else terminal
+        )
         return _run(
             argv,
             env=env,
             timeout=remaining,
             stdin_text=input_text,
             cwd=cwd,
-            on_output=on_output,
+            cancel_event=cancellation,
+            on_output=_watch if (on_output is not None or key == "hermes") else on_output,
         )
 
     proc = _invoke(command, stdin_text)
-    stdout = _redact_output(proc.output)
-    stderr = _redact_output(proc.stderr)
+    stdout, stderr = _outcome(proc)
     if proc.returncode not in (0, None) and not proc.timed_out:
         original_error = stderr or stdout
         retried = False
-        suggested = _suggested_retry_command(key, command, stdout, stderr)
+        # A billing/credit failure means the model the provider suggests next
+        # is also unavailable; skip that wasted attempt and go to free models.
+        suggested = (
+            None
+            if _is_credit_failure(f"{stdout}\n{stderr}")
+            else _suggested_retry_command(key, command, stdout, stderr)
+        )
         if suggested is not None:
             retried = True
             retry_proc = _invoke(suggested, stdin_text)
             command = suggested
             proc = retry_proc
-            stdout = _redact_output(proc.output)
-            stderr = _redact_output(proc.stderr)
+            stdout, stderr = _outcome(proc)
             if proc.returncode == 0 and not proc.timed_out:
                 original_error = ""
         if (
@@ -1809,7 +1966,10 @@ def run_task(
                 suggested is not None or _is_credit_failure(f"{stdout}\n{stderr}\n{original_error}")
             )
         ):
-            for model in _hermes_free_models()[:2]:
+            for model in _hermes_free_models():
+                if deadline - time.monotonic() < 12:
+                    # Too little budget left to start another model attempt.
+                    break
                 candidate = _command_with_model(command, model)
                 if candidate == command:
                     continue
@@ -1817,8 +1977,7 @@ def run_task(
                 retry_proc = _invoke(candidate, stdin_text)
                 command = candidate
                 proc = retry_proc
-                stdout = _redact_output(proc.output)
-                stderr = _redact_output(proc.stderr)
+                stdout, stderr = _outcome(proc)
                 if proc.returncode == 0 and not proc.timed_out:
                     break
         if retried and proc.returncode not in (0, None) and not proc.timed_out and original_error:
@@ -1830,6 +1989,11 @@ def run_task(
     if proc.timed_out:
         note = f"timed out after {timeout:g}s (process tree killed)"
         stderr = f"{stderr}\n{note}".strip() if stderr else note
+    if key == "hermes" and proc.returncode == 0 and not proc.timed_out:
+        for index, part in enumerate(command[:-1]):
+            if part in {"-m", "--model"}:
+                _LAST_GOOD_HERMES_MODEL[key] = command[index + 1]
+                break
     return RunResult(
         platform=key,
         command=command,

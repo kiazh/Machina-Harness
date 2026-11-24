@@ -11,6 +11,15 @@
 - Session serialization exposes `harnessPlatform` so the UI can distinguish the two.
 - Harness chat turns acquire/release the same durable turn claim as normal turns, so concurrent sends are still fenced.
 - **Live harness output.** The shared bounded runner now streams stdout/stderr chunks to the job as they arrive (redacted, line-buffered). Activity shows the latest line and the last 20 live lines; a two-way harness chat streams the same output as `message.delta` before the final answer. This applies to every run-capable harness (OpenCode, Codex, Hermes, and any future platform using the shared runner).
+- **Harness "thinking/doing" log in the chat.** A two-way harness chat keeps the streamed log in the transcript and appends the final answer, instead of replacing the log when the turn completes. The same log is stored on the child session, so reopening it shows what the harness did.
+- **Hermes streams structured progress.** Hermes now runs as `hermes chat --query-file - --format stream-json` (prompt on stdin), and Machina renders its events as `model: …`, `→ tool: …`, `← tool: …` lines. The final answer is taken from the structured `result` event, so raw JSON never reaches the transcript.
+
+### Fixed
+
+- Streaming reads now use un-buffered byte reads. `read(n)` on a text pipe blocked until the child exited, so every harness looked silent until it finished; output now arrives line by line for all platforms.
+- Hermes model fallback: when the provider reports exhausted credits, Machina skips the provider's suggested paid model, tries the live free models in a reliable order (fast ones first), refuses to start an attempt with less than 12 seconds of budget left, and remembers the last model that worked for the rest of the process. The first Hermes run after start recovers in about 30 seconds; later runs use the working model immediately.
+- Retried-attempt provider prose ("didn't answer after 3 attempts", "free period has ended", billing notices) and `session_id:` lines are filtered out of the chat/Activity output, so a recovered retry no longer looks like a failure.
+- A harness job publishes its terminal status only after its last progress flush and transcript store; polling never observes a half-finished completion.
 
 ## 2.3.0 - 2026-11-24
 

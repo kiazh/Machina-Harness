@@ -46,6 +46,52 @@ def _iso(epoch: float | None) -> str | None:
     return datetime.fromtimestamp(epoch, UTC).isoformat()
 
 
+#: Provider text that describes a failed attempt the runner then retries.
+#: Showing it in the live chat reads as a fatal error, so it is kept out of
+#: the user-visible stream and persisted transcript; the run itself still
+#: sees and reacts to it.
+_TRANSIENT_FAILURE_HINTS = (
+    "didn't answer after",
+    "didn't answer",
+    "temporarily unavailable",
+    "send /retry",
+    "switch models with /model",
+    "add a backup provider",
+    "fallback add",
+)
+
+
+def _is_transient_failure_line(line: str) -> bool:
+    lowered = (line or "").lower()
+    if any(hint in lowered for hint in _TRANSIENT_FAILURE_HINTS):
+        return True
+    try:
+        from machina.interop import _is_credit_failure
+
+        return _is_credit_failure(line)
+    except Exception:
+        return False
+
+
+def _visible_output(text: str) -> str:
+    """Drop retried-attempt failure prose from user-visible harness output."""
+    if not text:
+        return ""
+    kept = [
+        line
+        for line in text.splitlines(keepends=True)
+        if line.strip()
+        and not _is_transient_failure_line(line)
+        and not line.strip().lower().startswith("session_id:")
+    ]
+    visible = "".join(kept)
+    if visible and not visible.endswith("\n"):
+        # Redaction strips trailing whitespace; restore the separator so
+        # streamed chunks concatenate without gluing lines together.
+        visible += "\n"
+    return visible
+
+
 def _looks_like_question(text: str) -> bool:
     lowered = (text or "").lower()
     return any(hint in lowered for hint in _QUESTION_HINTS)
@@ -80,7 +126,10 @@ class HarnessJob:
             "session_id": self.session_id,
             "platform": self.platform,
             "task": self.task,
-            "status": self.status,
+            # A terminal status is published only once the run has flushed its
+            # last progress and stored its transcript; polling never observes
+            # a half-finished terminal state.
+            "status": self.status if self.done else "running",
             "needs_input": self.needs_input,
             "timeout": self.timeout,
             "started_at": _iso(self.started_at),
@@ -240,6 +289,7 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
         _flush_progress(job, pending, lock, carry, final=True)
 
     drain_task = asyncio.create_task(drain())
+    final_status = "error"
     try:
         from machina import interop
 
@@ -255,21 +305,21 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
         job.command = list(result.command)
         job.stdout = str(result.stdout or "")[:MAX_STDOUT_CHARS]
         job.stderr = str(result.stderr or "")[:MAX_STDERR_CHARS]
-        job.status = "complete" if result.ok else "error"
+        final_status = "complete" if result.ok else "error"
         if not result.ok and not job.error:
             job.error = result.unsupported_reason or (
                 job.stderr.splitlines()[-1] if job.stderr else "harness failed"
             )
-        job.needs_input = bool(
+        job.needs_input = final_status == "complete" and bool(
             (job.stdout.strip() or job.error.strip())
             and _looks_like_question(job.stdout or job.error)
         )
     except asyncio.CancelledError:
-        job.status = "stopped"
+        final_status = "stopped"
         job.error = "cancelled"
         raise
     except Exception as exc:  # spawn/transport failures stay in the record
-        job.status = "error"
+        final_status = "error"
         job.error = f"{type(exc).__name__}: {exc}"
     finally:
         stop.set()
@@ -281,17 +331,23 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
             pass
         job.ended_at = time.time()
         if job.persist:
-            body = job.stdout or job.stderr or job.error or "(no output)"
-            if job.status != "complete":
-                body = f"{job.status}: {job.error or body}"
-            await _append_message(job.session_id, "assistant", body)
+            answer = job.stdout or job.stderr or job.error or "(no output)"
+            if final_status != "complete":
+                answer = f"{final_status}: {job.error or answer}"
+            log = "\n".join(job.progress).strip()
+            if log and answer and answer.strip() not in log:
+                body = f"{log}\n\n{answer}"
+            else:
+                body = log or answer
+            await _append_message(job.session_id, "assistant", body[:MAX_STDOUT_CHARS])
             await _set_child_state(
                 job.session_id,
-                harness_status=job.status,
+                harness_status=final_status,
                 harness_needs_input=job.needs_input,
                 harness_job_id=job.id,
             )
         _TASKS.pop(job.id, None)
+        job.status = final_status
         job.done = True
         _emit(job)
 
@@ -322,14 +378,15 @@ def _flush_progress(
         text = _redact_output(text)
     except Exception:
         pass
-    lines = [line for line in text.splitlines() if line.strip()]
+    visible = _visible_output(text)
+    lines = [line for line in visible.splitlines() if line.strip()]
     if lines:
         job.progress.extend(lines)
         job.progress[:] = job.progress[-80:]
     callback = job.on_progress
-    if callback is not None:
+    if callback is not None and visible:
         try:
-            callback(text)
+            callback(visible)
         except Exception:
             pass
     return carry, bool(lines)

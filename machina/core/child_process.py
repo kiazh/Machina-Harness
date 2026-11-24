@@ -12,6 +12,7 @@ output shaping, and per-caller result types stay with each caller.
 
 from __future__ import annotations
 
+import codecs
 import os
 import signal
 import subprocess
@@ -222,9 +223,6 @@ def run_bounded(
             stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             cwd=str(target_cwd),
             env=env,
             **popen_kwargs,
@@ -261,8 +259,12 @@ def run_bounded(
 
         def read_stream(stream: Any, parts: list[str], is_stdout: bool, cap: int) -> None:
             total = 0
+            # Raw byte reads keep the stream un-buffered: ``read1`` returns
+            # whatever is available now, so a harness that prints one progress
+            # line at a time shows up live instead of at process exit.
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
             while True:
-                chunk = stream.read(8192)
+                chunk = decoder.decode(stream.read1(8192))
                 if not chunk:
                     return
                 room = cap - total
@@ -331,7 +333,7 @@ def run_bounded(
 
                 def write_stdin() -> None:
                     try:
-                        process.stdin.write(stdin_text)
+                        process.stdin.write(stdin_text.encode("utf-8"))
                         process.stdin.flush()
                     except (OSError, ValueError):
                         pass
