@@ -392,6 +392,7 @@ def _run(
     stdin_text: str | None = None,
     cwd: Path | None = None,
     cancel_event: threading.Event | None = None,
+    on_output: Callable[[str, str], None] | None = None,
 ) -> _ProcessResult:
     """Run one child through the shared bounded runner (round-5 review F2).
 
@@ -413,6 +414,7 @@ def _run(
         cwd=anchor,
         max_stdout=MAX_OUTPUT_CHARS,
         max_stderr=MAX_STDERR_CHARS,
+        on_output=on_output,
         **cancellation,
     )
     return _ProcessResult(
@@ -1676,6 +1678,7 @@ def run_task(
     timeout: float = 300.0,
     cwd: Path | None = None,
     cancel_event: threading.Event | None = None,
+    on_output: Callable[[str, str], None] | None = None,
 ) -> RunResult:
     """Delegate one prompt to an installed harness, bounded and typed.
 
@@ -1767,10 +1770,20 @@ def run_task(
                 stdin_text=input_text,
                 cwd=cwd,
                 cancel_event=cancel_event,
+                on_output=on_output,
             )
         if cwd is None:
-            return _run(argv, env=env, timeout=remaining, stdin_text=input_text)
-        return _run(argv, env=env, timeout=remaining, stdin_text=input_text, cwd=cwd)
+            return _run(
+                argv, env=env, timeout=remaining, stdin_text=input_text, on_output=on_output
+            )
+        return _run(
+            argv,
+            env=env,
+            timeout=remaining,
+            stdin_text=input_text,
+            cwd=cwd,
+            on_output=on_output,
+        )
 
     proc = _invoke(command, stdin_text)
     stdout = _redact_output(proc.output)

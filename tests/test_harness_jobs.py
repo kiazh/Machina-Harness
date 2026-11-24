@@ -50,7 +50,7 @@ async def test_background_job_records_bounded_result(monkeypatch):
     monkeypatch.setattr(
         interop,
         "run_task",
-        lambda platform, task, timeout, cwd=None: SimpleNamespace(
+        lambda platform, task, timeout, cwd=None, on_output=None: SimpleNamespace(
             ok=True,
             exit_code=0,
             command=["hermes", "--oneshot=hi"],
@@ -77,6 +77,35 @@ async def test_background_job_records_bounded_result(monkeypatch):
     assert [item["status"] for item in seen] == ["running", "complete"]
     assert harness_jobs.list_jobs("session-a")
     assert harness_jobs.list_jobs("session-b") == []
+
+
+@pytest.mark.asyncio
+async def test_background_job_retains_live_output_lines(monkeypatch):
+    from machina import interop
+
+    def fake_run(platform, task, timeout, cwd=None, on_output=None):
+        if on_output is not None:
+            on_output("stdout", "thinking...\nstep 1\n")
+        return SimpleNamespace(
+            ok=True,
+            exit_code=0,
+            command=["hermes"],
+            stdout="done\n",
+            stderr="",
+            unsupported_reason="",
+        )
+
+    monkeypatch.setattr(interop, "run_task", fake_run)
+    job = await harness_jobs.start(session_id="session-a", platform="hermes", task="hi", timeout=30)
+    for _ in range(80):
+        cur = harness_jobs.get(job["id"])
+        if cur and cur["status"] != "running":
+            break
+        await asyncio.sleep(0.02)
+    current = harness_jobs.get(job["id"])
+    assert current is not None
+    assert current["status"] == "complete"
+    assert any("thinking" in line for line in current["progress"])
 
 
 @pytest.mark.asyncio

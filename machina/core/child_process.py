@@ -17,6 +17,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -187,6 +188,7 @@ def run_bounded(
     max_stdout: int = 64_000,
     max_stderr: int = 8_000,
     cancel_event: threading.Event | None = None,
+    on_output: Callable[[str, str], None] | None = None,
 ) -> BoundedResult:
     """Run one child in its own process group with a hard kill-tree deadline.
 
@@ -273,6 +275,12 @@ def run_bounded(
                 kept = chunk[:room]
                 parts.append(kept)
                 total += len(kept)
+                if on_output is not None and kept:
+                    try:
+                        on_output("stdout" if is_stdout else "stderr", kept)
+                    except Exception:
+                        # A display callback must never break the child runner.
+                        pass
                 if len(chunk) > room:
                     if is_stdout:
                         exceeded.set()

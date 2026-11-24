@@ -10,6 +10,7 @@
 - Only harness-backed sessions get this behavior. Native delegated subagent sessions remain inspection-only.
 - Session serialization exposes `harnessPlatform` so the UI can distinguish the two.
 - Harness chat turns acquire/release the same durable turn claim as normal turns, so concurrent sends are still fenced.
+- **Live harness output.** The shared bounded runner now streams stdout/stderr chunks to the job as they arrive (redacted, line-buffered). Activity shows the latest line and the last 20 live lines; a two-way harness chat streams the same output as `message.delta` before the final answer. This applies to every run-capable harness (OpenCode, Codex, Hermes, and any future platform using the shared runner).
 
 ## 2.3.0 - 2026-11-24
 

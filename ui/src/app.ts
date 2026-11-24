@@ -260,6 +260,7 @@ interface HarnessJobView {
 	stdout: string;
 	stderr: string;
 	error: string;
+	progress: string[];
 }
 
 export class App implements FeatureHost {
@@ -1518,7 +1519,7 @@ export class App implements FeatureHost {
 				label: `${job.platform} · ${job.task.slice(0, 48)}`,
 				detail:
 					job.status === "running"
-						? "background subagent"
+						? (job.progress?.at(-1)?.slice(0, 80) || "background subagent")
 						: job.needs_input
 							? "needs direction"
 							: (job.command[0] ?? `${job.platform} run`),
@@ -1535,6 +1536,9 @@ export class App implements FeatureHost {
 					...(job.needs_input ? ["Needs input: the harness asked a question."] : []),
 					`Exit: ${job.exit_code ?? "pending"}`,
 					...(job.error ? [`Error: ${job.error}`] : []),
+					...(job.progress?.length
+						? ["", "Live output:", ...job.progress.slice(-20)]
+						: []),
 					...(job.stdout ? ["", "Output:", ...job.stdout.split(/\r?\n/).slice(0, 12)] : []),
 					...(job.stderr ? ["", "Stderr:", ...job.stderr.split(/\r?\n/).slice(0, 8)] : []),
 				],

@@ -1050,8 +1050,19 @@ class Gateway:
         platform: str,
         token: str,
     ) -> None:
-        """Forward one child-chat reply to the harness and stream the answer."""
+        """Forward one child-chat reply to the harness and stream its output."""
         key = str(session.id)
+
+        def emit(event_type: str, **fields: Any) -> None:
+            self._write(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": self.event_payload(event_type, key, turn_id, **fields),
+                }
+            )
+
+        emit("message.start")
         body = ""
         try:
             from machina.core import harness_jobs
@@ -1069,6 +1080,7 @@ class Gateway:
                 cwd=cwd,
                 reuse_session=True,
                 record_user=False,
+                on_progress=lambda chunk: emit("message.delta", text=chunk),
             )
             final = await harness_jobs.wait(job["id"], timeout=310.0)
             if final is None:
@@ -1089,35 +1101,13 @@ class Gateway:
             body = f"Harness {platform} failed: {type(exc).__name__}: {exc}"
         finally:
             try:
-                self._write(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "event",
-                        "params": self.event_payload("message.start", key, turn_id),
-                    }
-                )
-                self._write(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "event",
-                        "params": self.event_payload("message.delta", key, turn_id, text=body),
-                    }
-                )
-                self._write(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "event",
-                        "params": self.event_payload(
-                            "message.complete",
-                            key,
-                            turn_id,
-                            text=body,
-                            tokens=0,
-                            iterations=1,
-                            toolCalls=0,
-                            cancelled=False,
-                        ),
-                    }
+                emit(
+                    "message.complete",
+                    text=body,
+                    tokens=0,
+                    iterations=1,
+                    toolCalls=0,
+                    cancelled=False,
                 )
             finally:
                 from machina.core.turns import end_turn as _end

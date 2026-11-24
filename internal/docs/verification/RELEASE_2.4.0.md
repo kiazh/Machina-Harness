@@ -18,10 +18,18 @@ Two-way harness chats.
 - Harness chat turns use the same durable `TurnLifecycle` claim as normal
   turns: a second submit while a harness reply is running is fenced with
   `TURN_IN_PROGRESS`.
+- **Live harness output.** `run_bounded` accepts an `on_output` callback and
+  every `interop.run_task` caller passes it through. Background jobs store the
+  last 80 redacted lines, emit `harness.job` updates about once a second, and
+  expose `progress` in the snapshot. Activity shows the latest line and the
+  last 20 lines; a two-way child chat streams the output as `message.delta`
+  before `message.complete`. The capability is platform-neutral and works for
+  OpenCode, Codex, Hermes, and any future harness registered in the shared
+  runner.
 
 ## Verification
 
-- Repository smoke suite: `721 passed, 18 skipped`.
+- Repository smoke suite: `722 passed, 18 skipped`.
 - UI suite: `1,264 passed, 6 skipped`; typecheck and lint clean.
 - Real-database check: `prompt.submit` on a child with
   `harness_platform=hermes` forwarded the reply, emitted

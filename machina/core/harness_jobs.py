@@ -10,6 +10,7 @@ Jobs are in-process, per-session, capped, and never outlive Machina.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -68,6 +69,9 @@ class HarnessJob:
     stderr: str = ""
     error: str = ""
     persist: bool = False
+    done: bool = False
+    progress: list[str] = field(default_factory=list)
+    on_progress: Callable[[str], None] | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -86,6 +90,7 @@ class HarnessJob:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "error": self.error,
+            "progress": list(self.progress),
         }
 
 
@@ -176,6 +181,7 @@ async def start(
     cwd: Any = None,
     reuse_session: bool = False,
     record_user: bool = True,
+    on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Create the child chat (or reuse it), schedule the run, return snapshot."""
     if not session_id:
@@ -202,6 +208,7 @@ async def start(
         timeout=timeout,
     )
     job.persist = bool(child_id or reuse_session)
+    job.on_progress = on_progress
     _JOBS[job.id] = job
     _prune()
     if record_user and child_id:
@@ -212,6 +219,27 @@ async def start(
 
 
 async def _run(job: HarnessJob, cwd: Any) -> None:
+    pending: list[str] = []
+    lock = threading.Lock()
+    stop = threading.Event()
+
+    def on_output(_source: str, text: str) -> None:
+        with lock:
+            pending.append(text)
+
+    async def drain() -> None:
+        carry = ""
+        last_emit = 0.0
+        while not stop.is_set():
+            await asyncio.sleep(0.3)
+            carry, emitted = _flush_progress(job, pending, lock, carry)
+            now = time.monotonic()
+            if emitted and now - last_emit >= 0.9:
+                last_emit = now
+                _emit(job)
+        _flush_progress(job, pending, lock, carry, final=True)
+
+    drain_task = asyncio.create_task(drain())
     try:
         from machina import interop
 
@@ -221,6 +249,7 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
             job.task,
             timeout=job.timeout,
             cwd=cwd,
+            on_output=on_output,
         )
         job.exit_code = result.exit_code
         job.command = list(result.command)
@@ -243,6 +272,13 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
         job.status = "error"
         job.error = f"{type(exc).__name__}: {exc}"
     finally:
+        stop.set()
+        try:
+            await asyncio.shield(drain_task)
+        except asyncio.CancelledError:
+            drain_task.cancel()
+        except Exception:
+            pass
         job.ended_at = time.time()
         if job.persist:
             body = job.stdout or job.stderr or job.error or "(no output)"
@@ -256,7 +292,47 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
                 harness_job_id=job.id,
             )
         _TASKS.pop(job.id, None)
+        job.done = True
         _emit(job)
+
+
+def _flush_progress(
+    job: HarnessJob,
+    pending: list[str],
+    lock: threading.Lock,
+    carry: str,
+    *,
+    final: bool = False,
+) -> tuple[str, bool]:
+    """Move complete output lines into the job snapshot; return carry/emitted."""
+    with lock:
+        text = carry + "".join(pending)
+        pending.clear()
+    if not text:
+        return "", False
+    if not final and "\n" not in text:
+        return text, False
+    head, _, carry = text.rpartition("\n")
+    text = head + ("\n" if head else "") + (carry if final else "")
+    if not text.strip():
+        return carry, False
+    try:
+        from machina.interop import _redact_output
+
+        text = _redact_output(text)
+    except Exception:
+        pass
+    lines = [line for line in text.splitlines() if line.strip()]
+    if lines:
+        job.progress.extend(lines)
+        job.progress[:] = job.progress[-80:]
+    callback = job.on_progress
+    if callback is not None:
+        try:
+            callback(text)
+        except Exception:
+            pass
+    return carry, bool(lines)
 
 
 async def wait(job_id: str, timeout: float = 300.0) -> dict[str, Any] | None:
@@ -266,7 +342,7 @@ async def wait(job_id: str, timeout: float = 300.0) -> dict[str, Any] | None:
         job = _JOBS.get(job_id)
         if job is None:
             return None
-        if job.status != "running":
+        if job.done:
             return job.snapshot()
         await asyncio.sleep(0.25)
     job = _JOBS.get(job_id)
