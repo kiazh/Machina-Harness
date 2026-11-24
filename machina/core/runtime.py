@@ -194,6 +194,37 @@ class RuntimeServices:
         ]
         return report
 
+    async def probe_status(self) -> dict[str, Any]:
+        """Read-only readiness for status surfaces before/without startup.
+
+        Runs the provider/sandbox/toggle probes and reports them, but never
+        connects the DB, starts audit, loads skills, or flips ``_started``.
+        That keeps status honest on first use without changing lifecycle
+        ownership or leaking a started runtime into later startup.
+        """
+        if self._started:
+            return self.status()
+        async with self._lock:
+            if self._started:
+                return self.status()
+            report = dict(getattr(self, "_last_report", {}))
+            try:
+                report.update(await asyncio.to_thread(_detect_providers))
+                report.update(await asyncio.to_thread(_detect_sandbox))
+                report.update(await asyncio.to_thread(_detect_toggles))
+            except Exception as error:
+                report.setdefault("chat_provider_reason", str(error))
+                return self.status()
+            previous_report = getattr(self, "_last_report", {})
+            previous_caps = self.capabilities
+            self._last_report = report
+            self.capabilities = _capabilities_from_report(report)
+            try:
+                return self.status()
+            finally:
+                self._last_report = previous_report
+                self.capabilities = previous_caps
+
     async def shutdown(self, timeout: float = 10.0) -> None:
         """Bounded shutdown (AH-AUDIT-024/025).
 

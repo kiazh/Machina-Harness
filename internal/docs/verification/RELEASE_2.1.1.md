@@ -36,9 +36,11 @@ The dynamic-tool-loading, delegation-routing, and Kiro setup patch for 2.1.0.
   process environment).
 - **Status surfaces report real capability on first use.** `machina status`,
   MCP `machina_status`, and HTTP status share `services.status_summary`, which
-  now starts the idempotent runtime probes first. Previously they reported
+  now runs read-only provider/sandbox probes first. Previously they reported
   `chat provider: unknown` until some other command had initialized the
-  runtime.
+  runtime. The probe never connects the DB, starts audit, loads skills, or
+  flips the runtime's `_started` flag, so the API lifespan remains the sole
+  startup owner.
 
 ## Manual end-to-end verification (2026-11-24)
 
@@ -72,7 +74,7 @@ Kiro checkout:
 
 ## Verification
 
-- Repository smoke suite: `716 passed, 18 skipped`.
+- Repository smoke suite: `717 passed, 18 skipped`.
 - UI suite: `1,262 passed, 6 skipped`; typecheck and lint clean.
 - External suite: `6,548 passed, 13 skipped, 2 xfailed` on 2.1.0; the 2.1.1
   deltas are covered by the repository regression tests and CI.
