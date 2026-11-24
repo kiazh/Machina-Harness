@@ -76,8 +76,9 @@ Kiro checkout:
 
 - Repository smoke suite: `717 passed, 18 skipped`.
 - UI suite: `1,262 passed, 6 skipped`; typecheck and lint clean.
-- External suite: `6,548 passed, 13 skipped, 2 xfailed` on 2.1.0; the 2.1.1
-  deltas are covered by the repository regression tests and CI.
+- External suite: `6,548 passed, 13 skipped, 2 xfailed` on the 2.1.1 tree
+  (the one local editable-metadata check was rerun after reinstalling the
+  package; CI installs from source).
 
 ## Compatibility
 
