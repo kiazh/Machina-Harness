@@ -110,10 +110,19 @@ def failed_response(
     tool_calls: list[dict[str, Any]],
     tokens: int,
     iterations: int,
+    detail: str = "",
 ) -> AgentResponse:
-    """The shared provider-failure response shape for both loops."""
+    """The shared provider-failure response shape for both loops.
+
+    *detail* carries the bounded, already-redaction-safe cause (HTTP status and
+    provider/model) so a failed turn says *why* instead of sending the user to
+    the server log.
+    """
+    content = (
+        f"LLM provider error: {detail}" if detail else "LLM provider error. Check server logs."
+    )
     return AgentResponse(
-        content="LLM provider error. Check server logs.",
+        content=content,
         outcome="failed",
         tool_calls=tool_calls,
         tokens_used=tokens,

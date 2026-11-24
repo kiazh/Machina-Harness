@@ -130,18 +130,19 @@ def keep_free_hermes_parent_route(
 ) -> tuple[str | None, str | None]:
     """Keep a free Hermes parent's route for delegated children.
 
-    The connected-model router can rank a paid Nous model above the user's
-    explicitly chosen free model. An account without credits then fails every
-    child at the provider before any work happens. A paid Hermes parent may
-    still be routed across the catalog; only the free-tier choice is sticky.
+    The connected-model router ranks from "the key exists", not "the key
+    works". A paid Nous model, an unfunded DeepSeek key (HTTP 402) or an
+    invalid OpenRouter key (HTTP 401) can therefore outrank the user's
+    explicitly chosen free model, and every child dies at the provider before
+    doing any work. A free Hermes choice is sticky across providers and models:
+    only an explicit definition pin (resolved after this guard) can override
+    it. A paid parent may still be routed across the catalog.
     """
     if (
         parent_provider == "hermes"
-        and routed_provider == "hermes"
         and parent_model
         and str(parent_model).endswith(":free")
-        and routed_model
-        and not str(routed_model).endswith(":free")
+        and (routed_provider, routed_model) != (parent_provider, parent_model)
     ):
         return parent_provider, parent_model
     return routed_provider, routed_model

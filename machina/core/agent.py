@@ -2783,7 +2783,12 @@ async def _react_loop(
                         )
                         agent._schedule_memory_consolidation(session_id)
                         yield _LoopTerminal(
-                            failed_response(tool_calls_made, total_tokens, iteration + 1)
+                            failed_response(
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                                _provider_failure_detail(e, agent),
+                            )
                         )
                         return
 
@@ -2821,7 +2826,12 @@ async def _react_loop(
                         )
                         agent._schedule_memory_consolidation(session_id)
                         yield _LoopTerminal(
-                            failed_response(tool_calls_made, total_tokens, iteration + 1)
+                            failed_response(
+                                tool_calls_made,
+                                total_tokens,
+                                iteration + 1,
+                                _provider_failure_detail(e, agent),
+                            )
                         )
                         return
 
@@ -2989,6 +2999,31 @@ async def _react_loop(
             if pending_chunks:
                 await agent._flush_pending_cancellation_safe(pending_chunks, session_id)
             raise
+
+
+def _provider_failure_detail(error: Exception, agent: Any) -> str:
+    """One bounded line naming the HTTP status and provider/model."""
+    status = getattr(getattr(error, "response", None), "status_code", None)
+    provider = getattr(agent, "provider", None)
+    model = str(getattr(provider, "model", "") or "")
+    name = str(
+        getattr(getattr(provider, "spec", None), "name", "")
+        or getattr(provider, "name", "")
+        or type(provider).__name__
+    )
+    message = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+    parts: list[str] = []
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    parts.append(message[:180])
+    where = "/".join(part for part in (name, model) if part)
+    if where:
+        parts.append(f"({where})")
+    if status in (401, 403):
+        parts.append("Check the provider credential.")
+    elif status == 402:
+        parts.append("Add credits or switch provider/model.")
+    return " ".join(parts)[:320]
 
 
 class ReActAgent(BaseReActAgent):

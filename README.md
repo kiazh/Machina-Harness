@@ -62,7 +62,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
-**Release status:** **2.4.1 open-source feature release.** `main` adds background harness subagents and Activity navigation on top of the 2.1 one-click setup and tool-loading fixes in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.4.1 release notes](internal/docs/verification/RELEASE_2.4.1.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **2.4.2 open-source feature release.** `main` adds background harness subagents and Activity navigation on top of the 2.1 one-click setup and tool-loading fixes in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.4.2 release notes](internal/docs/verification/RELEASE_2.4.2.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -2854,7 +2854,7 @@ The gateway speaks newline-delimited JSON-RPC 2.0 over stdio. The HTTP API uses 
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "version": "2.4.1",
+    "version": "2.4.2",
     "protocolVersion": 2,
     "model": "openrouter/free",
     "provider": "openrouter",

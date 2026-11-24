@@ -1,5 +1,15 @@
 # Release notes
 
+## 2.4.2 - 2026-11-24
+
+**Delegation survives a broken provider key.**
+
+### Fixed
+
+- **Subagents no longer inherit a dead provider route.** A free Hermes parent's model is now sticky for delegated children across *all* providers, not just other Hermes routes. The router ranks from "a key exists", so an unfunded DeepSeek key (HTTP 402) or an invalid OpenRouter key (HTTP 401) used to outrank the working free model; every child then failed before doing any work. An explicit agent-definition pin still wins.
+- **Provider failures say what happened.** A failed turn now reports the HTTP status, provider/model and the fix ("Check the provider credential", "Add credits or switch provider/model") instead of the generic "LLM provider error. Check server logs."
+- Test isolation: the local `MACHINA_HARNESS_MODEL*` overrides no longer leak into command-shape tests.
+
 ## 2.4.1 - 2026-11-24
 
 **Harness chats keep the conversation.**

@@ -10,9 +10,16 @@ from machina import interop
 
 
 @pytest.fixture(autouse=True)
-def _clear_hermes_model_cache():
-    """The last-good model is process state; each test starts fresh."""
+def _clear_hermes_model_cache(monkeypatch):
+    """Process state and local .env overrides must not leak between tests."""
     interop._LAST_GOOD_HERMES_MODEL.clear()
+    for name in (
+        "MACHINA_HARNESS_MODEL",
+        "MACHINA_HARNESS_MODEL_HERMES",
+        "MACHINA_HARNESS_MODEL_OPENCODE",
+        "MACHINA_HARNESS_MODEL_CODEX",
+    ):
+        monkeypatch.delenv(name, raising=False)
     yield
     interop._LAST_GOOD_HERMES_MODEL.clear()
 
