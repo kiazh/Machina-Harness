@@ -1,5 +1,14 @@
 # Release notes
 
+## 2.2.1 - 2026-11-24
+
+**Keyboard-freeze hardening for slow commands.**
+
+### Fixed
+
+- `/harnesses` Run a task can never fall back to the old foreground path: it now requires a session and always starts a background job, so the "Consulting Hermes… waiting" freeze cannot occur.
+- A slow slash command no longer swallows every key indefinitely. The command keeps the keyboard for its 1.5s dialog window; after that, ordinary typing reaches the composer while Enter/Esc stay reserved for the command. This protects any future long-running command, not only harness/delegation paths.
+
 ## 2.2.0 - 2026-11-24
 
 **Background harness subagents and Activity navigation.**

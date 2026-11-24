@@ -13,7 +13,6 @@ import { keyValues } from "../format.ts";
 import type {
 	HarnessListResult,
 	HarnessRow,
-	HarnessRunResult,
 	InteropActionResult,
 } from "../protocol.ts";
 import { withDelayedNotice } from "./progress.ts";
@@ -97,24 +96,6 @@ async function unregisterHarness(host: FeatureHost, row: HarnessRow): Promise<vo
 	printResult(host, result);
 }
 
-/** Render the bounded run outcome as scroll-friendly plain text. */
-function renderRun(host: FeatureHost, row: HarnessRow, result: HarnessRunResult): void {
-	const headline = [`${row.label}: ${result.ok ? "completed" : "failed"}`];
-	if (result.exitCode !== null) headline.push(`exit code ${result.exitCode}`);
-	if (result.unsupportedReason) headline.push(`unsupported: ${result.unsupportedReason}`);
-	host.print(sanitizeDisplay(headline.join(" · ")), result.ok ? "success" : "warning");
-	if (result.command) host.print(sanitizeDisplay(`command: ${result.command}`), "plain");
-	if (result.unsupportedReason) return;
-	if (result.stdout) host.print(sanitizeDisplay(result.stdout), "plain");
-	if (result.stderr) host.print(sanitizeDisplay(result.stderr), "warning");
-	if (!result.stdout && !result.stderr && result.exitCode === null) {
-		host.print(
-			"No output; the harness produced no exit code (it may have timed out or been killed).",
-			"warning",
-		);
-	}
-}
-
 async function runTask(
 	host: FeatureHost,
 	row: HarnessRow,
@@ -153,34 +134,27 @@ async function runTask(
 		"with host access (files, network, tools).";
 	if (!(await confirm(host, warning, "Run task"))) return;
 	const sessionId = host.session()?.id;
-	if (sessionId) {
-		const started = await host.request<HarnessBackgroundStart>("interop.run", {
-			platform: row.key,
-			prompt,
-			timeout: runTimeoutSeconds,
-			background: true,
-			sessionId,
-		});
+	if (!sessionId) {
 		host.print(
-			`${row.label} started in the background (job ${started.jobId}). ` +
-				"Keep working; the Activity tab and a completion notice show the result.",
-			"success",
+			"Open a chat session first; harness runs are background subagents and need a session.",
+			"warning",
 		);
 		return;
 	}
-	const result = await withDelayedNotice(
-		host,
-		`Consulting ${row.label}. Waiting for its bounded run to finish...`,
-		() =>
-			host.request<HarnessRunResult>("interop.run", {
-				platform: row.key,
-				prompt,
-				// The gateway applies exactly this deadline; app.ts sizes the client
-				// clock past it so a late-but-successful run is never discarded (H22).
-				timeout: runTimeoutSeconds,
-			}),
+	// Always background: waiting inline holds commandRunning and swallows every
+	// key until the external CLI exits (the old 315s freeze).
+	const started = await host.request<HarnessBackgroundStart>("interop.run", {
+		platform: row.key,
+		prompt,
+		timeout: runTimeoutSeconds,
+		background: true,
+		sessionId,
+	});
+	host.print(
+		`${row.label} started in the background (job ${started.jobId}). ` +
+			"Keep working; the Activity tab and a completion notice show the result.",
+		"success",
 	);
-	renderRun(host, row, result);
 }
 
 async function actOnHarness(

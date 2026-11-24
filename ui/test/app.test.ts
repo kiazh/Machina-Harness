@@ -214,6 +214,26 @@ test("a slash command loading owns input until its dialog opens", async () => {
 	}
 });
 
+test("a slow command releases ordinary typing after the grace window", async () => {
+	const { app } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		const state = app as unknown as {
+			commandRunning: boolean;
+			commandRunningAt: number;
+			onInput(data: string): { consume: boolean } | undefined;
+		};
+		state.commandRunning = true;
+		state.commandRunningAt = Date.now() - 2_000;
+		assert.equal(state.onInput("a"), undefined, "typing reaches the composer after the grace window");
+		assert.deepEqual(state.onInput("\r"), { consume: true }, "Enter still belongs to the command");
+		state.commandRunningAt = Date.now();
+		assert.deepEqual(state.onInput("b"), { consume: true }, "the initial window still owns keys");
+	} finally {
+		await app.exit();
+	}
+});
+
 test("start() enables shrink-clearing so closed menus leave no ghost rows", async () => {
 	const { app, tui } = makeApp(SESSION_A);
 	await app.start();

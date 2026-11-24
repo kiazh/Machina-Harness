@@ -380,6 +380,7 @@ export class App implements FeatureHost {
 	 * to appear and corrupts both surfaces.
 	 */
 	private commandRunning = false;
+	private commandRunningAt = 0;
     private imageDraft = new ImageDraft();
     private imageLoads = Promise.resolve();
     private imageEpoch = 0;
@@ -2366,7 +2367,16 @@ export class App implements FeatureHost {
 		// A command that has not opened its dialog yet owns the keyboard.
 		// Once a dialog/approval is visible it receives keys normally.
 		if (this.commandRunning && !this.dialogs.length && !this.turnSession.approvalDialogCount()) {
-			return { consume: true };
+			// Commands normally open their dialog immediately. A slow RPC must
+			// not make the composer look dead: keep keys for the first 1.5s,
+			// then let ordinary typing reach the editor while still reserving
+			// Enter/Esc for the command's own flow.
+			const startedAt = this.commandRunningAt || Date.now();
+			if (Date.now() - startedAt < 1500) return { consume: true };
+			if (matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
+				return { consume: true };
+			}
+			return undefined;
 		}
 		const repeated = isKeyRepeat(data);
 		const normalized = normalizeModifierArrow(data);
@@ -3776,10 +3786,12 @@ export class App implements FeatureHost {
         if (!commandCarriesSecret(command)) this.editor.addToHistory(draft.text);
 		if (command) {
 			this.commandRunning = true;
+			this.commandRunningAt = Date.now();
 			try {
 				await runCommand(command, this);
 			} finally {
 				this.commandRunning = false;
+				this.commandRunningAt = 0;
 			}
 		} else {
 			this.lastPrompt = draft.text;
