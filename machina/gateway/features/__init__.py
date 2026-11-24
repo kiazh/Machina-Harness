@@ -26,8 +26,15 @@ from machina.gateway.features.auth_chatgpt import (
     auth_chatgpt_logout,
     auth_chatgpt_status,
 )
+from machina.gateway.features.auth_hermes import (
+    auth_hermes_setup,
+    auth_hermes_start,
+    auth_hermes_status,
+    auth_hermes_stop,
+)
 from machina.gateway.features.auth_kiro import (
     auth_kiro_fallback,
+    auth_kiro_setup,
     auth_kiro_start,
     auth_kiro_status,
     auth_kiro_stop,
@@ -230,8 +237,13 @@ METHODS: dict[str, Handler] = {
     "auth.kiro.status": auth_kiro_status,
     "auth.kiro.start": auth_kiro_start,
     "auth.kiro.stop": auth_kiro_stop,
+    "auth.kiro.setup": auth_kiro_setup,
     "auth.kiro.usage": auth_kiro_usage,
     "auth.kiro.fallback": auth_kiro_fallback,
+    "auth.hermes.status": auth_hermes_status,
+    "auth.hermes.start": auth_hermes_start,
+    "auth.hermes.stop": auth_hermes_stop,
+    "auth.hermes.setup": auth_hermes_setup,
     "mcp.catalog": mcp_catalog,
     "mcp.list": mcp_list,
     "mcp.config": mcp_config,

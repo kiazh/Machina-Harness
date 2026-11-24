@@ -595,6 +595,18 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
             return False, "gateway not already connected"
         except Exception as exc:
             return False, f"gateway unavailable: {type(exc).__name__}"
+    if name == "hermes":
+        try:
+            from machina.core import hermes_proxy
+
+            cached = hermes_proxy.cached_models()
+            if cached:
+                return True, "cached proxy catalog"
+            if hermes_proxy.reaches(timeout=0.25):
+                return True, "proxy reachable"
+            return False, "proxy not running; use /auth hermes Setup"
+        except Exception as exc:
+            return False, f"proxy unavailable: {type(exc).__name__}"
     if name == "custom":
         base = _config_value(config, "custom_base_url")
         return bool(base), "base URL configured" if base else "no base URL"
@@ -667,6 +679,18 @@ def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
             from machina.core.provider import kiro_proxy
 
             return kiro_proxy.cached_models() or kiro_proxy.fallback_models()
+        except Exception:
+            return []
+    if name == "hermes":
+        try:
+            from machina.core import hermes_proxy
+
+            cached = hermes_proxy.cached_models()
+            if cached:
+                return cached
+            if hermes_proxy.reaches(timeout=0.25):
+                return hermes_proxy.fetch_models()
+            return []
         except Exception:
             return []
     if name in {"custom", "ollama"} or name in provider_names():

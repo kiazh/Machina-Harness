@@ -148,6 +148,19 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         reasoning="none",
         description="Kiro local proxy (OpenAI-compatible gateway)",
     ),
+    "hermes": ProviderSpec(
+        name="hermes",
+        # Hermes ships a loopback OpenAI-compatible proxy to OAuth providers.
+        # Machina detects the CLI on every OS and starts the proxy only when
+        # an upstream is signed in; the factory resolves the live port and
+        # model. The proxy accepts any bearer token, so no user key is needed.
+        base_url="http://127.0.0.1:8645/v1",
+        api_key_env="HERMES_PROXY_API_KEY",
+        default_model="auto",
+        requires_key=False,
+        reasoning="openai",
+        description="Hermes local proxy (Nous Portal / xAI OAuth)",
+    ),
 }
 
 # Every chat provider the harness can route to: OpenRouter (multi-model),

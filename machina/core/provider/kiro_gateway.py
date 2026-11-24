@@ -14,6 +14,7 @@ only when Machina started it; an externally started gateway is never killed.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -22,13 +23,16 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import dataclass
 from http import client as http_client
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 import machina.core.provider.kiro_proxy as kiro_proxy
 from machina.core.config import config
@@ -54,6 +58,10 @@ logger = logging.getLogger(__name__)
 START_TIMEOUT_SECONDS = 8.0
 STOP_GRACE_SECONDS = 3.0
 POLL_SECONDS = 0.2
+INSTALL_TIMEOUT_SECONDS = 900.0
+
+GATEWAY_REPO_URL = "https://github.com/jwadow/kiro-gateway.git"
+GATEWAY_ZIP_URL = "https://codeload.github.com/jwadow/kiro-gateway/zip/refs/heads/main"
 
 #: Conventional checkout names. Detection never scans recursively; it only
 #: checks these bounded locations. Users with another layout set the config.
@@ -64,7 +72,21 @@ _COMMON_GATEWAY_DIRS = (
     "~/projects/kiro-gateway",
     "~/dev/kiro-gateway",
     "~/Documents/kiro-gateway",
+    "~/Downloads/kiro-gateway",
+    "~/Desktop/kiro-gateway",
     "~/.kiro-gateway",
+)
+
+#: Recognized launcher filenames, in preference order. Upstream uses
+#: ``main.py``; the others cover forks and wrapper layouts without requiring
+#: the user to hand-write ``MACHINA_KIRO_GATEWAY_COMMAND``.
+_LAUNCHER_FILES = (
+    "main.py",
+    "server.py",
+    "app.py",
+    "run.py",
+    "kiro_gateway/main.py",
+    "src/main.py",
 )
 
 _SAFE_STATE_LOCK = threading.Lock()
@@ -131,12 +153,50 @@ def _autostart_enabled() -> bool:
         return False
 
 
+def _launcher_file(directory: Path) -> Path | None:
+    """Return the first recognized launcher inside ``directory``."""
+    for relative in _LAUNCHER_FILES:
+        candidate = directory / relative
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def _configured_dir() -> Path | None:
     raw = _config_text("kiro_gateway_dir")
     if raw:
         return Path(raw).expanduser()
-    for candidate in _COMMON_GATEWAY_DIRS:
-        path = Path(candidate).expanduser()
+    conventional = [Path(candidate).expanduser() for candidate in _COMMON_GATEWAY_DIRS]
+    # Also honor a checkout created next to the current working directory
+    # (the common `git clone` case while a terminal is in a projects folder).
+    try:
+        conventional.extend((Path.cwd() / "kiro-gateway", Path.cwd().parent / "kiro-gateway"))
+    except OSError:
+        pass
+    # A GitHub ZIP extracts as ``kiro-gateway-main`` (or a "(1)" copy), so
+    # include one bounded glob level for the usual download folders. These
+    # only count when they actually contain a launcher: an unrelated
+    # similarly-named folder must not shadow a conventional checkout.
+    archived: list[Path] = []
+    for folder in ("Downloads", "Desktop"):
+        try:
+            archived.extend(sorted((Path.home() / folder).glob("kiro-gateway*")))
+        except OSError:
+            continue
+    # One nested level covers the common `~/projects/<org>/kiro-gateway`
+    # layout without turning detection into a filesystem crawl.
+    for folder in ("projects", "src", "code", "dev", "Documents"):
+        try:
+            archived.extend(sorted((Path.home() / folder).glob("*/kiro-gateway")))
+        except OSError:
+            continue
+    for path in (*conventional, *archived):
+        if path.is_dir() and _launcher_file(path) is not None:
+            return path
+    for path in conventional:
         if path.is_dir():
             return path
     return None
@@ -218,13 +278,209 @@ def detect_launch() -> tuple[LaunchSpec | None, str | None]:
         )
     if not directory.is_dir():
         return None, f"MACHINA_KIRO_GATEWAY_DIR does not exist: {directory}"
-    entry = directory / "main.py"
-    if not entry.is_file():
-        return None, f"No main.py found in MACHINA_KIRO_GATEWAY_DIR: {directory}"
+    entry = _launcher_file(directory)
+    if entry is None:
+        expected = ", ".join(_LAUNCHER_FILES)
+        return (
+            None,
+            f"No Kiro gateway launcher found in {directory}. Expected one of: "
+            f"{expected}. Clone jwadow/kiro-gateway, or set "
+            "MACHINA_KIRO_GATEWAY_COMMAND to the exact launcher command.",
+        )
     python = _python_for(directory)
     if not python:
         return None, "No Python interpreter found for the Kiro gateway checkout."
     return LaunchSpec((python, str(entry)), directory, "detected"), None
+
+
+def _base_python() -> str:
+    """Interpreter used to create the checkout's private venv."""
+    if getattr(sys, "frozen", False):
+        return shutil.which("python3") or shutil.which("python") or ""
+    return sys.executable or shutil.which("python3") or shutil.which("python") or ""
+
+
+def _venv_python(directory: Path) -> Path:
+    if os.name == "nt":
+        return directory / ".venv" / "Scripts" / "python.exe"
+    return directory / ".venv" / "bin" / "python"
+
+
+def _run_install_step(argv: list[str], *, cwd: Path | None = None) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+    except FileNotFoundError:
+        return False, f"{argv[0]} was not found on PATH."
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"{argv[0]} failed: {error}"
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    if result.returncode != 0:
+        tail = " ".join(output.split())[-600:]
+        return False, f"{argv[0]} exited with status {result.returncode}. {tail}".strip()
+    return True, ""
+
+
+def _download_checkout(directory: Path) -> tuple[bool, str]:
+    """Fetch the official checkout as a ZIP (no Git required)."""
+    try:
+        request = Request(GATEWAY_ZIP_URL, headers={"User-Agent": "Machina/setup"})
+        with urlopen(request, timeout=120) as response:  # nosec B310 - fixed https URL
+            payload = response.read()
+    except Exception as error:  # network, TLS, HTTP
+        return False, f"Could not download the Kiro gateway: {error}"
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload))
+    except zipfile.BadZipFile as error:
+        return False, f"The Kiro gateway download was not a valid archive: {error}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="machina-kiro-") as temporary:
+            root = Path(temporary).resolve()
+            for member in archive.infolist():
+                target = (root / member.filename).resolve()
+                if target != root and root not in target.parents:
+                    continue  # path traversal in a hostile archive
+                archive.extract(member, root)
+            entries = [entry for entry in root.iterdir() if entry.is_dir()]
+            source = entries[0] if len(entries) == 1 else root
+            for item in source.iterdir():
+                destination = directory / item.name
+                if destination.exists():
+                    continue
+                shutil.move(str(item), destination)
+    except (OSError, zipfile.BadZipFile) as error:
+        return False, f"Could not unpack the Kiro gateway download: {error}"
+    return True, ""
+
+
+def install_checkout() -> tuple[bool, str]:
+    """Provision the Kiro gateway checkout from its official repository.
+
+    Setup must be one action: clone, create the private venv, install the
+    gateway requirements, seed its ``.env``, and leave the launcher ready.
+    An existing non-empty directory is never overwritten.
+    """
+    spec, _ = detect_launch()
+    if spec is not None:
+        return True, f"Kiro gateway ready at {spec.cwd or 'the configured checkout'}."
+    directory = _configured_dir() or Path.home() / "kiro-gateway"
+    try:
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        return False, f"Could not create {directory}: {error}"
+    if not (directory / ".git").is_dir():
+        try:
+            non_empty = any(directory.iterdir())
+        except OSError:
+            non_empty = False
+        if non_empty:
+            return False, (
+                f"{directory} exists but is not a git checkout. Move it aside "
+                "or set MACHINA_KIRO_GATEWAY_DIR to an empty directory."
+            )
+        git = shutil.which("git")
+        cloned = False
+        if git:
+            ok, message = _run_install_step(
+                [git, "clone", "--depth", "1", GATEWAY_REPO_URL, str(directory)]
+            )
+            if ok:
+                cloned = True
+                _log(f"cloned {GATEWAY_REPO_URL} into {directory}")
+            else:
+                _log(f"git clone failed ({message}); falling back to the ZIP download")
+        if not cloned:
+            ok, message = _download_checkout(directory)
+            if not ok:
+                return False, message
+            _log(f"downloaded {GATEWAY_ZIP_URL} into {directory}")
+    venv = _venv_python(directory)
+    if not venv.is_file():
+        python = _base_python()
+        if not python:
+            return False, "No Python interpreter found to create the gateway venv."
+        ok, message = _run_install_step([python, "-m", "venv", str(directory / ".venv")])
+        if not ok:
+            return False, f"Could not create the gateway venv: {message}"
+    requirements = directory / "requirements.txt"
+    if requirements.is_file():
+        ok, message = _run_install_step(
+            [str(venv), "-m", "pip", "install", "-r", str(requirements)]
+        )
+        if not ok:
+            return False, f"Could not install the gateway requirements: {message}"
+    env_file = directory / ".env"
+    env_example = directory / ".env.example"
+    if not env_file.is_file() and env_example.is_file():
+        try:
+            shutil.copyfile(env_example, env_file)
+        except OSError as error:
+            _log(f"could not seed .env ({error}); continuing with defaults")
+    installed, error = detect_launch()
+    if installed is None:
+        return False, error or "The Kiro gateway checkout is incomplete."
+    return True, f"Kiro gateway installed at {directory}."
+
+
+def setup(*, wait: bool = True) -> dict[str, Any]:
+    """One-click Kiro gateway path: provision the checkout, then start it.
+
+    ``wait=False`` starts a background install and returns immediately so a
+    UI request never blocks on pip. The caller polls :func:`status` (or just
+    opens /models) while the checkout is provisioned.
+    """
+    if not login_detected():
+        return {
+            "installed": False,
+            "installing": False,
+            "message": (
+                "Kiro is not signed in yet. Install the official Kiro CLI, run "
+                "its sign-in, then click Setup again."
+            ),
+            "result": None,
+        }
+    spec, _error = detect_launch()
+    if spec is not None:
+        return {"installed": True, "installing": False, "message": "", "result": start()}
+    if not wait:
+        threading.Thread(
+            target=_setup_worker,
+            name="kiro-gateway-setup",
+            daemon=True,
+        ).start()
+        return {
+            "installed": False,
+            "installing": True,
+            "message": (
+                "Installing the Kiro gateway in the background. The proxy "
+                f"starts automatically; progress is in {log_path()}."
+            ),
+            "result": None,
+        }
+    ok, message = install_checkout()
+    if not ok:
+        return {"installed": False, "installing": False, "message": message, "result": None}
+    _log(message)
+    return {"installed": True, "installing": False, "message": "", "result": start()}
+
+
+def _setup_worker() -> None:
+    """Background install + start used by the gateway Setup action."""
+    try:
+        ok, message = install_checkout()
+        _log(message)
+        if ok:
+            result = start()
+            _log(f"setup start result: ready={result.get('ready')}")
+    except Exception as error:  # never raise out of a daemon worker
+        _log(f"setup failed ({type(error).__name__}: {error})")
 
 
 def _login_candidates() -> list[Path]:

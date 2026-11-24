@@ -91,6 +91,7 @@ SECRET_KEYS = frozenset(
         "opencode_api_key",
         "kimi_api_key",
         "kiro_api_key",
+        "hermes_proxy_api_key",
         "custom_api_key",
         "cohere_api_key",
         "database_url",
@@ -380,6 +381,7 @@ DEFAULTS: dict[str, Any] = {
     # KIRO_API_KEY is only the optional gateway loopback password (default:
     # dummy-local-only); KIRO_BASE_URL overrides the default port.
     "kiro_api_key": "",
+    "hermes_proxy_api_key": "",
     "kiro_base_url": "",
     # Optional lifecycle for the user-installed Kiro gateway. Auto-start is
     # gated on a detected Kiro CLI login and a configured/detected checkout
@@ -391,6 +393,13 @@ DEFAULTS: dict[str, Any] = {
     # Optional fallback route when Kiro credits are exhausted:
     # "provider" or "provider:model". Empty = auto-pick a signed-in provider.
     "kiro_fallback": "",
+    # Hermes local OpenAI proxy (``hermes proxy start``): detected on PATH on
+    # every OS and started on launch only when an upstream OAuth login exists.
+    # "auto" chooses nous/xai from `hermes proxy status`; set the port when
+    # 8645 is occupied. Disable autostart to keep the proxy user-managed.
+    "hermes_proxy_autostart": True,
+    "hermes_proxy_port": 8645,
+    "hermes_proxy_provider": "auto",
     # Generic OpenAI-compatible provider ("custom"): any base URL (LM Studio,
     # vLLM, llama.cpp, the Hermes loopback proxy, ...). The key is optional —
     # local endpoints commonly run keyless.
@@ -528,11 +537,15 @@ LEGACY_ENV_VARS: dict[str, str] = {
     "opencode_api_key": "OPENCODE_API_KEY",
     "kimi_api_key": "KIMI_API_KEY",
     "kiro_api_key": "KIRO_API_KEY",
+    "hermes_proxy_api_key": "HERMES_PROXY_API_KEY",
     "kiro_base_url": "KIRO_BASE_URL",
     "kiro_gateway_command": "KIRO_GATEWAY_COMMAND",
     "kiro_gateway_dir": "KIRO_GATEWAY_DIR",
     "kiro_autostart": "KIRO_AUTOSTART",
     "kiro_fallback": "KIRO_FALLBACK",
+    "hermes_proxy_autostart": "HERMES_PROXY_AUTOSTART",
+    "hermes_proxy_port": "HERMES_PROXY_PORT",
+    "hermes_proxy_provider": "HERMES_PROXY_PROVIDER",
     "custom_base_url": "CUSTOM_BASE_URL",
     "custom_api_key": "CUSTOM_API_KEY",
     "opencode_base_url": "OPENCODE_BASE_URL",
@@ -562,6 +575,7 @@ _ENUM_VALIDATORS: dict[str, tuple[str, ...]] = {
     "optimization_compression_backend": ("llmlingua2", "none"),
     "reranker_backend": ("auto", "cohere", "local", "http", "none"),
     "output_policy": ("legacy", "concise"),
+    "hermes_proxy_provider": ("auto", "nous", "xai"),
 }
 
 
@@ -867,12 +881,17 @@ class Config:
     opencode_api_key: str = field(default="", repr=False)
     kimi_api_key: str = field(default="", repr=False)
     kiro_api_key: str = field(default="", repr=False)
+    hermes_proxy_api_key: str = field(default="", repr=False)
     kiro_base_url: str = ""
     # User-installed gateway lifecycle (optional; see core/provider/kiro_gateway).
     kiro_gateway_command: str = ""
     kiro_gateway_dir: str = ""
     kiro_autostart: bool = True
     kiro_fallback: str = ""
+    # Hermes local OpenAI proxy lifecycle/catalog.
+    hermes_proxy_autostart: bool = True
+    hermes_proxy_port: int = 8645
+    hermes_proxy_provider: str = "auto"
     # "custom" provider: any OpenAI-compatible base URL; key optional.
     custom_base_url: str = ""
     custom_api_key: str = field(default="", repr=False)

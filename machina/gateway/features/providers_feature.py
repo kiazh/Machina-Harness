@@ -136,6 +136,46 @@ async def _kiro_models(provider: str, refresh: bool, *, fast: bool = False) -> d
         )
 
 
+async def _hermes_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
+    """Catalog from the local Hermes proxy, starting it on explicit refresh."""
+    from machina.core import hermes_proxy
+
+    if fast and not refresh:
+        cached = hermes_proxy.cached_models()
+        if cached is not None:
+            return _models_payload(provider, source="cache", models=cached)
+        # A proxy may already be running from an earlier Machina process or
+        # an external launch, so ownership is not a precondition. The catalog
+        # is one bounded loopback request; a refused port answers instantly.
+        if hermes_proxy.reaches(timeout=0.4):
+            try:
+                models = await asyncio.to_thread(hermes_proxy.fetch_models)
+                return _models_payload(provider, source="live", models=models)
+            except Exception as exc:
+                return _models_payload(
+                    provider,
+                    source="none",
+                    models=[],
+                    fetch_error=str(exc) or type(exc).__name__,
+                )
+        return _models_payload(
+            provider,
+            source="none",
+            models=[],
+            fetch_error="Hermes proxy is not running; open the catalog to start it.",
+        )
+    try:
+        models = await asyncio.to_thread(hermes_proxy.fetch_models, force=refresh)
+        return _models_payload(provider, source="live", models=models)
+    except Exception as exc:
+        return _models_payload(
+            provider,
+            source="none",
+            models=[],
+            fetch_error=str(exc) or type(exc).__name__,
+        )
+
+
 async def _named_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
     entry = store.get_provider_entry(provider)
     if entry is None:
@@ -215,6 +255,8 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         return await _chatgpt_models(provider, refresh, fast=fast)
     if provider == "kiro":
         return await _kiro_models(provider, refresh, fast=fast)
+    if provider == "hermes":
+        return await _hermes_models(provider, refresh, fast=fast)
     if store.is_named_provider(provider):
         return await _named_models(provider, refresh, fast=fast)
     # Built-in direct families use the bundled models.dev snapshot. This is

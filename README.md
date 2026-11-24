@@ -62,7 +62,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
-**Release status:** **2.0.1 open-source patch release.** `main` carries the 2.0 release work recorded in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.0.1 release notes](internal/docs/verification/RELEASE_2.0.1.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **2.1.0 open-source feature release.** `main` carries the 2.0 release work plus automatic Hermes proxy detection and the more forgiving Kiro launcher in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.1.0 release notes](internal/docs/verification/RELEASE_2.1.0.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -1035,6 +1035,7 @@ Two rules keep the boundary honest. Missing usage is a distinct state, not zero;
 | `opencode` | `OPENCODE_API_KEY`; optional `OPENCODE_BASE_URL` | `big-pickle` through OpenCode Zen |
 | `kimi` | `KIMI_API_KEY` | `kimi-for-coding` |
 | `kiro` | Kiro account via a local OpenAI-compatible proxy (no Kiro API key); `/auth kiro start`, `/auth kiro usage`; fallback `MACHINA_KIRO_FALLBACK` — [setup](docs/KIRO_PROXY.md) | `auto`; full alias catalog |
+| `hermes` | `/auth hermes` one-click Setup installs the Hermes CLI if needed, opens Nous Portal / xAI OAuth consent, and starts `hermes proxy` automatically — [setup](docs/HERMES_PROXY.md) | `auto`; live proxy catalog |
 | `chatgpt` | `/auth chatgpt sign-in` or `machina auth login` | Choose from the account's model catalog |
 | `copilot` | `/auth copilot sign-in` or `machina auth copilot login` | Choose a model available to your account |
 | `grok` | `/auth grok sign-in` or `machina auth grok login` | Grok subscription models via OAuth device flow (`grok-4.7` default) |
@@ -1059,7 +1060,9 @@ Machina can route work across every model you have actually connected rather tha
 
 The full modes, transport, free-OpenCode, and verification contract is in [docs/ROUTING.md](docs/ROUTING.md).
 
-`kiro` is a community interoperability path, not an AWS-supported provider. Kiro authenticates upstream with your account login, but its terms prohibit third-party harnesses that route requests outside its native interfaces. Machina does not implement the login or bundle the proxy: run a reviewed local gateway such as [jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) after `kiro-cli login`, and review the risks before using it. The proxy's local password is not a Kiro API key; it defaults to the gateway's documented `dummy-local-only` value and can be overridden with `KIRO_API_KEY`.
+`kiro` is a community interoperability path, not an AWS-supported provider. Kiro authenticates upstream with your account login, but its terms prohibit third-party harnesses that route requests outside its native interfaces. `/auth kiro setup` is one action: it clones the reviewed [jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) checkout when absent, creates its private venv, installs its requirements, and starts the proxy; Machina never implements Kiro's login itself. Review the risks before using it. The proxy's local password is not a Kiro API key; it defaults to the gateway's documented `dummy-local-only` value and can be overridden with `KIRO_API_KEY`.
+
+`hermes` is likewise local-first and one-click. `/auth hermes` (or `machina auth hermes setup`) detects the CLI on macOS, Linux, and Windows, runs the official installer when it is missing, opens the unavoidable OAuth consent window, then starts `hermes proxy start` as soon as an upstream is signed in. Machina never bundles Hermes and stops only the proxy it started. See [docs/HERMES_PROXY.md](docs/HERMES_PROXY.md).
 
 ### Usage is normalized, not guessed
 
@@ -2851,7 +2854,7 @@ The gateway speaks newline-delimited JSON-RPC 2.0 over stdio. The HTTP API uses 
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "version": "2.0.1",
+    "version": "2.1.0",
     "protocolVersion": 2,
     "model": "openrouter/free",
     "provider": "openrouter",

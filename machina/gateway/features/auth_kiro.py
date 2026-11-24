@@ -65,3 +65,16 @@ async def auth_kiro_stop(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(kiro_gateway.stop)
     except kiro_gateway.KiroGatewayError as exc:
         raise RpcError(OPERATION_FAILED, str(exc)) from None
+
+
+async def auth_kiro_setup(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    """One-click Setup: provision the checkout in the background, then start.
+
+    Never blocks the gateway on pip: ``setup(wait=False)`` returns as soon as
+    the install worker is scheduled, and the next status/models call sees the
+    gateway once it is ready.
+    """
+    try:
+        return await asyncio.to_thread(kiro_gateway.setup, wait=False)
+    except kiro_gateway.KiroGatewayError as exc:
+        raise RpcError(OPERATION_FAILED, str(exc)) from None

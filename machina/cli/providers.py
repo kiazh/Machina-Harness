@@ -13,7 +13,8 @@ Commands:
   back to openrouter visibly (``--yes`` skips the confirm).
 * ``machina providers models [PROVIDER]`` — print the catalog for a provider:
   the live ChatGPT/Codex catalog for ``chatgpt`` (per-model efforts + context
-  windows) or a named provider's pulled ``/models`` list.
+  windows), the detected Hermes proxy catalog for ``hermes``, or a named
+  provider's pulled ``/models`` list.
 
 The API key is resolved at call time through the shared secret resolver
 (environment -> ``*_FILE`` mount -> Vault/AWS backend), exactly like every
@@ -304,6 +305,9 @@ def models(
     if selected == "chatgpt":
         _chatgpt_models_cmd(refresh=refresh, json_output=json_output)
         return
+    if selected == "hermes":
+        _hermes_models_cmd(refresh=refresh, json_output=json_output)
+        return
     if store.is_named_provider(selected):
         _named_models_cmd(selected, refresh=refresh, json_output=json_output)
         return
@@ -312,6 +316,43 @@ def models(
         "Use it with an explicit model id, or list chatgpt/user-added providers: "
         "[bold]machina providers models chatgpt[/bold] · [bold]machina providers list[/bold]"
     )
+
+
+def _hermes_models_cmd(*, refresh: bool, json_output: bool) -> None:
+    """Print the models exposed by the detected local Hermes proxy."""
+    from machina.core import hermes_proxy
+
+    try:
+        models = hermes_proxy.fetch_models(force=refresh)
+        source = "live"
+        fetch_error = None
+    except Exception as error:
+        models = hermes_proxy.cached_models() or []
+        source = "cache" if models else "none"
+        fetch_error = str(error) or type(error).__name__
+    if json_output:
+        typer.echo(
+            json_lib.dumps(
+                {
+                    "provider": "hermes",
+                    "source": source,
+                    "fetchError": fetch_error,
+                    "models": models,
+                },
+                indent=2,
+            )
+        )
+        return
+    if not models:
+        console.print(f"[yellow]No Hermes models available ({escape(str(fetch_error))}).[/yellow]")
+        raise typer.Exit(EXIT_FAILED)
+    table = Table(title=f"Hermes models ({source})")
+    table.add_column("Model")
+    table.add_column("Description")
+    for row in models:
+        model_id = row.get("id") or row.get("model") or ""
+        table.add_row(escape(str(model_id)), escape(str(row.get("description", ""))))
+    console.print(table)
 
 
 def _chatgpt_models_cmd(*, refresh: bool, json_output: bool) -> None:

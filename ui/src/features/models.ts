@@ -26,7 +26,7 @@ import { type Command, type FeatureHost } from "./types.ts";
 
 export interface ModelEntry {
 	model: string;
-	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "grok" | "opencode" | "kimi" | "kiro" | "custom" | "ollama" | string;
+	provider: "openrouter" | "openai" | "anthropic" | "chatgpt" | "google" | "mistral" | "groq" | "together" | "deepseek" | "xai" | "grok" | "opencode" | "kimi" | "kiro" | "hermes" | "custom" | "ollama" | string;
 	description: string;
 	displayName?: string;
 	contextWindow?: number | null;
@@ -45,6 +45,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 	together: "Together AI",
 	openrouter: "OpenRouter",
 	opencode: "OpenCode Zen",
+	hermes: "Hermes proxy",
 	"hermes-proxy": "Hermes proxy",
 	kimi: "Kimi Code",
 	kiro: "Kiro local proxy",
@@ -189,14 +190,23 @@ export async function fetchCatalog(host: FeatureHost, refresh = false): Promise<
 }
 
 export function catalogToEntries(result: ModelsListResult): ModelEntry[] {
-	return result.models.map((entry) => ({
-		model: entry.id,
-		provider: result.provider,
-		displayName: entry.displayName,
-		contextWindow: entry.contextWindow,
-		efforts: entry.efforts,
-		description: entry.description ?? "",
-	}));
+	// Coerce every field: a provider row with a missing/renamed id must never
+	// reach the picker as `undefined` (the renderer calls string methods on
+	// labels). Older gateways may still answer with the CLI `model` key.
+	return result.models
+		.map((entry) => {
+			const raw = entry as unknown as { id?: unknown; model?: unknown };
+			const model = String(raw.id ?? raw.model ?? "").trim();
+			return {
+				model,
+				provider: String(result.provider ?? "").trim(),
+				displayName: typeof entry.displayName === "string" ? entry.displayName : undefined,
+				contextWindow: entry.contextWindow ?? null,
+				efforts: entry.efforts,
+				description: String(entry.description ?? ""),
+			};
+		})
+		.filter((entry) => entry.model.length > 0);
 }
 
 // ─── provider-grouped listing ────────────────────────────────────────────────
@@ -226,14 +236,16 @@ export interface GroupedModels {
 export type ModelPickerRow = SelectItem & { section?: true };
 
 function toSelectItem(e: ModelEntry): SelectItem {
-	const label = e.displayName && e.displayName !== e.model ? e.displayName : e.model;
-	const bits = [e.model];
+	const model = String(e.model ?? "");
+	const provider = String(e.provider ?? "");
+	const label = e.displayName && e.displayName !== model ? String(e.displayName) : model;
+	const bits = [model];
 	const window = formatContextWindow(e.contextWindow);
 	if (window !== "—") bits.push(`ctx ${window}`);
 	if (e.efforts?.length) bits.push(`effort: ${e.efforts.join("/")}`);
-	if (e.description) bits.push(e.description);
+	if (e.description) bits.push(String(e.description));
 	return {
-		value: `${e.provider}::${e.model}`,
+		value: `${provider}::${model}`,
 		label,
 		description: bits.join(" · "),
 	};
@@ -354,12 +366,12 @@ export function filterModelGroups(groups: ModelGroup[], query: string): ModelGro
 	return groups
 		.map((group) => ({
 			...group,
-			entries: group.entries.filter(
-				(entry) =>
-					entry.model.toLowerCase().includes(q) ||
-					entry.provider.toLowerCase().includes(q) ||
-					entry.description.toLowerCase().includes(q),
-			),
+			entries: group.entries.filter((entry) => {
+				const model = String(entry.model ?? "").toLowerCase();
+				const provider = String(entry.provider ?? "").toLowerCase();
+				const description = String(entry.description ?? "").toLowerCase();
+				return model.includes(q) || provider.includes(q) || description.includes(q);
+			}),
 		}))
 		.filter((group) => group.entries.length > 0);
 }
@@ -466,7 +478,7 @@ async function printCatalog(host: FeatureHost): Promise<void> {
 		return;
 	}
 	const rows = result.models.map((entry) => [
-		entry.id,
+		String((entry as unknown as { id?: unknown; model?: unknown }).id ?? (entry as unknown as { model?: unknown }).model ?? ""),
 		entry.efforts?.length ? entry.efforts.join("/") : "—",
 		formatContextWindow(entry.contextWindow),
 		entry.source ?? result.source,

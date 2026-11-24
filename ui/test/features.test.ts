@@ -1696,6 +1696,32 @@ test("/models search matches provider names and model ids across groups", async 
 	assert.ok(filterModelGroups(grouped.groups, "gpt").some((group) => group.provider === "chatgpt"));
 });
 
+test("/models tolerates CLI-shaped or malformed catalog rows without crashing", async () => {
+	const host = new FakeHost();
+	host.current = { ...SESSION, provider: "hermes", model: "claude-x" };
+	host.responses["providers.list"] = {
+		selected: "hermes",
+		providers: [{ name: "hermes", kind: "builtin", selected: true }],
+	};
+	host.responses["models.list"] = {
+		provider: "hermes",
+		source: "live",
+		fetchError: null,
+		// The pre-fix proxy catalog used `model` instead of `id`; one row is
+		// empty. Neither may produce an undefined label for the renderer.
+		models: [{ model: "claude-x", description: "Hermes proxy" }, { id: "" }],
+	};
+	const grouped = await fetchModelGroups(host);
+	const rows = buildModelPickerRows(grouped.groups);
+	const modelRows = rows.filter((row) => !row.section);
+	assert.deepEqual(modelRows.map((row) => row.value), ["hermes::claude-x"]);
+	assert.ok(modelRows.every((row) => typeof row.label === "string" && typeof row.description === "string"));
+	assert.deepEqual(
+		filterModelGroups(grouped.groups, "claude").flatMap((group) => group.entries.map((entry) => entry.model)),
+		["claude-x"],
+	);
+});
+
 test("/provider list shows built-in and user-added providers", async () => {
 	const host = new FakeHost();
 	host.responses["providers.list"] = {

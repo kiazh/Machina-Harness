@@ -1,5 +1,25 @@
 # Release notes
 
+## 2.1.0 - 2026-11-23
+
+**Hermes proxy detection and a more forgiving Kiro launcher.** See the [2.1.0 release notes](internal/docs/verification/RELEASE_2.1.0.md).
+
+### Added
+
+- One-click Hermes setup (`/auth hermes` or `machina auth hermes setup`): detects the CLI on macOS, Linux, and Windows, runs the official installer when missing, opens the OAuth consent window, then starts the proxy automatically once `hermes proxy status` reports ready.
+- `/auth kiro setup` now provisions the gateway instead of printing a checklist: it clones the official checkout into the configured/default directory, creates its private venv, installs `requirements.txt`, seeds `.env`, and starts the proxy in the background.
+- The `hermes` provider exposes the proxy's live `/v1/models` catalog in the CLI (`machina providers models hermes`), the gateway model picker, and connected-model routing. `MACHINA_HERMES_PROXY_AUTOSTART`, `MACHINA_HERMES_PROXY_PORT`, and `MACHINA_HERMES_PROXY_PROVIDER` control the lifecycle.
+- The runtime reports Hermes readiness with the exact sign-in command when the CLI is installed but no upstream is authorized, instead of failing a turn.
+- Kiro gateway detection now accepts `main.py`, `server.py`, `app.py`, `run.py`, `kiro_gateway/main.py`, and `src/main.py`, plus checkouts in `~/Downloads`/`~/Desktop` and next to the current directory. A missing launcher lists every accepted entrypoint and points at `MACHINA_KIRO_GATEWAY_COMMAND`.
+
+### Fixed
+
+- `/models` no longer crashes when a provider returns a differently shaped catalog row (the first Hermes rows used `model` instead of `id`). The gateway emits the shared `id`/`displayName` shape and the picker coerces/drops malformed rows defensively.
+- `/auth` opens instantly: the main menu no longer waits on Kiro's TCP/CLI probe or Hermes' `hermes proxy status` subprocess. Status is fetched only after choosing an account, or by `/auth status`.
+- Hermes startup is serialized, adopts a live Machina-owned proxy instead of respawning it, and closes the parent log descriptor after spawn (one handle per restart is no longer leaked).
+- The Hermes proxy is stopped only when Machina started it; an externally managed proxy is left untouched.
+- `HERMES_PROXY_API_KEY` is registered as an optional secret, so a token-protected proxy can be used without exposing the value in `config.yaml`.
+
 ## 2.0.1 - 2026-11-22
 
 **Verification and diagnostics patch.** See the [2.0.1 release notes](internal/docs/verification/RELEASE_2.0.1.md).

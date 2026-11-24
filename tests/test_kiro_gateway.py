@@ -85,6 +85,46 @@ def test_detect_launch_uses_the_checkout_venv(tmp_path, monkeypatch) -> None:
     assert spec.argv == (str(python), str(checkout / "main.py"))
 
 
+def test_detect_launch_accepts_an_alternate_entrypoint(tmp_path, monkeypatch) -> None:
+    checkout = tmp_path / "kiro-gateway-main"
+    checkout.mkdir()
+    (checkout / "server.py").write_text("print('gateway')\n", encoding="utf-8")
+    _set_config(monkeypatch, "kiro_gateway_dir", str(checkout))
+
+    spec, error = kiro_gateway.detect_launch()
+
+    assert error is None
+    assert spec is not None
+    assert spec.argv[-1] == str(checkout / "server.py")
+
+
+def test_detect_launch_names_expected_launchers_when_none_exist(tmp_path, monkeypatch) -> None:
+    checkout = tmp_path / "kiro-gateway"
+    checkout.mkdir()
+    _set_config(monkeypatch, "kiro_gateway_dir", str(checkout))
+
+    spec, error = kiro_gateway.detect_launch()
+
+    assert spec is None
+    assert "server.py" in (error or "")
+    assert "MACHINA_KIRO_GATEWAY_COMMAND" in (error or "")
+
+
+def test_detect_launch_finds_a_zip_extract_in_downloads(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    checkout = home / "Downloads" / "kiro-gateway-main"
+    checkout.mkdir(parents=True)
+    (checkout / "main.py").write_text("print('gateway')\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    _set_config(monkeypatch, "kiro_gateway_dir", "")
+
+    spec, error = kiro_gateway.detect_launch()
+
+    assert error is None
+    assert spec is not None
+    assert spec.cwd == checkout
+
+
 def test_detect_launch_is_actionable_when_the_checkout_is_missing(tmp_path, monkeypatch) -> None:
     missing = tmp_path / "absent"
     _set_config(monkeypatch, "kiro_gateway_dir", str(missing))
@@ -93,6 +133,97 @@ def test_detect_launch_is_actionable_when_the_checkout_is_missing(tmp_path, monk
 
     assert spec is None
     assert str(missing) in (error or "")
+
+
+def test_install_checkout_provisions_and_detects(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "kiro-gateway"
+    _set_config(monkeypatch, "kiro_gateway_dir", str(target))
+    calls: list[list[str]] = []
+
+    def _run(argv, *, cwd=None):
+        calls.append(list(argv))
+        if "clone" in argv:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "main.py").write_text("print('gateway')\n", encoding="utf-8")
+            (target / "requirements.txt").write_text("", encoding="utf-8")
+            (target / ".env.example").write_text(
+                "PROXY_API_KEY=dummy-local-only\n", encoding="utf-8"
+            )
+        elif argv[1:3] == ["-m", "venv"]:
+            venv = target / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+            venv.parent.mkdir(parents=True, exist_ok=True)
+            venv.write_text("", encoding="utf-8")
+        return True, ""
+
+    monkeypatch.setattr(kiro_gateway, "_run_install_step", _run)
+    monkeypatch.setattr(
+        kiro_gateway.shutil,
+        "which",
+        lambda name: "/usr/bin/git" if name == "git" else None,
+    )
+
+    ok, message = kiro_gateway.install_checkout()
+
+    assert ok is True
+    assert str(target) in message
+    assert (target / ".env").is_file()
+    assert any("clone" in call for call in calls)
+    spec, error = kiro_gateway.detect_launch()
+    assert error is None
+    assert spec is not None
+    assert spec.argv[-1].endswith("main.py")
+
+
+def test_install_checkout_falls_back_to_zip_without_git(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "kiro-gateway"
+    _set_config(monkeypatch, "kiro_gateway_dir", str(target))
+    monkeypatch.setattr(kiro_gateway.shutil, "which", lambda _name: None)
+
+    def _download(directory):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "main.py").write_text("print('gateway')\n", encoding="utf-8")
+        (directory / "requirements.txt").write_text("", encoding="utf-8")
+        return True, ""
+
+    def _run(argv, *, cwd=None):
+        if argv[1:3] == ["-m", "venv"]:
+            venv = target / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+            venv.parent.mkdir(parents=True, exist_ok=True)
+            venv.write_text("", encoding="utf-8")
+        return True, ""
+
+    monkeypatch.setattr(kiro_gateway, "_download_checkout", _download)
+    monkeypatch.setattr(kiro_gateway, "_run_install_step", _run)
+
+    ok, message = kiro_gateway.install_checkout()
+
+    assert ok is True
+    assert "installed" in message.lower()
+    spec, error = kiro_gateway.detect_launch()
+    assert error is None
+    assert spec is not None
+
+
+def test_setup_schedules_a_background_install_without_blocking(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "data.sqlite3"
+    database.write_bytes(b"sqlite")
+    monkeypatch.setenv("KIRO_CLI_DB_FILE", str(database))
+    _set_config(monkeypatch, "kiro_gateway_dir", str(tmp_path / "absent"))
+    started: list[object] = []
+
+    class _Thread:
+        def __init__(self, target=None, name=None, daemon=None):
+            started.append(target)
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(kiro_gateway.threading, "Thread", _Thread)
+
+    result = kiro_gateway.setup(wait=False)
+
+    assert result["installing"] is True
+    assert started
 
 
 def test_login_detection_uses_only_the_credential_file_presence(tmp_path, monkeypatch) -> None:
@@ -433,8 +564,16 @@ async def test_auth_kiro_handlers_are_registered_and_bounded(monkeypatch) -> Non
     assert "auth.kiro.status" in METHODS
     assert "auth.kiro.start" in METHODS
     assert "auth.kiro.stop" in METHODS
+    assert "auth.kiro.setup" in METHODS
     assert "auth.kiro.usage" in METHODS
     assert "auth.kiro.fallback" in METHODS
+    for method in (
+        "auth.hermes.status",
+        "auth.hermes.start",
+        "auth.hermes.stop",
+        "auth.hermes.setup",
+    ):
+        assert method in METHODS
 
     monkeypatch.setattr(
         kiro_gateway,

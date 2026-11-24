@@ -185,7 +185,7 @@ test("/auth (bare) prints the signed-in status card with actions", async () => {
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
 	assert.deepEqual(
 		host.calls.slice(1).map((call) => call.method),
-		["auth.grok.status", "auth.copilot.status", "auth.kiro.status"],
+		["auth.grok.status", "auth.copilot.status", "auth.kiro.status", "auth.hermes.status"],
 	);
 	const text = host.text();
 	assert.match(text, /signed in via Machina token store/);
@@ -323,7 +323,17 @@ test("unknown /auth options are rejected with the available subcommands", async 
 test("/auth offers completion-friendly subcommands", async () => {
 	const completions = (await authCommand.getArgumentCompletions!("")) ?? [];
 	const values = completions.map((item) => item.value);
-	assert.deepEqual(values, ["status", "chatgpt", "grok", "copilot", "kiro", "sign-in", "import-codex", "sign-out"]);
+	assert.deepEqual(values, [
+		"status",
+		"chatgpt",
+		"grok",
+		"copilot",
+		"kiro",
+		"hermes",
+		"sign-in",
+		"import-codex",
+		"sign-out",
+	]);
 	const signIn = (await authCommand.getArgumentCompletions!("sign-i")) ?? [];
 	assert.deepEqual(
 		signIn.map((item) => item.value),
@@ -456,19 +466,55 @@ test("/auth kiro stop reports a managed stop", async () => {
 	assert.match(host.text(), /Kiro local proxy stopped/);
 });
 
-test("/auth kiro setup and login point at the official CLI", async () => {
+test("/auth kiro setup provisions and starts the gateway in one action", async () => {
 	const setupHost = new AuthFakeHost();
+	setupHost.responses["auth.kiro.setup"] = {
+		installed: true,
+		installing: false,
+		message: "",
+		result: { started: true, ready: true, status: KIRO_STOPPED },
+	};
 	await run("/auth kiro setup", setupHost);
-	assert.equal(setupHost.calls.length, 0);
-	assert.match(setupHost.text(), /does not bundle or auto-install/);
-	assert.match(setupHost.text(), /MACHINA_KIRO_GATEWAY_DIR/);
-	assert.match(setupHost.text(), /MACHINA_KIRO_AUTOSTART=false/);
+	assert.equal(setupHost.calls[0]!.method, "auth.kiro.setup");
+	assert.match(setupHost.text(), /Kiro gateway is set up and running/);
+
+	const installingHost = new AuthFakeHost();
+	installingHost.responses["auth.kiro.setup"] = {
+		installed: false,
+		installing: true,
+		message: "Installing the Kiro gateway in the background.",
+		result: null,
+	};
+	await run("/auth kiro setup", installingHost);
+	assert.match(installingHost.text(), /Installing the Kiro gateway/);
 
 	const loginHost = new AuthFakeHost();
 	await run("/auth kiro login", loginHost);
 	assert.equal(loginHost.calls.length, 0);
 	assert.match(loginHost.text(), /kiro-cli login/);
 	assert.match(loginHost.text(), /\/auth kiro start/);
+});
+
+test("/auth hermes setup is one request and starts the proxy", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.hermes.setup"] = {
+		started: true,
+		message: "Hermes proxy started (nous) at http://127.0.0.1:8645/v1.",
+		status: {
+			installed: true,
+			binary: "/usr/bin/hermes",
+			running: true,
+			owned: true,
+			port: 8645,
+			base_url: "http://127.0.0.1:8645/v1",
+			provider: "nous",
+			readyProviders: ["nous"],
+			error: null,
+		},
+	};
+	await run("/auth hermes setup", host);
+	assert.equal(host.calls[0]!.method, "auth.hermes.setup");
+	assert.match(host.text(), /Hermes proxy started/);
 });
 
 test("renderKiroStatus shows the actionable error and log path", () => {

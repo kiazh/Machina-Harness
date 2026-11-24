@@ -1,10 +1,11 @@
-// /auth — account sign-in for ChatGPT, Grok, and GitHub Copilot, plus the
-// lifecycle of the user-installed Kiro local gateway.
+// /auth — account sign-in for ChatGPT, Grok, and GitHub Copilot, plus
+// one-click setup for the Kiro and Hermes local proxies.
 //
 // The gateway owns every browser/device flow and every token store. The UI
 // receives public metadata only (status fields, device codes, terminal events).
-// No credential value is printed or retained here. Kiro sign-in itself stays
-// in the official CLI; this surface only starts/stops its loopback proxy.
+// No credential value is printed or retained here. Kiro/Hermes OAuth consent
+// stays in the third-party CLI; Setup installs it when missing, opens the
+// consent handoff, and starts the loopback proxy.
 
 import type {
 	ChatGPTAuthStatus,
@@ -35,6 +36,7 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["grok", "Grok subscription: status, sign-in, sign-out"],
 	["copilot", "GitHub Copilot: status, sign-in, import-gh, sign-out"],
 	["kiro", "Kiro account: status, usage, start, stop, setup (local proxy)"],
+	["hermes", "Hermes proxy: status, setup, start, stop (one-click install + sign-in)"],
 	["sign-in", "Alias for /auth chatgpt sign-in"],
 	["import-codex", "Alias for /auth chatgpt import-codex"],
 	["sign-out", "Alias for /auth chatgpt sign-out"],
@@ -43,11 +45,12 @@ const SUBCOMMANDS: Array<[string, string]> = [
 const LOGIN_SETTLE_MS = 310_000;
 const POLL_INTERVAL_MS = 1_000;
 
-const PROVIDER_DEFAULT_MODEL: Record<Provider, string> = {
+const PROVIDER_DEFAULT_MODEL: Record<Provider | "hermes", string> = {
 	chatgpt: "gpt-6.1-sol",
 	grok: "grok-4.7",
 	copilot: "gpt-6.1-sol",
 	kiro: "auto",
+	hermes: "auto",
 };
 
 type AuthOutcome =
@@ -149,16 +152,20 @@ async function statuses(host: FeatureHost): Promise<{
 	return { chatgpt, grok, copilot, kiro };
 }
 
-async function showStatus(host: FeatureHost, only?: Provider): Promise<void> {
-	const result = await statuses(host);
+async function showStatus(host: FeatureHost, only?: Provider | "hermes"): Promise<void> {
+	const [result, hermes] = await Promise.all([
+		statuses(host),
+		only && only !== "hermes" ? Promise.resolve(null) : hermesStatus(host),
+	]);
 	const lines: string[] = [];
 	if (!only || only === "chatgpt") lines.push(result.chatgpt ? renderAuthStatus(result.chatgpt) : "ChatGPT subscription: status unavailable.");
 	if (!only || only === "grok") lines.push(result.grok ? renderGrokStatus(result.grok) : "Grok subscription: status unavailable.");
 	if (!only || only === "copilot") lines.push(result.copilot ? renderCopilotStatus(result.copilot) : "GitHub Copilot: status unavailable.");
 	if (!only || only === "kiro") lines.push(result.kiro ? renderKiroStatus(result.kiro) : "Kiro account: status unavailable.");
+	if (!only || only === "hermes") lines.push(hermes ? renderHermesStatus(hermes) : "Hermes proxy: status unavailable.");
 	lines.push("");
 	lines.push("Actions: /auth sign-in · /auth import-codex · /auth sign-out");
-	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth kiro");
+	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth kiro · /auth hermes");
 	host.print(lines.join("\n"), "plain");
 }
 
@@ -214,7 +221,7 @@ async function waitForOutcome(
 
 /** Apply the newly authorized provider and a catalog-backed model so the
  *  next turn does not keep using an API-key provider/model combination. */
-async function activateProvider(host: FeatureHost, provider: Provider): Promise<void> {
+async function activateProvider(host: FeatureHost, provider: Provider | "hermes"): Promise<void> {
 	let model = PROVIDER_DEFAULT_MODEL[provider];
 	try {
 		const catalog = await host.request<ModelsListResult>("models.list", { provider });
@@ -527,22 +534,138 @@ async function stopKiro(host: FeatureHost): Promise<void> {
 	);
 }
 
-function showKiroSetup(host: FeatureHost): void {
-	host.print(
-		[
-			"Kiro uses a community local gateway; Machina does not bundle or auto-install it.",
-			"1. Install the official Kiro CLI and sign in: kiro-cli login",
-			"2. Clone jwadow/kiro-gateway and install its dependencies.",
-			"3. Keep it at ~/kiro-gateway, or set MACHINA_KIRO_GATEWAY_DIR to the checkout.",
-			"   Builder ID accounts: Machina injects PROFILE_ARN from Kiro IDE's profile.json when present.",
-			"4. Start it here: /auth kiro start",
-			"5. Pick a model with /models (the full 22-alias catalog is built in).",
-			"Auto-start is on by default when a CLI login and checkout are detected; disable it with MACHINA_KIRO_AUTOSTART=false.",
-			"Docs: docs/KIRO_PROXY.md",
-			"Community interop only: Kiro's terms prohibit third-party harnesses and AWS does not support this path.",
-		].join("\n"),
-		"plain",
-	);
+async function setupKiro(host: FeatureHost): Promise<void> {
+	host.print("Setting up the Kiro gateway — installing it if needed. This is the only step.", "plain");
+	let result: { installed: boolean; installing: boolean; message: string; result: KiroStartResult | null };
+	try {
+		result = await host.request("auth.kiro.setup", {});
+	} catch (error) {
+		host.print(`Kiro setup did not complete: ${errorText(error)}`, "error");
+		return;
+	}
+	if (result.installing) {
+		host.print(result.message, "plain");
+		return;
+	}
+	if (result.message) {
+		host.print(result.message, "warning");
+		return;
+	}
+	if (result.result?.ready) {
+		host.print("Kiro gateway is set up and running.", "success");
+		await activateProvider(host, "kiro");
+		return;
+	}
+	host.print("Kiro gateway installed, but it did not become ready yet. Run /auth kiro status.", "warning");
+}
+
+interface HermesStatus {
+	installed: boolean;
+	binary: string | null;
+	running: boolean;
+	owned: boolean;
+	port: number;
+	base_url: string;
+	provider: string;
+	readyProviders: string[];
+	error: string | null;
+}
+
+async function hermesStatus(host: FeatureHost): Promise<HermesStatus | null> {
+	try {
+		const result = await host.request<{ status: HermesStatus }>("auth.hermes.status", {});
+		return result.status;
+	} catch {
+		return null;
+	}
+}
+
+function hermesLabel(status: HermesStatus | null): string {
+	if (!status) return "Hermes proxy — status unavailable";
+	if (status.running) return `Hermes proxy — running on port ${status.port}${status.owned ? " (managed)" : ""}`;
+	if (!status.installed) return "Hermes proxy — not installed";
+	if (status.readyProviders.length) return "Hermes proxy — signed in, proxy stopped";
+	return "Hermes proxy — installed, sign-in required";
+}
+
+export function renderHermesStatus(status: HermesStatus): string {
+	const lines = [
+		`Hermes proxy: ${status.running ? "running" : "stopped"} on port ${status.port}${status.owned ? " (managed by Machina)" : ""}.`,
+		`  Binary: ${status.binary ?? "not found"}`,
+		`  Signed-in upstreams: ${status.readyProviders.length ? status.readyProviders.join(", ") : "none"}`,
+	];
+	if (status.provider) lines.push(`  Active upstream: ${status.provider}`);
+	if (status.error) lines.push(`  ${status.error}`);
+	return lines.join("\n");
+}
+
+async function setupHermes(host: FeatureHost): Promise<void> {
+	host.print("Setting up Hermes — install if needed, sign in, then start the proxy. This is the only step.", "plain");
+	let result: { started: boolean; message: string; status: HermesStatus };
+	try {
+		result = await host.request("auth.hermes.setup", { provider: "auto" });
+	} catch (error) {
+		host.print(`Hermes setup did not complete: ${errorText(error)}`, "error");
+		return;
+	}
+	// Background install / OAuth handoff is not success yet: only claim it
+	// once the proxy actually answers.
+	host.print(result.message, result.status.running ? "success" : result.started ? "plain" : "warning");
+	if (result.status.running) await activateProvider(host, "hermes");
+}
+
+async function startHermes(host: FeatureHost): Promise<void> {
+	let result: { started: boolean; message: string; status: HermesStatus };
+	try {
+		result = await host.request("auth.hermes.start", {});
+	} catch (error) {
+		host.print(`Hermes proxy did not start: ${errorText(error)}`, "error");
+		return;
+	}
+	if (result.status.running) {
+		host.print(result.message, "success");
+		await activateProvider(host, "hermes");
+		return;
+	}
+	host.print(`${result.message}\n${renderHermesStatus(result.status)}`, "warning");
+}
+
+async function stopHermes(host: FeatureHost): Promise<void> {
+	let result: { stopped: boolean; message: string; status: HermesStatus };
+	try {
+		result = await host.request("auth.hermes.stop", {});
+	} catch (error) {
+		host.print(`Hermes proxy did not stop: ${errorText(error)}`, "error");
+		return;
+	}
+	host.print(result.message, result.stopped ? "success" : "warning");
+}
+
+async function hermesMenu(host: FeatureHost): Promise<void> {
+	const status = await hermesStatus(host);
+	const items: Array<{ value: string; label: string; description?: string }> = [
+		{
+			value: "setup",
+			label: status?.installed ? "Set up or sign in again" : "Set up Hermes (install + sign in + start)",
+			description: "One action: installs the official CLI if needed, opens sign-in, starts the proxy",
+		},
+	];
+	if (!status?.running) {
+		items.push({ value: "start", label: "Start the Hermes proxy", description: "Start it now if an upstream is signed in" });
+	}
+	if (status?.running && status.owned) {
+		items.push({ value: "stop", label: "Stop the Hermes proxy", description: "Stop only the process Machina started" });
+	}
+	items.push({ value: "status", label: "Show status" });
+	const choice = await host.pick(`${hermesLabel(status)} — choose an action`, items);
+	if (!choice) return;
+	if (choice.value === "setup") await setupHermes(host);
+	else if (choice.value === "start") await startHermes(host);
+	else if (choice.value === "stop") await stopHermes(host);
+	else {
+		const latest = await hermesStatus(host);
+		host.print(latest ? renderHermesStatus(latest) : "Hermes proxy status unavailable.", "plain");
+	}
 }
 
 async function kiroMenu(host: FeatureHost): Promise<void> {
@@ -561,7 +684,11 @@ async function kiroMenu(host: FeatureHost): Promise<void> {
 	if (running && status?.managed) {
 		items.push({ value: "stop", label: "Stop the Kiro local proxy", description: "Stop the child Machina started" });
 	}
-	items.push({ value: "setup", label: "Show gateway setup instructions" });
+	items.push({
+		value: "setup",
+		label: status?.launchConfigured ? "Set up and start the gateway" : "Set up the Kiro gateway automatically",
+		description: "Installs the checkout and dependencies if needed, then starts it",
+	});
 	items.push({ value: "usage", label: "Show Kiro usage and remaining credits" });
 	items.push({ value: "status", label: "Show status" });
 	const choice = await host.pick(`${kiroProviderLabel(status)} — choose an action`, items);
@@ -595,21 +722,39 @@ async function providerMenu(host: FeatureHost, provider: Provider): Promise<void
 }
 
 async function openAuthMenu(host: FeatureHost): Promise<void> {
-	const result = await statuses(host);
+	// Paint instantly. Status probes (Kiro's TCP/CLI check and Hermes'
+	// `hermes proxy status` subprocess) run only after a row is chosen or
+	// for the explicit /auth status card; the main menu must never wait on
+	// them.
 	const items = [
-		{ value: "chatgpt", label: providerLabel("chatgpt", result.chatgpt), description: "OpenAI account (ChatGPT subscription)" },
-		{ value: "grok", label: providerLabel("grok", result.grok), description: "xAI Grok subscription" },
-		{ value: "copilot", label: providerLabel("copilot", result.copilot), description: "GitHub Copilot seat" },
-		{ value: "kiro", label: kiroProviderLabel(result.kiro), description: "Kiro account through a local OpenAI-compatible proxy (community interop)" },
-		{ value: "status", label: "Show all sign-in statuses" },
+		{ value: "chatgpt", label: "ChatGPT subscription", description: "OpenAI account — sign in or manage status" },
+		{ value: "grok", label: "Grok subscription", description: "xAI Grok account — sign in or manage status" },
+		{ value: "copilot", label: "GitHub Copilot", description: "GitHub Copilot seat — sign in or manage status" },
+		{ value: "kiro", label: "Kiro account — local proxy", description: "Kiro through a local OpenAI-compatible proxy (community interop)" },
+		{ value: "hermes", label: "Hermes proxy — local proxy", description: "Hermes local proxy (Nous Portal / xAI OAuth) — one-click setup" },
+		{ value: "status", label: "Show all sign-in statuses", description: "Fetch status for every account (may take a moment)" },
 	];
-	const choice = await host.pick("Accounts — sign in, or manage the Kiro local proxy", items);
+	const choice = await host.pick("Accounts — sign in, or set up the Kiro/Hermes local proxies", items);
 	if (!choice) return;
 	if (choice.value === "status") {
 		await showStatus(host);
 		return;
 	}
+	if (choice.value === "hermes") {
+		await hermesMenu(host);
+		return;
+	}
 	await providerMenu(host, choice.value as Provider);
+}
+
+async function dispatchHermes(host: FeatureHost, sub: string): Promise<void> {
+	const command = sub || "menu";
+	if (command === "menu") return hermesMenu(host);
+	if (command === "setup" || command === "sign-in" || command === "login") return setupHermes(host);
+	if (command === "start") return startHermes(host);
+	if (command === "stop") return stopHermes(host);
+	if (command === "status") return showStatus(host, "hermes");
+	throw new Error(`Unknown /auth hermes option "${command}". Try: status, setup, start, stop.`);
 }
 
 async function dispatch(host: FeatureHost, provider: Provider, sub: string): Promise<void> {
@@ -636,7 +781,7 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 			return;
 		}
 		if (command === "setup") {
-			showKiroSetup(host);
+			await setupKiro(host);
 			return;
 		}
 		if (command === "sign-in" || command === "login") {
@@ -681,8 +826,8 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 
 export const authCommand: Command = {
 	name: "auth",
-	description: "Sign in to ChatGPT, Grok, or Copilot — or manage the Kiro local proxy",
-	argumentHint: "[chatgpt|grok|copilot|kiro] [status|sign-in|start|stop]",
+	description: "Sign in to ChatGPT, Grok, or Copilot — or set up the Kiro/Hermes local proxies",
+	argumentHint: "[chatgpt|grok|copilot|kiro|hermes] [status|sign-in|setup|start|stop]",
 	getArgumentCompletions: (prefix: string) => {
 		const typed = prefix.trimStart().toLowerCase();
 		if (/\s/.test(typed)) return null;
@@ -713,6 +858,9 @@ export const authCommand: Command = {
 			case "kiro":
 				await dispatch(host, "kiro", rest);
 				return;
+			case "hermes":
+				await dispatchHermes(host, rest);
+				return;
 			case "sign-in":
 			case "login":
 				await signInChatGPT(host);
@@ -726,7 +874,7 @@ export const authCommand: Command = {
 				return;
 			default:
 				throw new Error(
-					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/kiro.`,
+					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/kiro/hermes.`,
 				);
 		}
 	},

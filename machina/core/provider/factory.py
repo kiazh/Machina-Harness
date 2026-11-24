@@ -45,6 +45,35 @@ def _custom_provider(model: str | None, reasoning_effort: str | None) -> LLMProv
     return DirectProvider(spec, model=model, reasoning_effort=reasoning_effort)
 
 
+def _hermes_provider(model: str | None, reasoning_effort: str | None) -> LLMProvider:
+    """Detect/start the Hermes loopback proxy and build its OpenAI client."""
+    from machina.core import hermes_proxy
+
+    ok, message = hermes_proxy.start(wait=True)
+    if not ok:
+        raise ValidationError(message)
+    resolved = model or hermes_proxy.default_model()
+    spec = ProviderSpec(
+        name="hermes",
+        base_url=hermes_proxy.base_url(),
+        api_key_env="HERMES_PROXY_API_KEY",
+        default_model=resolved,
+        description="Hermes local proxy (Nous Portal / xAI OAuth)",
+        requires_key=False,
+        reasoning="openai",
+    )
+    # The proxy attaches the OAuth credential upstream and accepts any local
+    # bearer; HERMES_PROXY_API_KEY is only needed for a user-fronted token
+    # check.
+    local_key = str(config.get("hermes_proxy_api_key") or "").strip() or "machina"
+    return DirectProvider(
+        spec,
+        api_key=local_key,
+        model=resolved,
+        reasoning_effort=reasoning_effort,
+    )
+
+
 def _named_provider(
     name: str, model: str | None, reasoning_effort: str | None
 ) -> LLMProvider | None:
@@ -132,6 +161,8 @@ def get_provider(
     elif provider == "grok":
         # xAI Grok subscription tokens from the device OAuth flow.
         return GrokProvider(model=model, reasoning_effort=reasoning_effort)
+    elif provider == "hermes":
+        return _hermes_provider(model, reasoning_effort)
     elif provider == "custom":
         return _custom_provider(model, reasoning_effort)
     elif provider == "ollama":

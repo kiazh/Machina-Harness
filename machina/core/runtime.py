@@ -134,6 +134,9 @@ class RuntimeServices:
                 report["skills_error"] = str(e)
             # Blocking probes (docker subprocess, ollama socket) must not stall
             # the event loop: run detection in worker threads with same timeouts.
+            # Hermes detection/launch runs before provider readiness so a
+            # selected ``hermes`` provider sees the proxy already up.
+            report.update(await asyncio.to_thread(_detect_hermes_proxy))
             report.update(await asyncio.to_thread(_detect_providers))
             report.update(await asyncio.to_thread(_detect_sandbox))
             report.update(await asyncio.to_thread(_detect_toggles))
@@ -173,6 +176,9 @@ class RuntimeServices:
                     report["db"] = "unavailable"
             except Exception:
                 report["db"] = "unavailable"
+            # Hermes detection/launch runs before provider readiness so a
+            # selected ``hermes`` provider sees the proxy already up.
+            report.update(await asyncio.to_thread(_detect_hermes_proxy))
             report.update(await asyncio.to_thread(_detect_providers))
             report.update(await asyncio.to_thread(_detect_sandbox))
             report.update(await asyncio.to_thread(_detect_toggles))
@@ -440,6 +446,22 @@ def _detect_providers() -> dict[str, Any]:
             if not _endpoint_reachable(endpoint):
                 key_ok = False
                 reason = f"Kiro proxy unreachable at {endpoint} (start kiro-gateway)"
+        elif selected == "hermes":
+            # Hermes owns the upstream OAuth login; Machina only needs the
+            # loopback proxy to answer. Startup detection runs immediately
+            # before this check, so avoid a second `hermes proxy status`
+            # subprocess here.
+            from machina.core import hermes_proxy
+
+            key_ok = hermes_proxy.reaches()
+            reason = (
+                ""
+                if key_ok
+                else (
+                    hermes_proxy.last_error()
+                    or "Hermes proxy is not running; sign in with `hermes portal` or `hermes auth`."
+                )
+            )
         elif selected in PROVIDER_SPECS:
             env_name = PROVIDER_SPECS[selected].api_key_env
             key_ok = bool(config.get(PROVIDER_SPECS[selected].config_key))
@@ -579,6 +601,19 @@ def _detect_toggles() -> dict[str, Any]:
         if (_flag("memory_consolidation_enabled") and _flag("memory_enabled"))
         else "disabled",
     }
+
+
+def _detect_hermes_proxy() -> dict[str, Any]:
+    """Detect Hermes on every OS and launch its proxy when signed in."""
+    try:
+        from machina.core import hermes_proxy
+
+        if not hermes_proxy.installed():
+            return {"hermes_proxy": "not installed"}
+        ok, message = hermes_proxy.start(wait=True)
+        return {"hermes_proxy": "ready" if ok else message}
+    except Exception as error:
+        return {"hermes_proxy": f"unavailable: {error}"}
 
 
 def _capabilities_from_report(report: dict[str, Any]) -> list[Capability]:

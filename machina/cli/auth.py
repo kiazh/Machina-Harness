@@ -7,6 +7,8 @@ Three providers are covered, each with ``login|status|logout``:
 * ``copilot`` — GitHub's device flow (or a read-only ``gh auth token`` import)
   for a Copilot seat.
 * ``grok`` — xAI's device flow for SuperGrok / X Premium+ subscriptions.
+* ``hermes`` — one-click install/sign-in for the Hermes local proxy
+  (``status|setup|start|stop``); the OAuth consent itself belongs to Hermes.
 
 Every login listener binds loopback only and never logs a request line (the
 one-time code and state travel in the query string); the state check uses
@@ -556,6 +558,98 @@ def copilot_status(
     else:
         _print_copilot_status(report)
     raise typer.Exit(EXIT_OK if report.get("signed_in") else EXIT_FAILED)
+
+
+hermes_app = typer.Typer(
+    name="hermes",
+    help="Set up and manage the Hermes local OpenAI proxy.",
+    no_args_is_help=True,
+)
+app.add_typer(hermes_app, name="hermes")
+
+
+@hermes_app.command("status")
+def hermes_status(
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable JSON output"),
+) -> None:
+    """Show Hermes installation, upstream sign-in, and proxy state."""
+    from machina.core import hermes_proxy
+
+    report = hermes_proxy.status()
+    if json_output:
+        typer.echo(json.dumps(report, sort_keys=True))
+    else:
+        console.print(
+            f"Hermes: {'installed' if report['installed'] else 'not installed'}"
+            f" · proxy {'running' if report['running'] else 'stopped'}"
+            f" · port {report['port']}"
+        )
+        if report.get("readyProviders"):
+            console.print(f"  Signed-in upstreams: {', '.join(report['readyProviders'])}")
+        if report.get("error"):
+            console.print(f"  [yellow]{escape(str(report['error']))}[/yellow]")
+        if not report["running"]:
+            console.print("  Set it up with [bold]machina auth hermes setup[/bold].")
+    raise typer.Exit(EXIT_OK if report["running"] else EXIT_FAILED)
+
+
+@hermes_app.command("setup")
+def hermes_setup(
+    provider: str = typer.Option("auto", "--provider", help="Upstream to sign in: auto|nous|xai"),
+    no_window: bool = typer.Option(
+        False, "--no-window", help="Do not open the sign-in terminal window"
+    ),
+) -> None:
+    """Install Hermes if needed, sign in, and start the proxy (one action)."""
+    from machina.core import hermes_proxy
+
+    selected = (provider or "auto").strip().lower()
+    if selected not in {"auto", "nous", "xai"}:
+        output.error("--provider must be auto|nous|xai")
+        raise typer.Exit(EXIT_FAILED)
+    if not no_window and not hermes_proxy.installed():
+        console.print("Installing the official Hermes CLI — this can take a few minutes.")
+    ok, message = hermes_proxy.setup(
+        selected,
+        # None lets setup use the current terminal when it has a TTY, and
+        # otherwise open the sign-in window; --no-window never opens one.
+        interactive=None if not no_window else False,
+        open_window=not no_window,
+    )
+    # Setup can be accepted while an install/OAuth handoff is still running.
+    # Only claim success after the proxy's health check actually passes.
+    if hermes_proxy.reaches():
+        output.success(message)
+        raise typer.Exit(EXIT_OK)
+    if ok:
+        console.print(message)
+        output.muted("Setup is in progress; check `machina auth hermes status`.")
+        raise typer.Exit(EXIT_OK)
+    output.error(message)
+    raise typer.Exit(EXIT_FAILED)
+
+
+@hermes_app.command("start")
+def hermes_start() -> None:
+    """Start the Hermes proxy when the CLI and an upstream login are ready."""
+    from machina.core import hermes_proxy
+
+    ok, message = hermes_proxy.start(wait=True)
+    (output.success if ok else output.error)(message)
+    raise typer.Exit(EXIT_OK if ok else EXIT_FAILED)
+
+
+@hermes_app.command("stop")
+def hermes_stop() -> None:
+    """Stop only a Hermes proxy that Machina started."""
+    from machina.core import hermes_proxy
+
+    stopped, message = hermes_proxy.stop()
+    if stopped:
+        output.success(message)
+    else:
+        console.print(f"[yellow]{escape(message)}[/yellow]")
+    raise typer.Exit(EXIT_OK if stopped else EXIT_FAILED)
 
 
 @copilot_app.command("logout")

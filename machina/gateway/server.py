@@ -237,6 +237,7 @@ class Gateway:
         self._job_runner = None
         self._warmers_task = None
         self._kiro_task = None
+        self._hermes_task = None
         self._connector_autoconnect_task = None
         self._turns: dict[str, asyncio.Task[None]] = {}
         from machina.gateway.operations import Operations
@@ -492,6 +493,13 @@ class Gateway:
             except (asyncio.CancelledError, Exception):
                 pass
             self._kiro_task = None
+        if self._hermes_task is not None:
+            self._hermes_task.cancel()
+            try:
+                await self._hermes_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._hermes_task = None
         if self._connector_autoconnect_task is not None:
             self._connector_autoconnect_task.cancel()
             try:
@@ -767,6 +775,13 @@ class Gateway:
             from machina.core.provider.kiro_gateway import schedule_autostart
 
             self._kiro_task = schedule_autostart()
+            # Detect the installed Hermes CLI and start its OpenAI proxy when
+            # an upstream OAuth login exists. Same contract: a background
+            # task, never on the initialize/`/models` path, and only a proxy
+            # Machina started is stopped.
+            from machina.core import hermes_proxy
+
+            self._hermes_task = hermes_proxy.schedule_autostart()
             # Reconnect already-authorized HTTP MCP servers without blocking
             # initialize or the first turn. This is best-effort: missing or
             # expired authorization stays on the explicit /mcp path.
