@@ -1893,6 +1893,14 @@ def run_task(
         _flush_stream()
         out = _redact_output(result.output)
         err = _redact_output(result.stderr)
+        if key == "hermes":
+            # Hermes prints its session id on stderr after every chat run;
+            # it is bookkeeping, not a diagnostic.
+            err = "\n".join(
+                line
+                for line in err.splitlines()
+                if line.strip() and not line.strip().lower().startswith("session_id:")
+            )
         if key == "hermes" and stream_state["saw"]:
             answer = stream_state["answer"].strip()
             if result.returncode == 0:
