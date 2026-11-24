@@ -47,6 +47,12 @@ def session_to_dict(session: Session) -> dict[str, Any]:
             and isinstance(session.state.get("desktop_workspace_root"), str)
             else {}
         ),
+        **(
+            {"harnessPlatform": session.state["harness_platform"]}
+            if isinstance(getattr(session, "state", None), dict)
+            and isinstance(session.state.get("harness_platform"), str)
+            else {}
+        ),
     }
 
 

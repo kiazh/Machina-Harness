@@ -1,5 +1,16 @@
 # Release notes
 
+## 2.4.0 - 2026-11-24
+
+**Two-way harness chats.**
+
+### Added
+
+- Harness child sessions are now real two-way chats. Opening one from Activity and sending a message forwards it to the same harness platform as a background job; the answer streams back into that child transcript and is stored in history.
+- Only harness-backed sessions get this behavior. Native delegated subagent sessions remain inspection-only.
+- Session serialization exposes `harnessPlatform` so the UI can distinguish the two.
+- Harness chat turns acquire/release the same durable turn claim as normal turns, so concurrent sends are still fenced.
+
 ## 2.3.0 - 2026-11-24
 
 **Harness jobs become real child chats.**

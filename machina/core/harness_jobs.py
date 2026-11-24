@@ -67,6 +67,7 @@ class HarnessJob:
     stdout: str = ""
     stderr: str = ""
     error: str = ""
+    persist: bool = False
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -173,8 +174,10 @@ async def start(
     task: str,
     timeout: float,
     cwd: Any = None,
+    reuse_session: bool = False,
+    record_user: bool = True,
 ) -> dict[str, Any]:
-    """Create the child chat, schedule the run, and return its snapshot."""
+    """Create the child chat (or reuse it), schedule the run, return snapshot."""
     if not session_id:
         raise ValueError("background harness jobs require a session")
     running = sum(
@@ -187,7 +190,9 @@ async def start(
             f"this session already has {running} background harness job(s); "
             "wait for one to finish first"
         )
-    child_id = await _create_child_session(session_id, platform, task, cwd)
+    child_id = (
+        None if reuse_session else await _create_child_session(session_id, platform, task, cwd)
+    )
     job = HarnessJob(
         id=uuid.uuid4().hex[:12],
         owner_session_id=session_id,
@@ -196,9 +201,10 @@ async def start(
         task=task,
         timeout=timeout,
     )
+    job.persist = bool(child_id or reuse_session)
     _JOBS[job.id] = job
     _prune()
-    if child_id:
+    if record_user and child_id:
         await _append_message(child_id, "user", f"[{platform}] {task}")
     asyncio.create_task(_run(job, cwd))
     _emit(job)
@@ -238,7 +244,7 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
         job.error = f"{type(exc).__name__}: {exc}"
     finally:
         job.ended_at = time.time()
-        if job.session_id != job.owner_session_id:
+        if job.persist:
             body = job.stdout or job.stderr or job.error or "(no output)"
             if job.status != "complete":
                 body = f"{job.status}: {job.error or body}"
@@ -251,6 +257,20 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
             )
         _TASKS.pop(job.id, None)
         _emit(job)
+
+
+async def wait(job_id: str, timeout: float = 300.0) -> dict[str, Any] | None:
+    """Wait for one job to reach a terminal state (bounded)."""
+    deadline = time.monotonic() + max(1.0, float(timeout))
+    while time.monotonic() < deadline:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return None
+        if job.status != "running":
+            return job.snapshot()
+        await asyncio.sleep(0.25)
+    job = _JOBS.get(job_id)
+    return job.snapshot() if job is not None else None
 
 
 def get(job_id: str) -> dict[str, Any] | None:

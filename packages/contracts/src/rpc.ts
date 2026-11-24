@@ -13,6 +13,8 @@ export interface SessionInfo {
 	parentSessionId?: string | null;
 	/** A user-created fork starts its own family. */
 	isFork?: boolean;
+	/** External harness backing this child chat (two-way harness session). */
+	harnessPlatform?: string;
 }
 
 export interface InitializeResult {

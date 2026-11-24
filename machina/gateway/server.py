@@ -964,6 +964,42 @@ class Gateway:
             marker = f"[image {index}]"
             if marker not in text:
                 text += "\n" + marker
+        # A harness-backed child chat forwards replies to the same external
+        # platform instead of running a native agent turn.
+        harness_platform = ""
+        if isinstance(getattr(session, "state", None), dict):
+            harness_platform = str(session.state.get("harness_platform") or "").strip()
+        if harness_platform:
+            key = str(session.id)
+            turn_id = uuid.uuid4().hex[:12]
+            token = await TurnLifecycle.acquire_claim(session.id, turn_id=turn_id)
+            if not token:
+                raise RpcError(TURN_IN_PROGRESS, "a turn is already running for this session")
+            running = self._turns.get(key)
+            if running is not None and not running.done():
+                from machina.core.turns import end_turn as _end
+
+                await _end(session.id, token)
+                raise RpcError(TURN_IN_PROGRESS, "a turn is already running for this session")
+            try:
+                from machina.core.context import context_manager
+
+                await context_manager.add_chunk(
+                    session.id,
+                    session.agent_id,
+                    "user_message",
+                    {"content": text},
+                    token_count=max(1, len(text) // 4),
+                )
+            except Exception:
+                logger.exception("harness chat could not persist the user message")
+            logger.info("Harness turn %s started for session %s", turn_id, session.id)
+            self._turn_tokens[key] = token
+            task = asyncio.create_task(
+                self._run_harness_chat_turn(session, turn_id, text, harness_platform, token)
+            )
+            self._turns[key] = task
+            return {"turnId": turn_id}
         key = str(session.id)
         # Shared coordinator claim (cross-transport owner token). The DB claim
         # fences same-process and REST/scheduler workers alike (N3, final pass:
@@ -1005,6 +1041,95 @@ class Gateway:
             self._run_turn_with_timeout(session.id, turn_id, text, **image_kwargs)
         )
         return {"turnId": turn_id}
+
+    async def _run_harness_chat_turn(
+        self,
+        session: Session,
+        turn_id: str,
+        text: str,
+        platform: str,
+        token: str,
+    ) -> None:
+        """Forward one child-chat reply to the harness and stream the answer."""
+        key = str(session.id)
+        body = ""
+        try:
+            from machina.core import harness_jobs
+            from machina.gateway.features.interop import _workspace_cwd
+
+            try:
+                cwd = _workspace_cwd(session)
+            except Exception:
+                cwd = None
+            job = await harness_jobs.start(
+                session_id=key,
+                platform=platform,
+                task=text,
+                timeout=300.0,
+                cwd=cwd,
+                reuse_session=True,
+                record_user=False,
+            )
+            final = await harness_jobs.wait(job["id"], timeout=310.0)
+            if final is None:
+                body = "Harness job disappeared before producing a result."
+            else:
+                body = (
+                    final.get("stdout")
+                    or final.get("stderr")
+                    or final.get("error")
+                    or "(no output)"
+                )
+                if final.get("status") != "complete":
+                    body = f"Harness {platform} {final.get('status')}: {body}"
+        except asyncio.CancelledError:
+            body = "Harness turn cancelled."
+            raise
+        except Exception as exc:
+            body = f"Harness {platform} failed: {type(exc).__name__}: {exc}"
+        finally:
+            try:
+                self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "event",
+                        "params": self.event_payload("message.start", key, turn_id),
+                    }
+                )
+                self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "event",
+                        "params": self.event_payload("message.delta", key, turn_id, text=body),
+                    }
+                )
+                self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "event",
+                        "params": self.event_payload(
+                            "message.complete",
+                            key,
+                            turn_id,
+                            text=body,
+                            tokens=0,
+                            iterations=1,
+                            toolCalls=0,
+                            cancelled=False,
+                        ),
+                    }
+                )
+            finally:
+                from machina.core.turns import end_turn as _end
+
+                try:
+                    await _end(session.id, token)
+                except Exception:
+                    logger.exception("harness chat could not release its turn claim")
+                self._turn_tokens.pop(key, None)
+                current = self._turns.get(key)
+                if current is not None and current is asyncio.current_task():
+                    self._turns.pop(key, None)
 
     async def _shell_jobs(self, params: dict[str, Any]) -> dict[str, Any]:
         self.require_db()

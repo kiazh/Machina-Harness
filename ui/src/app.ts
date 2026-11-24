@@ -3742,7 +3742,7 @@ export class App implements FeatureHost {
             return;
         }
 		const inFlight = this.current !== undefined && this.turnSession.isRunning(this.current.id);
-		if (!command && this.current?.parentSessionId && !this.current.isFork) {
+		if (!command && this.current?.parentSessionId && !this.current.isFork && !this.current.harnessPlatform) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
 			return;
@@ -3846,7 +3846,7 @@ export class App implements FeatureHost {
 			await this.ensureSession(text);
 		}
 		if (!this.current) return;
-		if (this.current.parentSessionId && !this.current.isFork) {
+		if (this.current.parentSessionId && !this.current.isFork && !this.current.harnessPlatform) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
 			return;
@@ -3988,13 +3988,14 @@ export class App implements FeatureHost {
 				job.status !== "running"
 				&& (job.owner_session_id === this.current?.id || job.session_id === this.current?.id)
 			) {
+				const selfChat = job.owner_session_id === job.session_id && job.session_id === this.current?.id;
 				const detail = (job.stdout || job.stderr || job.error || "").trim().split(/\r?\n/)[0] ?? "";
 				if (job.needs_input) {
 					this.transcript.addNotice(
-						`Harness ${job.platform} is asking${detail ? `: ${detail.slice(0, 160)}` : " for direction"} — open it from Activity or reply in chat.`,
+						`Harness ${job.platform} is asking${detail ? `: ${detail.slice(0, 160)}` : " for direction"} — reply here or open it from Activity.`,
 						"warning",
 					);
-				} else {
+				} else if (!selfChat) {
 					this.transcript.addNotice(
 						`Harness ${job.platform} ${job.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
 						job.status === "complete" ? "success" : job.status === "stopped" ? "warning" : "error",
