@@ -1516,11 +1516,14 @@ RUN_PLATFORMS: dict[str, list[str]] = {
 }
 
 _RUN_DESCRIPTIONS: dict[str, str] = {
-    "opencode": 'opencode run -- "<prompt>" — OpenCode headless message (v2 CLI)',
+    "opencode": (
+        'opencode run --format json --auto -- "<prompt>" — structured headless '
+        "message (session id + tool events)"
+    ),
     "codex": "codex exec - (prompt on stdin) — Codex non-interactive execution",
     "hermes": (
-        "hermes chat --query-file - --format stream-json — structured headless "
-        "run (prompt on stdin, live tool events)"
+        "hermes chat --oneshot --yolo --query-file - --format stream-json — "
+        "structured headless run (prompt on stdin, live tool events)"
     ),
 }
 
@@ -1538,15 +1541,11 @@ _SUGGESTED_MODEL_RE = re.compile(r"switch to ['\"]([^'\"]{1,200})['\"]", re.IGNO
 # When the suggested model is paid and the account has no credits, Hermes
 # tells the user to "pick a free model". These are verified Nous Portal free
 # chat ids; the live proxy catalog can add more.
-#: Ordered best-effort: models that answered in seconds first, slower ones
-#: last. ``stepfun/step-3.7-flash:free`` can stall for minutes without output,
-#: so it is a last resort that the retry budget deliberately skips.
-_KNOWN_FREE_HERMES_MODELS = (
-    "tencent/hy4-flash:free",
-    "upstage/solar-mini4:free",
-    "meituan/longcat-2.5:free",
-    "stepfun/step-3.7-flash:free",
-)
+#: Only DeepSeek ids are ever selected as a replacement model. This machine's
+#: owner asked for DeepSeek exclusively, so Machina never silently crosses to
+#: another vendor's model; the harness's own configured model still applies.
+_MODEL_FAMILY = "deepseek"
+_KNOWN_FREE_HERMES_MODELS: tuple[str, ...] = ()
 _CREDIT_FAILURE_HINTS = (
     "requires available credits",
     "no active subscription",
@@ -1590,6 +1589,8 @@ def _hermes_free_models() -> list[str]:
             live.append(model)
     ordered: list[str] = []
     for model in [*models, *live]:
+        if _MODEL_FAMILY not in model.lower():
+            continue
         if model not in ordered:
             ordered.append(model)
     return ordered
@@ -1674,6 +1675,24 @@ class _EitherEvent:
         return any(event.is_set() for event in self._events)
 
 
+def _with_model(command: list[str], key: str, model: str) -> list[str]:
+    """Insert ``-m model`` where *key*'s CLI parser accepts it.
+
+    Hermes takes ``-m`` at the top level; OpenCode and Codex define it on the
+    headless subcommand (``run``/``exec``), so a top-level insert is rejected.
+    """
+    inserted = ["-m", model]
+    has_subcommand = len(RUN_PLATFORMS.get(key, ())) > 1
+    if not has_subcommand:
+        return [command[0], *inserted, *command[1:]]
+    subcommand = RUN_PLATFORMS[key][1]
+    try:
+        index = command.index(subcommand)
+    except ValueError:
+        return [command[0], *inserted, *command[1:]]
+    return [*command[: index + 1], *inserted, *command[index + 1 :]]
+
+
 def _command_with_model(command: list[str], model: str) -> list[str]:
     """Replace an existing ``-m`` value or insert one after the binary."""
     updated: list[str] = []
@@ -1706,6 +1725,9 @@ def _suggested_retry_command(
     model = match.group(1).strip()
     if not model or model.startswith("-"):
         return None
+    if _MODEL_FAMILY not in model.lower():
+        # Never switch to another vendor's model to recover a run.
+        return None
     if any(part in {"-m", "--model"} for part in command):
         return None
     return [command[0], "-m", model, *command[1:]]
@@ -1732,11 +1754,27 @@ def _literal_prompt_invocation(
     """
     entry = [binary, *prefix[1:]]
     if key == "opencode":
-        return [*entry, "--", prompt], None
+        return [*entry, "--format", "json", "--auto", "--", prompt], None
     if key == "codex":
         return [*entry, "-"], prompt
     if key == "hermes":
-        return [binary, "chat", "--query-file", "-", "--format", "stream-json"], prompt
+        # --oneshot: explicit headless semantics (no clarify prompts).
+        # --yolo/--accept-hooks: a child with no TTY cannot answer approval
+        # prompts, so a tool call would otherwise stall until the deadline.
+        return (
+            [
+                binary,
+                "chat",
+                "--oneshot",
+                "--yolo",
+                "--accept-hooks",
+                "--query-file",
+                "-",
+                "--format",
+                "stream-json",
+            ],
+            prompt,
+        )
     return None
 
 
@@ -1771,6 +1809,8 @@ def run_task(
     cwd: Path | None = None,
     cancel_event: threading.Event | None = None,
     on_output: Callable[[str, str], None] | None = None,
+    resume: str | None = None,
+    on_session_id: Callable[[str], None] | None = None,
 ) -> RunResult:
     """Delegate one prompt to an installed harness, bounded and typed.
 
@@ -1842,6 +1882,19 @@ def run_task(
             stderr=f"{spec.label} is not installed ({spec.binaries[0]} not on PATH)",
             ok=False,
         )
+    if resume and key in {"hermes", "opencode"}:
+        # Continue the harness's own conversation instead of starting cold.
+        if key == "hermes":
+            command = [command[0], "chat", "--resume", resume, *command[2:]]
+        else:
+            command = [command[0], "run", "--session", resume, *command[2:]]
+    override = (
+        os.environ.get(f"MACHINA_HARNESS_MODEL_{key.upper()}")
+        or os.environ.get("MACHINA_HARNESS_MODEL")
+        or ""
+    ).strip()
+    if override:
+        command = _with_model(command, key, override[:200])
     env = _child_env(spec)
     # One deadline across the first attempt and any model-hint/free retries:
     # giving each attempt the full timeout can triple the billed wait.
@@ -1851,14 +1904,90 @@ def run_task(
     # going to recover inside this run: stop the child as soon as that line
     # appears instead of waiting out the whole deadline.
     terminal = threading.Event()
-    stream_state: dict[str, Any] = {"buf": "", "answer": "", "errors": [], "saw": False}
+    stream_state: dict[str, Any] = {
+        "buf": "",
+        "answer": "",
+        "errors": [],
+        "saw": False,
+        "session": "",
+        "texts": [],
+    }
 
     def _absorb(source: str, text: str) -> str:
-        """Turn raw Hermes ``stream-json`` lines into readable progress."""
-        if key != "hermes" or source != "stdout":
+        """Turn raw Hermes ``stream-json`` lines into readable progress.
+
+        Tool/system events become their own lines; ``text`` events are model
+        tokens and are concatenated verbatim, so the transcript shows the
+        answer as written instead of one word per line.
+        """
+        if source != "stdout":
+            return text
+        if key == "opencode":
+            *lines, stream_state["buf"] = (stream_state["buf"] + text).split("\n")
+            pieces: list[str] = []
+
+            def push_line(value: str) -> None:
+                if pieces and not pieces[-1].endswith("\n"):
+                    pieces.append("\n")
+                pieces.append(value + "\n")
+
+            for raw_line in lines:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    push_line(line)
+                    continue
+                if not isinstance(payload, dict):
+                    push_line(line)
+                    continue
+                stream_state["saw"] = True
+                part = payload.get("part") or {}
+                session = payload.get("sessionID") or (
+                    part.get("sessionID") if isinstance(part, dict) else ""
+                )
+                if isinstance(session, str) and session.strip():
+                    if stream_state["session"] != session:
+                        stream_state["session"] = session
+                        if on_session_id is not None:
+                            try:
+                                on_session_id(session)
+                            except Exception:
+                                pass
+                kind = payload.get("type")
+                if kind == "text":
+                    message = str(part.get("text") or "")
+                    if message.strip():
+                        stream_state["texts"].append(message)
+                        push_line(message)
+                elif kind == "tool_use":
+                    tool = str(part.get("tool") or "tool")
+                    state = part.get("state") if isinstance(part, dict) else {}
+                    state = state if isinstance(state, dict) else {}
+                    detail = _hermes_tool_detail(state.get("input"))
+                    push_line(f"→ {tool}: {detail}" if detail else f"→ {tool}")
+                    output = _hermes_tool_detail(state.get("output"), 240)
+                    if output:
+                        push_line(f"← {output}")
+                elif kind == "error":
+                    message = str(
+                        part.get("message") or payload.get("error") or "opencode error"
+                    ).strip()
+                    stream_state["errors"].append(message)
+                    push_line(f"error: {message}")
+            return "".join(pieces)
+        if key != "hermes":
             return text
         *lines, stream_state["buf"] = (stream_state["buf"] + text).split("\n")
-        shown: list[str] = []
+        pieces: list[str] = []
+
+        def push_line(value: str) -> None:
+            if pieces and not pieces[-1].endswith("\n"):
+                pieces.append("\n")
+            pieces.append(value + "\n")
+
         for raw_line in lines:
             line = raw_line.strip()
             if not line:
@@ -1866,23 +1995,38 @@ def run_task(
             try:
                 payload = json.loads(line)
             except Exception:
-                shown.append(line)
+                push_line(line)
                 continue
             if not isinstance(payload, dict):
-                shown.append(line)
+                push_line(line)
                 continue
             stream_state["saw"] = True
-            if payload.get("type") == "result":
+            session = payload.get("session_id")
+            if isinstance(session, str) and session.strip():
+                if stream_state["session"] != session:
+                    stream_state["session"] = session
+                    if on_session_id is not None:
+                        try:
+                            on_session_id(session)
+                        except Exception:
+                            pass
+            kind = payload.get("type")
+            if kind == "result":
                 answer = str(payload.get("text") or "").strip()
                 if answer:
                     stream_state["answer"] = answer
                     if payload.get("exit_code") not in (0, None):
                         stream_state["errors"].append(answer)
                 continue
+            if kind == "text":
+                chunk = str(payload.get("text") or "")
+                if chunk:
+                    pieces.append(chunk)
+                continue
             rendered = _hermes_stream_event(payload)
             if rendered:
-                shown.append(rendered)
-        return "\n".join(shown) + "\n" if shown else ""
+                push_line(rendered)
+        return "".join(pieces)
 
     def _flush_stream() -> None:
         leftover, stream_state["buf"] = stream_state["buf"], ""
@@ -1903,6 +2047,17 @@ def run_task(
             )
         if key == "hermes" and stream_state["saw"]:
             answer = stream_state["answer"].strip()
+            if result.returncode == 0:
+                out = _redact_output(answer)
+            else:
+                errors = "\n".join(dict.fromkeys(stream_state["errors"])).strip()
+                if errors:
+                    err = _redact_output(errors)
+                out = ""
+        if key == "opencode" and stream_state["saw"]:
+            answer = "\n\n".join(
+                text.strip() for text in stream_state["texts"] if text.strip()
+            ).strip()
             if result.returncode == 0:
                 out = _redact_output(answer)
             else:
@@ -1932,7 +2087,7 @@ def run_task(
         else:
             remaining = max(1.0, deadline - time.monotonic())
         terminal.clear()
-        stream_state.update(buf="", answer="", errors=[], saw=False)
+        stream_state.update(buf="", answer="", errors=[], saw=False, texts=[])
         cancellation = (
             _EitherEvent(cancel_event, terminal) if cancel_event is not None else terminal
         )
@@ -1975,6 +2130,8 @@ def run_task(
             )
         ):
             for model in _hermes_free_models():
+                if _MODEL_FAMILY not in model.lower():
+                    continue
                 if deadline - time.monotonic() < 12:
                     # Too little budget left to start another model attempt.
                     break

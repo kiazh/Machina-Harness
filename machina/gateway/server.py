@@ -79,6 +79,9 @@ CANCEL_JOIN_TIMEOUT_SECONDS = 0.1
 # 1000 keeps the payload bounded while preserving that contract; the DB-side
 # fetch still full-scan (residual noted by FM1 for the context.py owner).
 MAX_RESUME_HISTORY_CHUNKS = 1000
+#: Harness chat turns run research-style tasks (web search, many tool calls),
+#: so they get a longer bound than a delegated one-shot run.
+HARNESS_CHAT_TIMEOUT_SECONDS = 600.0
 # W4: initialize may carry these keys without a token — the bare handshake.
 # Any other key (model/provider/mode today, future state mutations) requires
 # the auth token when one is configured.
@@ -1081,17 +1084,21 @@ class Gateway:
                 cwd = _workspace_cwd(session)
             except Exception:
                 cwd = None
+            resume = ""
+            if isinstance(getattr(session, "state", None), dict):
+                resume = str(session.state.get("harness_session_id") or "").strip()
             job = await harness_jobs.start(
                 session_id=key,
                 platform=platform,
                 task=text,
-                timeout=300.0,
+                timeout=HARNESS_CHAT_TIMEOUT_SECONDS,
                 cwd=cwd,
                 reuse_session=True,
                 record_user=False,
                 on_progress=on_progress,
+                resume_session=resume or None,
             )
-            final = await harness_jobs.wait(job["id"], timeout=310.0)
+            final = await harness_jobs.wait(job["id"], timeout=HARNESS_CHAT_TIMEOUT_SECONDS + 30.0)
             if final is None:
                 body = "Harness job disappeared before producing a result."
             else:
@@ -1114,8 +1121,12 @@ class Gateway:
             if logged.strip():
                 body = logged.rstrip()
                 # Keep the live "what it is doing" log and append the final
-                # answer when the stream itself did not already end with it.
-                if answer and answer not in body:
+                # answer only when the stream did not already contain it.
+                # Compare normalized text: token events split the answer
+                # across newlines, so a raw substring test would duplicate it.
+                flat_body = " ".join(body.split())
+                flat_answer = " ".join(answer.split())
+                if flat_answer and flat_answer not in flat_body:
                     body = f"{body}\n\n{answer}"
                 if status_note and status_note not in body:
                     body = f"{body}\n\n{status_note}"

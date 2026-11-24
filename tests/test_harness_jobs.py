@@ -50,13 +50,15 @@ async def test_background_job_records_bounded_result(monkeypatch):
     monkeypatch.setattr(
         interop,
         "run_task",
-        lambda platform, task, timeout, cwd=None, on_output=None: SimpleNamespace(
-            ok=True,
-            exit_code=0,
-            command=["hermes", "--oneshot=hi"],
-            stdout="HARNESS_OK",
-            stderr="",
-            unsupported_reason="",
+        lambda platform, task, timeout, cwd=None, on_output=None, resume=None, on_session_id=None: (
+            SimpleNamespace(
+                ok=True,
+                exit_code=0,
+                command=["hermes", "--oneshot=hi"],
+                stdout="HARNESS_OK",
+                stderr="",
+                unsupported_reason="",
+            )
         ),
     )
 
@@ -83,7 +85,9 @@ async def test_background_job_records_bounded_result(monkeypatch):
 async def test_background_job_retains_live_output_lines(monkeypatch):
     from machina import interop
 
-    def fake_run(platform, task, timeout, cwd=None, on_output=None):
+    def fake_run(
+        platform, task, timeout, cwd=None, on_output=None, resume=None, on_session_id=None
+    ):
         if on_output is not None:
             on_output("stdout", "thinking...\nstep 1\n")
         return SimpleNamespace(
@@ -106,6 +110,45 @@ async def test_background_job_retains_live_output_lines(monkeypatch):
     assert current is not None
     assert current["status"] == "complete"
     assert any("thinking" in line for line in current["progress"])
+
+
+@pytest.mark.asyncio
+async def test_background_job_forwards_the_resume_session(monkeypatch):
+    from machina import interop
+
+    seen: dict = {}
+
+    def fake_run(
+        platform, task, timeout, cwd=None, on_output=None, resume=None, on_session_id=None
+    ):
+        seen["resume"] = resume
+        if on_session_id is not None:
+            on_session_id("sess-new")
+        return SimpleNamespace(
+            ok=True,
+            exit_code=0,
+            command=["hermes"],
+            stdout="ok",
+            stderr="",
+            unsupported_reason="",
+        )
+
+    monkeypatch.setattr(interop, "run_task", fake_run)
+    job = await harness_jobs.start(
+        session_id="session-a",
+        platform="hermes",
+        task="follow up",
+        timeout=30,
+        resume_session="sess-old",
+    )
+    for _ in range(80):
+        current = harness_jobs.get(job["id"])
+        if current and current["status"] != "running":
+            break
+        await asyncio.sleep(0.02)
+
+    assert seen["resume"] == "sess-old"
+    assert harness_jobs.get(job["id"])["status"] == "complete"
 
 
 @pytest.mark.asyncio

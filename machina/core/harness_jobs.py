@@ -118,6 +118,9 @@ class HarnessJob:
     done: bool = False
     progress: list[str] = field(default_factory=list)
     on_progress: Callable[[str], None] | None = None
+    resume_session: str = ""
+    session_ref: str = ""
+    on_resume: Callable[[str], None] | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -231,6 +234,8 @@ async def start(
     reuse_session: bool = False,
     record_user: bool = True,
     on_progress: Callable[[str], None] | None = None,
+    resume_session: str | None = None,
+    on_session_id: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Create the child chat (or reuse it), schedule the run, return snapshot."""
     if not session_id:
@@ -258,6 +263,8 @@ async def start(
     )
     job.persist = bool(child_id or reuse_session)
     job.on_progress = on_progress
+    job.resume_session = (resume_session or "").strip()
+    job.on_resume = on_session_id
     _JOBS[job.id] = job
     _prune()
     if record_user and child_id:
@@ -290,6 +297,27 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
 
     drain_task = asyncio.create_task(drain())
     final_status = "error"
+
+    loop = asyncio.get_running_loop()
+
+    def remember_session(session: str) -> None:
+        job.session_ref = session
+        callback = job.on_resume
+        if callback is not None:
+            try:
+                callback(session)
+            except Exception:
+                pass
+        if job.persist:
+            # Persist the harness conversation id as soon as it appears, so a
+            # later turn can resume even if this run is interrupted.
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _set_child_state(job.session_id, harness_session_id=session), loop
+                )
+            except Exception:
+                pass
+
     try:
         from machina import interop
 
@@ -300,6 +328,8 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
             timeout=job.timeout,
             cwd=cwd,
             on_output=on_output,
+            resume=job.resume_session or None,
+            on_session_id=remember_session,
         )
         job.exit_code = result.exit_code
         job.command = list(result.command)
@@ -335,16 +365,23 @@ async def _run(job: HarnessJob, cwd: Any) -> None:
             if final_status != "complete":
                 answer = f"{final_status}: {job.error or answer}"
             log = "\n".join(job.progress).strip()
-            if log and answer and answer.strip() not in log:
+            flat_log = " ".join(log.split())
+            flat_answer = " ".join(answer.split())
+            if log and answer and flat_answer not in flat_log:
                 body = f"{log}\n\n{answer}"
             else:
                 body = log or answer
             await _append_message(job.session_id, "assistant", body[:MAX_STDOUT_CHARS])
+            extra: dict[str, Any] = {}
+            session_ref = job.session_ref or job.resume_session
+            if session_ref:
+                extra["harness_session_id"] = session_ref
             await _set_child_state(
                 job.session_id,
                 harness_status=final_status,
                 harness_needs_input=job.needs_input,
                 harness_job_id=job.id,
+                **extra,
             )
         _TASKS.pop(job.id, None)
         job.status = final_status

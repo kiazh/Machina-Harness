@@ -1,5 +1,22 @@
 # Release notes
 
+## 2.4.1 - 2026-11-24
+
+**Harness chats keep the conversation.**
+
+### Fixed
+
+- **Streamed answers no longer break into one word per line.** Hermes emits token-level `text` events; Machina rendered each as its own line. Token text is now concatenated verbatim, while tool/system events keep their own lines.
+- **The final answer is no longer duplicated.** When the streamed log already ended with the answer, the completion used a raw substring check that failed across line breaks and appended the answer again. Both the transcript and the stored message now compare normalized text.
+- **Harness child chats keep their conversation.** Each turn used to start a fresh harness session, so "can you retry" had no context. Machina now stores the harness session id on the child session and resumes it: Hermes with `chat --resume <id>`, OpenCode with `run --session <id>`. The id is persisted as soon as it appears, so a later turn continues even if the previous run was interrupted.
+- **Headless runs cannot stall on a prompt.** Hermes runs with `--oneshot --yolo --accept-hooks`; OpenCode runs with `--format json --auto`. Previously a tool approval or clarify prompt had no TTY to answer it and the run sat until the deadline.
+- **Long research turns get time to finish.** Harness chat turns are bounded at 10 minutes instead of 5; the deadline error is unchanged for shorter delegated runs.
+
+### Changed
+
+- **Model policy: DeepSeek only.** Machina never silently switches to another vendor's model to recover a run. The automatic replacement list only considers DeepSeek ids, and a provider-suggested model is adopted only when it is DeepSeek. `MACHINA_HARNESS_MODEL` (or `MACHINA_HARNESS_MODEL_<PLATFORM>`) pins the model used for a harness run.
+- OpenCode runs now use `--format json`, so Machina captures the session id and renders `→ tool` / `← output` progress; the final answer is the concatenated text events.
+
 ## 2.4.0 - 2026-11-24
 
 **Two-way harness chats.**
