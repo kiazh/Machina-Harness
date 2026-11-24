@@ -19,6 +19,20 @@ def _reset_jobs():
     harness_jobs.reset_for_tests()
 
 
+def test_harness_workspace_falls_back_when_the_session_has_no_pin(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from machina.core import execution_context
+    from machina.gateway.features.interop import _workspace_cwd
+
+    monkeypatch.setattr(execution_context, "configured_workspace", lambda: tmp_path)
+    assert _workspace_cwd(SimpleNamespace(state={})) == tmp_path.resolve()
+    assert (
+        _workspace_cwd(SimpleNamespace(state={"desktop_workspace_root": str(tmp_path)}))
+        == tmp_path.resolve()
+    )
+
+
 @pytest.mark.asyncio
 async def test_background_job_records_bounded_result(monkeypatch):
     from machina import interop

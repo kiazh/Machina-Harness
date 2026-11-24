@@ -110,9 +110,14 @@ async def resolve_execution_context(session_id: str | None, tool: str = "") -> E
                 raise ValueError("Session is unavailable; no workspace authority was selected")
             pinned = session.state.get("desktop_workspace_root")
             if pinned is not None:
-                if not isinstance(pinned, str) or not Path(pinned).is_absolute():
+                if not isinstance(pinned, str) or not pinned.strip():
                     raise ValueError("Session workspace is invalid; select its folder again")
-                root = Path(pinned).resolve()
+                candidate = Path(pinned).expanduser()
+                if not candidate.is_absolute():
+                    # Legacy relative pin: resolve against the configured root
+                    # rather than failing every tool in the session.
+                    candidate = configured_workspace() / candidate
+                root = candidate.resolve()
                 if not root.is_dir():
                     raise ValueError("Session workspace is unavailable; select its folder again")
     return _context(await resolve_effective_mode(session_id), tool, root)

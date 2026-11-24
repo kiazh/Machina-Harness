@@ -558,7 +558,7 @@ async def test_interop_runs_in_the_bound_session_workspace_through_real_child_ru
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("wrapped", [False, True])
-@pytest.mark.parametrize("pin", [None, "relative/folder", "missing", 17])
+@pytest.mark.parametrize("pin", ["relative/folder", "missing", 17])
 async def test_session_interop_refuses_invalid_or_unavailable_workspace_before_launch(
     gateway, tmp_path, monkeypatch, wrapped, pin
 ):
@@ -588,6 +588,24 @@ async def test_session_interop_refuses_invalid_or_unavailable_workspace_before_l
         response = await rpc(gateway, "interop.run", params)
     assert response.get("error", {}).get("code") == INVALID_PARAMS, response
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_session_interop_without_a_pin_uses_the_configured_workspace(
+    gateway, harmless_harness
+):
+    """A plain chat has no workspace pin; harness runs still work."""
+    response = await rpc(
+        gateway,
+        "interop.run",
+        {
+            "platform": "codex",
+            "prompt": "inspect fixture",
+            "sessionId": str(gateway.test_sessions[0].id),
+        },
+    )
+    assert response["result"]["ok"] is True, response
+    assert response["result"]["stdout"]
 
 
 def test_interop_explicit_cwd_is_never_replaced_with_the_default_if_it_disappears(

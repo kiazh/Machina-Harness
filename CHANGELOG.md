@@ -1,5 +1,18 @@
 # Release notes
 
+## 2.2.2 - 2026-11-24
+
+**Session-workspace validation fix.**
+
+### Fixed
+
+- A plain chat session has no `desktop_workspace_root` pin. `/harnesses` and
+  tool execution treated “no pin” as an invalid workspace and surfaced
+  `Session workspace is invalid; select its folder again`. Harness runs now
+  fall back to the configured workspace; explicit absolute pins still win.
+- Legacy relative pins are resolved against the configured workspace instead
+  of failing every harness/tool call for that session.
+
 ## 2.2.1 - 2026-11-24
 
 **Keyboard-freeze hardening for slow commands.**

@@ -131,14 +131,31 @@ def _redact(text: str) -> str:
 
 
 def _workspace_cwd(session: Session) -> Path:
-    """Resolve explicit session authority; a missing pin never chooses another project."""
+    """Resolve the session workspace for a harness child.
+
+    A session without an explicit pin (a plain chat) uses the configured
+    gateway workspace. An explicit absolute pin still wins; a missing or
+    relative pin is normalized against the configured root, and only an
+    unavailable pinned folder asks the user to select it again.
+    """
+    from machina.core.execution_context import configured_workspace
     from machina.gateway.features.desktop_workspace import WORKSPACE_STATE_KEY
 
     pinned = session.state.get(WORKSPACE_STATE_KEY)
-    if not isinstance(pinned, str) or not Path(pinned).is_absolute():
+    fallback = configured_workspace()
+    if pinned is None:
+        if fallback.is_dir():
+            return fallback.resolve()
+        raise RpcError(INVALID_PARAMS, "No workspace is available; open a folder first")
+    if not isinstance(pinned, str) or not pinned.strip():
         raise RpcError(INVALID_PARAMS, "Session workspace is invalid; select its folder again")
+    candidate = Path(pinned).expanduser()
+    if not candidate.is_absolute():
+        # Legacy/relative pins: resolve against the configured root instead
+        # of bricking every harness call for the session.
+        candidate = (fallback / candidate).resolve()
     try:
-        root = Path(pinned).resolve(strict=True)
+        root = candidate.resolve(strict=True)
         if not root.is_dir():
             raise OSError("not a directory")
     except (OSError, ValueError, RuntimeError):
