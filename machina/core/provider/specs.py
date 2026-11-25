@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import machina.core.provider.kiro_proxy as kiro
+from machina.core.provider.aliases import canonical_provider
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +188,9 @@ class _ProviderRegistry(tuple):
             return True
         if not isinstance(value, str) or not value:
             return False
+        value = canonical_provider(value)
+        if tuple.__contains__(self, value):
+            return True
         return value in _named_provider_names()
 
 

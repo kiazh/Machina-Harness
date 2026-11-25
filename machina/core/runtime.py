@@ -404,9 +404,10 @@ def _detect_providers() -> dict[str, Any]:
     reports unavailable for the selected route instead of healthy-by-any-key.
     """
     from machina.core.config import config
+    from machina.core.provider.aliases import canonical_provider
 
     try:
-        selected = (config.get("provider") or "openrouter").lower()
+        selected = canonical_provider(config.get("provider") or "openrouter")
     except Exception:
         selected = "openrouter"
     key_ok = False
@@ -640,8 +641,10 @@ def _detect_hermes_proxy() -> dict[str, Any]:
         from machina.core import hermes_proxy
 
         if not hermes_proxy.installed():
+            hermes_proxy.migrate_legacy_provider()
             return {"hermes_proxy": "not installed"}
         ok, message = hermes_proxy.start(wait=True)
+        hermes_proxy.migrate_legacy_provider()
         return {"hermes_proxy": "ready" if ok else message}
     except Exception as error:
         return {"hermes_proxy": f"unavailable: {error}"}

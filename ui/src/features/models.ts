@@ -33,6 +33,16 @@ export interface ModelEntry {
 	efforts?: string[];
 }
 
+const PROVIDER_ALIASES: Record<string, string> = {
+	"hermes-proxy": "hermes",
+};
+
+/** Canonical provider name for legacy aliases (saved routes/old stores). */
+export function canonicalProvider(name: string): string {
+	const normalized = String(name ?? "").trim().toLowerCase();
+	return PROVIDER_ALIASES[normalized] ?? normalized;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
 	openai: "OpenAI",
 	anthropic: "Anthropic",
@@ -199,7 +209,7 @@ export function catalogToEntries(result: ModelsListResult): ModelEntry[] {
 			const model = String(raw.id ?? raw.model ?? "").trim();
 			return {
 				model,
-				provider: String(result.provider ?? "").trim(),
+				provider: canonicalProvider(String(result.provider ?? "")),
 				displayName: typeof entry.displayName === "string" ? entry.displayName : undefined,
 				contextWindow: entry.contextWindow ?? null,
 				efforts: entry.efforts,
@@ -275,14 +285,14 @@ export async function fetchModelGroups(host: FeatureHost, fast = false): Promise
 			return cached.grouped;
 		}
 	}
-	const sessionProvider = (host.session()?.provider ?? "").trim().toLowerCase();
+	const sessionProvider = canonicalProvider(host.session()?.provider ?? "");
 	let listed: ProvidersListResult | undefined;
 	try {
 		listed = await host.request<ProvidersListResult>("providers.list");
 	} catch {
 		listed = undefined;
 	}
-	const current = sessionProvider || (listed?.selected ?? "").trim().toLowerCase() || "openrouter";
+	const current = sessionProvider || canonicalProvider(listed?.selected ?? "") || "openrouter";
 	const sessionId = host.session()?.id;
 
 	const kinds = new Map<string, string>();
@@ -293,8 +303,9 @@ export async function fetchModelGroups(host: FeatureHost, fast = false): Promise
 	push(current);
 	if (listed) {
 		for (const provider of listed.providers) {
-			kinds.set(provider.name, provider.kind);
-			push(provider.name);
+			const name = canonicalProvider(provider.name);
+			kinds.set(name, provider.kind);
+			push(name);
 		}
 	} else {
 		for (const entry of CURATED_MODELS) push(entry.provider);

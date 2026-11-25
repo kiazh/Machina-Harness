@@ -39,6 +39,7 @@ from machina.core.config import (
 )
 from machina.core.exceptions import ValidationError
 from machina.core.provider import catalog, models_dev
+from machina.core.provider.aliases import canonical_provider
 from machina.core.provider.reasoning import supported_reasoning_efforts
 from machina.core.provider.specs import PROVIDERS
 from machina.core.session import session_manager
@@ -231,16 +232,16 @@ async def _session_route(gw: Gateway, params: dict[str, Any]) -> tuple[str, str]
         if opened is not None:
             session = await session_manager.get(opened)
     if session is not None:
-        provider = str(session.provider or "").strip().lower()
+        provider = canonical_provider(session.provider)
         if provider:
             return provider, str(session.model or "").strip()
-    return str(gw.provider or "").strip().lower(), str(gw.model or "").strip()
+    return canonical_provider(gw.provider), str(gw.model or "").strip()
 
 
 async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """Models for a provider (default: the request session's pinned one)."""
     gw.require_db()
-    explicit = str(params.get("provider") or "").strip().lower()
+    explicit = canonical_provider(params.get("provider"))
     if explicit:
         provider = explicit
     else:
@@ -355,7 +356,9 @@ async def models_set_effort(gw: Gateway, params: dict[str, Any]) -> dict[str, An
 async def providers_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     """Built-in + user-added providers, with honest per-entry state."""
     gw.require_db()
-    selected = str(gw.provider or "").strip().lower()
+    selected = canonical_provider(gw.provider)
+    if selected != str(gw.provider or "").strip().lower():
+        gw.provider = selected
     rows: list[dict[str, Any]] = []
     for name in PROVIDERS:
         rows.append({"name": name, "kind": "builtin", "selected": name == selected})

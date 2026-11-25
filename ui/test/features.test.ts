@@ -4,7 +4,7 @@ import { stripTerminalSequences, type SelectItem } from "@earendil-works/pi-tui"
 import { parseCommand } from "../src/commands.ts";
 import { type AskTextOptions, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS } from "../src/features/index.ts";
 import { formatGrowthReport } from "../src/features/growth.ts";
-import { CURATED_MODELS, buildModelPickerRows, fetchModelGroups, filterCuratedModels, filterModelGroups } from "../src/features/models.ts";
+import { CURATED_MODELS, buildModelPickerRows, canonicalProvider, fetchModelGroups, filterCuratedModels, filterModelGroups } from "../src/features/models.ts";
 import { Menu } from "../src/components/Menu.ts";
 import { markdownTable, resolvePrefix } from "../src/format.ts";
 import { listAllSessions, type SessionListHost } from "../src/features/sessions.ts";
@@ -1694,6 +1694,30 @@ test("/models search matches provider names and model ids across groups", async 
 	assert.deepEqual(deepseek.map((group) => group.provider), ["deepseek"]);
 	assert.deepEqual(deepseek[0]!.entries.map((entry) => entry.model), ["deepseek-v4-flash"]);
 	assert.ok(filterModelGroups(grouped.groups, "gpt").some((group) => group.provider === "chatgpt"));
+});
+
+test("legacy Hermes provider aliases collapse into the canonical hermes group", async () => {
+	const host = new FakeHost();
+	host.current = { ...SESSION, provider: "hermes-proxy", model: "old/model" };
+	host.responses["providers.list"] = {
+		selected: "hermes-proxy",
+		providers: [
+			{ name: "hermes", kind: "builtin", selected: false },
+			{ name: "hermes-proxy", kind: "named", selected: true },
+		],
+	};
+	host.responses["models.list"] = (p: Record<string, unknown>) => ({
+		provider: p.provider,
+		source: "live",
+		fetchError: null,
+		models: [{ id: p.provider === "hermes" ? "new/model" : "old/model" }],
+	});
+	const grouped = await fetchModelGroups(host);
+	assert.equal(canonicalProvider("hermes-proxy"), "hermes");
+	assert.equal(grouped.current, "hermes");
+	assert.deepEqual(grouped.groups.map((group) => group.provider), ["hermes"]);
+	assert.deepEqual(grouped.groups[0]!.entries.map((entry) => entry.model), ["new/model"]);
+	assert.equal(grouped.groups[0]!.current, true);
 });
 
 test("/models tolerates CLI-shaped or malformed catalog rows without crashing", async () => {

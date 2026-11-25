@@ -116,6 +116,14 @@ def test_detect_launch_finds_a_zip_extract_in_downloads(tmp_path, monkeypatch) -
     checkout.mkdir(parents=True)
     (checkout / "main.py").write_text("print('gateway')\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    # pathlib.expanduser() follows HOME/USERPROFILE on POSIX/Windows rather
+    # than Path.home(), so isolate both for conventional-location detection.
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    # Detection also checks a sibling of the current working directory; keep
+    # that probe inside the fixture so a real checkout next to the repo cannot
+    # win before the simulated download.
+    monkeypatch.chdir(tmp_path)
     _set_config(monkeypatch, "kiro_gateway_dir", "")
 
     spec, error = kiro_gateway.detect_launch()

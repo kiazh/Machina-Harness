@@ -6,6 +6,7 @@ import base64
 from typing import Any
 
 from machina.core.models import ContextChunk, Session
+from machina.core.provider.aliases import canonical_provider
 from machina.core.transcript import TranscriptProjector
 
 
@@ -25,7 +26,7 @@ def session_to_dict(session: Session) -> dict[str, Any]:
         "id": str(session.id),
         "title": session.title or "",
         "model": session.model or "",
-        "provider": session.provider or "",
+        "provider": canonical_provider(session.provider),
         "status": session.status,
         "lastActivity": session.last_activity.isoformat() if session.last_activity else None,
         # Additive orchestration link: delegated child sessions carry the

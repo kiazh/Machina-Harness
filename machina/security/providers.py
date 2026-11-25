@@ -42,6 +42,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from machina.core.provider.aliases import PROVIDER_ALIASES, canonical_provider
 from machina.observability.diagnostics import record_failure
 from machina.security import store_fence
 from machina.security.env_file import (
@@ -132,6 +133,7 @@ RESERVED_NAMES: frozenset[str] = frozenset(
         "kimi",
         "kiro",
         "hermes",
+        *PROVIDER_ALIASES,
         "chatgpt",
         "copilot",
         "grok",
@@ -292,12 +294,19 @@ def get_provider_entry(name: str) -> dict[str, Any] | None:
 
 
 def provider_names() -> tuple[str, ...]:
-    """Sorted names of user-added providers."""
-    return tuple(sorted(load_store()["providers"]))
+    """Sorted names of user-added providers, excluding compatibility aliases."""
+    return tuple(
+        sorted(
+            name
+            for name in load_store()["providers"]
+            if canonical_provider(name) == str(name).strip().lower()
+        )
+    )
 
 
 def is_named_provider(name: str) -> bool:
-    return str(name or "").strip().lower() in load_store()["providers"]
+    normalized = str(name or "").strip().lower()
+    return canonical_provider(normalized) == normalized and normalized in load_store()["providers"]
 
 
 def resolve_provider_key(entry: dict[str, Any] | str) -> str:

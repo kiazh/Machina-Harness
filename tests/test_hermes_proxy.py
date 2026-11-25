@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -156,6 +157,17 @@ def test_provider_factory_builds_the_managed_endpoint(monkeypatch):
     assert provider.spec.base_url == "http://127.0.0.1:9999/v1"
 
 
+def test_provider_factory_canonicalizes_legacy_hermes_and_free_suffix(monkeypatch):
+    from machina.core.provider import factory
+
+    monkeypatch.setattr(hermes_proxy, "start", lambda **_kwargs: (True, "ready"))
+    monkeypatch.setattr(hermes_proxy, "base_url", lambda: "http://127.0.0.1:9999/v1")
+    monkeypatch.setattr(hermes_proxy, "cached_models", lambda: [{"id": "qwen/qwen4-max"}])
+    provider = factory.get_provider(provider="hermes-proxy", model="qwen/qwen4-max:free")
+    assert provider.model == "qwen/qwen4-max"
+    assert provider.spec.name == "hermes"
+
+
 def test_schedule_autostart_respects_disabled_and_no_scheduler(monkeypatch):
     from machina.core.config import config
 
@@ -184,7 +196,8 @@ def test_install_uses_the_official_installer(monkeypatch):
     ok, message = hermes_proxy.install(wait=True)
     assert ok is True
     assert "installed" in message.lower()
-    assert calls and hermes_proxy.INSTALL_SH_URL in " ".join(calls[0])
+    installer_url = hermes_proxy.INSTALL_PS1_URL if os.name == "nt" else hermes_proxy.INSTALL_SH_URL
+    assert calls and installer_url in " ".join(calls[0])
 
 
 def test_setup_starts_background_install_without_blocking(monkeypatch):

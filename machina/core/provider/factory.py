@@ -6,6 +6,7 @@ from copy import copy
 
 from machina.core.config import config
 from machina.core.exceptions import ValidationError
+from machina.core.provider.aliases import canonical_provider
 from machina.core.provider.anthropic import AnthropicProvider
 from machina.core.provider.base import LLMProvider
 from machina.core.provider.chatgpt import ChatGPTProvider
@@ -53,6 +54,14 @@ def _hermes_provider(model: str | None, reasoning_effort: str | None) -> LLMProv
     if not ok:
         raise ValidationError(message)
     resolved = model or hermes_proxy.default_model()
+    # Legacy Hermes catalogs used a `:free` suffix that the current gateway
+    # omits. Keep the same family instead of failing an old saved session.
+    if resolved.endswith(":free"):
+        rows = hermes_proxy.cached_models() or []
+        ids = {str(row.get("id") or "") for row in rows if row.get("id")}
+        base = resolved.removesuffix(":free")
+        if resolved not in ids and base in ids:
+            resolved = base
     spec = ProviderSpec(
         name="hermes",
         base_url=hermes_proxy.base_url(),
@@ -144,6 +153,7 @@ def get_provider(
     ``reasoning_effort`` (low|medium|high) optionally pins the reasoning depth;
     otherwise each provider falls back to the ``reasoning_effort`` config key.
     """
+    provider = canonical_provider(provider)
     if provider == "openrouter":
         return OpenRouterProvider(
             model=model or "openrouter/free", reasoning_effort=reasoning_effort

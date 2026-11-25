@@ -7,7 +7,9 @@ Linux, and Windows, starts that proxy on launch when an upstream is already
 signed in, and exposes its `/v1/models` catalog as the `hermes` provider.
 
 Machina does not bundle Hermes, perform its login, or manage a proxy it did
-not start.
+not start. Older installations that saved the loopback proxy as a user-added
+`hermes-proxy` provider are folded into the built-in `hermes` route on startup,
+so `/models` shows one current Hermes group rather than a stale cached catalog.
 
 ## 1. One click: Setup
 

@@ -462,6 +462,57 @@ def autostart_if_ready() -> tuple[bool, str]:
     return start(wait=True)
 
 
+def migrate_legacy_provider() -> bool:
+    """Fold the pre-built-in ``hermes-proxy`` named provider into ``hermes``.
+
+    Older builds exposed the loopback proxy as a user-added named provider and
+    persisted its model catalog. The built-in ``hermes`` route now owns that
+    endpoint, so keeping both creates two identical provider groups in
+    ``/models`` and leaves the saved route on stale cached models. Remove the
+    alias entry and move the saved route/model to the canonical provider when
+    the proxy catalog is available. Returns True when a legacy entry was
+    removed.
+    """
+    from machina.security import providers as store
+    from machina.security.providers import is_loopback_base_url
+
+    legacy_name = "hermes-proxy"
+    entry = store.get_provider_entry(legacy_name)
+    if entry is None:
+        return False
+    base = str(entry.get("base_url") or "").strip().rstrip("/").lower()
+    if not base or not is_loopback_base_url(base):
+        return False
+    if not (base.endswith("/v1") or base == base_url().rstrip("/").lower()):
+        return False
+    report = store.remove_provider(legacy_name)
+    if report is None:
+        return False
+    try:
+        from machina.core.config import config, persist_provider_fallback
+
+        current = str(config.get("provider") or "").strip().lower()
+        if current == legacy_name:
+            rows = cached_models() or []
+            ids = {str(row.get("id") or "") for row in rows if row.get("id")}
+            model = str(config.get("model") or "").strip()
+            if ids and model not in ids:
+                # Preserve the requested family when the old catalog used a
+                # free-tier suffix that the current gateway omits.
+                base = model.removesuffix(":free")
+                if base in ids:
+                    model = base
+                elif f"{model}:free" in ids:
+                    model = f"{model}:free"
+                else:
+                    model = str(rows[0].get("id") or "").strip()
+            persist_provider_fallback("hermes", model or None)
+    except Exception as error:
+        logger.warning("Hermes provider migration could not update config: %s", error)
+    logger.info("Removed legacy Hermes named provider; using built-in hermes")
+    return True
+
+
 def _install_argv() -> list[str]:
     """Official Hermes installer for the current OS (fixed URLs only)."""
     if os.name == "nt":

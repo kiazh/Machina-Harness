@@ -32,6 +32,7 @@ from rich.table import Table
 
 from machina.cli.output import console
 from machina.core.config import DEFAULTS, config
+from machina.core.provider.aliases import canonical_provider
 from machina.core.provider.catalog import (
     cached_catalog,
     fetch_catalog_for_account,
@@ -65,7 +66,7 @@ def _fmt_context(tokens: int | None) -> str:
 
 
 def _provider_rows() -> list[dict[str, object]]:
-    selected = str(config.get("provider") or "").lower()
+    selected = canonical_provider(config.get("provider"))
     rows: list[dict[str, object]] = [
         {
             "name": name,
@@ -301,7 +302,7 @@ def models(
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
     """Print a provider's model catalog (chatgpt: live, with efforts)."""
-    selected = (provider or str(config.get("provider") or "openrouter")).strip().lower()
+    selected = canonical_provider(provider or config.get("provider") or "openrouter")
     if selected == "chatgpt":
         _chatgpt_models_cmd(refresh=refresh, json_output=json_output)
         return

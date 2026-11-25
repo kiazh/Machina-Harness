@@ -225,8 +225,10 @@ class Gateway:
         self._owns_db = owns_db
         # Stdio owns process cleanup; HTTP adapters borrow the app runtime.
         self.runtime = runtime if runtime is not None else runtime_services
+        from machina.core.provider.aliases import canonical_provider
+
         self.model: str = config.get("model")
-        self.provider: str = config.get("provider")
+        self.provider: str = canonical_provider(config.get("provider"))
         # Round-3 review finding 10: the last session the client created or
         # resumed. Model commands without explicit session identity resolve
         # that session's pinned route before falling back to the gateway
@@ -674,6 +676,11 @@ class Gateway:
         session = await session_manager.get(sid)
         if session is None:
             raise RpcError(SESSION_NOT_FOUND, f"session {sid} not found")
+        # Older sessions may pin the user-added hermes-proxy alias. Present
+        # them as the built-in route so the next turn and /models agree.
+        from machina.core.provider.aliases import canonical_provider
+
+        session.provider = canonical_provider(session.provider)
         return session
 
     def opened_session_id(self) -> uuid.UUID | None:
