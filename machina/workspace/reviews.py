@@ -33,6 +33,25 @@ _SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
 _SNAPSHOT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+_COMMENT_PREFIXES = ("#", "//", "/*", "*", "--", '"""', "'''")
+_TODO_RE = re.compile(r"\b(?:TODO|FIXME|HACK)\b", re.IGNORECASE)
+_BARE_EXCEPT_RE = re.compile(r"^\s*except\s*:")
+_BASE_EXCEPT_RE = re.compile(r"\bexcept\s+BaseException\b")
+_EXCEPT_RE = re.compile(r"\bexcept\s+Exception\b")
+_SHELL_TRUE_RE = re.compile(r"\bshell\s*=\s*True\b")
+_VERIFY_FALSE_RE = re.compile(r"\bverify\s*=\s*False\b")
+_CHMOD_RE = re.compile(r"\bchmod\b[^\n]*\b(?:0o?777|777)\b")
+_EVAL_RE = re.compile(r"\b(?:eval|exec)\s*\(")
+_DESERIALIZE_RE = re.compile(r"\b(?:pickle|dill|marshal)\.loads?\s*\(")
+_YAML_UNSAFE_RE = re.compile(r"\byaml\.(?:load|unsafe_load)\s*\(")
+_JWT_NOVERIFY_RE = re.compile(
+    r"verify_signature\s*[\"']?\s*:\s*False|algorithms\s*=\s*\[\s*[\"']none[\"']",
+    re.IGNORECASE,
+)
+_SQL_FSTRING_RE = re.compile(
+    r"\.(?:execute|executemany)\s*\(\s*f[\"']|\.(?:execute|executemany)\s*\([^)\n]*\.format\s*\(",
+    re.IGNORECASE,
+)
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS access key"),
     (re.compile(r"(?:sk|rk)-(?:live|test|proj)-[A-Za-z0-9_-]{16,}"), "API secret key"),
@@ -210,6 +229,7 @@ def findings_from_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
             lowered = stripped.casefold()
             if not stripped:
                 continue
+            comment = stripped.startswith(_COMMENT_PREFIXES)
 
             if stripped.startswith("<<<<<<<") or stripped.startswith(">>>>>>>"):
                 add(
@@ -231,28 +251,128 @@ def findings_from_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "Remove the value from source, load it from the secret store, and rotate it if it was real.",
                     )
                     break
-            if "pdb.set_trace()" in lowered or "breakpoint()" in lowered or lowered.startswith("debugger"):
-                add(
-                    shown_path,
-                    line_number,
-                    "debug-breakpoint",
-                    "high",
-                    "Debug breakpoint left in code",
-                    "Remove the breakpoint; it stops or freezes the program outside a debugger.",
-                )
-            if (
-                "console.log(" in lowered
-                or lowered.startswith("print(")
-            ) and not _is_test_path(shown_path):
-                add(
-                    shown_path,
-                    line_number,
-                    "debug-print",
-                    "low",
-                    "Debug output left in non-test code",
-                    "Remove the temporary log or route it through the project logger.",
-                )
-            if "todo" in lowered or "fixme" in lowered or "hack" in lowered:
+            if not comment:
+                if "pdb.set_trace()" in lowered or "breakpoint()" in lowered or lowered.startswith("debugger"):
+                    add(
+                        shown_path,
+                        line_number,
+                        "debug-breakpoint",
+                        "high",
+                        "Debug breakpoint left in code",
+                        "Remove the breakpoint; it stops or freezes the program outside a debugger.",
+                    )
+                if (
+                    "console.log(" in lowered
+                    or lowered.startswith("print(")
+                ) and not _is_test_path(shown_path):
+                    add(
+                        shown_path,
+                        line_number,
+                        "debug-print",
+                        "low",
+                        "Debug output left in non-test code",
+                        "Remove the temporary log or route it through the project logger.",
+                    )
+                if _BASE_EXCEPT_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "broad-except",
+                        "high",
+                        "BaseException is caught",
+                        "Catch the specific exceptions you can handle; BaseException also swallows cancellation and exit.",
+                    )
+                elif _EXCEPT_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "broad-except",
+                        "medium",
+                        "Broad Exception handler added",
+                        "Catch the specific exception types and let unexpected failures surface.",
+                    )
+                elif _BARE_EXCEPT_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "bare-except",
+                        "high",
+                        "Bare except added",
+                        "Catch the specific exception types; a bare except also swallows cancellation and programming errors.",
+                    )
+                if _SHELL_TRUE_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "shell-true",
+                        "high",
+                        "subprocess runs with shell=True",
+                        "Pass an argument list without a shell, or prove every interpolated value is trusted.",
+                    )
+                if _VERIFY_FALSE_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "tls-verify-disabled",
+                        "high",
+                        "TLS verification disabled",
+                        "Restore certificate verification; disabling it defeats transport security.",
+                    )
+                if _CHMOD_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "world-writable",
+                        "high",
+                        "World-writable permissions added",
+                        "Grant the narrowest permissions the process actually needs.",
+                    )
+                if _EVAL_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "dynamic-execution",
+                        "medium",
+                        "Dynamic code execution added",
+                        "Prefer a parser or dispatch table; eval/exec turns ordinary input into code.",
+                    )
+                if _DESERIALIZE_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "unsafe-deserialization",
+                        "high",
+                        "Unsafe deserialization added",
+                        "pickle/dill/marshal can execute code while loading untrusted data; use a data-only format.",
+                    )
+                if _YAML_UNSAFE_RE.search(stripped) and "safeloader" not in lowered:
+                    add(
+                        shown_path,
+                        line_number,
+                        "unsafe-yaml-load",
+                        "high",
+                        "yaml.load without SafeLoader",
+                        "Use yaml.safe_load or pass SafeLoader; the default loader can construct arbitrary objects.",
+                    )
+                if _JWT_NOVERIFY_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "jwt-no-verify",
+                        "critical",
+                        "JWT signature verification disabled",
+                        "Verify the signature and reject the none algorithm.",
+                    )
+                if _SQL_FSTRING_RE.search(stripped):
+                    add(
+                        shown_path,
+                        line_number,
+                        "sql-injection",
+                        "high",
+                        "SQL built with string interpolation",
+                        "Pass bound parameters to execute; interpolated SQL lets input change the query.",
+                    )
+            if _TODO_RE.search(stripped):
                 add(
                     shown_path,
                     line_number,
@@ -260,60 +380,6 @@ def findings_from_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "info",
                     "Unfinished marker added",
                     f"Follow up on: {_snippet(stripped)}",
-                )
-            if "except baseexception:" in lowered:
-                add(
-                    shown_path,
-                    line_number,
-                    "broad-except",
-                    "high",
-                    "BaseException is caught",
-                    "Catch the specific exceptions you can handle; BaseException also swallows cancellation and exit.",
-                )
-            elif "except exception:" in lowered:
-                add(
-                    shown_path,
-                    line_number,
-                    "broad-except",
-                    "medium",
-                    "Broad Exception handler added",
-                    "Catch the specific exception types and let unexpected failures surface.",
-                )
-            if "shell=true" in lowered:
-                add(
-                    shown_path,
-                    line_number,
-                    "shell-true",
-                    "high",
-                    "subprocess runs with shell=True",
-                    "Pass an argument list without a shell, or prove every interpolated value is trusted.",
-                )
-            if "verify=false" in lowered:
-                add(
-                    shown_path,
-                    line_number,
-                    "tls-verify-disabled",
-                    "high",
-                    "TLS verification disabled",
-                    "Restore certificate verification; disabling it defeats transport security.",
-                )
-            if "chmod 777" in lowered:
-                add(
-                    shown_path,
-                    line_number,
-                    "world-writable",
-                    "high",
-                    "World-writable permissions added",
-                    "Grant the narrowest permissions the process actually needs.",
-                )
-            if re.search(r"\beval\(", lowered) or re.search(r"\bexec\(", lowered):
-                add(
-                    shown_path,
-                    line_number,
-                    "dynamic-execution",
-                    "medium",
-                    "Dynamic code execution added",
-                    "Prefer a parser or dispatch table; eval/exec turns ordinary input into code.",
                 )
             if re.search(r"://[^/\s:@]+:[^/\s@]+@", text):
                 add(
