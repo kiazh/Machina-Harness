@@ -58,9 +58,10 @@ export class ThinkingIndicator implements Component {
 
 	render(width: number): string[] {
 		if (!this.sub) return [];
-		const dot = this.activity.frame(["·", "•", "·", "•"], ACTIVITY_INTERVAL_MS, this.startedAt);
+		const dot = this.activity.frame(["✻", "✶", "✳", "✢"], ACTIVITY_INTERVAL_MS, this.startedAt);
 		const secs = Math.floor((Date.now() - this.startedAt) / 1000);
-		const msg = secs > 0 ? `${this.baseMessage} ${secs}s` : this.baseMessage;
+		const base = this.baseMessage.replace(/[.\s]+$/, "");
+		const msg = secs > 0 ? `${base} (${secs}s · esc to interrupt)` : base;
 		const gutter = " ".repeat(transcriptInset(width));
 		return [truncateToWidth(`${gutter}${theme.accent(dot)} ${theme.muted(msg)}`, width)];
 	}
@@ -317,19 +318,22 @@ export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
 export class ComposerBox extends Box {
 	readonly editor: ComposerInput;
 	placeholder = COMPOSER_PLACEHOLDER;
+	private readonly tui: TUI;
 	private degradedMode = false;
 	/** Last measured chrome height, keyed by the inputs that can change it. */
 	private measuredRows: { width: number; text: string; windowRows: number; degraded: boolean; popupHeight: number; rows: number } | undefined;
 
 	constructor(tui: TUI, editorTheme: EditorTheme, options?: EditorOptions) {
 		super(0, 0, theme.userBg);
+		this.tui = tui;
 		this.editor = new ComposerInput(tui, editorTheme, options);
 		this.addChild(this.editor);
 	}
 
-	/** Viewport-derived editable-row budget (shell density, max 8). */
+	/** Viewport-derived editable-row budget (shell density, rules included). */
 	setMaxRows(rows: number): void {
-		this.editor.windowRows = Math.max(1, rows);
+		const chrome = (this.tui.terminal.rows ?? 24) >= 12 ? 2 : 0;
+		this.editor.windowRows = Math.max(1, rows - chrome);
 	}
 
 	/** Safe degraded mode: draft preserved, editing deferred until resize. */
@@ -357,26 +361,33 @@ export class ComposerBox extends Box {
 
 	override render(width: number): string[] {
 		const inner = Math.max(1, width - 2);
-		const prefix = (index: number): string => index === 0 ? theme.accent("› ") : "  ";
+		const prefix = (index: number): string => index === 0 ? theme.accent("❯ ") : "  ";
+		const total = Math.max(0, width);
+		const rule = theme.border("─".repeat(total));
+		const withRules = (rows: string[]): string[] =>
+			total > 0 && (this.tui.terminal.rows ?? 24) >= 12 ? [rule, ...rows, rule] : rows;
 		if (this.degradedMode) {
-			const rows = [truncateToWidth(
-				`${theme.accent("› ")}${theme.muted(truncateToWidth("Too small - resize to continue (draft kept)", inner))}`,
-				Math.max(0, width),
-			)];
+			const rows = withRules([truncateToWidth(
+				`${theme.accent("❯ ")}${theme.muted(truncateToWidth("Too small - resize to continue (draft kept)", inner))}`,
+				total,
+			)]);
 			this.rememberMeasurement(width, rows.length);
 			return rows;
 		}
 		let body: string[];
+		let inputStart = 0;
 		if (this.editor.getText() === "") {
-			const placeholder = theme.muted(truncateToWidth(this.placeholder, inner));
-			body = this.editor.windowRows >= 3 ? ["", placeholder, ""] : [placeholder];
+			body = [theme.muted(truncateToWidth(this.placeholder, inner))];
 		} else {
 			const rendered = this.editor.render(inner);
 			const { renderedAutocompleteHeight: popupHeight } = this.editor as unknown as EditorPopupLayout;
-			body = composerWindow(rendered, this.editor.windowRows, popupHeight).rows;
+			const window = composerWindow(rendered, this.editor.windowRows, popupHeight);
+			body = window.rows;
+			inputStart = Math.min(body.length - 1, popupHeight + window.markerAbove);
 		}
-		const total = Math.max(0, width);
-		const rows = body.map((line, index) => truncateToWidth(`${prefix(index)}${line}`, total));
+		const rows = withRules(body.map((line, index) =>
+			truncateToWidth(`${index === inputStart ? prefix(0) : "  "}${line}`, total),
+		));
 		this.rememberMeasurement(width, rows.length);
 		return rows;
 	}
@@ -393,8 +404,14 @@ export class ComposerBox extends Box {
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Box["handleMouse"]> {
-		if (event.x < 2) return undefined;
-		return super.handleMouse({ ...event, x: event.x - 2, width: Math.max(1, event.width - 2) });
+		const topRule = (this.tui.terminal.rows ?? 24) >= 12 ? 1 : 0;
+		if (event.x < 2 || event.y < topRule) return undefined;
+		return super.handleMouse({
+			...event,
+			y: event.y - topRule,
+			x: event.x - 2,
+			width: Math.max(1, event.width - 2),
+		});
 	}
 }
 

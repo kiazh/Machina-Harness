@@ -284,7 +284,7 @@ test("user turns are plain dim-prefixed text without boxes", async () => {
 	const { UserTurn } = await import("../src/components.ts");
 	const user = new UserTurn("read a.py\nsecond line");
 	const out = plain(user, 40);
-	assert.match(out, /› read a\.py/);
+	assert.match(out, /❯ read a\.py/);
 	assert.match(out, /second line/);
 	assert.doesNotMatch(out, /[┌┐└┘│]/);
 	for (const line of user.render(40)) assert.ok(visibleWidth(line) <= 40);
@@ -402,9 +402,9 @@ test("slash menu opens above the input", async () => {
 	let inputRow = -1;
 	for (let i = 0; i < 30; i++) {
 		await new Promise((r) => setTimeout(r, 100));
-		const rows = box.editor.render(60).map((line) => stripTerminalSequences(line));
+		const rows = box.render(60).map((line) => stripTerminalSequences(line));
 		popupRow = rows.findIndex((line) => line.includes("Show help"));
-		inputRow = rows.findIndex((line) => line.startsWith(" /"));
+		inputRow = rows.findIndex((line) => line.includes("❯"));
 		if (popupRow !== -1 && inputRow !== -1) break;
 	}
 	assert.ok(popupRow !== -1, "menu opened");
@@ -433,10 +433,10 @@ for (const command of ["delegate", "delete"]) test(`clicking ${command} in the s
 	for (let i = 0; i < 30 && !box.editor.isShowingAutocomplete(); i++) {
 		await new Promise(resolve => setTimeout(resolve, 20));
 	}
-	const rows = box.editor.render(60).map(stripTerminalSequences);
+	const rows = box.render(60).map(stripTerminalSequences);
 	const y = rows.findIndex(row => row.includes("Choose items"));
 	assert.ok(y >= 0);
-	box.editor.handleMouse({ type: "click", button: "left", x: 4, y, screenX: 4, screenY: y, width: 60, height: rows.length, shift: false, alt: false, ctrl: false });
+	box.handleMouse({ type: "click", button: "left", x: 4, y, screenX: 4, screenY: y, width: 60, height: rows.length, shift: false, alt: false, ctrl: false });
 	assert.deepEqual(submitted, [`/${command}`]);
 });
 
@@ -446,7 +446,7 @@ test("codex skin ships with the clones", async () => {
 	assert.match(skinDescription("codex"), /codex/i);
 });
 
-test("composer is a clean input line with one accent marker", async () => {
+test("composer is a ruled input block with one accent marker", async () => {
 	const { ComposerBox } = await import("../src/components.ts");
 	const { editorTheme } = await import("../src/theme.ts");
 	const composer = new ComposerBox({ terminal: { rows: 40 } } as never, editorTheme);
@@ -457,16 +457,11 @@ test("composer is a clean input line with one accent marker", async () => {
 		for (const line of composer.render(width)) {
 			assert.ok(visibleWidth(line) <= width, `line wider than ${width}`);
 		}
-		assert.doesNotMatch(
-			composer.render(width).map((line) => stripTerminalSequences(line)).join("\n"),
-			/[┌┐└┘│─]/,
-			"no border rules in the clean composer",
-		);
 	}
-	assert.match(stripTerminalSequences(composer.render(80)[1] ?? ""), /Ask anything, or type \/ for commands\./);
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^› /, "the first row carries the accent marker");
-	for (const line of rows.slice(1)) assert.match(line, /^ {2}/);
+	assert.match(rows[0] ?? "", /^─+$/, "the composer opens with a hairline rule");
+	assert.match(rows[1] ?? "", /^❯ Ask anything/, "the input row carries the accent marker");
+	assert.match(rows.at(-1) ?? "", /^─+$/, "the composer closes with a hairline rule");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
 	composer.editor.setText("hello");
 	assert.doesNotMatch(
@@ -634,7 +629,7 @@ test("V01 multiline user text stays plain and assistant markdown is unframed", a
 	const { AssistantTurn, UserTurn } = await import("../src/components.ts");
 	const user = new UserTurn("first line\nsecond **not markdown**");
 	const rendered = plain(user, 40);
-	assert.match(rendered, /› first line/);
+	assert.match(rendered, /❯ first line/);
 	assert.match(rendered, /second \*\*not markdown\*\*/);
 	assert.doesNotMatch(rendered, /[┌┐└┘│]/);
 	const assistant = new AssistantTurn();

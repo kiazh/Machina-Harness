@@ -208,7 +208,7 @@ test("R4-094(b) a hidden session's turn failure survives completion and replays 
 
 test("R4-094(c) the composer window discloses hidden draft rows", () => {
 	const box = new ComposerBox({ terminal: { rows: 40, columns: 80 }, requestRender() {}, invalidate() {} } as never, editorTheme);
-	box.setMaxRows(4);
+	box.setMaxRows(6);
 	box.editor.setText(Array.from({ length: 10 }, (_, index) => `line${index}`).join("\n"));
 	const rows = box.render(60).map(stripTerminalSequences);
 	assert.ok(rows.some((row) => /↑ \d+ more/.test(row)), "hidden rows above the window are disclosed");
@@ -218,7 +218,7 @@ test("R4-094(c) the composer window discloses hidden draft rows", () => {
 
 test("R4-094(c2) mouse clicks map through the composer window start", () => {
 	const box = new ComposerBox({ terminal: { rows: 40, columns: 80 }, requestRender() {}, invalidate() {} } as never, editorTheme);
-	box.setMaxRows(4);
+	box.setMaxRows(6);
 	box.editor.setText(Array.from({ length: 10 }, (_, index) => `line${index}`).join("\n"));
 	const rows = box.render(60).map(stripTerminalSequences);
 	const rowIndex = rows.findIndex((row) => row.includes("line8"));

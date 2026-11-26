@@ -9,6 +9,7 @@ import { panelInset } from "../design/spacing.ts";
 import { sanitizeDisplay, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
 import { toolCallDisplayName } from "../mcpNames.ts";
 import { theme } from "../theme.ts";
+import { styleDiffLine } from "./DiffBlock.ts";
 
 export type ToolOutcome =
 	| "queued"
@@ -151,7 +152,10 @@ export class ToolTurn implements Component {
 		const previewBudget = this.outcome === "running" ? 1 : 2;
 		if (this.result.text.trim()) {
 			const shaped = shapePreview(this.result.text, Math.max(1, room - 2), previewBudget);
-			for (const line of shaped.shown) lines.push(theme.dim(`  ${truncateToWidth(line, Math.max(1, room - 2))}`));
+			shaped.shown.forEach((line, index) => {
+				const prefix = index === 0 ? theme.dim("⎿ ") : "  ";
+				lines.push(`${prefix}${truncateToWidth(styleDiffLine(line), Math.max(1, room - 2))}`);
+			});
 			if (shaped.omitted > 0) {
 				lines.push(theme.dim(`  … ${shaped.omitted} more line${shaped.omitted === 1 ? "" : "s"}`));
 			}

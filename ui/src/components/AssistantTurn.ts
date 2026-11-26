@@ -228,8 +228,8 @@ export class AssistantTurn implements Component {
 		const rows = this.md.render(geometry.contentWidth);
 		const pad = " ".repeat(geometry.indent);
 		const marker = this.streaming
-			? theme.accent(this.activity?.frame(["·", "•", "·", "•"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "·")
-			: " ";
+			? theme.accent(this.activity?.frame(["✻", "✶", "✳", "✢"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "✻")
+			: theme.accent("⏺");
 		const output = [...BLOCK_GAP];
 		const label = this.label && this.label !== "assistant" ? theme.dim(this.label) : "";
 		if (label) output.push(truncateToWidth(`${pad}${label}`, width));

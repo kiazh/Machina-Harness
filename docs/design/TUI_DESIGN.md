@@ -12,23 +12,29 @@ state, approval, output, ui, dialogs, layout, features, app).
   failure. Borders recede (`#526058`) instead of framing every row.
 - Terminal monospace only. No gradients, shadows, large colored panels,
   emoji controls or decorative ASCII art.
-- User turns are `›` plus text on a two-column gutter. Assistant responses are
-  unframed prose on a readable 96-column measure; they have no heading, card,
-  fill or closing rule. Tool activity is one unframed line (`marker name args`
-  with a right-aligned status), capped at 108 columns, with at most two dim
-  preview rows. Notices and thinking use the same gutter. Below 40 columns,
-  extra gutters disappear.
+- User turns are a full-width, subtly tinted bar: `❯` then the prompt, with
+  continuation lines aligned beneath it. This is the only tinted transcript
+  line, matching Claude Code's prompt band.
+- Assistant responses are unframed prose on a readable 96-column measure,
+  introduced by a single `⏺` marker; no heading, card, fill or closing rule.
+- Tool activity is one unframed `⏺ name args` line with a right-aligned
+  status, capped at 108 columns. Results appear beneath it as `⎿` plus at
+  most two preview rows; diff lines keep add/remove colors.
+- The composer is a ruled input block: a hairline rule above and below, a
+  `❯` accent marker, and plain input rows. Rules disappear below 12 rows to
+  protect the status/footer line.
+- Notices and thinking use the same gutter. Thinking reads
+  `✻ Thinking (3s · esc to interrupt)`. Below 40 columns, extra gutters
+  disappear.
 - Approval evidence is the one intentional framed surface: a bounded rectangle
   with a distinct fill, because it is a safety decision rather than ambient
   output. The rectangle keeps its contrast in truecolor and 256-color modes
   and never turns red/green on an outcome change.
-- The composer is one clean input block: a `›` accent marker and plain rows,
-  no filled panel or rule. Selected list rows use a quiet neutral fill.
 - Brand, session title and workspace share one context row. The footer has one
   row: actual model · branch · mode · status, observed tokens when nonzero,
   hints when space permits, and a fixed bottom-right activity/learning square.
 - Bold is reserved for brand, selections, approval titles and Markdown
-  emphasis. Every state keeps a text marker (`✔`/`✖`/`⊘`/`!`, `›`/`·`/`→`)
+  emphasis. Every state keeps a text marker (`✔`/`✖`/`⊘`/`!`, `❯`/`⏺`/`⎿`)
   so meaning survives monochrome skins.
 
 ## Layout and density

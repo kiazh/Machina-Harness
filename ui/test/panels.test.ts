@@ -40,11 +40,11 @@ for (const trueColor of [true, false]) {
 		const topRow = resultRow - 1;
 		assert.match(plain[topRow]!, /^ {4}✔ read_file/);
 		assert.match(plain[topRow]!, /^ {4}[✔⊘✖] read_file/);
-		assert.match(plain[resultRow]!, /^ {6}Example inspection/);
+		assert.match(plain[resultRow]!, /^ {4}⎿ Example inspection/);
 		assert.doesNotMatch(plain[resultRow]!, /[┌┐└┘│]/, "routine successes remain unboxed");
 		const assistantRow = plain.findIndex(row => row.includes("I’ll inspect"));
 		const assistant = plain[assistantRow]!;
-		assert.match(assistant, /^ {4}I’ll inspect/, "assistant prose is a clean indented column");
+		assert.match(assistant, /^ {2}⏺ I’ll inspect/, "assistant prose is a clean indented column");
 		assert.doesNotMatch(assistant, /[┌┐└┘│]/, "assistant prose has no frame");
 		assert.equal(plain[topRow]!.indexOf("✔"), assistant.indexOf("I’ll"), "tool marker aligns with the assistant text column");
 		assert.equal(plain[topRow - 1]?.trim(), "", "space outside the panel");
