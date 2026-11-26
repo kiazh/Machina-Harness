@@ -1316,7 +1316,7 @@ const skinColors: Record<string, Record<PaletteName, Color>> = Object.fromEntrie
 			warning: parseColor(def.base.warning),
 			error: parseColor(def.base.error),
 			info: parseColor(def.base.info),
-			border: mixColors(neutral, text, 0.28),
+			border: mixColors(neutral, text, 0.20),
 			userBg: mixColors(neutral, text, 0.1),
 			assistantBg: mixColors(neutral, text, 0.06),
 			toolBg: mixColors(neutral, text, 0.09),
