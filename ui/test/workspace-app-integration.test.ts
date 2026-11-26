@@ -420,16 +420,20 @@ test("METHOD_NOT_FOUND disables the workspace quietly with one notice and never 
 
 // ─── successful open + geometry ─────────────────────────────────────────────
 
-test("successful open wires the default split and pushes shell state", async () => {
+test("successful open starts chat-first and reveals the editor on the first file", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 
 	const layout = internals(app).workspaceLayout;
-	assert.equal(layout?.effectiveMode, "split");
-	assert.ok((layout?.editor?.columns ?? 0) >= 48, "editor column keeps its minimum at 160 cols");
-	assert.ok((layout?.chat?.columns ?? 0) >= 40, "chat column keeps its minimum");
+	assert.equal(layout?.effectiveMode, "chat", "a fresh workspace is a full-width chat");
+	assert.equal(layout?.editor, undefined, "no empty editor column is reserved");
 	assert.equal(internals(app).integration?.controller.phase, "ready");
+	await internals(app).openWorkspacePath("src/a.ts");
+	const split = internals(app).workspaceLayout;
+	assert.equal(split?.effectiveMode, "split", "opening a file reveals the editor");
+	assert.ok((split?.editor?.columns ?? 0) >= 48, "editor column keeps its minimum at 160 cols");
+	assert.ok((split?.chat?.columns ?? 0) >= 40, "chat column keeps its minimum");
 	const opens = client.requests.filter((entry) => entry.method === "workspace.open");
 	assert.equal(opens.length, 1, "opened exactly once, in the background");
 	assert.equal(opens[0]?.params.root, "/ws");
@@ -534,17 +538,22 @@ async function bootFramed(columns: number, rows: number): Promise<{
 	return { app, tui, term, client };
 }
 
-test("at 160x48 the composed frame carries a real editor column beside chat", async () => {
+test("at 160x48 a fresh workspace does not reserve an empty editor", async () => {
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
-		const screen = tui.getScreenLines().map(stripTerminalSequences);
+		let screen = tui.getScreenLines().map(stripTerminalSequences);
 		assert.equal(screen.length, 48);
 		for (const line of screen) assert.ok(visibleWidth(line) <= 160);
-		const joined = screen.join("\n");
+		let joined = screen.join("\n");
 		assert.match(joined, /Ask anything/, "chat composer visible");
-		assert.match(joined, /No open files · Ctrl\+P to open/, "the single empty-editor hint lives in the viewport (finding 1)");
-		assert.doesNotMatch(joined, /No open document/, "no repeated empty-state restatement");
-		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
+		assert.doesNotMatch(joined, /No open files/, "no empty editor pane is composed");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
+		await internals(app).openWorkspacePath("src/a.ts");
+		tui.renderNow(true);
+		screen = tui.getScreenLines().map(stripTerminalSequences);
+		joined = screen.join("\n");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "opening a file composes the editor");
+		assert.match(joined, /src\/a\.ts|a\.ts/, "the opened file is visible");
 	} finally {
 		await app.exit();
 		assert.equal(client.stopped, true);
@@ -630,7 +639,8 @@ test("Ctrl+N pane commands work from the editor and composer", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
-	assert.equal(internals(app).activeRegion, "chat-composer");
+	await internals(app).openWorkspacePath("a.ts");
+	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 
 	// Pane commands work from the composer too; the editor can be brought
@@ -868,8 +878,9 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
+	await internals(app).openWorkspacePath("a.ts");
 	const state = internals(app);
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "fresh state opens the explorer");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the first file opens the explorer");
 	assert.ok(internals(app).workspaceLayout?.explorer, "the tree is docked in the split");
 	internals(app).shell.onWorkspaceExplorerToggle?.();
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "the grip closes the explorer");
@@ -902,7 +913,10 @@ test("a narrow terminal refuses the explorer toggle with one honest notice", asy
 	await waitForWorkspace(app);
 	const state = internals(app);
 	const notices = captureNotices(app);
-	// Close the explorer while the split can still dock it.
+	// Open then close the explorer while the split can still dock it.
+	(state.integration!.controller as unknown as { setMode(mode: string): void }).setMode("split");
+	state.shell.onWorkspaceExplorerToggle?.();
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true);
 	state.shell.onWorkspaceExplorerToggle?.();
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false);
 	// Narrow viewport + editor preference makes the explorer an overlay.
@@ -923,12 +937,12 @@ test("a fresh workspace persists the explorer open; an explicit stored false sta
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
-	// The open-time intent write keeps the default (explorer open).
+	// The open-time intent write keeps the chat-first default (explorer closed).
 	const writes = client.requests.filter((entry) => entry.method === "config.set");
 	const last = writes.at(-1)?.params.value;
 	assert.equal(typeof last, "string");
 	const document = JSON.parse(last as string) as { byRoot: Record<string, { explorerRequested: boolean }> };
-	assert.equal(document.byRoot["/ws"]?.explorerRequested, true, "fresh state is written open");
+	assert.equal(document.byRoot["/ws"]?.explorerRequested, false, "fresh state is written closed");
 	await app.exit();
 
 	// A stored document with an explicit false keeps it closed.
@@ -974,10 +988,10 @@ test("a fresh workspace persists the explorer open; an explicit stored false sta
 	await waitForWorkspace(third.app);
 	assert.equal(
 		internals(third.app).integration?.controller.getLayoutInput().explorerRequested,
-		true,
-		"absent field defaults to explorer open",
+		false,
+		"an older empty chat state stays chat-first",
 	);
-	assert.ok(internals(third.app).workspaceLayout?.explorer, "the drawer docks for older states too");
+	assert.equal(internals(third.app).workspaceLayout?.explorer, undefined, "no empty drawer is painted");
 	await third.app.exit();
 });
 
@@ -1002,22 +1016,21 @@ test("Ctrl+N then N cycles composer → editor → explorer and retargets TUI fo
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
-	assert.equal(internals(app).activeRegion, "chat-composer");
-
-	pressGuide(tui, "n");
+	await internals(app).openWorkspacePath("a.ts");
 	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(tui.focused, internals(app).integration?.pane, "editing focus moved to the pane");
 
-	// The explorer is open by default (fresh state), so it is part of the cycle.
+	// The first file reveals the explorer, so it is part of the cycle.
 	pressGuide(tui, "n");
 	assert.equal(internals(app).activeRegion, "explorer");
 	assert.notEqual(tui.focused, internals(app).integration?.pane);
 
 	pressGuide(tui, "n");
-	assert.equal(internals(app).activeRegion, "chat-composer", "cycles back");
-	// Ctrl+N then P walks backwards from the composer to the explorer.
+	assert.equal(internals(app).activeRegion, "chat-composer", "cycles back to the composer");
+	pressGuide(tui, "n");
+	assert.equal(internals(app).activeRegion, "editor", "the editor follows the composer");
 	pressGuide(tui, "p");
-	assert.equal(internals(app).activeRegion, "explorer", "Ctrl+N then P cycles in reverse");
+	assert.equal(internals(app).activeRegion, "chat-composer", "Ctrl+N then P cycles in reverse");
 	await app.exit();
 });
 
@@ -1873,6 +1886,7 @@ function listMany(count: number) {
 test("a populated docked explorer paints a bounded panel, never a full-page rectangle", async () => {
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
+		await internals(app).openWorkspacePath("src/a.ts");
 		client.handlers.set("workspace.list", listMany(60));
 		const { explorerModel, explorerPane } = explorerInternals(app);
 		await explorerModel.reload("");
@@ -1917,14 +1931,15 @@ test("a populated docked explorer paints a bounded panel, never a full-page rect
 test("a short docked explorer stays content-sized while its budget stays capped", async () => {
 	const { app, tui } = await bootFramed(160, 48);
 	try {
+		await internals(app).openWorkspacePath("src/a.ts");
 		tui.renderNow(true);
 		const layout = internals(app).workspaceLayout;
 		if (!layout?.explorer) assert.fail("the drawer is docked at 160 cols");
 		const { explorerPane } = explorerInternals(app);
 		assert.equal(explorerPane.getRowBudget(), LAYOUT_BUDGETS.explorerMaxTreeRows, "the cap is still applied");
 		const rendered = explorerPane.render(layout.explorer.columns);
-		assert.equal(rendered.length, 2, "an empty tree paints only its header + placeholder (no padding)");
-		assert.match(rendered.map(stripTerminalSequences).join("\n"), /\(empty\)/);
+		assert.ok(rendered.length <= LAYOUT_BUDGETS.explorerMaxTreeRows, "the tree stays inside its budget");
+		assert.match(rendered.map(stripTerminalSequences).join("\n"), /workspace/, "the header stays visible");
 	} finally {
 		await app.exit();
 	}

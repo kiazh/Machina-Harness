@@ -43,6 +43,9 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Layout and density
 
+- A fresh workspace is a full-width chat. The editor and explorer are revealed
+  when the first file opens; an empty split is never the default. The split
+  remains available from `/workspace split` and the pane keys.
 - One retained transcript `ScrollView` for the shell's lifetime (`AppShell`);
   composer and footer stay docked. Resizes update density before layout measurement,
   without waiting for input or gateway activity. Viewport classes: full (≥16 rows, gaps),
@@ -62,9 +65,9 @@ state, approval, output, ui, dialogs, layout, features, app).
   transcript `ScrollView`, so it never scrolls away and never rebuilds scroll
   state. It shows **what is playing on this computer** — any app (a browser
   video, Spotify, Music, …) — not a library of its own. Density budgets:
-  three rows (title / artist · source / transport + progress) at ≥24 rows,
-  two rows at full density, one compact line at reduced, hidden at
-  compact/degraded. A click sends play/pause to the detected source when
+  one line (`title — artist · elapsed / duration`) at full and reduced
+  density, hidden at compact/degraded. Ambient music never pushes the
+  conversation down by three rows.
   that source accepts transport commands.
 - Detection is a gateway concern (`nowplaying.get`, `nowplaying.command`):
   layered, local-only, and best-effort — system media APIs (MediaRemote)

@@ -3723,6 +3723,13 @@ export class App implements FeatureHost {
 			integration.view.setDocument(outcome.documentId);
 			void this.refreshProblemsForActiveDocument();
 			this.refreshLspStatus();
+			// Opening a file reveals the editor from the default chat canvas.
+			// Sync the composed geometry before claiming editor focus; otherwise
+			// the focus router still sees a chat-only layout and falls back.
+			if (options.focus !== false) {
+				this.syncWorkspaceShellIfChanged();
+				this.setFocusForRegion("editor");
+			}
 			this.syncCursorBlink();
 			this.tui.requestRender();
 		}

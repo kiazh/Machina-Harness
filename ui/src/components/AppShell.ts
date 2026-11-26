@@ -303,8 +303,9 @@ export class AppShell {
 	private pinnedBarRows(): number {
 		switch (this.density) {
 			case "full":
-				return this.lastRows >= 24 ? 3 : 2;
 			case "reduced":
+				// One quiet strip: title, artist and clock. The old three-row
+				// player pushed the conversation down for ambient music.
 				return 1;
 			default:
 				return 0;

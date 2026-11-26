@@ -199,7 +199,9 @@ export class NowPlayingBar implements PinnedBarBudget {
 			return truncateToWidth(message, width);
 		}
 		const artist = state.artist ? ` — ${sanitizeLabelText(state.artist)}` : "";
-		const clock = state.duration !== null ? ` · ${formatClock(this.elapsedNow())}` : "";
+		const clock = state.duration !== null
+			? ` · ${formatClock(this.elapsedNow())} / ${formatClock(state.duration)}`
+			: "";
 		return truncateToWidth(
 			`${this.glyph()} ${theme.bold(`${sanitizeLabelText(state.title)}${artist}`)}${theme.dim(clock)}`,
 			width,

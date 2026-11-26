@@ -419,7 +419,7 @@ test("openWorkspace mints the identity, persists intent and restore round-trips"
 
 	h.controller.setMode("editor");
 	h.controller.setRatio(0.62);
-	assert.equal(h.controller.getLayoutInput().explorerRequested, true, "fresh intent opens the explorer");
+	assert.equal(h.controller.getLayoutInput().explorerRequested, false, "fresh intent stays chat-first");
 	h.controller.toggleExplorer();
 	await delay(60);
 	assert.equal(h.persistence.saves.length, 2, "meaningful changes coalesce into one debounced save");
@@ -427,7 +427,7 @@ test("openWorkspace mints the identity, persists intent and restore round-trips"
 	assert.ok(persisted);
 	assert.equal(persisted.requestedMode, "editor");
 	assert.equal(persisted.splitRatio, 0.62);
-	assert.equal(persisted.explorerRequested, false, "an explicit toggle off persists as false");
+	assert.equal(persisted.explorerRequested, true, "an explicit toggle on persists as true");
 	assert.equal(persisted.chatSide, "left", "the side persists with the ratio");
 	assert.deepEqual(await h.controller.restore("/ws"), persisted);
 	assert.equal(await h.controller.restore("/other"), undefined);
@@ -520,7 +520,7 @@ test("a failed workspace open notifies and leaves the controller usable", async 
 	assert.equal(identity, undefined);
 	assert.equal(h.controller.phase, "closed");
 	assert.ok(h.notices.some((notice) => notice.kind === "error" && notice.text.includes("backend offline")));
-	assert.equal(h.controller.getLayoutInput().requestedMode, "split");
+	assert.equal(h.controller.getLayoutInput().requestedMode, "chat");
 	assert.equal((await h.controller.openUri(fileUri("a.ts"))).status, "no-workspace");
 	await h.controller.dispose();
 });
@@ -820,7 +820,7 @@ test("tab overflow evicts the oldest clean tab and releases its document", async
 	}
 	assert.equal(h.tabs.count(), WORKSPACE_MAX_OPEN_TABS);
 	assert.equal(h.store.documents().length, WORKSPACE_MAX_OPEN_TABS, "evicted buffers are closed");
-	assert.equal(h.controller.getLayoutInput().explorerRequested, true);
+	assert.equal(h.controller.getLayoutInput().explorerRequested, true, "the first file reveals the tree");
 	const evictedUri = fileUri("tab-0.ts");
 	assert.ok(
 		h.gateway.callsOf("workspace.documentClose").some((call) => call.params.uri === evictedUri),
@@ -1416,6 +1416,7 @@ test("persisted open URIs are bounded at twenty and cursors mirror the store", a
 test("mode toggles preserve the previous non-chat mode", async () => {
 	const h = build();
 	await openWorkspace(h);
+	h.controller.setMode("split");
 	assert.equal(h.controller.getLayoutInput().requestedMode, "split");
 	h.controller.toggleChatMaximize();
 	assert.equal(h.controller.mode, "chat");
@@ -1441,9 +1442,9 @@ test("mode toggles preserve the previous non-chat mode", async () => {
 	assert.equal(h.controller.getLayoutInput().splitRatio, 0.25);
 	h.controller.setRatio(0.95);
 	assert.equal(h.controller.getLayoutInput().splitRatio, 0.75);
-	assert.equal(h.controller.getLayoutInput().explorerRequested, true, "the explorer opens by default");
+	assert.equal(h.controller.getLayoutInput().explorerRequested, false, "the explorer stays closed by default");
 	h.controller.toggleExplorer();
-	assert.equal(h.controller.getLayoutInput().explorerRequested, false);
+	assert.equal(h.controller.getLayoutInput().explorerRequested, true);
 	h.controller.setChatSide("right");
 	assert.equal(h.controller.getLayoutInput().chatSide, "right");
 	h.controller.setChatSide("bogus" as never);

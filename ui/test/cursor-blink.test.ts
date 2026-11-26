@@ -457,6 +457,9 @@ for (const preferred of ["editor", "chat-composer", "explorer"] as const) {
 		const booted = await boot();
 		try {
 			const state = internals(booted.app);
+			if (preferred === "explorer") {
+				(state.integration!.controller as unknown as { toggleExplorer(): void }).toggleExplorer();
+			}
 			await state.openWorkspacePath("src/a.ts");
 			booted.term.onInput?.("X");
 			await settle();

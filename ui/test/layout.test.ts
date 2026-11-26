@@ -385,11 +385,11 @@ test("the pinned music bar stays at row 0 while the transcript grows", () => {
 	try {
 		let screen = plain(tui.getScreenLines());
 		assert.match(screen[0] ?? "", /Example track title/, "bar pinned at row 0");
-		assert.match(screen[1] ?? "", /Example artist · Google Chrome/);
+		assert.match(screen[0] ?? "", /Example artist/, "the one-line bar keeps the artist");
 		assert.equal(
 			screen.findIndex((line) => line.includes("history row 0")),
-			3,
-			"transcript starts below the three-row bar",
+			1,
+			"transcript starts directly below the one-line bar",
 		);
 
 		for (let i = 4; i < 60; i++) transcript.addChild(new Text(`history row ${i}`, 0, 0));

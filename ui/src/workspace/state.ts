@@ -113,11 +113,11 @@ export const WORKSPACE_STATE_VERSION = 1 as const;
 export function defaultWorkspacePersistedState(): WorkspacePersistedState {
 	return {
 		version: WORKSPACE_STATE_VERSION,
-		requestedMode: "split",
+		requestedMode: "chat",
 		splitRatio: LAYOUT_BUDGETS.defaultSplitRatio,
-		// Fresh state opens the explorer: the tree is one click away and the
-		// far-right grip keeps a visible affordance when it is closed.
-		explorerRequested: true,
+		// A fresh workspace is a full-width chat. Opening a file reveals the
+		// editor; the explorer is an explicit drawer, not permanent chrome.
+		explorerRequested: false,
 		openUris: [],
 	};
 }
