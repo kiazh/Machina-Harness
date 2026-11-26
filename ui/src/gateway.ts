@@ -136,6 +136,10 @@ export class GatewayClient {
 	}
 
 	start(): void {
+		// main.ts starts the gateway before importing the UI to overlap boot;
+		// App.start calls this again. A second spawn would orphan the first
+		// Python process (and its DB/gateway resources), so start is idempotent.
+		if (this.proc) return;
 		log.debug("spawn", { python: this.options.python, cwd: this.options.cwd ?? process.cwd() });
 		const proc = spawn(this.options.python, ["-m", "machina.gateway"], {
 			cwd: this.options.cwd ?? process.cwd(),

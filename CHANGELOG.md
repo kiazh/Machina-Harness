@@ -16,6 +16,7 @@
 - Chrome labels are single-line and terminal-safe: hostile session titles, model names, completion labels, diagnostics and approval fields can no longer inject rows, control bytes or a split escape. Diff path traversal through `path` is rejected.
 - Malformed gateway frames are normalized or dropped at the boundary: missing tool names/ids/results, non-string text, and unidentifiable approvals can no longer crash the renderer or open an unbound card.
 - A corrupt snapshot manifest with non-numeric counters now degrades to zero instead of breaking the whole Changes list.
+- The gateway is spawned once per UI launch; the early boot start and `App.start` no longer orphan a second Python process.
 
 ### Added
 
