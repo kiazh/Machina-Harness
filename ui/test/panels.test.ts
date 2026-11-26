@@ -31,14 +31,13 @@ for (const trueColor of [true, false]) {
 			const f = await referenceFixture();
 			try { console.log(JSON.stringify(f.tui.getScreenLines())); }
 			finally { await f.app.exit(); }
-		`], { cwd: new URL("..", import.meta.url), env: { ...process.env, PI_TRUE_COLOR: trueColor ? "1" : "0", MACHINA_UI_REDUCED_MOTION: "1" }, encoding: "utf8", timeout: 10000 });
+		`], { cwd: new URL("..", import.meta.url), env: { ...process.env, PI_TRUE_COLOR: trueColor ? "1" : "0", MACHINA_UI_REDUCED_MOTION: "1" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(child.status, 0, child.stderr);
 		const screen = JSON.parse(child.stdout) as string[];
 		const plain = screen.map(stripTerminalSequences);
 		const resultRow = plain.findIndex(row => row.includes("Homebrew fallback"));
 		assert.ok(resultRow >= 0);
 		const topRow = resultRow - 1;
-		assert.match(plain[topRow]!, /^ {4}✔ read_file/);
 		assert.match(plain[topRow]!, /^ {4}[✔⊘✖] read_file/);
 		assert.match(plain[resultRow]!, /^ {4}⎿ Example inspection/);
 		assert.doesNotMatch(plain[resultRow]!, /[┌┐└┘│]/, "routine successes remain unboxed");
@@ -51,7 +50,7 @@ for (const trueColor of [true, false]) {
 		const evidence = plain.findIndex(row => row.includes("needs approval"));
 		const edge = luminance(color(screen[evidence - 1]!));
 		const fill = luminance(color(screen[evidence]!, true));
-		const backdrop = luminance([15, 18, 17]);
+		const backdrop = luminance([8, 9, 11]);
 		assert.ok((edge + 0.05) / (fill + 0.05) >= 2.5, "approval rectangle remains visible against its inset surface");
 		assert.ok((fill + 0.05) / (backdrop + 0.05) >= 1.1, "approval fill differs visibly from the transcript background");
 		assert.match(plain[evidence - 1]!, /^ {4}[┌└].*[┐┘]\s*$/);

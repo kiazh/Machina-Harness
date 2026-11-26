@@ -7,9 +7,10 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Visual language
 
-- Ink & Sage: a green-black canvas, warm bone text, quiet gray-green metadata,
-  one soft sage accent, and muted olive/amber/coral for success, warning and
-  failure. Borders recede (`#526058`) instead of framing every row.
+- Two startup palettes: **Ink & Sage** (`codex`) with a green-black canvas and
+  soft sage accent, and **Moonstone Nocturne** (`moonstone`) with an obsidian
+  canvas, bone ink and one acid-lime signal. Borders recede instead of framing
+  every row.
 - Terminal monospace only. No gradients, shadows, large colored panels,
   emoji controls or decorative ASCII art.
 - User turns are a full-width, subtly tinted bar: `❯` then the prompt, with

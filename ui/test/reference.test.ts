@@ -10,7 +10,7 @@ const plain = (rows: string[]) => rows.map(stripTerminalSequences);
 test("reference header keeps brand and workspace on one row", () => {
  const rows = plain(header("1.0", {model:"actual", provider:"test", cwd:"/repo", branch:"main"}).render(120));
  assert.equal(rows.length, 1);
- assert.match(rows[0]!, /^◆ Machina\s+repo$/);
+ assert.match(rows[0]!, /MACHINA.*repo$/);
 });
 
 test("completed tools use quiet indented log rows with bounded reading width", () => {

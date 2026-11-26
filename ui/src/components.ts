@@ -21,7 +21,7 @@ import { hasTerminalPasteResidue, sanitizeDisplay, sanitizePastedText } from "./
 import { LIMITS } from "./design/tokens.ts";
 import { transcriptInset } from "./design/spacing.ts";
 import { Menu } from "./components/Menu.ts";
-import { styleComposerText, theme } from "./theme.ts";
+import { isOpaqueBackground, styleComposerText, theme } from "./theme.ts";
 
 export { Footer } from "./components/Footer.ts";
 
@@ -101,10 +101,12 @@ function workspaceName(cwd: string): string {
 export function header(_version: string, info?: SessionHeaderInfo): Component {
 	return {
 		render(width: number): string[] {
-			const brand = `${theme.accent("◆")} ${theme.text("Machina")}`;
+			const brand = isOpaqueBackground()
+				? theme.accentBg(theme.onAccent(" MACHINA "))
+				: theme.accentBold("MACHINA");
 			const title = info?.title ? theme.muted(sanitizeDisplay(info.title)) : "";
 			const where = info?.cwd ? theme.dim(sanitizeDisplay(workspaceName(info.cwd))) : "";
-			const left = title ? `${brand} ${theme.dim("·")} ${title}` : brand;
+			const left = title ? `${brand}  ${title}` : brand;
 			const room = Math.max(0, width - visibleWidth(where) - 1);
 			const first = truncateToWidth(left, room, "…", true);
 			const gap = Math.max(0, width - visibleWidth(first) - visibleWidth(where));
@@ -363,9 +365,12 @@ export class ComposerBox extends Box {
 		const inner = Math.max(1, width - 2);
 		const prefix = (index: number): string => index === 0 ? theme.accent("❯ ") : "  ";
 		const total = Math.max(0, width);
-		const rule = theme.border("─".repeat(total));
+		const topRule = theme.accent("━".repeat(total));
+		const bottomRule = theme.border("─".repeat(total));
 		const withRules = (rows: string[]): string[] =>
-			total > 0 && (this.tui.terminal.rows ?? 24) >= 12 ? [rule, ...rows, rule] : rows;
+			total > 0 && (this.tui.terminal.rows ?? 24) >= 12
+				? [topRule, ...rows, bottomRule]
+				: rows;
 		if (this.degradedMode) {
 			const rows = withRules([truncateToWidth(
 				`${theme.accent("❯ ")}${theme.muted(truncateToWidth("Too small - resize to continue (draft kept)", inner))}`,

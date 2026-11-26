@@ -276,7 +276,7 @@ test("assistant output is clean prose and respects width", async () => {
 	assert.match(rendered, /hello world/);
 	assert.doesNotMatch(rendered, /[┌┐└┘│]/);
 	const banner = plain(header("0.1.0"), 80);
-	assert.match(banner, /◆ Machina/);
+	assert.match(banner, /MACHINA/);
 	assert.doesNotMatch(banner, /─/);
 });
 
@@ -459,7 +459,7 @@ test("composer is a ruled input block with one accent marker", async () => {
 		}
 	}
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^─+$/, "the composer opens with a hairline rule");
+	assert.match(rows[0] ?? "", /^━+$/, "the composer opens with an accent rule");
 	assert.match(rows[1] ?? "", /^❯ Ask anything/, "the input row carries the accent marker");
 	assert.match(rows.at(-1) ?? "", /^─+$/, "the composer closes with a hairline rule");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
@@ -517,7 +517,7 @@ test("light theme composer placeholder uses readable muted ink", async () => {
 test("session header is a quiet context line", async () => {
 	const { header } = await import("../src/components.ts");
 	const out = plain(header("0.1.0", { model: "gpt-x", provider: "acme", cwd: "/repo", branch: "main" }), 80);
-	assert.match(out, /◆ Machina/);
+	assert.match(out, /MACHINA/);
 	assert.match(out, /repo$/, "the workspace sits quietly on the right");
 	assert.doesNotMatch(out, /[┌┐└┘│]/);
 });

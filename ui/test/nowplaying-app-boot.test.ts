@@ -102,7 +102,7 @@ test("base launch shows what is playing at row 0", async () => {
 		assert.match(screen[0] ?? "", /Boot Track/, "the bar is visible on the first frame");
 		assert.match(screen[1] ?? "", /Example Artist · Google Chrome/);
 		assert.match(screen[2] ?? "", /3:30/);
-		const transcriptRow = screen.findIndex((line) => line.includes("Machina"));
+		const transcriptRow = screen.findIndex((line) => line.includes("MACHINA"));
 		assert.ok(transcriptRow > 0, "the transcript starts below the bar");
 	} finally {
 		await app.exit();

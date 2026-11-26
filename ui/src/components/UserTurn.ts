@@ -4,7 +4,7 @@
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { BLOCK_GAP } from "../design/tokens.ts";
 import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
-import { repairFill, theme } from "../theme.ts";
+import { isOpaqueBackground, repairFill, theme } from "../theme.ts";
 
 export class UserTurn implements Component {
 	private readonly raw: string;
@@ -28,11 +28,13 @@ export class UserTurn implements Component {
 			.split("\n")
 			.flatMap((line) => wrapDisplay(line, inner));
 		const body = lines.length ? lines : [""];
+		const opaque = isOpaqueBackground();
+		const ink = opaque ? theme.promptInk : theme.text;
 		const rows = body.map((line, index) => {
-			const prefix = index === 0 ? theme.accent("❯ ") : "  ";
-			const content = `${prefix}${truncateToWidth(line, inner)}`;
+			const prefix = index === 0 ? ink("❯ ") : "  ";
+			const content = `${prefix}${ink(truncateToWidth(line, inner))}`;
 			const padded = `${content}${" ".repeat(Math.max(0, total - visibleWidth(content)))}`;
-			return repairFill("userBg", theme.userBg(padded));
+			return opaque ? repairFill("promptBg", theme.promptBg(padded)) : padded;
 		});
 		const out = [...BLOCK_GAP, ...rows.map((line) => truncateToWidth(line, total))];
 		if (this.cached.size >= 4) this.cached.clear();

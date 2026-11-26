@@ -48,7 +48,10 @@ export type PaletteName =
 	| "assistantBg"
 	| "toolBg"
 	| "toolOkBg"
-	| "toolErrBg";
+	| "toolErrBg"
+	| "background"
+	| "promptBg"
+	| "promptInk";
 
 type BaseSlot =
 	| "text"
@@ -1242,19 +1245,19 @@ const SKINS: Record<string, SkinDef> = {
 	},
 
 	"moonstone": {
-		description: "Moonstone - blue-grey night, pearl violet and sea glass (dark)",
+		description: "Moonstone Nocturne - obsidian canvas, bone ink, acid-lime signal",
 		art: ["  * . *  ", "  |MOON| ", "  * . *  ", "         "],
 		base: {
-			text: "#eef0f8",
-			muted: "#b0b5c8",
-			dim: "#999fb4",
-			accent: "#c4b5fd",
-			secondary: "#93c5fd",
-			success: "#a7d8b4",
-			warning: "#e8cf96",
-			error: "#f5a3a3",
-			info: "#9ed8e8",
-			neutral: "#151722",
+			text: "#f4efe4",
+			muted: "#9a9d99",
+			dim: "#7c817d",
+			accent: "#d7ff5f",
+			secondary: "#c5a5ea",
+			success: "#9fe3a3",
+			warning: "#ffc46b",
+			error: "#ff7a6b",
+			info: "#7fd1c8",
+			neutral: "#08090b",
 		},
 	},
 
@@ -1322,6 +1325,9 @@ const skinColors: Record<string, Record<PaletteName, Color>> = Object.fromEntrie
 			toolBg: mixColors(neutral, text, 0.09),
 			toolOkBg: mixColors(neutral, parseColor(def.base.success), 0.13),
 			toolErrBg: mixColors(neutral, parseColor(def.base.error), 0.13),
+			background: neutral,
+			promptBg: name === "moonstone" ? parseColor(def.base.text) : mixColors(neutral, text, 0.1),
+			promptInk: name === "moonstone" ? neutral : text,
 		};
 		// Keep readable roles legible on canvas, overlays and tinted cards.
 		// Accent hue is retained; adjust lightness only when contrast needs it.
@@ -1601,6 +1607,10 @@ export const theme = {
 	toolBg: bg("toolBg"),
 	toolOkBg: bg("toolOkBg"),
 	toolErrBg: bg("toolErrBg"),
+	promptBg: bg("promptBg"),
+	promptInk: fg("promptInk"),
+	accentBg: bg("accent"),
+	onAccent: fg("background"),
 };
 
 export const markdownTheme: MarkdownTheme = {
