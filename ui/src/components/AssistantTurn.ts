@@ -5,20 +5,13 @@
 // animates while text is arriving.
 /* eslint-disable no-control-regex -- terminal escape boundaries are the subject matter here. */
 
-import { Markdown, type Component } from "@earendil-works/pi-tui";
+import { Markdown, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
-import {
-	chooseResponseGeometry,
-	contentPrefersWide,
-	renderAssistantFrame,
-	type ResponseGeometry,
-	type ResponseMeasure,
-	type ResponseWidthClass,
-} from "../design/responseLayout.ts";
+import type { ResponseGeometry } from "../design/responseLayout.ts";
+import { transcriptInset } from "../design/spacing.ts";
 import { sanitizeDisplay } from "../design/text.ts";
 import { BLOCK_GAP } from "../design/tokens.ts";
-import { markdownTheme } from "../theme.ts";
-import { repairFill, theme } from "../theme.ts";
+import { markdownTheme, theme } from "../theme.ts";
 
 /** Per-frame delta coalescing: one sanitize/Markdown update per animation frame. */
 const STREAM_FLUSH_MS = 16;
@@ -108,8 +101,6 @@ export class AssistantTurn implements Component {
 	private revision = 0;
 	private cachedGeometry: { revision: number; paneWidth: number; geometry: ResponseGeometry } | undefined;
 	private readonly cachedRows = new Map<number, string[]>();
-	/** Last class at the same pane width, for monotonic stream growth. */
-	private previousClass: { widthClass: ResponseWidthClass; paneWidth: number } | undefined;
 	private readonly activity: ActivitySource | undefined;
 	private streaming = false;
 	private startedAt = 0;
@@ -152,8 +143,6 @@ export class AssistantTurn implements Component {
 		this.md.setText(this.display);
 		this.revision++;
 		this.cachedRows.clear();
-		// The canonical text is a new sizing basis: stream growth history ends.
-		this.previousClass = undefined;
 	}
 
 	getText(): string {
@@ -204,9 +193,9 @@ export class AssistantTurn implements Component {
 	}
 
 	/**
-	 * Chosen geometry for the current content at an allocated pane width.
-	 * Cached by (content revision, pane width); the monotonic `previous` class
-	 * resets when the pane width changes or canonical text is set.
+	 * A stable prose column. Assistant text is not a card: the column is the
+	 * same at every pane width up to a readable measure, with a two-cell
+	 * gutter and no frame. Kept as a method for callers that measure it.
 	 */
 	responseGeometry(paneWidth: number): ResponseGeometry {
 		this.flush();
@@ -215,10 +204,17 @@ export class AssistantTurn implements Component {
 		if (cached && cached.revision === this.revision && cached.paneWidth === width) {
 			return cached.geometry;
 		}
-		// A real pane-width change abandons the previous allocation's growth.
-		if (this.previousClass && this.previousClass.paneWidth !== width) this.previousClass = undefined;
-		const geometry = chooseResponseGeometry(width, this.measure(), this.previousClass);
-		this.previousClass = { widthClass: geometry.widthClass, paneWidth: width };
+		const indent = transcriptInset(width);
+		const contentWidth = Math.max(1, Math.min(96, width - indent - 2));
+		const geometry: ResponseGeometry = {
+			paneWidth: width,
+			widthClass: "full",
+			framed: false,
+			indent,
+			span: Math.max(0, Math.min(width - indent, contentWidth + 2)),
+			contentWidth,
+			frameRows: 0,
+		};
 		this.cachedGeometry = { revision: this.revision, paneWidth: width, geometry };
 		return geometry;
 	}
@@ -230,38 +226,21 @@ export class AssistantTurn implements Component {
 		const geometry = this.responseGeometry(width);
 		if (geometry.span <= 0) return [...BLOCK_GAP];
 		const rows = this.md.render(geometry.contentWidth);
-		const frame = this.streaming
-			? this.activity?.frame(["·", "•", "●", "•"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "·"
+		const pad = " ".repeat(geometry.indent);
+		const marker = this.streaming
+			? theme.accent(this.activity?.frame(["·", "•", "·", "•"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "·")
 			: " ";
-		const output = [
-			...BLOCK_GAP,
-			...renderAssistantFrame(
-				rows,
-				geometry,
-				theme.accent(frame),
-				{
-					border: theme.border,
-					accentBold: theme.accentBold,
-					fill: (line) => repairFill("assistantBg", theme.assistantBg(line)),
-					dim: theme.dim,
-				},
-				{ label: this.label },
-			),
-		];
+		const output = [...BLOCK_GAP];
+		const label = this.label && this.label !== "assistant" ? theme.dim(this.label) : "";
+		if (label) output.push(truncateToWidth(`${pad}${label}`, width));
+		rows.forEach((line, index) => {
+			output.push(truncateToWidth(`${pad}${index === 0 ? marker : " "} ${line}`, width));
+		});
 		if (!this.streaming) {
 			if (this.cachedRows.size >= 4) this.cachedRows.clear();
 			this.cachedRows.set(width, output);
 		}
 		return output;
-	}
-
-	/** Measurement hook backed by the real pi-tui Markdown renderer. */
-	private measure(): ResponseMeasure {
-		this.flush();
-		return {
-			renderRows: (contentWidth: number) => this.md.render(Math.max(1, Math.floor(contentWidth))),
-			prefersWide: () => contentPrefersWide(this.display),
-		};
 	}
 
 	invalidate(): void {

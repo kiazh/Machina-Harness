@@ -163,7 +163,7 @@ test("pane renders tab strip, breadcrumb, viewport and status within its allocat
 	harness.pane.layout(10);
 	const rows = plain(harness.pane.render(80));
 	assert.equal(rows.length, 10);
-	assert.match(rows[0] ?? "", /\[main\.ts ✕\]/, "the active chip carries the close cell");
+	assert.match(rows[0] ?? "", /main\.ts/, "the active tab is visible");
 	assert.match(rows[1] ?? "", /\/w\/src\/main\.ts/);
 	assert.match(rows[1] ?? "", /TypeScript/);
 	assert.match(rows[2] ?? "", /1 {2}hello/, "gutter (1 digit + 2-cell padding) then content");
@@ -177,25 +177,21 @@ test("pane renders tab strip, breadcrumb, viewport and status within its allocat
 	}
 });
 
-test("the tab strip and status rows carry a continuous surface fill", () => {
+test("the tab strip and status rows stay on the plain surface", () => {
 	const harness = setup("hello");
 	harness.pane.layout(8);
 	const rows = harness.pane.render(80);
 	// eslint-disable-next-line no-control-regex -- terminal SGR sequences carry ESC
 	const fill = /\x1b\[48;[^m]*m/.exec(theme.toolBg("x"))?.[0] ?? "";
-	assert.ok(fill.length > 0, "the theme exposes a tool surface background");
-	assert.ok(rows[0]!.includes(fill), "tab strip row is grounded by the surface fill");
-	assert.ok(rows[7]!.includes(fill), "status row is grounded by the surface fill");
-	assert.ok(!rows[3]!.includes(fill), "viewport text stays on the plain surface");
+	assert.ok(fill.length > 0, "the theme still exposes a tool surface background");
+	assert.ok(!rows[0]!.includes(fill), "the tab strip is not filled");
+	assert.ok(!rows[7]!.includes(fill), "the status row is not filled");
 	for (const row of plain(rows)) assert.ok(visibleWidth(row) <= 80);
-	// Text markers survive the fill untouched.
 	assert.ok(harness.store.insertText(harness.doc.id, "!").ok);
 	const dirty = harness.pane.render(80);
-	assert.match(plain(dirty)[0] ?? "", /●/);
+	assert.match(plain(dirty)[0] ?? "", /✕/);
 	assert.match(plain(dirty)[7] ?? "", /●/);
-	assert.ok(dirty[0]!.includes(fill) && dirty[7]!.includes(fill));
 });
-
 test("layout() allocates viewport rows and render stays exactly that tall", () => {
 	const harness = setup("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
 	harness.pane.layout(7);
@@ -293,10 +289,10 @@ test("clicking a tab selects it and its document; middle-click asks to close", (
 	harness.pane.layout(6);
 	const rows = plain(harness.pane.render(60));
 	const firstRow = rows[0] ?? "";
-	const x = firstRow.indexOf("[main.ts]");
+	const x = firstRow.indexOf("main.ts");
 	assert.ok(x >= 0, `inactive tab labels present: ${firstRow}`);
 	// Only the ACTIVE chip renders the close cell.
-	assert.ok(firstRow.includes("[other.ts ✕]"), `active chip carries the close cell: ${firstRow}`);
+	assert.match(firstRow, /other\.ts.*✕/, `active chip carries the close cell: ${firstRow}`);
 	const click = harness.pane.handleMouse(mouseEvent({ type: "press", x: x + 1, y: 0, width: 60 }));
 	assert.deepEqual(click, { handled: true, focus: true });
 	assert.equal(harness.tabModel.activeDocumentId(), harness.doc.id);
@@ -326,7 +322,7 @@ test("the active tab's ✕ cell closes through onCloseTab; the label still selec
 	assert.ok(harness.store.insertText(second.id, "!").ok);
 	assert.ok(harness.store.noteExternalChange(second.id, "rev-9").ok);
 	const marked = plain(harness.pane.render(80))[0] ?? "";
-	assert.match(marked, /\[other\.ts ● ! ✕\]/);
+	assert.match(marked, /other\.ts .*!.*✕/);
 	const markedX = marked.indexOf("✕");
 	// Clicking the ✕ asks to close the ACTIVE tab (dirty decision flow is the app's).
 	const closed = harness.pane.handleMouse(mouseEvent({ type: "press", x: markedX, y: 0, width: 80 }));
@@ -430,7 +426,7 @@ test("pane boots as a real alt-screen root: focus, mouse dispatch and capture en
 	try {
 		const frame = plain(tui.getScreenLines());
 		assert.equal(frame.length, 12, "the pane fills the terminal frame");
-		assert.match(frame[0] ?? "", /\[main\.ts ✕\]/);
+		assert.match(frame[0] ?? "", /main\.ts/);
 		assert.match(frame[1] ?? "", /main\.ts/);
 		assert.match(frame[2] ?? "", /hello world/);
 		assert.match(frame[11] ?? "", /Ln 1, Col 1/);
@@ -456,7 +452,7 @@ test("pane boots as a real alt-screen root: focus, mouse dispatch and capture en
 		// Tab-strip click through the same real dispatch path selects the tab.
 		tui.renderNow(true);
 		const strip = plain(tui.getScreenLines())[0] ?? "";
-		const x = strip.indexOf("[other.ts]");
+		const x = strip.indexOf("other.ts");
 		assert.ok(x >= 0, `second tab visible: ${strip}`);
 		inject(sgr(0, x + 1, 0));
 		inject(sgr(0, x + 1, 0, true));

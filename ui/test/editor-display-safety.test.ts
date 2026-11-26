@@ -69,7 +69,7 @@ test("percent-encoded control bytes in a document URI never reach the tab strip 
 		assert.ok(!row.includes("]52;") && !row.includes("cHduZWQ"), `${name} leaks the OSC payload`);
 	}
 	// Visible text keeps the honest path with the control run removed.
-	assert.match(stripTerminalSequences(strip), /\[evil\.py ✕\]/);
+	assert.match(stripTerminalSequences(strip), /evil\.py ✕/);
 	assert.match(stripTerminalSequences(crumb), /\/w\/evil\.py/);
 });
 
@@ -125,7 +125,7 @@ test("a percent-encoded newline in a URI flattens to one space in single-line ch
 	for (const [name, row] of [["tab strip", rows[0] ?? ""], ["breadcrumb", rows[1] ?? ""]] as const) {
 		assert.ok(!row.includes("\n"), `${name} stays on one physical row`);
 	}
-	assert.match(stripTerminalSequences(rows[0] ?? ""), /\[a b\.py ✕\]/);
+	assert.match(stripTerminalSequences(rows[0] ?? ""), /a b\.py ✕/);
 	assert.match(stripTerminalSequences(rows[1] ?? ""), /\/w\/a b\.py/);
 });
 
@@ -145,7 +145,7 @@ test("bidi/isolate controls in a document URI never reorder the tab strip or bre
 	for (const [name, row] of [["tab strip", rows[0] ?? ""], ["breadcrumb", rows[1] ?? ""]] as const) {
 		assert.ok(!BIDI_CONTROLS_RE.test(row), `${name} carries a bidi/isolate control: ${JSON.stringify(row)}`);
 	}
-	assert.match(stripTerminalSequences(rows[0] ?? ""), /\[evilgnp\.exe ✕\]/);
+	assert.match(stripTerminalSequences(rows[0] ?? ""), /evilgnp\.exe ✕/);
 	assert.match(stripTerminalSequences(rows[1] ?? ""), /\/w\/evilgnp\.exe/);
 });
 

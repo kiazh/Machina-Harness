@@ -1145,6 +1145,7 @@ export class App implements FeatureHost {
 			provider: session.provider || "",
 			cwd: this.footer.cwd,
 			branch: this.footer.branch,
+			title: session.title || undefined,
 		};
 	}
 

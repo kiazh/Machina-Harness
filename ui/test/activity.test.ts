@@ -7,13 +7,13 @@ test("command action controls wrap and each mouse target invokes its own action"
  const clicked: string[] = [];
  const bar = new ActivityBar(() => "1 shell running", () => clicked.push("details"), () => ["Background", "Output", "Stop"].map(label => ({ label, run: () => clicked.push(label) })));
  const rows = bar.render(22).map(stripTerminalSequences);
- assert.match(rows.join("\n"), /\[Background\]/);
- assert.match(rows.join("\n"), /\[Output\]/);
- assert.match(rows.join("\n"), /\[Stop\]/);
+ assert.match(rows.join("\n"), /Background/);
+ assert.match(rows.join("\n"), /Output/);
+ assert.match(rows.join("\n"), /Stop/);
  assert.ok(rows.every(row => visibleWidth(row) <= 22));
  for (const label of ["Background", "Output", "Stop"]) {
-  const y = rows.findIndex(row => row.includes(`[${label}]`));
-  const x = rows[y]!.indexOf(`[${label}]`) + 1;
+  const y = rows.findIndex(row => row.includes(label));
+  const x = rows[y]!.indexOf(label) + 1;
   bar.handleMouse({ type: "click", button: "left", x, y, width: 22 } as Parameters<ActivityBar["handleMouse"]>[0]);
  }
  assert.deepEqual(clicked, ["Background", "Output", "Stop"]);

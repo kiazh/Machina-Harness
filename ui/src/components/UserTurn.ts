@@ -30,9 +30,11 @@ export class UserTurn implements Component {
 			.split("\n")
 			.flatMap((line) => wrapDisplay(line, inner));
 		const out = lines.map((line, i) =>
-			i === 0 ? `${theme.dim(">")} ${truncateToWidth(line, inner)}` : `  ${truncateToWidth(line, inner)}`,
+			i === 0
+				? `${theme.accent("›")} ${truncateToWidth(line, inner)}`
+				: `  ${truncateToWidth(line, inner)}`,
 		);
-		const body = out.length ? out : [`${theme.dim(">")} `];
+		const body = out.length ? out : [`${theme.accent("›")} `];
 		const rows = [...BLOCK_GAP, ...body.map((line) => truncateToWidth(gutter + line, total))];
 		if (this.cached.size >= 4) this.cached.clear();
 		this.cached.set(width, rows);

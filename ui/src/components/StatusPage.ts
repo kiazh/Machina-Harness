@@ -259,7 +259,7 @@ export class StatusPage implements Component {
 				entry,
 				width: visibleWidth(` ${base} `),
 				label: active
-					? theme.userBg(theme.accentBold(` ${base} `))
+					? theme.accentBold(` ${base} `)
 					: theme.muted(` ${base} `),
 			};
 		});

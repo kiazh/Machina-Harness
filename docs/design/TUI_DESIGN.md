@@ -7,25 +7,28 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Visual language
 
-- Near-black background, off-white text, gray metadata, restrained blue/indigo
-  accent; muted green/amber/red for confirmed success, warning and failure.
+- Ink & Sage: a green-black canvas, warm bone text, quiet gray-green metadata,
+  one soft sage accent, and muted olive/amber/coral for success, warning and
+  failure. Borders recede (`#526058`) instead of framing every row.
 - Terminal monospace only. No gradients, shadows, large colored panels,
   emoji controls or decorative ASCII art.
-- User and assistant messages stay plain, with a shared two-column outer gutter
-  at widths ≥40. Markers occupy two more columns; wrapped reply text and the
-  left edge of tool frames align at column four. Notices and thinking activity
-  use the same outer gutter. Below 40 columns, extra gutters disappear.
-  Tool output and approval evidence use neutral rectangular frames, capped at
-  104 columns, with inset padding and space outside. Codex uses a distinct
-  `#17171c` panel fill and `#606069` border; emitted border/fill contrast is
-  tested in truecolor and 256-color modes. Frames do not turn red/green on outcome changes. The composer
-  has a thin accent column; selected rows use a quiet neutral fill in codex.
-- Brand and workspace share one header row. The footer has one row: actual
-  model / branch / mode / status, observed tokens when nonzero, hints when
-  space permits, and a fixed bottom-right activity/learning square. Workspace is
-  displayed in the header rather than repeated in the footer.
+- User turns are `›` plus text on a two-column gutter. Assistant responses are
+  unframed prose on a readable 96-column measure; they have no heading, card,
+  fill or closing rule. Tool activity is one unframed line (`marker name args`
+  with a right-aligned status), capped at 108 columns, with at most two dim
+  preview rows. Notices and thinking use the same gutter. Below 40 columns,
+  extra gutters disappear.
+- Approval evidence is the one intentional framed surface: a bounded rectangle
+  with a distinct fill, because it is a safety decision rather than ambient
+  output. The rectangle keeps its contrast in truecolor and 256-color modes
+  and never turns red/green on an outcome change.
+- The composer is one clean input block: a `›` accent marker and plain rows,
+  no filled panel or rule. Selected list rows use a quiet neutral fill.
+- Brand, session title and workspace share one context row. The footer has one
+  row: actual model · branch · mode · status, observed tokens when nonzero,
+  hints when space permits, and a fixed bottom-right activity/learning square.
 - Bold is reserved for brand, selections, approval titles and Markdown
-  emphasis. Every state keeps a text marker (`✔`/`✖`/`○`/`?`, `✓`/`!`/`✗`)
+  emphasis. Every state keeps a text marker (`✔`/`✖`/`⊘`/`!`, `›`/`·`/`→`)
   so meaning survives monochrome skins.
 
 ## Layout and density

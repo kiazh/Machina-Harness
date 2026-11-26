@@ -140,16 +140,20 @@ export class ActivityBar {
 		const rows: string[] = [];
 		const targets: { x: number; y: number; size: number; action: ActivityAction }[] = [];
 		let row = "";
+		const separator = theme.dim(" · ");
 		for (const action of this.actions()) {
-			const label = truncateToWidth(`[${action.label}]`, width);
-			if (row && visibleWidth(row) + 1 + visibleWidth(label) > width) { rows.push(row); row = ""; }
-			if (row) row += " ";
-			targets.push({ x: visibleWidth(row), y: rows.length, size: visibleWidth(label), action });
-			row += theme.accentBold(label);
+			const label = truncateToWidth(action.label, width);
+			if (row && visibleWidth(row) + visibleWidth(separator) + visibleWidth(label) > width) {
+				rows.push(row);
+				row = "";
+			}
+			const prefix = row ? visibleWidth(separator) : 0;
+			targets.push({ x: visibleWidth(row) + prefix, y: rows.length, size: visibleWidth(label), action });
+			row += row ? `${separator}${theme.accentBold(label)}` : theme.accentBold(label);
 		}
 		const summary = sanitizeDisplay(this.summary());
 		if (summary) {
-			const text = theme.muted(" " + summary + "  ") + theme.dim("Ctrl+N A status");
+			const text = ` ${theme.muted(summary)} ${theme.dim("· Ctrl+N A")}`;
 			if (row && width - visibleWidth(row) < 24) { rows.push(row); row = ""; }
 			row += (row ? "  " : "") + truncateToWidth(text, Math.max(0, width - visibleWidth(row) - (row ? 2 : 0)));
 		}

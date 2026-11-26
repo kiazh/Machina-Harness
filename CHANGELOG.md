@@ -14,6 +14,7 @@
 
 ### Changed
 
+- Full visual overhaul: the default Ink & Sage palette, unframed assistant prose and one-line tool activity, a clean `›` composer, a quiet context header, a one-row footer, unframed Activity/Changes tabs, bracketless editor tabs, and calmer diagnostics. Assistant prose caps at a readable 96 columns; tool activity at 108. Approval evidence remains the one intentional framed surface.
 - Snapshot manifests now record the prompt, route, per-file change kind, additions/deletions, and an end-of-turn copy. No-op writes are dropped; ignored paths remain as an honest disclosure.
 - Command and remote RPC registries expose 53 slash commands and 176 JSON-RPC methods.
 

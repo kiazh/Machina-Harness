@@ -152,8 +152,8 @@ export class Footer implements Component {
 			? theme.dim(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`)
 			: "";
 		const tail = `${status}${agents}${tokens}`;
-		const metadata = theme.dim(sanitizeDisplay([this.model, this.branch, this.mode].filter(Boolean).join(" / ")));
-		const core = metadata ? `${metadata} / ${tail}` : tail;
+		const metadata = theme.dim(sanitizeDisplay([this.model, this.branch, this.mode].filter(Boolean).join(" · ")));
+		const core = metadata ? `${metadata} ${theme.dim("·")} ${tail}` : tail;
 		const hint = this.keyHint ? theme.accent(this.keyHint) : theme.dim("? shortcuts · / commands");
 		const room = Math.max(0, width - 2);
 		let left = core;

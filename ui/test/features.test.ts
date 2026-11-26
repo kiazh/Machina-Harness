@@ -2118,12 +2118,11 @@ test("notices mark success, warning, and error with text cues", async () => {
 	assert.doesNotMatch(line("info"), /[✓!✗] hello/);
 });
 
-test("plain generated output is framed like assistant text", async () => {
+test("plain generated output is clean prose", async () => {
 	const { Notice } = await import("../src/components.ts");
-	const frame = stripTerminalSequences(new Notice("generated output", "plain").render(60).join("\n"));
-	assert.match(frame, /┌─ output/);
-	assert.match(frame, /generated output/);
-	assert.match(frame, /└/);
+	const text = stripTerminalSequences(new Notice("generated output", "plain").render(60).join("\n"));
+	assert.match(text, /generated output/);
+	assert.doesNotMatch(text, /[┌┐└┘│]/);
 });
 
 const PROFILE = {

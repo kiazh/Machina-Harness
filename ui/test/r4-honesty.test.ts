@@ -224,25 +224,22 @@ test("R4-023: Picker inherits Menu sanitization for titles, labels and descripti
 
 // ─── R4-023: single-row headers split embedded newlines ──────────────────────
 
-test("R4-023: ToolTurn header splits newline-laden names/args into physical rows", () => {
+test("R4-023: ToolTurn header collapses newline-laden names/args safely", () => {
 	const hostileTurn = new ToolTurn(`name ${OSC_TITLE}head\nname-tail`, { path: `p ${OSC52}\np2` }, staticActivity);
 	hostileTurn.settle({ text: "", backendTruncated: false, locallyTruncated: false }, "denied");
 	const rows = hostileTurn.render(70);
 	assertRowsClean(rows, "ToolTurn");
 	assert.ok(!rows.some((row) => row.includes("\n")), "no row may embed a newline");
 	const clean = rows.map((row) => stripTerminalSequences(row).trimEnd());
-	assert.ok(clean.some((row) => row.includes("name head")), JSON.stringify(clean));
-	assert.ok(clean.some((row) => row.includes("name-tail p")), JSON.stringify(clean));
+	assert.ok(clean.some((row) => row.includes("name head name-tail")), JSON.stringify(clean));
 	assert.ok(clean.some((row) => row.includes("p2")), JSON.stringify(clean));
 
-	// Exact row count: margin + panel top + 2 header rows + denied status + bottom.
 	const exact = new ToolTurn("n1\nn2", {}, staticActivity);
 	exact.settle({ text: "", backendTruncated: false, locallyTruncated: false }, "denied");
 	const exactRows = exact.render(70).map((row) => stripTerminalSequences(row).trimEnd());
-	assert.equal(exactRows.length, 6, JSON.stringify(exactRows));
-	assert.ok(exactRows[2]!.includes("⊘ n1"), exactRows[2]);
-	assert.ok(exactRows[3]!.includes("n2"), exactRows[3]);
-	assert.ok(exactRows[4]!.includes("denied; not executed"), exactRows[4]);
+	assert.equal(exactRows.length, 2, JSON.stringify(exactRows));
+	assert.ok(exactRows[1]!.includes("n1 n2"), exactRows[1]);
+	assert.ok(exactRows[1]!.includes("denied; not executed"), exactRows[1]);
 });
 
 test("R4-023: ApprovalCard dock title splits newline-laden tool/target fields", () => {

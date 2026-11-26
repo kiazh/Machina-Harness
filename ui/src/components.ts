@@ -16,13 +16,12 @@ import {
 	visibleWidth,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import { ICONS } from "./design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
 import { hasTerminalPasteResidue, sanitizeDisplay, sanitizePastedText } from "./design/text.ts";
 import { LIMITS } from "./design/tokens.ts";
 import { transcriptInset } from "./design/spacing.ts";
 import { Menu } from "./components/Menu.ts";
-import { repairFill, styleComposerText, theme } from "./theme.ts";
+import { styleComposerText, theme } from "./theme.ts";
 
 export { Footer } from "./components/Footer.ts";
 
@@ -59,11 +58,11 @@ export class ThinkingIndicator implements Component {
 
 	render(width: number): string[] {
 		if (!this.sub) return [];
-		const dots = this.activity.frame([...ICONS.toolActiveFrames], ACTIVITY_INTERVAL_MS, this.startedAt);
+		const dot = this.activity.frame(["·", "•", "·", "•"], ACTIVITY_INTERVAL_MS, this.startedAt);
 		const secs = Math.floor((Date.now() - this.startedAt) / 1000);
 		const msg = secs > 0 ? `${this.baseMessage} ${secs}s` : this.baseMessage;
 		const gutter = " ".repeat(transcriptInset(width));
-		return [truncateToWidth(`${gutter}${theme.accent(dots)} ${theme.muted(msg)}`, width)];
+		return [truncateToWidth(`${gutter}${theme.accent(dot)} ${theme.muted(msg)}`, width)];
 	}
 
 	invalidate(): void {}
@@ -89,6 +88,7 @@ export interface SessionHeaderInfo {
 	provider: string;
 	cwd: string;
 	branch: string;
+	title?: string;
 }
 
 /** Basename of a cwd for the header's right-side workspace label. */
@@ -96,17 +96,18 @@ function workspaceName(cwd: string): string {
 	return basename(cwd) || cwd;
 }
 
-/** One brand row with workspace and branch aligned right. */
+/** One quiet context row: brand, session title, and workspace. */
 export function header(_version: string, info?: SessionHeaderInfo): Component {
 	return {
 		render(width: number): string[] {
-			const brand = `${theme.accent(">_")} ${theme.bold("Machina")}`;
-			// Finding 7: one grouped, quiet label (`workspace · ws-fixture`);
-			// the branch stays in the footer, so the header never reads detached.
-			const where = info?.cwd ? theme.dim(sanitizeDisplay(`workspace · ${workspaceName(info.cwd)}`)) : "";
-			const room = Math.max(0, width - visibleWidth(brand) - 3);
-			const right = room >= 6 ? truncateToWidth(where, room) : "";
-			return [truncateToWidth(`${brand}${" ".repeat(Math.max(0, width - visibleWidth(brand) - visibleWidth(right)))}${right}`, width)];
+			const brand = `${theme.accent("◆")} ${theme.text("Machina")}`;
+			const title = info?.title ? theme.muted(sanitizeDisplay(info.title)) : "";
+			const where = info?.cwd ? theme.dim(sanitizeDisplay(workspaceName(info.cwd))) : "";
+			const left = title ? `${brand} ${theme.dim("·")} ${title}` : brand;
+			const room = Math.max(0, width - visibleWidth(where) - 1);
+			const first = truncateToWidth(left, room, "…", true);
+			const gap = Math.max(0, width - visibleWidth(first) - visibleWidth(where));
+			return [truncateToWidth(`${first}${" ".repeat(gap)}${where}`, width)];
 		},
 		invalidate(): void {},
 	};
@@ -356,35 +357,26 @@ export class ComposerBox extends Box {
 
 	override render(width: number): string[] {
 		const inner = Math.max(1, width - 2);
-		// Fill via repairFill, not the naive Box fill: editor rows can carry
-		// nested background resets (selection pill), which would otherwise
-		// leak terminal black into the padding. Render the editor directly
-		// so the fill width stays exact.
-		const fill = (line: string): string => {
-			const padded = `${line}${" ".repeat(Math.max(0, inner - visibleWidth(line)))}`;
-			return repairFill("userBg", theme.userBg(padded));
-		};
-		const bar = theme.accent(ICONS.composerBar);
+		const prefix = (index: number): string => index === 0 ? theme.accent("› ") : "  ";
 		if (this.degradedMode) {
-			const rows = [`${bar} ${fill(theme.muted(truncateToWidth("Too small — resize to continue (draft kept)", inner)))}`].map(
-				(line) => truncateToWidth(line, Math.max(0, width)),
-			);
+			const rows = [truncateToWidth(
+				`${theme.accent("› ")}${theme.muted(truncateToWidth("Too small - resize to continue (draft kept)", inner))}`,
+				Math.max(0, width),
+			)];
 			this.rememberMeasurement(width, rows.length);
 			return rows;
 		}
-		// NOTE: the editor renders raw (unfilled) lines here on purpose —
-		// going through super.render would double-fill via the Box.
 		let body: string[];
 		if (this.editor.getText() === "") {
-			const placeholder = fill(theme.muted(truncateToWidth(`> ${this.placeholder}`, inner)));
-			body = this.editor.windowRows >= 3 ? [fill(""), placeholder, fill("")] : [placeholder];
+			const placeholder = theme.muted(truncateToWidth(this.placeholder, inner));
+			body = this.editor.windowRows >= 3 ? ["", placeholder, ""] : [placeholder];
 		} else {
 			const rendered = this.editor.render(inner);
 			const { renderedAutocompleteHeight: popupHeight } = this.editor as unknown as EditorPopupLayout;
-			body = composerWindow(rendered, this.editor.windowRows, popupHeight).rows.map((line) => fill(line));
+			body = composerWindow(rendered, this.editor.windowRows, popupHeight).rows;
 		}
 		const total = Math.max(0, width);
-		const rows = body.map((line) => truncateToWidth(`${bar} ${line}`, total));
+		const rows = body.map((line, index) => truncateToWidth(`${prefix(index)}${line}`, total));
 		this.rememberMeasurement(width, rows.length);
 		return rows;
 	}

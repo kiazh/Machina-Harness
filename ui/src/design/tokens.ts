@@ -58,19 +58,22 @@ export const LIMITS = {
 	maxCellWidth: 48,
 } as const;
 
-/** Starting codex semantic values from the spec (section 6.1). */
+/**
+ * Ink & Sage: the startup palette. Warm bone text on a green-black canvas,
+ * one soft sage accent, and borders that recede instead of framing every row.
+ */
 export const CODEX_SEMANTIC_START: SemanticPalette = {
-	background: "#0b0b0c",
-	surface: "#17171c",
-	raisedSurface: "#16161a",
-	border: "#606069",
-	text: "#e4e4e7",
-	muted: "#8b8b94",
-	faint: "#5d5d66",
-	accent: "#7aa2f7",
-	accentSoft: "#3b4261",
-	success: "#9ece6a",
-	warning: "#e0af68",
-	danger: "#f7768e",
-	selection: "#2a3140",
+	background: "#0f1211",
+	surface: "#181d1a",
+	raisedSurface: "#1b211e",
+	border: "#526058",
+	text: "#e8e4da",
+	muted: "#9aa49c",
+	faint: "#727d75",
+	accent: "#a7d3b5",
+	accentSoft: "#2c3a31",
+	success: "#9fcf9a",
+	warning: "#e4b77a",
+	danger: "#e08a80",
+	selection: "#24312a",
 };

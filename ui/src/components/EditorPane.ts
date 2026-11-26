@@ -46,7 +46,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { normalizeWidth, padRow, truncateDisplay } from "../design/text.ts";
 import { sanitizeDisplay } from "../editor/display.ts";
-import { repairFill, selectListTheme, theme } from "../design/theme.ts";
+import { theme } from "../design/theme.ts";
 import type { DocumentRecord } from "../editor/model.ts";
 import type { EditorStore } from "../editor/model.ts";
 import type { TabModel } from "../editor/tabs.ts";
@@ -186,7 +186,7 @@ function chipText(chip: TabChip, closable: boolean): string {
 	if (chip.conflict) markers.push("!");
 	if (chip.readOnly) markers.push("[ro]");
 	const body = markers.length > 0 ? `${chip.label} ${markers.join(" ")}` : chip.label;
-	return closable ? `[${body} ${TAB_CLOSE_GLYPH}]` : `[${body}]`;
+	return closable ? `${body} ${TAB_CLOSE_GLYPH}` : body;
 }
 
 /**
@@ -217,10 +217,6 @@ function clampRows(rows: number): number {
  * background across the full pane width, re-asserted after nested style resets
  * so text markers keep their own ink without leaking terminal default fills.
  */
-function paneSurfaceRow(row: string, width: number): string {
-	return repairFill("toolBg", theme.toolBg(padRow(row, width)));
-}
-
 /**
  * Pane chrome around one EditorView: one-row tab strip, breadcrumb, the
  * virtualized viewport and a local status row.
@@ -491,24 +487,17 @@ export class EditorPane implements Component, Focusable {
 		const viewLines = this.view.render(safeWidth);
 		while (viewLines.length < viewportRows) viewLines.push(" ".repeat(safeWidth));
 		const problemLines = problemsRows > 0 ? this.renderProblems(safeWidth, problemsRows) : [];
-		// Continuous surface fill grounds the pane: the tab strip and the local
-		// status row share the raised tool surface across the pane width. Text
-		// markers keep their own styling (repairFill only re-asserts the fill).
-		const surface = new Set<number>();
 		const lines: string[] = [];
-		surface.add(lines.length);
 		lines.push(strip.text);
 		lines.push(this.breadcrumb(safeWidth));
 		lines.push(...viewLines.slice(0, viewportRows));
 		lines.push(...popupShown);
-		surface.add(lines.length);
 		lines.push(this.statusRow(safeWidth));
 		if (problemsDivider > 0) lines.push(theme.border("─".repeat(safeWidth)));
 		lines.push(...problemLines);
-		return lines.slice(0, this.allocatedRows).map((line, index) => {
-			const row = padRow(truncateDisplay(line, safeWidth), safeWidth);
-			return surface.has(index) ? paneSurfaceRow(row, safeWidth) : row;
-		});
+		return lines.slice(0, this.allocatedRows).map((line) =>
+			padRow(truncateDisplay(line, safeWidth), safeWidth),
+		);
 	}
 
 	invalidate(): void {
@@ -594,7 +583,7 @@ export class EditorPane implements Component, Focusable {
 		const active = this.tabModel.activeDocumentId();
 		const closable = chips.map((chip) => chip.documentId === active);
 		const styles = chips.map((chip, index) =>
-			closable[index] ? selectListTheme.selectedText(chipText(chip, true)) : theme.muted(chipText(chip, false)),
+			closable[index] ? theme.accentBold(chipText(chip, true)) : theme.muted(chipText(chip, false)),
 		);
 		const widths = styles.map((style) => visibleWidth(style));
 		const total = widths.reduce((sum, chipWidth) => sum + chipWidth, 0) + Math.max(0, chips.length - 1);
@@ -635,7 +624,7 @@ export class EditorPane implements Component, Focusable {
 			const documentId = chips[index]?.documentId ?? "";
 			if (closable[index]) {
 				// Close cell of the active chip: the ✕ sits one column before `]`.
-				hitAreas.push({ documentId, start: start + chipWidth - 2, end: start + chipWidth - 1, close: true });
+				hitAreas.push({ documentId, start: start + chipWidth - 2, end: start + chipWidth, close: true });
 			}
 			hitAreas.push({ documentId, start, end: start + chipWidth });
 		}

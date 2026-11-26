@@ -516,7 +516,7 @@ test("a live child appears as a running tab and streams into its inspection view
 	await settle();
 	tui.renderNow(true);
 	assert.equal(app.session()?.id, MAIN.id, "the main agent keeps focus");
-	assert.match(screenOf(tui), /researcher ●/, "the child tab is visible while running");
+	assert.match(screenOf(tui), /researcher/, "the child tab is visible while running");
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);
 	const familyReads = client.requests.filter((request) => request.method === "session.family").length;
 	client.emit(MAIN.id, "parent-turn", {

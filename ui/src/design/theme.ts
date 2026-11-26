@@ -214,20 +214,19 @@ const SKINS: Record<string, SkinDef> = {
 		},
 	},
 	codex: {
-		description: "Codex-style quiet chrome — pale blue accents and neutral surfaces",
+		description: "Ink & Sage (codex quiet chrome) - warm bone text, soft sage accent",
 		art: ["  ┌─────┐", "  │ >_  │", "  │ AH  │", "  └─────┘"],
 		base: {
 			text: CODEX_SEMANTIC_START.text,
 			muted: CODEX_SEMANTIC_START.muted,
-			// AA lift of CODEX_SEMANTIC_START.faint (#5d5d66 = 3.02:1 on
-			// #0b0b0c): the startup skin's `dim` must clear 4.5:1 (see P3-2).
-			dim: "#797984",
+			// AA lift of CODEX_SEMANTIC_START.faint on the green-black canvas.
+			dim: "#818c84",
 			accent: CODEX_SEMANTIC_START.accent,
 			secondary: CODEX_SEMANTIC_START.accentSoft,
 			success: CODEX_SEMANTIC_START.success,
 			warning: CODEX_SEMANTIC_START.warning,
 			error: CODEX_SEMANTIC_START.danger,
-			info: "#7dcfff",
+			info: "#8fbfc4",
 			neutral: CODEX_SEMANTIC_START.background,
 		},
 	},

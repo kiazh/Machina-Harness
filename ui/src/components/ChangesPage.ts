@@ -448,7 +448,7 @@ export class ChangesPage implements Component {
 			width,
 		));
 		push(between(
-			` ${theme.dim("← Activity")} ${theme.dim("│")} ${theme.userBg(theme.accentBold(" CHANGES "))} ${theme.dim("→")} ${theme.muted(snap.scope === "session" ? "this chat" : "all chats")}`,
+			` ${theme.dim("← Activity")} ${theme.dim("·")} ${theme.accentBold("CHANGES")} ${theme.dim("→")} ${theme.muted(snap.scope === "session" ? "this chat" : "all chats")}`,
 			`${theme.dim(`${turns.length} prompts`)} ${theme.dim("·")} ${theme.text(`${totals.files} files`)} ${theme.success(`+${totals.additions}`)} ${theme.error(`−${totals.deletions}`)} `,
 			width,
 		));
@@ -645,8 +645,8 @@ export class ChangesPage implements Component {
 		];
 		lines.push({
 			text: ` ${tabs.map(tab => tab.id === this.tab
-				? theme.userBg(theme.accentBold(` ${tab.label} `))
-				: theme.muted(` ${tab.label} `)).join(" ")}`,
+				? theme.accentBold(` ${tab.label} `)
+				: theme.muted(` ${tab.label} `)).join(theme.dim("·"))}`,
 		});
 		lines.push({ text: "" });
 

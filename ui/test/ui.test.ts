@@ -261,7 +261,7 @@ test("formatToolArgs summarizes arguments", () => {
 	assert.equal(formatToolArgs({ path: "a.py", limit: 20, flags: ["-n"] }), 'path=a.py, limit=20, flags=["-n"]');
 });
 
-test("assistant output renders a square response frame and respects width", async () => {
+test("assistant output is clean prose and respects width", async () => {
 	const { AssistantTurn, header } = await import("../src/components.ts");
 	const message = new AssistantTurn("hello **world**");
 	message.append(" more");
@@ -272,11 +272,11 @@ test("assistant output renders a square response frame and respects width", asyn
 	}
 	const rendered = plain(message, 80);
 	assert.match(rendered, /hello/);
-	assert.match(rendered, /┌─ assistant/);
-	assert.match(rendered, /│ hello world/);
-	assert.match(rendered, /└─/);
+	assert.doesNotMatch(rendered, /[┌┐└┘│]/);
+	assert.match(rendered, /hello world/);
+	assert.doesNotMatch(rendered, /[┌┐└┘│]/);
 	const banner = plain(header("0.1.0"), 80);
-	assert.match(banner, />_ Machina/);
+	assert.match(banner, /◆ Machina/);
 	assert.doesNotMatch(banner, /─/);
 });
 
@@ -284,9 +284,9 @@ test("user turns are plain dim-prefixed text without boxes", async () => {
 	const { UserTurn } = await import("../src/components.ts");
 	const user = new UserTurn("read a.py\nsecond line");
 	const out = plain(user, 40);
-	assert.match(out, /> read a\.py/);
+	assert.match(out, /› read a\.py/);
 	assert.match(out, /second line/);
-	assert.doesNotMatch(out, /─/);
+	assert.doesNotMatch(out, /[┌┐└┘│]/);
 	for (const line of user.render(40)) assert.ok(visibleWidth(line) <= 40);
 });
 
@@ -446,7 +446,7 @@ test("codex skin ships with the clones", async () => {
 	assert.match(skinDescription("codex"), /codex/i);
 });
 
-test("composer is a filled codex-style block with no rules", async () => {
+test("composer is a clean input line with one accent marker", async () => {
 	const { ComposerBox } = await import("../src/components.ts");
 	const { editorTheme } = await import("../src/theme.ts");
 	const composer = new ComposerBox({ terminal: { rows: 40 } } as never, editorTheme);
@@ -459,14 +459,14 @@ test("composer is a filled codex-style block with no rules", async () => {
 		}
 		assert.doesNotMatch(
 			composer.render(width).map((line) => stripTerminalSequences(line)).join("\n"),
-			/─/,
-			"no border rules in the filled composer",
+			/[┌┐└┘│─]/,
+			"no border rules in the clean composer",
 		);
 	}
 	assert.match(stripTerminalSequences(composer.render(80)[1] ?? ""), /Ask anything, or type \/ for commands\./);
-	for (const line of composer.render(80)) {
-		assert.match(stripTerminalSequences(line), /^│ /);
-	}
+	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
+	assert.match(rows[0] ?? "", /^› /, "the first row carries the accent marker");
+	for (const line of rows.slice(1)) assert.match(line, /^ {2}/);
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
 	composer.editor.setText("hello");
 	assert.doesNotMatch(
@@ -512,22 +512,22 @@ test("light theme composer placeholder uses readable muted ink", async () => {
 			const line = composer.render(60).find((row) => row.includes("Ask anything"));
 			assert.ok(line, `${skin} renders the placeholder`);
 			const ink = theme.muted("x").split("x")[0];
-			assert.ok(line.slice(0, line.indexOf("> Ask anything")).endsWith(ink), `${skin} placeholder uses muted ink`);
+			assert.ok(line.slice(0, line.indexOf("Ask anything")).endsWith(ink), `${skin} placeholder uses muted ink`);
 		}
 	} finally {
 		setSkin(previous);
 	}
 });
 
-test("session header is a minimal codex-style brand line", async () => {
+test("session header is a quiet context line", async () => {
 	const { header } = await import("../src/components.ts");
 	const out = plain(header("0.1.0", { model: "gpt-x", provider: "acme", cwd: "/repo", branch: "main" }), 80);
-	assert.match(out, />_ Machina/);
-	assert.match(out, /workspace · repo/, "finding 7: one grouped workspace label");
-	assert.doesNotMatch(out, /─/);
+	assert.match(out, /◆ Machina/);
+	assert.match(out, /repo$/, "the workspace sits quietly on the right");
+	assert.doesNotMatch(out, /[┌┐└┘│]/);
 });
 
-test("tool turns use quiet frames and honest markers", async () => {
+test("tool turns are one-line activity with honest markers", async () => {
 	const { ToolTurn } = await import("../src/components.ts");
 	const running = new ToolTurn("terminal", { command: "pytest" }, staticActivity);
 	assert.match(plain(running, 60), /terminal/);
@@ -540,7 +540,7 @@ test("tool turns use quiet frames and honest markers", async () => {
 	for (const width of [20, 40, 80]) {
 		for (const line of failed.render(width)) assert.ok(visibleWidth(line) <= width);
 	}
-	assert.match(plain(failed, 60), /┌─/, "quiet frames bound tool output");
+	assert.doesNotMatch(plain(failed, 60), /[┌┐└┘│]/, "tool activity is unframed");
 });
 
 test("skins switch palette and art, unknown names throw", async () => {
@@ -602,18 +602,18 @@ test("transcript restyle keeps every block", async () => {
 	assert.equal(container.children.length, count, "restyle drops nothing");
 });
 
-test("guidance notices render as a framed next-steps panel", () => {
+test("guidance notices read as a clean next-steps column", () => {
 	const notice = new Notice("No activity yet.\n\n1. Send a message.\n2. Try /activity again.", "guidance");
 	const rendered = notice.render(80);
 	const text = rendered.map((line) => stripTerminalSequences(line)).join("\n");
-	assert.match(text, /┌─ next steps/);
+	assert.match(text, /next/);
 	assert.match(text, /No activity yet/);
 	assert.match(text, /Try \/activity again/);
-	assert.match(text, /└/);
+	assert.doesNotMatch(text, /[┌┐└┘│]/);
 	for (const width of [20, 40, 80, 160]) {
 		assert.ok(
 			notice.render(width).every((line) => visibleWidth(line) <= width),
-			`the panel stays inside a ${width}-column pane`,
+			`the notice stays inside a ${width}-column pane`,
 		);
 	}
 });
@@ -630,20 +630,20 @@ test("every skin keeps its accent roles distinct", async () => {
 	}
 });
 
-test("V01 multiline user text stays plain and assistant markdown renders inside a frame", async () => {
+test("V01 multiline user text stays plain and assistant markdown is unframed", async () => {
 	const { AssistantTurn, UserTurn } = await import("../src/components.ts");
 	const user = new UserTurn("first line\nsecond **not markdown**");
 	const rendered = plain(user, 40);
-	assert.match(rendered, /> first line/);
+	assert.match(rendered, /› first line/);
 	assert.match(rendered, /second \*\*not markdown\*\*/);
-	assert.doesNotMatch(rendered, /─/);
+	assert.doesNotMatch(rendered, /[┌┐└┘│]/);
 	const assistant = new AssistantTurn();
 	assistant.append("Hello ");
 	assistant.append("**world**");
 	const aria = plain(assistant, 60);
 	assert.match(aria, /world/);
-	assert.match(aria, /┌─ assistant/);
-	assert.match(aria, /│ Hello world/, "streamed markdown appears inside the response frame");
+	assert.doesNotMatch(aria, /[┌┐└┘│]/);
+	assert.match(aria, /Hello world/, "streamed markdown renders as clean prose");
 });
 
 test("V02 tool previews count wrapping with honest local and backend truncation", async () => {

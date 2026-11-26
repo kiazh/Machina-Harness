@@ -1,4 +1,5 @@
-// Compact, non-focus-stealing tabs for the current agent family.
+// Quiet agent family strip: plain names, one accent for the active chat,
+// and a small dot for a running child. No pills, brackets, or counters.
 import { type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { sanitizeDisplay } from "../design/text.ts";
 import { theme } from "../design/theme.ts";
@@ -21,16 +22,25 @@ export class AgentTabBar {
 	render(width: number): string[] {
 		if (width <= 0 || !this.visible) return [];
 		this.hitboxes = [];
-		let line = "";
-		let column = 0;
-		for (const row of this.rows()) {
-			const title = row.main ? "Main" : row.session.title.split(":", 1)[0] || "Agent";
-			const label = ` ${sanitizeDisplay(title).slice(0, 18)}${row.running ? " ●" : ""} `;
-			const size = visibleWidth(label);
+		let line = " ";
+		let column = 1;
+		for (const [index, row] of this.rows().entries()) {
+			const title = row.main ? "main" : row.session.title.split(":", 1)[0] || "agent";
+			const label = sanitizeDisplay(title).slice(0, 18);
+			const dot = row.running ? " •" : "";
+			const size = visibleWidth(label) + visibleWidth(dot);
 			if (column + size > width) break;
+			const style = row.session.id === this.current() ? theme.accent : theme.dim;
 			this.hitboxes.push({ start: column, end: column + size, id: row.session.id });
-			line += row.session.id === this.current() ? theme.accent(label) : theme.dim(label);
+			line += style(label);
+			if (dot) line += theme.success(dot);
 			column += size;
+			if (index < this.rows().length - 1) {
+				const gap = "   ";
+				if (column + gap.length > width) break;
+				line += gap;
+				column += gap.length;
+			}
 		}
 		return [truncateToWidth(line, width)];
 	}
