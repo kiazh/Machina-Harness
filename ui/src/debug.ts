@@ -21,7 +21,7 @@ const MAX_OBJECT_KEYS = 30;
 const MAX_DEPTH = 4;
 const MAX_BYTES = 5 * 1024 * 1024;
 const SECRET_KEY = /(api[-_]?key|token|secret|password|passwd|authorization|cookie|credential|private[-_]?key)$/i;
-const SECRET_TEXT = /(bearer\s+|(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd)\s*[:=]\s*["']?)([^\s"',;}]+)/gi;
+const SECRET_TEXT = /(--?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|password|passwd|secret|token)\s+|bearer\s+|(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd)\s*[:=]\s*["']?)([^\s"',;}]+)/gi;
 const PRIVATE_METHOD = /(^|\.)(ask|question|prompt|chat|feedback|memory|growth|keys?|secret|auth|credential|oauth|provider\.(add|key))/i;
 const PRIVATE_KEYS = new Set(["value", "text", "code", "answer", "prompt", "message", "content", "password", "token", "key", "secret"]);
 

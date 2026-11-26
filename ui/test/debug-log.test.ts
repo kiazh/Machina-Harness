@@ -99,6 +99,7 @@ test("redactLogValue bounds depth without dropping primitive values", () => {
 	assert.equal(redactLogValue(7), 7);
 	assert.match(String(redactLogValue("Authorization: Bearer abc123")), /\[redacted\]/);
 	assert.match(String(redactLogValue("token=abc123")), /\[redacted\]/);
+	assert.match(String(redactLogValue("curl --password hunter2 https://x")), /\[redacted\]/);
 	assert.equal(JSON.stringify(redactLogValue(deep)).includes("[depth]"), true);
 });
 
