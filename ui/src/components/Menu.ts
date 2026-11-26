@@ -264,6 +264,12 @@ export class Menu implements Component {
 	}
 
 	handleMouse(event: TuiMouseEvent): ReturnType<NonNullable<Component["handleMouse"]>> {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? 0;
+			if (!delta) return undefined;
+			this.move(delta > 0 ? 1 : -1);
+			return { handled: true, focus: true, render: true };
+		}
 		if (!this.multiSelect || event.button !== "left") return undefined;
 		const content = Math.max(1, event.width);
 		const selected = this.getSelectedItem()?.value;

@@ -411,8 +411,8 @@ test("slash menu opens above the input", async () => {
 	assert.ok(inputRow !== -1, "input rendered");
 	assert.ok(popupRow < inputRow, "menu renders above the input");
 	const press = {
-		type: "press", button: "left", x: 5, y: popupRow,
-		screenX: 5, screenY: popupRow, width: 60, height: 10,
+		type: "press", button: "left", x: 6, y: popupRow,
+		screenX: 6, screenY: popupRow, width: 60, height: 10,
 		shift: false, alt: false, ctrl: false,
 	} as never;
 	const res = box.handleMouse(press);
@@ -436,7 +436,8 @@ for (const command of ["delegate", "delete"]) test(`clicking ${command} in the s
 	const rows = box.render(60).map(stripTerminalSequences);
 	const y = rows.findIndex(row => row.includes("Choose items"));
 	assert.ok(y >= 0);
-	box.handleMouse({ type: "click", button: "left", x: 4, y, screenX: 4, screenY: y, width: 60, height: rows.length, shift: false, alt: false, ctrl: false });
+	const x = rows[y]!.indexOf(command);
+	box.handleMouse({ type: "click", button: "left", x, y, screenX: x, screenY: y, width: 60, height: rows.length, shift: false, alt: false, ctrl: false });
 	assert.deepEqual(submitted, [`/${command}`]);
 });
 
@@ -446,7 +447,7 @@ test("codex skin ships with the clones", async () => {
 	assert.match(skinDescription("codex"), /codex/i);
 });
 
-test("composer is a framed input card with one accent marker", async () => {
+test("composer is a raised input dock with one accent marker", async () => {
 	const { ComposerBox } = await import("../src/components.ts");
 	const { editorTheme } = await import("../src/theme.ts");
 	const composer = new ComposerBox({ terminal: { rows: 40 } } as never, editorTheme);
@@ -459,16 +460,27 @@ test("composer is a framed input card with one accent marker", async () => {
 		}
 	}
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^╭─+╮$/, "the composer opens with a rounded frame");
-	assert.match(rows[1] ?? "", /^│ ❯ Ask anything/, "the input row carries the accent marker inside the frame");
-	assert.match(rows.at(-1) ?? "", /^╰─+╯$/, "the composer closes with a rounded frame");
+	assert.match(rows[0] ?? "", /^ {4}MESSAGE\s*$/, "the composer opens with its own label");
+	assert.match(rows[1] ?? "", /^ {4}❯ Ask anything/, "the input row carries the accent marker");
+	assert.equal(rows.at(-1)!.trim(), "", "the raised surface ends with one padding row");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
 	composer.editor.setText("hello");
 	const typed = composer.render(80).map((line) => stripTerminalSequences(line));
 	assert.doesNotMatch(typed.join("\n"), /Ask anything/, "placeholder hides once typing starts");
-	assert.match(typed[1] ?? "", /^│ ❯ hello/, "the prompt marker and draft share one row");
-	assert.equal(typed.length, 3, "typed composer stays one ruled input row plus two rules");
-	assert.match(typed.at(-1) ?? "", /^╰─+╯$/, "the closing frame stays below the draft");
+	assert.match(typed[1] ?? "", /^ {4}❯ hello/, "the prompt marker and draft share one row");
+	assert.equal(typed.length, 3, "one input row, header and padding");
+	assert.equal(typed.at(-1)!.trim(), "");
+});
+
+test("the composer wraps at its visible edge without dropping draft cells", async () => {
+	const { ComposerBox } = await import("../src/components.ts");
+	const { editorTheme } = await import("../src/theme.ts");
+	const composer = new ComposerBox({ terminal: { rows: 24 } } as never, editorTheme);
+	const draft = "1234567890".repeat(7);
+	composer.editor.setText(draft);
+	const rows = composer.render(40).map(stripTerminalSequences);
+	const displayed = rows.slice(1, -1).map(row => row.slice(6).trimEnd()).join("");
+	assert.equal(displayed, draft);
 });
 
 test("composer draft uses theme ink before and after the editor cursor", async () => {

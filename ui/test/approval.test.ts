@@ -1,4 +1,4 @@
-// Exact approval review (A01/A02/A05): evidence rendering, Deny-default
+// Exact approval review (A01/A02/A05): evidence rendering, one-time default
 // decisions, and control-sequence safety. App-level binding tests live in
 // state.test.ts through the production event flow.
 
@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { ApprovalCard, type ApprovalDecision, type ApprovalDetails } from "../src/components/ApprovalCard.ts";
+import { isOpaqueBackground, setOpaqueBackground } from "../src/theme.ts";
 
 function details(overrides: Partial<ApprovalDetails> = {}): ApprovalDetails {
 	return {
@@ -28,6 +29,34 @@ function details(overrides: Partial<ApprovalDetails> = {}): ApprovalDetails {
 function plain(card: ApprovalCard, width = 80): string {
 	return card.render(width).map((line) => stripTerminalSequences(line)).join("\n");
 }
+
+test("hostile approval fields never add rows, split escapes, or overflow", () => {
+	const previous = isOpaqueBackground();
+	try {
+		for (const opaque of [true, false]) {
+			setOpaqueBackground(opaque);
+			const card = new ApprovalCard(details({
+				requestId: "\x1b[7m sel \x1b[0m",
+				target: "name\nsecond line",
+				capabilities: ["exec", "write\nfile"],
+				contentPreview: "line one\nline two",
+				fileDiff: { diff: "+added\n-removed", truncated: true },
+			}), { docked: true });
+			card.setError("failed\nagain");
+			card.setRecorded("recorded\nstatus");
+			for (const width of [1, 2, 3, 9, 20, 80]) {
+				for (const row of [...card.render(width), ...card.evidence.render(width)]) {
+					assert.doesNotMatch(row, /[\r\n]/, `width ${width} row must be one line`);
+					assert.ok(visibleWidth(row) <= width, `width ${width}: ${visibleWidth(row)}`);
+					// eslint-disable-next-line no-control-regex -- proving no split escape survives is the point.
+					assert.doesNotMatch(row, /\x1b(?!\[[0-9;]*m)/, "no dangling escape byte survives a truncation");
+				}
+			}
+		}
+	} finally {
+		setOpaqueBackground(previous);
+	}
+});
 
 const stubTui = (rows: number, columns = 80): TUI =>
 	({ terminal: { rows, columns } }) as unknown as TUI;
@@ -56,7 +85,7 @@ test("A01 approval evidence shows exact boundaries and backend fields", () => {
 	assert.match(out, /Network: example\.com/);
 	assert.match(out, /sha256:abcdef0123456789.*\(42 chars\)/);
 	assert.match(out, /Preview:/);
-	assert.match(out, /❯ Deny/, "Deny is initially selected, never Allow");
+	assert.match(out, /❯ Allow once/, "the initial choice grants only this request");
 	assert.match(out, /this operation only/, "session grants are scoped, never all tools");
 	for (const line of card.render(80)) assert.ok(visibleWidth(line) <= 80);
 	card.handleInput("\x1b[6~");
@@ -72,21 +101,20 @@ test("A01 absent timeout reads unspecified, never an invented default", () => {
 	assert.doesNotMatch(plain(card), /Timeout: 60s/);
 });
 
-test("A02 default Enter denies; Allow options need deliberate selection", () => {
+test("A02 default Enter allows once; a session grant needs deliberate selection", () => {
 	const decisions: ApprovalDecision[] = [];
 	const card = new ApprovalCard(details(), { onDecision: (d) => void decisions.push(d) });
 	card.render(80);
 	card.handleInput("\r");
-	assert.deepEqual(decisions, [{ verdict: "denied", grant: "once" }], "default Enter denies");
+	assert.deepEqual(decisions, [{ verdict: "approved", grant: "once" }]);
 
 	const allow: ApprovalDecision[] = [];
 	const card2 = new ApprovalCard(details(), { onDecision: (d) => void allow.push(d) });
 	card2.render(80);
-	card2.handleInput("\x1b[A");
-	card2.handleInput("\x1b[A");
-	assert.match(plain(card2), /❯ Allow once/);
+	card2.handleInput("\x1b[B");
+	assert.match(plain(card2), /❯ Allow for this session/);
 	card2.handleInput("\r");
-	assert.deepEqual(allow, [{ verdict: "approved", grant: "once" }]);
+	assert.deepEqual(allow, [{ verdict: "approved", grant: "session" }]);
 });
 
 test("A02 duplicate Enter while resolving sends one request", () => {
@@ -105,8 +133,6 @@ test("A02 clipped terminals refuse Allow but keep Deny safe", () => {
 	card.render(40);
 	assert.equal(card.isAllowBlocked(), true);
 	assert.match(plain(card, 40), /Allow blocked/);
-	card.handleInput("\x1b[A");
-	card.handleInput("\x1b[A");
 	assert.match(plain(card, 40), /❯ Allow once/);
 	card.handleInput("\r");
 	assert.deepEqual(decisions, [], "unseen actions are never approved");
@@ -147,7 +173,7 @@ test("A01 long evidence scrolls with decision controls visible", () => {
 	);
 	const first = plain(card);
 	assert.match(first, /more evidence rows \(pgup\/pgdn\)/);
-	assert.match(first, /❯ Deny/, "decision controls stay visible while evidence overflows");
+	assert.match(first, /❯ Allow once/, "decision controls stay visible while evidence overflows");
 	card.handleInput("\x1b[6~");
 	const second = plain(card);
 	assert.notEqual(second, first, "details scroll");

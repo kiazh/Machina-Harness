@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { NavBar, type NavSnapshot } from "../src/components/NavBar.ts";
+import { isOpaqueBackground, setOpaqueBackground } from "../src/theme.ts";
 
 const snapshot = (overrides: Partial<NavSnapshot> = {}): NavSnapshot => ({
 	view: "chat",
@@ -29,19 +30,19 @@ test("command strip carries brand, tabs, session context and state", () => {
 	assert.match(rows[0] ?? "", /machina · main/);
 	assert.match(rows[0] ?? "", /qwen\/qwen4-max/);
 	assert.match(rows[0] ?? "", /ready/);
-	assert.match(rows[1] ?? "", /━+/);
-	assert.ok(rows[1]!.indexOf("━") >= (rows[0]!.indexOf("Chat")), "the bright segment sits under the active tab");
+	assert.match(rows[0] ?? "", /\[Chat\]/);
+	assert.match(rows[1] ?? "", /^─+$/);
 });
 
 test("command strip follows the active view and collapses to one row", () => {
 	const activity = bar(snapshot({ view: "activity" }), 9).render(80).map(stripTerminalSequences);
 	assert.equal(activity.length, 1);
-	assert.match(activity[0] ?? "", /Activity/);
+	assert.match(activity[0] ?? "", /\[Activity 2\]/);
 	assert.doesNotMatch(activity[0] ?? "", /━/);
 
 	const changes = bar(snapshot({ view: "changes" })).render(80).map(stripTerminalSequences);
-	assert.match(changes[1] ?? "", /━/);
-	assert.ok(changes[1]!.indexOf("━") >= changes[0]!.indexOf("Changes"));
+	assert.match(changes[0] ?? "", /\[Changes 3\]/);
+	assert.match(changes[1] ?? "", /^─+$/);
 });
 
 test("clicking a tab selects that screen", () => {
@@ -56,6 +57,29 @@ test("clicking a tab selects that screen", () => {
 	} as never);
 	assert.equal(result?.handled, true);
 	assert.deepEqual(selected, ["activity"]);
+});
+
+test("the closing bracket of the active tab is clickable with transparent chrome", () => {
+	const previous = isOpaqueBackground();
+	setOpaqueBackground(false);
+	try {
+		const selected: string[] = [];
+		const nav = new NavBar(() => snapshot({ view: "activity" }), view => selected.push(view), () => 24);
+		const row = stripTerminalSequences(nav.render(120)[0]!);
+		const x = row.indexOf("[Activity 2]") + "[Activity 2".length;
+		nav.handleMouse({ type: "click", button: "left", x, y: 0 } as never);
+		assert.deepEqual(selected, ["activity"]);
+	} finally {
+		setOpaqueBackground(previous);
+	}
+});
+
+test("a narrow strip keeps the live state chip even when the brand is dropped", () => {
+	const rows = bar(snapshot({ view: "activity", status: "awaiting_approval", activityCount: 99, changeCount: 99 }), 24)
+		.render(40).map(stripTerminalSequences);
+	assert.match(rows[0] ?? "", /awaiting ap/);
+	assert.match(rows[0] ?? "", /\[Act 99\]/);
+	assert.doesNotMatch(rows[0] ?? "", /MACHINA/, "the state outranks the wordmark at 40 columns");
 });
 
 test("narrow command strips keep every tab and inside the width", () => {

@@ -773,7 +773,7 @@ export class SkillsMenu implements Component {
 		const parts = [`${this.candidates.length} shown`];
 		if (this.status === "loading") parts.push("searching…");
 		parts.push("ctrl+f filters", "↑↓ move", "enter details", "ctrl+r preview", "ctrl+s section");
-		if (this.nextCursor) parts.push("ctrl+n more");
+		if (this.nextCursor) parts.push("Alt+N more");
 		parts.push("esc close");
 		return parts.join(" · ");
 	}
@@ -1006,7 +1006,7 @@ export class SkillsMenu implements Component {
 			this.openDetails(true);
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("n"))) {
+		if (matchesKey(data, Key.alt("n"))) {
 			void this.loadMore();
 			return;
 		}

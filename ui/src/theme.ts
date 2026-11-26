@@ -15,6 +15,8 @@ export {
 	repairFill,
 	selectListTheme,
 	selectionBar,
+	chromeInner,
+	chromeLine,
 	semanticPalette,
 	setOpaqueBackground,
 	setSkin,

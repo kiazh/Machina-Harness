@@ -13,7 +13,7 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { EditorPane, disambiguatedTabLabels, uriDisplayPath } from "../src/components/EditorPane.ts";
-import { theme } from "../src/design/theme.ts";
+import { surfaceLine, isOpaqueBackground, setOpaqueBackground } from "../src/design/theme.ts";
 import { EditorStore, type DocumentRecord } from "../src/editor/model.ts";
 import { TabModel } from "../src/editor/tabs.ts";
 import { EditorView } from "../src/editor/view.ts";
@@ -177,14 +177,14 @@ test("pane renders tab strip, breadcrumb, viewport and status within its allocat
 	}
 });
 
-test("the tab strip and status rows stay on the plain surface", () => {
+test("the tab strip is a real bar and the status row stays on the plain surface", () => {
 	const harness = setup("hello");
 	harness.pane.layout(8);
 	const rows = harness.pane.render(80);
 	// eslint-disable-next-line no-control-regex -- terminal SGR sequences carry ESC
-	const fill = /\x1b\[48;[^m]*m/.exec(theme.toolBg("x"))?.[0] ?? "";
+	const fill = /\x1b\[48;[^m]*m/.exec(surfaceLine("x", 4))?.[0] ?? "";
 	assert.ok(fill.length > 0, "the theme still exposes a tool surface background");
-	assert.ok(!rows[0]!.includes(fill), "the tab strip is not filled");
+	assert.ok(rows[0]!.includes(fill), "the tab strip owns a bar surface");
 	assert.ok(!rows[7]!.includes(fill), "the status row is not filled");
 	for (const row of plain(rows)) assert.ok(visibleWidth(row) <= 80);
 	assert.ok(harness.store.insertText(harness.doc.id, "!").ok);
@@ -280,6 +280,27 @@ test("duplicate basenames disambiguate with directory segments", () => {
 	);
 	assert.deepEqual(disambiguatedTabLabels(["file:///w/plain.ts"]), ["plain.ts"]);
 	assert.equal(uriDisplayPath("file:///w/My%20File.ts"), "/w/My File.ts");
+});
+
+test("with transparent chrome the visible tab label and ✕ map to their real cells", () => {
+	const previous = isOpaqueBackground();
+	setOpaqueBackground(false);
+	try {
+		const harness = setup("first");
+		const second = openDoc(harness.store, "second", { uri: "file:///w/src/other.ts" });
+		harness.openTab(second);
+		harness.pane.layout(6);
+		const strip = plain(harness.pane.render(60))[0] ?? "";
+		const closeX = strip.indexOf("✕");
+		const labelX = strip.indexOf("main.ts");
+		assert.ok(closeX > 0 && labelX > 0, `both affordances are drawn: ${strip}`);
+		harness.pane.handleMouse(mouseEvent({ type: "press", x: closeX, y: 0, width: 60 }));
+		assert.deepEqual(harness.closed, [second.id], "the drawn ✕ closes the active tab");
+		harness.pane.handleMouse(mouseEvent({ type: "press", x: labelX, y: 0, width: 60 }));
+		assert.deepEqual(harness.selected, [harness.doc.id], "the drawn label selects its tab");
+	} finally {
+		setOpaqueBackground(previous);
+	}
 });
 
 test("clicking a tab selects it and its document; middle-click asks to close", () => {
@@ -381,6 +402,14 @@ test("LSP status is text supplied by the controller, never invented", () => {
 	assert.match(plain(harness.pane.render(80))[5] ?? "", /initializing/);
 	harness.pane.setLspStatus(undefined);
 	assert.doesNotMatch(plain(harness.pane.render(80))[5] ?? "", /initializing/);
+});
+
+test("the language label keeps its word boundary (Plain text, not Plaintext)", () => {
+	const harness = setup("plain words", { languageId: "plaintext", uri: "file:///w/notes.txt" });
+	harness.pane.layout(6);
+	const status = plain(harness.pane.render(80))[5] ?? "";
+	assert.match(status, /Plain text/);
+	assert.doesNotMatch(status, /Plaintext/);
 });
 
 test("status row tracks the caret display position through the view", () => {

@@ -8,6 +8,7 @@ together even when later prompts edit the same files.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,8 @@ from machina.core.execution_context import configured_workspace
 from machina.gateway.errors import INVALID_PARAMS, NOT_FOUND, RpcError
 from machina.gateway.features._common import _bool, _int, _str
 from machina.workspace import reviews, snapshots
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -81,6 +84,13 @@ async def changes_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     for turn in turns:
         review = review_map.get(str(turn["id"]))
         turn["review"] = reviews.compact(review) if review is not None else None
+    logger.debug(
+        "changes.list session=%s scope=%s turns=%d reviews=%d",
+        session_id if scope == "session" else "-",
+        scope,
+        len(turns),
+        len(review_map),
+    )
     return {
         "turns": turns,
         "scope": scope,
@@ -95,14 +105,21 @@ async def changes_diff(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     if payload.get("status") != "complete":
         raise RpcError(INVALID_PARAMS, "snapshot is still open; wait for the turn to finish")
     path = _str(params, "path", required=False, max_len=_MAX_PATH)
-    result = snapshots.diff_files(payload)
-    files = list(result.get("files") or [])
+    requested = ""
     if path:
         requested = path.replace("\\", "/")
         while requested.startswith("./"):
             requested = requested[2:]
         requested = requested.lstrip("/")
-        files = [item for item in files if item.get("path") == requested]
+    result = snapshots.diff_files(payload, path=requested or None)
+    files = list(result.get("files") or [])
+    logger.debug(
+        "changes.diff snapshot=%s path=%r files=%d truncated=%s",
+        snapshot_id,
+        requested or None,
+        len(files),
+        bool(result.get("truncated")),
+    )
     return {
         "snapshotId": snapshot_id,
         "files": files,
@@ -125,6 +142,13 @@ async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         )
     force = _bool(params, "force", default=False)
     review = reviews.run_rules(workspace, payload, force=force)
+    logger.debug(
+        "review.start snapshot=%s engine=%s status=%s findings=%d",
+        payload.get("snapshot_id"),
+        engine,
+        review.get("status"),
+        len(review.get("findings") or []),
+    )
     return {"review": review}
 
 
@@ -134,4 +158,5 @@ async def review_cancel(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     review = reviews.cancel(workspace, snapshot_id)
     if review is None:
         raise RpcError(NOT_FOUND, "no review run for this snapshot")
+    logger.debug("review.cancel snapshot=%s status=%s", snapshot_id, review.get("status"))
     return {"review": review}

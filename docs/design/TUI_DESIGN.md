@@ -3,69 +3,68 @@
 The governing philosophy is [Signal Grid](PHILOSOPHY.md): content is the
 interface, one grid, one signal, type before boxes, and a numbered turn rhythm.
 
-Updated for the user's screenshot reference (2026-10-11). This describes the implemented
-terminal interface: tokens, density, interaction states and the theme
-contract. Normative test coverage lives in `ui/test/` (design, motion,
-state, approval, output, ui, dialogs, layout, features, app).
+This describes the implemented terminal interface: tokens, density,
+interaction states and the theme contract. Behaviour is enforced by the suite in
+`ui/test/`; run `npm run check --prefix ui` before changing this file.
 
 ## Visual language
 
-- Two startup palettes: **Ink & Sage** (`codex`) with a green-black canvas and
-  soft sage accent, and **Moonstone Nocturne** (`moonstone`) with an obsidian
-  canvas, bone ink and one acid-lime signal. Borders recede instead of framing
-  every row.
+- **Moonstone** uses plum graphite, porcelain text and mint controls. Chrome,
+  list and input surfaces are visibly distinct. Other skins keep their palettes
+  and use the same hierarchy. `design.test.ts` enforces WCAG AA contrast for
+  every text role against the terminal canvas in all 73 skins.
 - Terminal monospace only. No gradients, shadows, large colored panels,
-  emoji controls or decorative ASCII art.
-- User turns are a full-width, subtly tinted bar: `❯` then the prompt, with
-  continuation lines aligned beneath it. This is the only tinted transcript
-  line, matching Claude Code's prompt band.
+  emoji controls or decorative ASCII art. Chrome labels are single-line:
+  embedded newlines flatten, control bytes and bidi overrides are stripped,
+  and ANSI-aware truncation never leaves a split escape.
+- User turns show a quiet numbered `❯` prefix with continuation lines aligned
+  beneath the prompt. The band is filled only when the theme paints backgrounds.
 - Assistant responses are unframed prose on a readable 96-column measure,
-  introduced by a single `⏺` marker; no heading, card, fill or closing rule.
-- Tool activity is one unframed `⏺ name args` line with a right-aligned
-  status, capped at 108 columns. Results appear beneath it as `⎿` plus at
-  most two preview rows; diff lines keep add/remove colors.
-- The composer is a framed input card: a rounded border, `❯` and the draft on
-  the same row, and the border lifts to the accent while the composer owns
-  focus. The inner editor contributes no second gutter. The frame disappears
-  below 12 rows to protect the status/footer line.
+  introduced by a small `·` text glyph; no heading, card, fill or closing rule.
+- Tool activity is one unframed outcome-marked line (`✔`/`✖`/`●`/…) with a
+  right-aligned status, capped at 108 columns. Results appear beneath it as `⎿`
+  plus at most two preview rows; diff lines keep add/remove colors.
+- The composer is an inset, raised **Message** dock. Its label picks up the
+  focus color, and **Paste image** sits above the draft when it fits. Draft
+  wrapping and click targets use the visible input width. Below 12 rows it
+  becomes a plain input line.
 - Notices and thinking use the same gutter. Thinking reads
-  `✻ Thinking (3s · esc to interrupt)`. Below 40 columns, extra gutters
-  disappear.
-- Approval is a pair of matching rounded cards, drawn by one shared
-  `renderCard` primitive: a titled evidence card in the transcript and a
-  titled decision card above the composer. Each has a thin border, a padded
-  interior, an optional raised surface, and a title embedded in the top rule.
-  The decision card uses a full-width accent bar for the current choice.
-- The shell owns a persistent command strip: `MACHINA` block, `Chat`,
-  `Activity` and `Changes` tabs with live counts, then session title,
-  project/branch, model and state. The active tab gets a bright underline.
-  The transcript no longer repeats a brand header. The footer keeps the
-  model · branch · mode · status row, tokens, hints and the bottom-right
-  activity square.
+  `✶ Thinking (3s · esc to interrupt)`; the snowflake cycles its four
+  six-spoked forms `✶ ✼ ✽ ✻`, which share a cell and a centre. Below 40
+  columns, extra gutters disappear.
+- Approval evidence stays in a bounded transcript card. The decision lives
+  in a raised panel above the composer, with an explicit title and a filled
+  current choice.
+- The footer keeps model · branch · mode · status, tokens, hints and the
+  bottom-right activity square.
 - Bold is reserved for brand, selections, approval titles and Markdown
-  emphasis. Every state keeps a text marker (`✔`/`✖`/`⊘`/`!`, `❯`/`⏺`/`⎿`)
-  so meaning survives monochrome skins.
+  emphasis. Every state keeps a text marker so meaning survives monochrome
+  skins: `❯` for prompts, `●` for live work, `✔`/`✖`/`⊘`/`!` for outcomes.
 
 ## Command strip
 
 - Two rows at normal heights, one on short viewports. It is present on chat,
   Activity and Changes, so the three screens are real tabs rather than
   full-viewport replacements.
-- Left: solid accent `MACHINA` block, then the tabs. Counts appear only when
-  nonzero: `Activity 2`, `Changes 3`. The active tab is accent-bold and owns
-  the heavy segment of the second-row rule.
-- Right: session title, project · branch, model, and the live state. Parts
-  drop from the right as the width shrinks; status is last to go.
-- Tabs are clickable. `←`/`→` on an empty composer, `/activity`, `/changes`,
-  `Ctrl+N` and Esc keep working through the same screen entry points.
-- Pages receive the reduced viewport height from the shell; their own header
-  row is a quiet section title, never a second brand.
+- Left: the `MACHINA` wordmark and tabs. Counts appear only when nonzero. The
+  active tab uses fill and brackets. At wider widths, click **Keys** for the
+  shortcut guide.
+- Right: session title, project · branch, model and the live state. Context
+  drops as width shrinks; the state chip is kept last and truncated when
+  necessary. Below 56 columns the wordmark yields to it.
+- Tabs are clickable and work through the same screen entry points as
+  `/activity`, `/changes` and `Alt+←`/`Alt+→`. `Alt+1/2/3` select the chat,
+  editor, or split layout instead. Pending decisions stay docked, but browsing
+  pages never traps the user.
+- Pages receive the shell's viewport height; their own header row is a quiet
+  section title, never a second brand.
 
 ## Layout and density
 
-- A fresh workspace is a full-width chat. The editor and explorer are revealed
-  when the first file opens; an empty split is never the default. The split
-  remains available from `/workspace split` and the pane keys.
+- A fresh workspace opens chat beside the editor where space allows, and
+  collapses to chat alone on narrow terminals. The explorer stays a drawer
+  until requested. `Alt+1/2/3` or `/workspace chat|editor|split` changes the
+  layout.
 - One retained transcript `ScrollView` for the shell's lifetime (`AppShell`);
   composer and footer stay docked. Resizes update density before layout measurement,
   without waiting for input or gateway activity. Viewport classes: full (≥16 rows, gaps),
@@ -80,29 +79,19 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Music bar
 
-- A pinned now-playing bar sits above the transcript in the chat column
-  (chat-only and split layouts alike): it is a sibling of the retained
-  transcript `ScrollView`, so it never scrolls away and never rebuilds scroll
-  state. It shows **what is playing on this computer** — any app (a browser
-  video, Spotify, Music, …) — not a library of its own. Density budgets:
-  one line (`title — artist · elapsed / duration`) at full and reduced
-  density, hidden at compact/degraded. Ambient music never pushes the
-  conversation down by three rows.
-  that source accepts transport commands.
+- A pinned now-playing bar sits above the transcript in the chat column, as a
+  sibling of the retained `ScrollView`, so it never scrolls away or rebuilds
+  scroll state. It shows **what is playing on this computer**, not a library of
+  its own. Three rows: title, artist/source, transport. Two rows: title and
+  transport. One row: `title — artist · elapsed`. Compact and degraded
+  densities hide it. A click toggles playback when the source accepts commands.
 - Detection is a gateway concern (`nowplaying.get`, `nowplaying.command`):
-  layered, local-only, and best-effort — system media APIs (MediaRemote)
-  first, then nowplaying-cli/media-control when installed, then Spotify/Music
-  via AppleScript, then the front YouTube tab of a running Chromium-family
-  browser or Safari. macOS Automation prompts are reported honestly
-  ("allow it in System Settings → Privacy & Security → Automation"), a
-  browser tab's playback state is `unknown` rather than guessed, and the bar
-  never invents a title. Elapsed time interpolates between 2 s polls while
-  playing; the transport line and equalizer advance at 250 ms; reduced
-  motion keeps the glyph static. `/music` is the keyboard surface
-  (play/pause, next/previous, status, on/off) and `nowplaying_enabled=false`
-  hides the bar entirely.
-- Whatever the OS provides stays on this machine: detection reads local app
-  state and never uploads metadata.
+  local-only and layered from system media APIs to nowplaying-cli, Spotify or
+  Music, then a front browser tab. Automation denial is reported with its
+  System Settings path; unknown playback stays `unknown`; a missing title is
+  never invented. Elapsed time interpolates between polls. `/music` is the
+  keyboard surface and `nowplaying_enabled=false` hides the bar.
+- Detection reads local app state and never uploads metadata.
 
 ## Honest states
 
@@ -114,7 +103,8 @@ state, approval, output, ui, dialogs, layout, features, app).
   including non-visible sessions. The 300 s watchdog warns once and keeps
   the guard; disconnect is offline with local commands intact.
 - Approvals resolve `{requestId, sessionId, verdict, grant}` after
-  revalidation; Deny is default and Esc denies explicitly, while navigation,
+  revalidation. Enter confirms Allow once by default; a session grant requires
+  selection. Esc denies explicitly, while navigation,
   exit and disconnect invalidate without resolving. Decisions record; only
   later tool events prove execution. Approval evidence is retained in the
   transcript; only vertical decision controls occupy the dock. Queues attach
@@ -126,9 +116,11 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Interaction
 
-- Enter submits, Shift+Enter newlines, Esc stops/denies, double-Esc refills,
+- Enter submits, Shift+Enter inserts a newline, double-Esc stops or refills,
   Ctrl+C stops/clears/exits, Ctrl+D exits when idle/empty, Tab completes,
-  `?` (empty) and F1 open shortcuts. Safe commands work mid-turn.
+  `?` (empty chat, Activity, Changes), `Alt+H` and **Keys** open shortcuts.
+  Safe commands work mid-turn. `Alt+V` or **Paste image** reads the image
+  directly when the terminal handles `Ctrl+V` as text paste.
 - Menus own a real case-insensitive filter (label/value/description) with
   honest empty states and selection-preserving budgets. Forms validate
   inline, keep drafts on failure and save exactly once. Secrets are masked
@@ -138,44 +130,50 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Changes and review runs
 
-- Activity is the left screen and Changes is the right screen. On an empty
-  composer, `←` opens Activity and `→` opens Changes; with text in the
-  composer those arrows stay ordinary cursor movement. While either full
-  screen is open, `←`, `→`, or Esc returns to chat; the screens never swap
-  positions. The legacy `Ctrl+N` then `←`/`→` chord remains a fallback.
-  `/changes` opens Changes directly and `/changes all` includes every chat in
-  the workspace. The two pages replace the transcript and composer inside the
-  command strip; the strip itself never disappears.
-- Activity is a full-width stack of bounded cards with a two-cell margin. Each category owns a rounded
-  card with its title and count in the top rule; rows carry their status and
-  age inline, and the selected row opens its retained logs inside the same
-  card. Empty categories are omitted from `ALL`. There is no second inspector
-  column at any width.
-- Changes is a full-width stack of prompt cards with a two-cell margin. Each card title is
-  `NN ❯ prompt`; the card body carries the touched files, line counts, route
-  and review state. The selected card expands in place into three views:
-  `FILES` (bounded, selection-following file list), `DIFF` (stable unified diff
-  for the selected file), and `REVIEW` (run status, summary, and findings with
-  severity, file and line). `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
-  finding, `1/2/3` or Tab switches views, PgUp/PgDn scrolls the active view,
-  `r` starts or re-runs the local rules review, `x` cancels a running one, and
-  `w` toggles this-chat/all-chats. The viewport never opens on the second line
-  of a prompt.
+- Click the top tabs or use `Alt+←` / `Alt+→` to move through Activity, Chat and
+  Changes. `Esc` returns to Chat. `/changes` opens the current chat's changes;
+  a blank chat has none. The command strip stays visible.
+- Activity and Changes share an index/evidence layout. On wide terminals the
+  index stays at left while evidence scrolls on the right. On narrow terminals,
+  a short list around the selection sits above the evidence. Activity rows
+  retain status in the index, name shell jobs by their command, and show an
+  output preview before metadata. `Space` expands details, `PgUp`/`PgDn` pages
+  them, and Enter opens a session or agent when the item has a destination.
+- In Changes, a numbered prompt index stays visible while **Files**, **Diff**
+  or **Review** shows evidence for the selection. Click a view or press `1/2/3`
+  or Tab. `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
+  finding, and `PgUp`/`PgDn` pages evidence. `Space` opens the full prompt.
+  `r` reviews the diff and `x` cancels a review. `Ctrl+C` cancels a running
+  reply from either page, and `Ctrl+D` exits when idle.
 - The unit is **one prompt**, not a commit. A prompt block keeps its captured
   before/after content, so a later prompt editing the same file does not
-  rewrite an earlier block's diff. Prompts show age, excerpt, file count,
-  `+/-` line counts, and the attached review state.
-- Findings are actionable, never automatic. `Enter` (or `a`) on a selected
-  finding opens an action request that explains the issue and asks
-  `Implement fix` / `Not now`. Only an explicit `Implement fix` closes the
-  screen and sends a focused repair prompt to the chat; dismissing it changes
-  nothing. The action request also appears when a review the user just started
-  finds its first issue.
-- Every width uses the same card stack; the selected card expands in place
-  rather than stacking a second panel. Every section has an honest empty
-  state; a binary file says so instead of pretending to have a text diff. The
-  screen reads bounded local stores and never edits files or re-runs the agent
-  turn.
+  rewrite an earlier block's diff. File rows keep the filename when a path
+  cannot fit, and the diff wraps long code lines instead of clipping them.
+- Review shows one finding's title, severity, location and explanation in one
+  reading column. A short clickable finding list appears above it when space
+  permits. `PgUp`/`PgDn` page longer explanations. Reviews never
+  start a repair automatically. Press Enter or click **Fix in Chat** to send a
+  follow-up to the active chat, or queue it as guidance if a reply is running.
+  The action never creates a chat or replaces the composer draft. Sent findings
+  stay listed as `Sent` or `Queued` until `c` clears them; cleared entries are
+  not offered again. A review rechecks the original snapshot, not the repaired
+  working tree, so neither sending a repair nor re-running that review marks it
+  fixed.
+- Every section has an honest empty state. Binary files don't pretend to have
+  a text diff. Viewing evidence never edits files or re-runs the original turn.
+
+## Debugging
+
+- UI logs are off by default. `--log <path>` or `MACHINA_UI_LOG=<path>`
+  (or `MACHINA_UI_DEBUG=1` for `<MACHINA_HOME>/logs/ui.log`) writes NDJSON;
+  `--log-level` / `MACHINA_UI_LOG_LEVEL` sets the level. Defaults:
+  `debug`, 5 MB rotation, secrets redacted by field name.
+- Scopes: `main`, `app`, `gateway`, `transcript`, `changes`, `status`, `tool`.
+  The app logs every RPC (`rpc.ok`/`rpc.failed`), screen and session changes,
+  Changes refresh/diff/review/fix steps, approvals and render failures.
+  Session titles, keys/answers/prompts and token-shaped strings are redacted.
+- The gateway writes `gateway.log` at DEBUG, including workspace snapshot and
+  review summaries.
 
 ## Motion
 
@@ -204,7 +202,7 @@ state, approval, output, ui, dialogs, layout, features, app).
 ## MCP inspection
 
 `/mcp` opens a server picker when inventory exists. `/mcp list` and
-`/mcp status <id>` inspect the worker’s actual shared ConnectorService.
+`/mcp status <id>` inspect the worker's actual shared ConnectorService.
 Disabled, disconnected, connecting, connected, degraded, auth_required and
 error remain distinct; negotiated protocol is displayed rather than guessed.
 Inspection is read-only and does not connect or discover tools. Default
@@ -229,6 +227,5 @@ redacts output. Oversized notes/persona/trials have explicit omission markers;
 an oversized remaining snapshot is refused rather than truncated into invalid
 JSON. This mutable, agent-specific result is never cached globally.
 
-The screenshot supersedes the earlier borderless-tool/two-footer-row direction.
-See [visual verification](../../internal/docs/verification/TUI_OVERHAUL_REVIEW.md) and the
-[renderer capture](../../internal/docs/archive/artifacts/tui-reference.png).
+See [visual verification](../../internal/docs/verification/TUI_OVERHAUL_REVIEW.md)
+and the [renderer capture](../../internal/docs/archive/artifacts/tui-reference.png).

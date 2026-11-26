@@ -41,9 +41,9 @@ const appCommands: Command[] = [
 	},
 	{
 		name: "changes",
-		description: "Review what each prompt changed, with review runs (/changes all for every chat)",
-		async run(args, host) {
-			host.openChanges?.(args.trim().toLowerCase() === "all" ? "workspace" : "session");
+		description: "Review what each prompt in this chat changed, with review runs",
+		async run(_args, host) {
+			host.openChanges?.();
 		},
 	},
 	{

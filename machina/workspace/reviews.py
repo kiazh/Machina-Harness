@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from machina.workspace import snapshots
+
+logger = logging.getLogger(__name__)
 
 REVIEW_VERSION = 1
 ENGINES = ("rules",)
@@ -404,6 +407,12 @@ def run_rules(
         review["error"] = f"{type(error).__name__}: {error}"
         review["summary"] = "Review failed before it could inspect the diff."
     review["finishedAt"] = _now()
+    logger.debug(
+        "review.rules snapshot=%s status=%s findings=%d",
+        snapshot_id,
+        review["status"],
+        len(review["findings"]),
+    )
     return save(workspace, review)
 
 

@@ -4,21 +4,35 @@
 
 **Changes screen: review each prompt, not each commit.**
 
+### Fixed
+
+- Changes now keeps each chat's evidence separate: switching chats clears the list, late list responses cannot replace the new chat's rows, and a stale poll cannot erase a review just run from this UI.
+- A diff file omitted by the 512 KiB budget is fetched by path when selected, so it no longer reads "No textual diff recorded".
+- Fix handoffs mark a finding handled only after delivery, and a locally retained prompt reads **Queued** instead of **Sent**. Clearing handled findings never offers them again.
+- Approvals keep navigation live: a dialog hidden by the dock no longer blocks Activity/Changes, Quick Open hides while the dock is up, and the state chip survives a 40-column strip.
+- Editor tab close cells, wheel targets, short viewports, and approval evidence below 24 columns now stay inside their bounds.
+- `Ctrl+C` cancels a running reply from Activity or Changes.
+- All 73 palettes clear WCAG AA (4.5:1) for every text role against the terminal canvas; the default `codex` skin was using a background token as secondary ink at 1.58:1.
+- Chrome labels are single-line and terminal-safe: hostile session titles, model names, completion labels, diagnostics and approval fields can no longer inject rows, control bytes or a split escape. Diff path traversal through `path` is rejected.
+- Malformed gateway frames are normalized or dropped at the boundary: missing tool names/ids/results, non-string text, and unidentifiable approvals can no longer crash the renderer or open an unbound card.
+- A corrupt snapshot manifest with non-numeric counters now degrades to zero instead of breaking the whole Changes list.
+
 ### Added
 
-- Two first-class screens inside the command strip: on an empty composer, `←` opens Activity and `→` opens Changes. Either arrow or Esc returns to chat; with text in the composer, arrows keep editing. The legacy `Ctrl+N` then `←`/`→` chord remains a fallback. `/changes` opens Changes directly; `/changes all` includes every chat in the workspace.
+- Opt-in structured debug log for the UI (`--log` / `MACHINA_UI_LOG` / `MACHINA_UI_DEBUG`): NDJSON, level-filtered, redacted, rotating at 5 MB, covering RPCs, screens, sessions, Changes, approvals and render failures. The gateway's existing DEBUG log now includes workspace snapshot/review summaries.
+- `Alt+←` and `Alt+→` move through Activity, Chat, and Changes; `Esc` returns to Chat. Plain arrows still edit text. `/changes` opens the current chat's changes, and blank chats have none.
 - Per-prompt change history. Each completed turn that changed a file stores its prompt, provider/model, file list, `+/-` line counts, and a stable end-of-turn copy, so a later prompt editing the same file cannot rewrite an earlier row's diff.
-- Three evidence views: `FILES` (bounded, selection-following), `DIFF` (stable unified diff), and `REVIEW` (status, summary, findings with severity, file and line). Keys: `↑/↓` prompt, `[`/`]` file, `1/2/3` or Tab view, PgUp/PgDn scroll, `r` review, `x` cancel, `w` scope.
+- Three evidence views: **Files**, **Diff**, and **Review**. Keys: `↑/↓` prompt, `[`/`]` file, `1/2/3` or Tab view, `PgUp/PgDn` scroll, `r` review, and `x` cancel.
 - Review runs attached to a prompt through new `changes.list`, `changes.diff`, `review.start`, and `review.cancel` RPCs. The first engine is deterministic (`rules`): conflicts, credential-like values, debug breakpoints/prints, unfinished markers, broad exception handlers, `shell=True`, disabled TLS verification, world-writable permissions, dynamic execution, URL credentials, and truncated-diff disclosure.
-- Findings are actionable. `n`/`p` selects one; `Enter` or `a` opens an action request that explains the issue and asks `Implement fix` / `Not now`. Nothing is sent to the agent unless the user chooses `Implement fix`; that path closes the screen and sends a focused repair prompt scoped to the finding.
+- `n`/`p` selects a finding. **Fix in Chat** sends or queues a repair in the same chat without replacing the draft. **Clear handled** hides sent findings without offering them again. A rerun reviews the original snapshot, not the repaired files.
 
 ### Changed
 
-- The shell is now a workbench, not a full-page chat. A persistent command strip carries the solid `MACHINA` block, real `Chat` / `Activity` / `Changes` tabs with live counts, the session title, project and branch, model, and state; the active tab owns the bright underline. Activity and Changes open inside the strip instead of replacing the viewport. The old transcript brand header is gone.
+- A persistent command strip keeps the Activity, Chat, and Changes tabs and session context visible across all three screens.
 - The composer is a framed input card now: a rounded border, the accent `❯` inside it, and an accent frame while the composer owns focus. The full-width acid rule and hairline are gone.
 - Approvals use one shared rounded-card primitive: a titled evidence card in the transcript and a matching decision card above the composer, with a padded interior, a thin border, a raised fill, and a full-width accent bar on the current choice. The hand-drawn square frame and the flat rule-based dock are gone.
-- Activity and Changes are full-width stacks of rounded cards, not tables or bare timelines: each Activity category is its own bounded panel, each prompt change is its own bounded panel, and the selected panel expands its evidence in place. Activity hides empty categories in the `ALL` view and the queue unless it has work.
-- Full visual overhaul: `moonstone` is now **Nocturne** (obsidian canvas, bone ink, acid-lime signal), with full-width bone `❯` prompt bands, a solid accent `MACHINA` block, `⏺` assistant prose, `⏺`/`⎿` tool activity with colored diff previews, an accent-ruled composer whose marker and draft share one row, a quiet context header, a one-row footer, unframed Activity/Changes tabs, bracketless editor tabs, numbered prompt bands, per-turn `✻` colophons, and calmer diagnostics. Assistant prose caps at a readable 96 columns; tool activity at 108. Approval evidence and decisions are the intentional framed surfaces. Activity is one spaced grid with inline log evidence; Changes is a numbered prompt timeline whose selected block expands files, diff and review in place. Neither screen uses filter pills, a split inspector, or a border between panels. Workspaces now start as a full-width chat: the editor and explorer appear only when a file is opened, so no empty half-screen pane is reserved. The music bar is a single compact line.
+- Activity and Changes put the list beside the selected evidence on wide terminals and above it on narrow ones. Activity previews command output; Changes wraps long diff lines.
+- The workspace defaults to chat and editor side by side where space permits. `Alt+1/2/3` selects chat, editor, or split; the explorer opens on demand. The music bar remains one line.
 - Snapshot manifests now record the prompt, route, per-file change kind, additions/deletions, and an end-of-turn copy. No-op writes are dropped; ignored paths remain as an honest disclosure.
 - Command and remote RPC registries expose 53 slash commands and 176 JSON-RPC methods.
 

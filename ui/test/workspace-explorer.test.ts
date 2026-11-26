@@ -131,7 +131,7 @@ test("root listing loads lazily and only expanded directories are requested", as
 	const model = new ExplorerModel(list);
 	const pane = new ExplorerPane(model);
 	assert.equal(calls.length, 0, "no request before load");
-	assert.match(plain(pane), /^workspace/, "header renders the root label");
+	assert.match(plain(pane), /^\s*workspace/, "header renders the root label");
 	await model.load();
 	assert.deepEqual(calls.map((call) => call.path), [""]);
 	assert.deepEqual(
@@ -360,6 +360,20 @@ test("symlink entries render a marker; outside links stay non-expandable", async
 });
 
 // ─── keyboard and mouse mapping ─────────────────────────────────────────────
+
+test("the wheel walks the explorer tree like the arrow keys", async () => {
+	const { list } = recordingList(standardTree());
+	const model = new ExplorerModel(list);
+	const pane = new ExplorerPane(model);
+	await model.load();
+	await model.expand("src");
+	model.select("src/main.ts");
+	pane.render(40);
+	pane.handleMouse({ type: "wheel", button: "none", wheelDelta: 1, x: 4, y: 2 } as never);
+	assert.equal(model.selectedId(), "node_modules", "wheel down moves the selection");
+	pane.handleMouse({ type: "wheel", button: "none", wheelDelta: -1, x: 4, y: 2 } as never);
+	assert.equal(model.selectedId(), "src/main.ts", "wheel up moves back");
+});
 
 test("unfocused keys are inert; focused keys move, expand, collapse and preview", async () => {
 	const { list } = recordingList(standardTree());

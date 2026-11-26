@@ -262,12 +262,12 @@ test("R4-023: ApprovalCard dock title splits newline-laden tool/target fields", 
 	assertRowsClean(rows, "ApprovalCard dock");
 	assert.ok(!rows.some((row) => row.includes("\n")), "no row may embed a newline");
 	const clean = rows.map((row) => stripTerminalSequences(row).trimEnd());
-	// one bordered decision card; hostile newlines flatten into one row
-	assert.equal(clean.length, 8, JSON.stringify(clean));
-	assert.match(clean[0]!, /^╭─ Approval required/);
+	// One raised decision panel; hostile newlines flatten into one row.
+	assert.equal(clean.length, 7, JSON.stringify(clean));
+	assert.match(clean[0]!, /^ +Approval required/);
 	assert.match(clean[1]!, /Allow x.*Injected.*y.*Target2\?/);
 	assert.match(clean[4]!, /Deny/);
-	assert.match(clean[7]!, /^╰/);
+	assert.equal(clean.at(-1)!.trim(), "");
 
 	// A single-line title keeps the exact previous row shape (no width-math drift).
 	const single = new ApprovalCard(
@@ -286,7 +286,7 @@ test("R4-023: ApprovalCard dock title splits newline-laden tool/target fields", 
 	);
 	const singleRows = single.render(80);
 	assertRowsClean(singleRows, "ApprovalCard single-line");
-	assert.equal(singleRows.length, 8);
+	assert.equal(singleRows.length, 7);
 	assert.match(stripTerminalSequences(singleRows[1]!), /Allow git · status\?/);
 });
 

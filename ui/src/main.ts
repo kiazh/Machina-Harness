@@ -5,14 +5,19 @@ import { parseArgs } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import { describeError, uiLog, type LogLevel } from "./debug.ts";
 import { GatewayClient } from "./gateway.ts";
 
 const USAGE = `Usage: machina [--model MODEL] [--provider PROVIDER] [--session ID] [--mode MODE] [--no-clear]
+               [--log PATH] [--log-level error|warn|info|debug|trace]
 
 Interactive Machina terminal UI. Set MACHINA_PYTHON to the Python interpreter
 that has Machina installed (the \`machina\` command does this for you).
 The terminal is cleared on startup so the app owns the screen; pass
---no-clear to keep existing scrollback.`;
+--no-clear to keep existing scrollback.
+
+Logging is off unless --log is passed or MACHINA_UI_LOG / MACHINA_UI_DEBUG is
+set. The default path is <MACHINA_HOME>/logs/ui.log (NDJSON, 5 MB rotation).`;
 
 const { values } = parseArgs({
 	args: process.argv.slice(2),
@@ -22,6 +27,8 @@ const { values } = parseArgs({
 		session: { type: "string" },
 		mode: { type: "string" },
 		"no-clear": { type: "boolean" },
+		log: { type: "string" },
+		"log-level": { type: "string" },
 		help: { type: "boolean", short: "h" },
 	},
 	strict: true,
@@ -31,6 +38,24 @@ if (values.help) {
 	console.log(USAGE);
 	process.exit(0);
 }
+
+if (values.log) {
+	uiLog.configure({ path: values.log, level: values["log-level"] as LogLevel | undefined });
+	if (!uiLog.enabled) console.error(`machina: could not open debug log at ${values.log}`);
+} else {
+	uiLog.configureFromEnv();
+	if (uiLog.enabled && values["log-level"]) {
+		uiLog.configure({ path: uiLog.target!, level: values["log-level"] as LogLevel });
+	}
+}
+const mainLog = uiLog.scope("main");
+mainLog.info("ui.start", {
+	pid: process.pid,
+	platform: process.platform,
+	node: process.versions.node,
+	cwd: process.cwd(),
+	log: uiLog.target ?? null,
+});
 
 function detectPython(): string {
 	if (process.env.MACHINA_PYTHON) return process.env.MACHINA_PYTHON;
@@ -78,6 +103,7 @@ let shuttingDown = false;
 const requestShutdown = () => {
 	if (shuttingDown) return;
 	shuttingDown = true;
+	mainLog.info("ui.shutdown");
 	void app.exit().finally(() => process.exit(0));
 };
 process.on("SIGTERM", requestShutdown);
@@ -85,6 +111,7 @@ process.on("SIGBREAK", requestShutdown);
 
 // Never leave the terminal in raw mode, whatever happens.
 const crash = (error: unknown) => {
+	mainLog.error("ui.fatal", { error: describeError(error) });
 	try {
 		tui.stop();
 	} catch {
@@ -105,4 +132,6 @@ if (!values["no-clear"] && process.stdout.isTTY) {
 
 await app.start();
 await app.exited;
+mainLog.info("ui.exit");
+uiLog.close();
 process.exit(0);

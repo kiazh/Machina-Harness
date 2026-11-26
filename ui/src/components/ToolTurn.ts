@@ -4,6 +4,7 @@
 
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
+import { uiLog } from "../debug.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { panelInset } from "../design/spacing.ts";
 import { sanitizeDisplay, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
@@ -91,7 +92,7 @@ export class ToolTurn implements Component {
 	private readonly args: string;
 	private readonly externalHarness: boolean;
 	private readonly activity: ActivitySource;
-	private readonly startedAt: number;
+	private readonly startedAt = Date.now();
 	private completedAt: number | undefined;
 	private result: ToolResultView = { text: "", backendTruncated: false, locallyTruncated: false };
 	private outcome: ToolOutcome = "running";
@@ -99,26 +100,43 @@ export class ToolTurn implements Component {
 	private readonly cached = new Map<number, string[]>();
 
 	constructor(name: string, args: Record<string, unknown>, activity: ActivitySource) {
-		this.name = sanitizeDisplay(toolLabel(name, args));
-		this.externalHarness = name === "harness_delegate";
+		// Gateway frames are typed at compile time but untrusted at runtime; a
+		// malformed tool frame must not take the renderer down.
+		const safeName = typeof name === "string" && name.trim() ? name : "unknown tool";
+		const safeArgs: Record<string, unknown> = args && typeof args === "object" && !Array.isArray(args)
+			? args
+			: {};
+		if (safeName !== name || safeArgs !== args) {
+			uiLog.scope("tool").warn("tool.start.normalized", { name: typeof name, args: typeof args });
+		}
+		this.name = sanitizeDisplay(toolLabel(safeName, safeArgs));
+		this.externalHarness = safeName === "harness_delegate";
 		// The `mcp_call` label already names the connector and tool; showing the
 		// raw namespaced `name` in the argument line would duplicate the ugly
 		// wire form (`vercel__list_projects`). Keep only the call arguments.
-		const displayArgs = name === "mcp_call"
-			? (args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments) ? { arguments: args.arguments } : {})
-			: args;
+		const displayArgs = safeName === "mcp_call"
+			? (safeArgs.arguments && typeof safeArgs.arguments === "object" && !Array.isArray(safeArgs.arguments) ? { arguments: safeArgs.arguments } : {})
+			: safeArgs;
 		const argsText = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
 		const clipped = truncateUtf8ByBytes(argsText, 4_000);
 		this.args = clipped.truncated ? `${clipped.text} …` : clipped.text;
 		this.activity = activity;
-		this.startedAt = Date.now();
 	}
 
 	settle(result: ToolResultView, outcome: ToolOutcome): void {
-		this.result = result;
-		this.outcome = outcome;
+		// Tool frames arrive from a subprocess-facing gateway; a missing result
+		// field is unknown output, not a reason to crash the transcript.
+		if (typeof result?.text !== "string") {
+			uiLog.scope("tool").warn("tool.result.invalid", { name: this.name, type: typeof result?.text });
+		}
+		this.result = {
+			text: typeof result?.text === "string" ? result.text : "",
+			backendTruncated: result?.backendTruncated === true,
+			locallyTruncated: result?.locallyTruncated === true,
+		};
+		this.outcome = typeof outcome === "string" ? outcome : "outcome_unknown";
 		if (outcome !== "running" && outcome !== "queued" && this.completedAt === undefined) {
 			this.completedAt = Date.now();
 		}

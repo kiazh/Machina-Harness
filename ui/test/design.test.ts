@@ -121,6 +121,28 @@ test("dim text tokens clear WCAG AA and stay below muted (every skin)", () => {
 	assert.ok(contrast(codex.neutral, codex.dim) >= 4.5, "the runtime-default codex.dim clears AA");
 });
 
+test("every text role clears WCAG AA on the canvas in every skin", () => {
+	const luminance = (hex: string): number => {
+		const [r, g, b] = hex.slice(1).match(/../g)!.map((pair) => {
+			const channel = Number.parseInt(pair, 16) / 255;
+			return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+		});
+		return r! * 0.2126 + g! * 0.7152 + b! * 0.0722;
+	};
+	const contrast = (a: string, b: string): number => {
+		const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+		return (values[0]! + 0.05) / (values[1]! + 0.05);
+	};
+	for (const name of SKIN_NAMES) {
+		const base = skinBase(name);
+		assert.ok(base, `${name} has a palette`);
+		for (const role of ["text", "muted", "dim", "accent", "secondary", "success", "warning", "error", "info"] as const) {
+			const ratio = contrast(base.neutral, base[role]);
+			assert.ok(ratio >= 4.5, `${name}.${role} contrast ${ratio.toFixed(2)}:1 is below 4.5:1`);
+		}
+	}
+});
+
 test("legacy theme facade still resolves", async () => {
 	const legacy = await import("../src/theme.ts");
 	assert.deepEqual([...legacy.SKIN_NAMES].sort(), [...SKIN_NAMES].sort());

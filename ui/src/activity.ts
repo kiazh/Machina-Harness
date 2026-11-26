@@ -22,12 +22,13 @@ const MAX_TOOL_ARG_CHARS = 4_000;
 
 /** Keep status evidence bounded without losing the connector/tool identity. */
 function boundedToolArgs(args: Record<string, unknown>): Record<string, unknown> {
-	let serialized: string;
+	let serialized: string | undefined;
 	try {
 		serialized = JSON.stringify(args);
 	} catch {
 		return { _unserializable: true };
 	}
+	if (typeof serialized !== "string") return { _unserializable: true };
 	if (serialized.length <= MAX_TOOL_ARG_CHARS) return { ...args };
 	return {
 		...(typeof args.name === "string" ? { name: args.name } : {}),
@@ -53,7 +54,7 @@ export function activityEmptyGuidance(hasSession: boolean): string {
 		"  2. Ask for a long-running command; it appears here as a shell job.",
 		"  3. Use /delegate <task> to start a subagent.",
 		"",
-		"Open this view anytime with /activity or Ctrl+N then A.",
+		"Open this view with Alt+← or /activity.",
 	].join("\n");
 }
 
@@ -87,14 +88,17 @@ export class ActivityStore {
 		return [...this.queues.values()].reduce((total, items) => total + items.length, 0);
 	}
 	noteToolStart(sessionId: string, id: string, name: string, args: Record<string, unknown> = {}): void {
+		const safeName = typeof name === "string" && name.trim() ? name : "unknown tool";
+		const safeArgs: Record<string, unknown> = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+		const safeId = typeof id === "string" && id ? id : `tool-${Date.now()}`;
 		const tools = this.toolEvents.get(sessionId) ?? new Map<string, ToolActivity>();
-		tools.set(id, {
-			id,
+		tools.set(safeId, {
+			id: safeId,
 			sessionId,
-			name,
+			name: safeName,
 			status: "running",
 			startedAt: Date.now(),
-			args: boundedToolArgs(args),
+			args: boundedToolArgs(safeArgs),
 		});
 		while (tools.size > 32) tools.delete(tools.keys().next().value!);
 		this.toolEvents.set(sessionId, tools);
@@ -153,7 +157,7 @@ export class ActivityBar {
 		}
 		const summary = sanitizeDisplay(this.summary());
 		if (summary) {
-			const text = ` ${theme.muted(summary)} ${theme.dim("· Ctrl+N A")}`;
+			const text = ` ${theme.text(summary)} ${theme.muted("· Alt+←")}`;
 			if (row && width - visibleWidth(row) < 24) { rows.push(row); row = ""; }
 			row += (row ? "  " : "") + truncateToWidth(text, Math.max(0, width - visibleWidth(row) - (row ? 2 : 0)));
 		}

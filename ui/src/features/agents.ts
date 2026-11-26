@@ -28,7 +28,7 @@ export function agentSessionItems(
 
 export const agentsCommand: Command = {
 	name: "agents",
-	description: "Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K)",
+	description: "Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input or Alt+J/K)",
 	argumentHint: "[list|show|save|history|delete|sessions|switch]",
 	getArgumentCompletions: options([
 		["list", "All available agents"],
@@ -63,7 +63,7 @@ export const agentsCommand: Command = {
 				const running = new Map((host.familySessions?.() ?? []).map((row) => [row.session.id, row.running]));
 				const family = await listFamilySessions(host, current);
 				if (family.length <= 1) {
-					host.print("No delegated agent sessions in this family yet. Use /delegate to start one; Ctrl+N then J/K cycles subagents.", "plain");
+					host.print("No delegated agent sessions in this family yet. Use /delegate to start one; Alt+J/K cycles subagents.", "plain");
 					return;
 				}
 				const choice = await host.pick("Switch to an agent session", agentSessionItems(family, current, running));

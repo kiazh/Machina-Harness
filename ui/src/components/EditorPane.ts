@@ -38,6 +38,7 @@
 import {
 	Key,
 	matchesKey,
+	truncateToWidth,
 	visibleWidth,
 	type Component,
 	type Focusable,
@@ -46,7 +47,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { normalizeWidth, padRow, truncateDisplay } from "../design/text.ts";
 import { sanitizeDisplay } from "../editor/display.ts";
-import { theme } from "../design/theme.ts";
+import { isOpaqueBackground, selectionBar, surfaceLine, chromeLine, theme } from "../design/theme.ts";
 import type { DocumentRecord } from "../editor/model.ts";
 import type { EditorStore } from "../editor/model.ts";
 import type { TabModel } from "../editor/tabs.ts";
@@ -201,6 +202,8 @@ export function displayLanguageName(languageId: string): string {
 		javascript: "JavaScript",
 		typescriptreact: "TSX",
 		javascriptreact: "JSX",
+		plaintext: "Plain text",
+		markdown: "Markdown",
 	};
 	const key = sanitizeDisplay(languageId).trim().toLowerCase();
 	if (key in known) return known[key] as string;
@@ -384,14 +387,15 @@ export class EditorPane implements Component, Focusable {
 			if (!this.inViewport(event.y)) return undefined;
 			return this.view.handleMouse({
 				...event,
+				x: event.x - this.frameOffset(),
 				y: event.y - EDITOR_PANE_HEADER_ROWS,
-				width,
+				width: this.frameContentWidth(event.width),
 				height: this.viewportRows,
 			});
 		}
 		if (event.type === "press" && Math.floor(event.y) === 0) {
-			const x = Math.floor(event.x);
-			const hit = this.tabStrip(width).hitAreas.find((area) => x >= area.start && x < area.end);
+			const x = Math.floor(event.x) - this.tabStripOffset();
+			const hit = this.tabStrip(this.tabStripWidth(width)).hitAreas.find((area) => x >= area.start && x < area.end);
 			if (!hit) return undefined;
 			// The active chip's close cell: the same decision flow as middle-click
 			// (dirty buffers ask Save/Discard/Cancel through the controller).
@@ -438,21 +442,45 @@ export class EditorPane implements Component, Focusable {
 			}
 		}
 		if (event.type === "drag" || event.type === "release" || this.inViewport(event.y)) {
-			// Viewport-local coordinates: chrome rows sit above the view.
+			// Viewport-local coordinates: chrome rows sit above the view, and a
+			// transparent frame spends one cell on its left rule.
 			return this.view.handleMouse({
 				...event,
+				x: event.x - this.frameOffset(),
 				y: event.y - EDITOR_PANE_HEADER_ROWS,
-				width,
+				width: this.frameContentWidth(width),
 				height: this.viewportRows,
 			});
 		}
 		return undefined;
 	}
 
+	/** Left rule cells in front of the editor content (transparent frame only). */
+	private frameOffset(): number {
+		return isOpaqueBackground() ? 0 : 1;
+	}
+
+	/** The top rule spends three cells on `╭─ ` before the tab strip. */
+	private tabStripOffset(): number {
+		return isOpaqueBackground() ? 0 : 3;
+	}
+
+	private tabStripWidth(width: number): number {
+		return Math.max(1, Math.floor(width) - (isOpaqueBackground() ? 0 : 5));
+	}
+
+	private frameContentWidth(width: number): number {
+		return Math.max(1, Math.floor(width) - this.frameOffset() * 2);
+	}
+
 	render(width: number): string[] {
 		const safeWidth = normalizeWidth(width);
 		this.lastRenderedWidth = safeWidth;
-		const strip = this.tabStrip(safeWidth);
+		// A transparent frame spends one cell on each side rule, and its top and
+		// bottom rules spend one more on each side of a label.
+		const innerWidth = isOpaqueBackground() ? safeWidth : Math.max(1, safeWidth - 2);
+		const ruleWidth = this.tabStripWidth(safeWidth);
+		const strip = this.tabStrip(ruleWidth);
 
 		// The popup and problems slots share one budget with the viewport: at
 		// least one viewport row always survives, and the popup wins contested
@@ -484,15 +512,26 @@ export class EditorPane implements Component, Focusable {
 		this.viewportRows = viewportRows;
 		this.view.setViewportRows(viewportRows);
 
-		const viewLines = this.view.render(safeWidth);
-		while (viewLines.length < viewportRows) viewLines.push(" ".repeat(safeWidth));
+		const viewLines = this.view.render(innerWidth);
+		while (viewLines.length < viewportRows) viewLines.push(" ".repeat(innerWidth));
 		const problemLines = problemsRows > 0 ? this.renderProblems(safeWidth, problemsRows) : [];
 		const lines: string[] = [];
-		lines.push(strip.text);
-		lines.push(this.breadcrumb(safeWidth));
-		lines.push(...viewLines.slice(0, viewportRows));
-		lines.push(...popupShown);
-		lines.push(this.statusRow(safeWidth));
+		if (!isOpaqueBackground()) {
+			// Transparent canvas: a real frame. The tab row is the top rule,
+			// the status row is the bottom rule, and every row between owns a
+			// side rule, so the editor reads as one bounded pane.
+			lines.push(this.frameRule(strip.text, safeWidth, true));
+			lines.push(chromeLine(this.breadcrumb(innerWidth), safeWidth));
+			for (const line of viewLines.slice(0, viewportRows)) lines.push(chromeLine(line, safeWidth));
+			for (const line of popupShown) lines.push(chromeLine(line, safeWidth));
+			lines.push(this.frameRule(this.statusRow(ruleWidth), safeWidth, false));
+		} else {
+			lines.push(surfaceLine(strip.text, safeWidth));
+			lines.push(this.breadcrumb(safeWidth));
+			lines.push(...viewLines.slice(0, viewportRows));
+			lines.push(...popupShown);
+			lines.push(this.statusRow(safeWidth));
+		}
 		if (problemsDivider > 0) lines.push(theme.border("─".repeat(safeWidth)));
 		lines.push(...problemLines);
 		return lines.slice(0, this.allocatedRows).map((line) =>
@@ -545,6 +584,17 @@ export class EditorPane implements Component, Focusable {
 		return y >= EDITOR_PANE_HEADER_ROWS && y < EDITOR_PANE_HEADER_ROWS + this.viewportRows;
 	}
 
+	/** Top or bottom rule with a label set into it (transparent-canvas frame). */
+	private frameRule(label: string, width: number, top: boolean): string {
+		const open = top ? "╭" : "╰";
+		const close = top ? "╮" : "╯";
+		if (width < 4) return label;
+		const budget = Math.max(0, width - 5);
+		const text = truncateToWidth(label.trimEnd(), budget, "");
+		const fill = Math.max(0, budget - visibleWidth(text));
+		return `${theme.border(`${open}─ `)}${text}${theme.border(`${"─".repeat(fill)}─${close}`)}`;
+	}
+
 	private selectTab(documentId: string): void {
 		const result = this.tabModel.setActive(documentId);
 		if (!result.ok) return;
@@ -582,9 +632,15 @@ export class EditorPane implements Component, Focusable {
 		if (chips.length === 0) return { text: "", hitAreas: [] };
 		const active = this.tabModel.activeDocumentId();
 		const closable = chips.map((chip) => chip.documentId === active);
-		const styles = chips.map((chip, index) =>
-			closable[index] ? theme.accentBold(chipText(chip, true)) : theme.muted(chipText(chip, false)),
-		);
+		const plain = chips.map((chip) => ` ${chipText(chip, chip.documentId === active)} `);
+		// The active chip is a filled pill inside the bar; the others are quiet
+		// text. Padding makes the strip read as tabs, not floating filenames.
+		const styles = chips.map((chip, index) => {
+			const text = plain[index] ?? "";
+			return chip.documentId === active
+				? selectionBar(text, Math.max(1, visibleWidth(text)))
+				: theme.muted(text);
+		});
 		const widths = styles.map((style) => visibleWidth(style));
 		const total = widths.reduce((sum, chipWidth) => sum + chipWidth, 0) + Math.max(0, chips.length - 1);
 		const hitAreas: TabHitArea[] = [];
@@ -623,8 +679,9 @@ export class EditorPane implements Component, Focusable {
 			const chipWidth = widths[index] ?? 0;
 			const documentId = chips[index]?.documentId ?? "";
 			if (closable[index]) {
-				// Close cell of the active chip: the ✕ sits one column before `]`.
-				hitAreas.push({ documentId, start: start + chipWidth - 2, end: start + chipWidth, close: true });
+				// Close cell of the active chip: find the glyph inside the padded chip.
+				const offset = (plain[index] ?? "").indexOf(TAB_CLOSE_GLYPH);
+				hitAreas.push({ documentId, start: start + (offset >= 0 ? offset : chipWidth - 2), end: start + chipWidth, close: true });
 			}
 			hitAreas.push({ documentId, start, end: start + chipWidth });
 		}
@@ -645,10 +702,13 @@ export class EditorPane implements Component, Focusable {
 		const display = uriDisplayPath(record.uri);
 		const language = theme.dim(displayLanguageName(record.languageId));
 		const languageWidth = visibleWidth(language);
-		const pathBudget = Math.max(0, width - languageWidth - 2);
-		const left = theme.muted(truncateDisplay(this.relativeDisplayPath(display), pathBudget));
-		const gap = Math.max(1, width - visibleWidth(left) - languageWidth);
-		return `${left}${" ".repeat(gap)}${language}`;
+		const pathBudget = Math.max(0, width - languageWidth - 3);
+		// Chrome hierarchy: the tab bar above is the identity; the breadcrumb is
+		// only the location, so it stays quiet rather than repeating the tab.
+		const left = theme.dim(truncateDisplay(this.relativeDisplayPath(display), pathBudget));
+		// One cell keeps the label off the pane edge (and off a docked explorer).
+		const gap = Math.max(1, width - visibleWidth(left) - languageWidth - 1);
+		return `${left}${" ".repeat(gap)}${language} `;
 	}
 
 	private relativeDisplayPath(display: string): string {

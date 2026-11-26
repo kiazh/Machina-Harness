@@ -1,11 +1,11 @@
-// Single source for the keyboard-shortcut reference. The `?`/Ctrl+N,H picker
+// Single source for the keyboard-shortcut reference. The `?`/Alt+H picker
 // (Picker rows, flat list with a value) and `/help` (context-grouped HelpKey
 // rows) both render these rows, so a new binding is documented once.
 //
 // Order is the picker's: composer bindings, then workspace, then global; the
 // help menu groups by `context` and preserves source order inside a group.
 
-export type ShortcutContext = "Composer" | "Workspace" | "Global";
+export type ShortcutContext = "Composer" | "Workspace" | "Review & activity" | "Global";
 
 export interface ShortcutRow {
 	/** Stable picker value (also the row identity in tests). */
@@ -16,10 +16,9 @@ export interface ShortcutRow {
 }
 
 export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
-	{ value: "send", context: "Composer", label: "Enter — send / queue guidance", description: "While working, queues guidance for the next safe tool boundary; the current task stays in context; Escape interrupts" },
-	{ value: "activity", context: "Composer", label: "Ctrl+N then A — activity", description: "Live status tab for agents, shells, tools, queues and harnesses · /activity; /activity list for actions" },
+	{ value: "send", context: "Composer", label: "Enter · send or queue guidance", description: "During a reply, guidance is delivered at the next safe tool boundary in the current chat" },
 	{ value: "newline", context: "Composer", label: "Shift+Enter — new line" },
-	{ value: "image", context: "Composer", label: "Drop an image / Ctrl+V — paste image", description: "PNG, JPEG, GIF or WebP · ⌘V where forwarded by your terminal" },
+	{ value: "image", context: "Composer", label: "Alt+V · paste clipboard image", description: "Works without the terminal's Ctrl+V paste action. Ctrl+V / ⌘V also work when forwarded. Or drop an image file." },
 	{ value: "stop", context: "Composer", label: "Esc ×2 - stop reply", description: "First press arms the abort; second within 900ms stops. Ctrl+C stops immediately. Twice on empty input edits the last prompt" },
 	{ value: "cancel", context: "Composer", label: "Ctrl+C — stop / clear / exit", description: "Stop a reply, clear a draft, or exit when empty" },
 	{ value: "exit", context: "Composer", label: "Ctrl+D — exit", description: "When input is empty and idle" },
@@ -27,17 +26,22 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ value: "complete", context: "Composer", label: "Tab — complete", description: "Commands and arguments" },
 	{ value: "words", context: "Composer", label: "Ctrl+←/→ — move by word", description: "Alt+B / Alt+F also move by word when a terminal does not forward Ctrl+Arrow" },
 	{ value: "subagents", context: "Composer", label: "↓ — subagent menu", description: "On empty input: switch between the main session and its subagents" },
-	{ value: "tabs", context: "Composer", label: "Ctrl+N then J / K — next / previous agent", description: "With composer focus; the file editor keeps Ctrl+Shift+Arrow word selection" },
-	{ value: "status", context: "Composer", label: "← / → - Activity / Changes", description: "On an empty composer, ← opens Activity (left screen) and → opens Changes (right screen); either arrow or Esc closes. With text in the composer, arrows keep editing. Legacy Ctrl+N then ←/→ also works. Activity shows live agents, shells, tools/MCP calls and queues; Changes shows per-prompt files, stable diffs and review runs — /activity and /changes" },
-	{ value: "quickopen", context: "Workspace", label: "Ctrl+P / Ctrl+N then O - quick open", description: "Fuzzy file search in the workspace; the prefixed form survives terminals that capture Ctrl+P" },
+	{ value: "tabs", context: "Composer", label: "Alt+J / Alt+K · next / previous agent", description: "Alt+0 closes the current idle agent tab." },
+	{ value: "status", context: "Global", label: "Alt+← / Alt+→ · Activity ← Chat → Changes", description: "← from Chat opens Activity; → opens Changes. Either arrow steps back toward Chat, and Esc always returns." },
+	{ value: "quickopen", context: "Workspace", label: "Ctrl+P / Alt+O · quick open", description: "Fuzzy file search in the workspace. Also /quickopen." },
 	{ value: "save", context: "Workspace", label: "Ctrl+S — save file", description: "Save the active editor buffer" },
-	{ value: "closetab", context: "Workspace", label: "Ctrl+W / Ctrl+N then X - close tab", description: "Close the active editor tab (dirty: save/discard/cancel); the prefixed form survives terminal tab/window capture" },
-	{ value: "explorer", context: "Workspace", label: "Ctrl+T / Ctrl+Shift+E / Ctrl+N then T - file tree", description: "Toggle the right-edge explorer; Ctrl+N then T works when a terminal captures Ctrl+T; → or enter expands folders (/explorer)" },
-	{ value: "intel", context: "Workspace", label: "Ctrl+Space / Ctrl+N then I - inline completion", description: "Tab accepts · Esc dismisses · macOS input-source and Windows IME may steal Ctrl+Space · fallback /editor complete · Ctrl+N then G definition · R references · M rename · /problems lists diagnostics" },
-	{ value: "focus", context: "Workspace", label: "Ctrl+N then N / P — next / previous pane", description: "Composer → editor → explorer → problems" },
-	{ value: "chatmax", context: "Workspace", label: "Ctrl+N then C chat · E editor · S split", description: "Ctrl+←/→ remains word movement in text fields; edit shortcuts in Settings" },
+	{ value: "closetab", context: "Workspace", label: "Ctrl+W / Alt+X · close file tab", description: "Close the editor tab. Unsaved changes still prompt to save, discard or cancel." },
+	{ value: "explorer", context: "Workspace", label: "Alt+E / Ctrl+T / Ctrl+Shift+E · file tree", description: "Enter or Right expands folders. Also /explorer." },
+	{ value: "intel", context: "Workspace", label: "Ctrl+Space / Alt+I · inline completion", description: "If your input method captures Ctrl+Space, use Alt+I or /editor complete. Alt+G definition, Alt+R references, Alt+M rename." },
+	{ value: "focus", context: "Workspace", label: "Alt+Q / Alt+W · next / previous pane", description: "Composer → editor → explorer → problems" },
+	{ value: "chatmax", context: "Workspace", label: "Alt+1 chat · Alt+2 editor · Alt+3 split", description: "Change the workspace layout without changing text-editing keys." },
+	{ value: "attach", context: "Workspace", label: "Alt+T / Ctrl+Shift+A · attach selection", description: "Copy the active file selection into the chat draft. Does not send it." },
 	{ value: "wsroot", context: "Workspace", label: "/workspace open <path> — open a folder", description: "Also /workspace split|chat|editor|ratio|side|status|close" },
-	{ value: "help", context: "Global", label: "? / Ctrl+N then H — shortcuts", description: "? on empty input; Ctrl+N then H with a draft" },
+	{ value: "activity", context: "Review & activity", label: "Activity · 1–7 filter, ↑↓ move, Space details", description: "Enter opens the selection. PgUp/PgDn pages expanded logs. Alt+← also opens Activity. Ctrl+C stops a running reply." },
+	{ value: "reviewViews", context: "Review & activity", label: "Changes · ↑↓ prompts, 1/2/3 views, [ ] files", description: "Tab switches Files/Diff/Review; Space shows the prompt." },
+	{ value: "reviewActions", context: "Review & activity", label: "Review · R run, N/P finding, Enter fix", description: "PgUp/PgDn reads more detail. X cancels a review. Enter sends the fix to this chat. C clears handled findings." },
+	{ value: "approval", context: "Review & activity", label: "Approval · Enter confirm, Esc deny", description: "Allow once is selected first. ↑↓ changes the choice. PgUp/PgDn pages evidence." },
+	{ value: "help", context: "Global", label: "? / Alt+H · shortcuts", description: "? on empty chat or in Activity and Changes. Alt+H also works with a draft." },
 	{ value: "commands", context: "Global", label: "/help — all commands", description: "This menu; /growth shows learning details" },
 	{ value: "learning", context: "Global", label: "□ / ▪ — activity and learning", description: "Pulses while working and briefly when learning is saved" },
 ];

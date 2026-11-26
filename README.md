@@ -1187,23 +1187,23 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Send a message / add a new line | `Enter` / `Shift+Enter` |
 | Find commands | `/help` |
 | Open a project | `/workspace open <path>` |
-| Find a file | `Ctrl+P`, `Ctrl+N` then `O`, or `/quickopen` |
-| Attach the editor selection | `Ctrl+Shift+A`, `Ctrl+N` then `V`, or `/attach` |
-| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` (or `Ctrl+N` then `X`) |
-| Show or hide the file explorer | `Ctrl+T`, `Ctrl+Shift+E` (browser-safe), `Ctrl+N` then `T`, or `/explorer` |
-| Change pane focus | `Ctrl+N`, then `N` / `P` |
-| Rename symbol | `Ctrl+N`, then `M` |
-| Show code completion | `Ctrl+Space`, `Ctrl+N` then `I`, or `/editor complete` |
-| Go to definition / find references | `Ctrl+N`, then `G` / `R` |
-| Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
-| Switch between agents | `Ctrl+N`, then `J` / `K` |
-| Activity / Changes screens | `←` for Activity, `→` for Changes, when the composer is empty; either arrow or Esc closes the full screen. Arrows keep editing when the composer has text. `/changes` opens Changes directly |
+| Find a file | `Ctrl+P`, `Alt+O`, or `/quickopen` |
+| Attach the editor selection | `Alt+T`, `Ctrl+Shift+A`, or `/attach` |
+| Save / close the active editor tab | `Ctrl+S` / `Ctrl+W` (or `Alt+X`) |
+| Show or hide the file explorer | `Alt+E`, `Ctrl+T`, `Ctrl+Shift+E`, or `/explorer` |
+| Change pane focus | `Alt+Q` / `Alt+W` |
+| Rename symbol | `Alt+M` |
+| Show code completion | `Ctrl+Space`, `Alt+I`, or `/editor complete` |
+| Go to definition / find references | `Alt+G` / `Alt+R` |
+| Maximize chat / editor / restore split | `Alt+1` / `Alt+2` / `Alt+3` |
+| Switch between agents | `Alt+J` / `Alt+K` |
+| Activity ← Chat → Changes | `Alt+←` / `Alt+→`, `/activity`, `/changes`, or click a tab. Esc returns to Chat. |
 | Change keyboard shortcuts | `/settings` → Keyboard shortcuts |
-| Paste an image | `Ctrl+V` |
-| Stop a response | `Esc` after dismissing any open popup |
-| See keyboard shortcuts | `Ctrl+N`, then `H`; or `?` on empty input |
+| Paste an image | `Alt+V` or click **Paste image**. `Ctrl+V` also works where forwarded. |
+| Stop a response | `Ctrl+C` immediately or `Esc` twice after dismissing any open popup |
+| See keyboard shortcuts | `Alt+H`, click **Keys**, or `?` on an empty composer |
 
-Some terminals or operating systems intercept shortcuts; the slash commands and `Ctrl+N`-prefixed fallbacks remain available. On macOS, `Ctrl+Space` may be the input-source switch and `Ctrl+Left/Right` may be Mission Control; use the prefixed forms or `/editor complete`. On Windows, `Ctrl+Space` may be captured by the IME and `Ctrl+T`/`Ctrl+W` may be terminal/browser actions; use the prefixed forms. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
+Some terminals intercept shortcuts before Machina receives them. Use the listed alternatives, slash commands or clickable controls. On macOS, Alt shortcuts rely on the terminal forwarding Option as Meta. See the [workspace guide](docs/design/WORKSPACE.md) for the full interaction model.
 
 </details>
 
@@ -1224,6 +1224,20 @@ PostgreSQL with pgvector is the durable store for sessions, context, archives, m
 - **Usage ledger** with normalized token categories and cost provenance.
 - **Diagnostics** that record failures without crashing optional work.
 - **Redaction** at the boundary: known secrets are removed from supported output paths; logs drop raw conversation and tool payloads by default.
+
+### Debug logging
+
+The terminal UI is silent unless you opt in. `machina --log <path>` (or `MACHINA_UI_LOG=<path>`, or `MACHINA_UI_DEBUG=1` for the default) writes newline-delimited JSON to `<MACHINA_HOME>/logs/ui.log`, rotating at 5 MB. `--log-level` or `MACHINA_UI_LOG_LEVEL` accepts `error`, `warn`, `info`, `debug` (default) and `trace`.
+
+Records carry timestamp, pid, level, scope and message. They cover screen opens and closes, session switches, every RPC with duration and redacted params, turn submits and completions, Changes refreshes/diffs/reviews/fixes, approval prompts and decisions, gateway stderr, and any caught render failure. Secrets, session titles and private RPC content (keys, answers, prompts) are redacted; long values are clipped.
+
+The Python gateway writes `<MACHINA_HOME>/logs/gateway.log` at DEBUG with rotation, including `machina.workspace` snapshot and review summaries. Useful queries:
+
+```bash
+rg '"msg":"rpc.failed"' ~/.machina/logs/ui.log
+rg '"msg":"changes\.' ~/.machina/logs/ui.log
+rg 'changes\.list|review\.start' ~/.machina/logs/gateway.log
+```
 
 ### The test strategy
 
@@ -3173,8 +3187,8 @@ The terminal UI registers **53** slash commands. A bare `/` lists the registry, 
 | Command | Usage | Description |
 |---|---|---|
 | `/activity` | `/activity` | Open the live status tab; `/activity list` views queued steering, background commands, and agents |
-| `/changes` | `/changes [all]` | Review what each prompt changed: stable per-prompt diffs and attached review runs. Findings explain themselves and ask before sending an `Implement fix` prompt; `all` includes every chat in the workspace |
-| `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K) |
+| `/changes` | — | Review what each prompt in the current chat changed: stable per-prompt diffs and attached review runs. Findings explain themselves; **Fix in Chat** sends a repair to this chat, and **Clear handled** hides sent findings |
+| `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input or Alt+J/K) |
 | `/approvals` | `/approvals [list\|allow <id>\|deny <id>\|revoke]` | List pending approvals, or allow/deny one |
 | `/attach` | `/attach` | Attach the editor selection to the next message |
 | `/auth` | `/auth [chatgpt\|grok\|copilot\|kiro] [status\|sign-in\|start\|stop]` | Sign in to ChatGPT, Grok, or Copilot — or manage the Kiro local proxy |

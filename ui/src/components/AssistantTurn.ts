@@ -7,6 +7,7 @@
 
 import { Markdown, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
+import { ICONS } from "../design/icons.ts";
 import type { ResponseGeometry } from "../design/responseLayout.ts";
 import { transcriptInset } from "../design/spacing.ts";
 import { sanitizeDisplay } from "../design/text.ts";
@@ -127,7 +128,7 @@ export class AssistantTurn implements Component {
 	}
 
 	append(delta: string): void {
-		if (delta.length === 0) return;
+		if (typeof delta !== "string" || delta.length === 0) return;
 		this.content += delta;
 		this.pending += delta;
 		this.scheduleFlush();
@@ -135,11 +136,12 @@ export class AssistantTurn implements Component {
 
 	/** Reconcile to canonical final text (replaces incompatible streamed content). */
 	setText(text: string): void {
+		const safe = typeof text === "string" ? text : "";
 		this.cancelFlush();
 		this.pending = "";
 		this.sanitizeCarry = "";
-		this.content = text;
-		this.display = this.sanitizeStreamChunk(text);
+		this.content = safe;
+		this.display = this.sanitizeStreamChunk(safe);
 		this.md.setText(this.display);
 		this.revision++;
 		this.cachedRows.clear();
@@ -228,8 +230,8 @@ export class AssistantTurn implements Component {
 		const rows = this.md.render(geometry.contentWidth);
 		const pad = " ".repeat(geometry.indent);
 		const marker = this.streaming
-			? theme.accent(this.activity?.frame(["✻", "✶", "✳", "✢"], ACTIVITY_INTERVAL_MS, this.startedAt) ?? "✻")
-			: theme.accent("⏺");
+			? theme.accent(this.activity?.frame(ICONS.workingFrames, ACTIVITY_INTERVAL_MS, this.startedAt) ?? ICONS.workingFrames[0])
+			: theme.dim("·");
 		const output = [...BLOCK_GAP];
 		const label = this.label && this.label !== "assistant" ? theme.dim(this.label) : "";
 		if (label) output.push(truncateToWidth(`${pad}${label}`, width));

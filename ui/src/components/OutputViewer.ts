@@ -11,6 +11,7 @@ import {
 	wrapTextWithAnsi,
 	type Component,
 	type TUI,
+	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { LIMITS } from "../design/tokens.ts";
 import { sanitizeDisplay, truncateUtf8ByBytes } from "../design/text.ts";
@@ -158,6 +159,14 @@ export class OutputViewer implements Component {
 	}
 
 	setRecord(record: OutputRecord): void { this.record = record; }
+
+	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
+		if (event.type !== "wheel") return undefined;
+		const delta = event.wheelDelta ?? 0;
+		if (!delta) return undefined;
+		this.scroll.scrollBy(delta);
+		return { handled: true, render: true };
+	}
 
 	render(width: number): string[] {
 		const total = Math.max(0, width);

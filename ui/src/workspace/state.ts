@@ -113,10 +113,10 @@ export const WORKSPACE_STATE_VERSION = 1 as const;
 export function defaultWorkspacePersistedState(): WorkspacePersistedState {
 	return {
 		version: WORKSPACE_STATE_VERSION,
-		requestedMode: "chat",
+		// A workspace opens with the editor visible beside the chat; the
+		// explorer stays an explicit drawer.
+		requestedMode: "split",
 		splitRatio: LAYOUT_BUDGETS.defaultSplitRatio,
-		// A fresh workspace is a full-width chat. Opening a file reveals the
-		// editor; the explorer is an explicit drawer, not permanent chrome.
 		explorerRequested: false,
 		openUris: [],
 	};

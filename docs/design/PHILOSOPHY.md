@@ -3,8 +3,8 @@
 Machina's interface is a **typed instrument**, not a dashboard. The transcript
 is the product. Chrome exists only when it carries live state.
 
-This replaces the earlier "quiet cards" direction. Cards, pills, nested panels
-and decorative borders are not part of the language.
+Do not use repeating cards, filled pills, nested panels or decorative borders
+where a list and readable evidence do the job.
 
 ## 1. Content is the interface
 
@@ -13,31 +13,32 @@ and decorative borders are not part of the language.
 - Tool calls are events, not cards.
 - The shell is one persistent command strip: brand, the three screens, session
   context and live state. It stays because every part carries state.
-- Bounded cards are reserved for grouped evidence: approvals, Activity
-  categories, and prompt change blocks. The conversation itself stays
-  unframed; cards never wrap prose.
+- Frames mark input and approval decisions, not ordinary prose or lists.
+  Activity and Changes pair a scan-friendly index with the selected evidence.
+  On narrow terminals, the selection and evidence stack in the same order.
 
 ## 2. One grid
 
 - Two-cell transcript gutter, four-cell tool gutter.
 - Assistant prose measure: 96 columns.
 - Tool activity measure: 108 columns.
-- Prompt bands and composer rules span the full usable width.
+- The composer aligns with the transcript gutter. Side-by-side evidence
+  columns share one quiet separator.
 - On narrow terminals the gutters collapse before any content is hidden.
 
 ## 3. One signal
 
-- `moonstone` is Nocturne: obsidian, bone, one acid-lime signal.
+- `moonstone` uses plum graphite, porcelain ink and mint actions.
 - `codex` is Ink & Sage: green-black, bone, one soft-sage signal.
-- The accent marks **current**, **live**, or **actionable**. It is never used
-  to decorate a heading or fill a card.
+- The accent marks **current**, **live**, or **actionable**. Use filled focus
+  for one active row or tab, not an entire panel.
 - Success, warning and danger are separate semantic inks, never the accent.
 - Every state keeps a text glyph so meaning survives monochrome terminals.
 
 ## 4. Type does the work
 
 - Hierarchy comes from scale, weight, case and space, not boxes.
-- Micro-labels are uppercase and dim: `FILES`, `REVIEW`, `STATUS`.
+- Labels are short and muted. The active tab uses brackets as a text cue.
 - Body text is bone. Metadata is muted. Empty structure is faint.
 - Large weights are reserved for the wordmark, selected rows and approval
   titles.
@@ -47,9 +48,9 @@ and decorative borders are not part of the language.
 Every turn has the same shape:
 
 ```text
-01 ❯ the user's prompt on a full-width bone band
+01 ❯ the user's prompt (a filled band only when the theme paints backgrounds)
 
-  ⏺ assistant prose, unframed
+  · assistant prose, unframed
 
     ✔ read_file install.sh                              done 0ms
     ⎿ the result, at most two preview rows
@@ -58,7 +59,7 @@ Every turn has the same shape:
 ```
 
 - Prompts are numbered. The number is part of the band, not a separate column.
-- Assistant replies start with `⏺`.
+- Completed replies start with a text dot `·`, not an emoji.
 - Tool results start with `⎿`.
 - The turn closes with a `✻` colophon, not another rule.
 - A cancelled turn closes with `⊘ stopped after ...`.
@@ -66,13 +67,13 @@ Every turn has the same shape:
 ## 6. Negative space is structure
 
 - One blank row between semantic blocks.
-- Two blank rows around approval evidence.
+- Approval evidence adds one more row above the card; no other block does.
 - No blank row is decorative. It separates different kinds of information.
 - Do not fill empty space with metadata. Let the transcript breathe.
 
 ## 7. Motion is a pulse
 
-- One glyph, one cadence: `✻ ✶ ✳ ✢`.
+- One cell, one cadence: a snowflake turns `✶ ✼ ✽ ✻` in place.
 - Working text says what is happening and how to stop it.
 - Reduced motion keeps the glyph static.
 - No layout animation, no bouncing, no sweeping bands.
@@ -90,7 +91,6 @@ Every turn has the same shape:
 - Cards around assistant replies.
 - Filled filter pills.
 - Nested boxes.
-- Bracket-wrapped tabs.
 - Side-stripe accents on content.
 - Color as the only state signal.
 - Decorative gradient-like ASCII art.
@@ -107,5 +107,6 @@ Every turn has the same shape:
 - Command strip: `ui/src/components/NavBar.ts`
 - Cards: `ui/src/design/box.ts`
 - Screens: `ui/src/components/StatusPage.ts`,
-  `ui/src/components/ChangesPage.ts`
+  `ui/src/components/ChangesPage.ts`, with shared index/evidence geometry in
+  `ui/src/design/inspect.ts`
 - Workspace chrome: `ui/src/components/EditorPane.ts`

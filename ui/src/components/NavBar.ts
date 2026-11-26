@@ -1,10 +1,7 @@
-// The persistent command strip. Brand, three real tabs, session context and
-// live state occupy one row; the active tab gets a bright underline on the
-// second row. This is the shell's navigation now: pages swap inside it instead
-// of replacing the whole viewport.
+// Persistent navigation and session context. Only the active tab is marked.
 import { truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { sanitizeDisplay } from "../design/text.ts";
-import { isOpaqueBackground, theme } from "../theme.ts";
+import { sanitizeLabelText } from "../design/text.ts";
+import { chromeInner, selectionBar, surfaceLine, theme } from "../theme.ts";
 
 export type NavView = "chat" | "activity" | "changes";
 
@@ -14,14 +11,10 @@ export interface NavSnapshot {
 	project?: string;
 	branch?: string;
 	model?: string;
-	provider?: string;
 	/** Footer status vocabulary: ready, working, offline, awaiting_approval... */
 	status: string;
-	running?: boolean;
 	activityCount?: number;
 	changeCount?: number;
-	approvals?: number;
-	queued?: number;
 }
 
 interface Tab {
@@ -34,7 +27,7 @@ interface Tab {
 interface Hitbox {
 	x: number;
 	width: number;
-	view: NavView;
+	view: NavView | "keys";
 }
 
 function statusText(snapshot: NavSnapshot): { text: string; tone: (text: string) => string; glyph: string } {
@@ -52,16 +45,19 @@ export class NavBar implements Component {
 	private readonly snapshot: () => NavSnapshot;
 	private readonly onSelect: (view: NavView) => void;
 	private readonly terminalRows: () => number;
+	private readonly onKeys?: () => void;
 	private hitboxes: Hitbox[] = [];
 
 	constructor(
 		snapshot: () => NavSnapshot,
 		onSelect: (view: NavView) => void,
 		terminalRows: () => number,
+		onKeys?: () => void,
 	) {
 		this.snapshot = snapshot;
 		this.onSelect = onSelect;
 		this.terminalRows = terminalRows;
+		this.onKeys = onKeys;
 	}
 
 	/** Two rows on normal viewports, one on short ones. */
@@ -71,29 +67,36 @@ export class NavBar implements Component {
 
 	render(width: number): string[] {
 		const total = Math.max(1, width);
+		// On a transparent canvas the row spends two cells on its outline, so
+		// fit the content to that smaller width instead of clipping the status.
+		const fit = chromeInner(total);
 		const snap = this.snapshot();
-		const brand = isOpaqueBackground()
-			? theme.accentBg(theme.onAccent(" MACHINA "))
-			: theme.accentBold("MACHINA");
+		// The state chip outranks the wordmark on very narrow strips: losing
+		// "awaiting approval" is worse than losing the brand.
+		const showBrand = total >= 56;
+		const brand = showBrand ? theme.bold(theme.text(" MACHINA ")) : "";
 		const compact = total < 64;
 		const tabs: Tab[] = [
-			{ view: "chat", label: "Chat", short: "Chat", count: 0 },
 			{ view: "activity", label: "Activity", short: "Act", count: snap.activityCount ?? 0 },
+			{ view: "chat", label: "Chat", short: "Chat", count: 0 },
 			{ view: "changes", label: "Changes", short: "Chg", count: snap.changeCount ?? 0 },
 		];
 		const tabParts = tabs.map((tab) => {
 			const active = snap.view === tab.view;
 			const name = compact ? tab.short : tab.label;
 			const count = tab.count > 0 ? ` ${tab.count}` : "";
-			const plain = `${name}${count}`;
+			const plain = active ? `[${name}${count}]` : ` ${name}${count} `;
 			const styled = active
-				? `${theme.accentBold(name)}${tab.count > 0 ? theme.accent(count) : ""}`
-				: `${theme.muted(name)}${tab.count > 0 ? theme.dim(count) : ""}`;
+				? selectionBar(plain, visibleWidth(plain))
+				: theme.text(plain);
 			return { tab, plain, styled };
 		});
-		const brandPlain = isOpaqueBackground() ? " MACHINA " : "MACHINA";
-		const left = `${brand}   ${tabParts.map(part => part.styled).join("   ")}`;
-		const leftPlain = `${brandPlain}   ${tabParts.map(part => part.plain).join("   ")}`;
+		const brandPlain = showBrand ? " MACHINA " : "";
+		const head = showBrand ? `${brand} ${theme.border("│")} ` : "";
+		const headPlain = showBrand ? `${brandPlain} │ ` : "";
+		const keys = this.onKeys && total >= 76 ? "  Keys ? " : "";
+		const left = `${head}${tabParts.map(part => part.styled).join(" ")}${theme.muted(keys)}`;
+		const leftPlain = `${headPlain}${tabParts.map(part => part.plain).join(" ")}${keys}`;
 		const leftWidth = visibleWidth(leftPlain);
 
 		// Right side is optional context. Status always survives; title,
@@ -102,38 +105,38 @@ export class NavBar implements Component {
 		const candidates = [
 			`${state.tone(state.glyph)} ${state.tone(state.text)}`,
 			snap.model && snap.model.toLowerCase() !== (snap.title ?? "").toLowerCase()
-				? theme.dim(sanitizeDisplay(snap.model))
+				? theme.dim(sanitizeLabelText(snap.model))
 				: "",
-			snap.project ? theme.dim(sanitizeDisplay(snap.project) + (snap.branch ? ` · ${sanitizeDisplay(snap.branch)}` : "")) : "",
-			snap.title ? theme.muted(sanitizeDisplay(snap.title)) : "",
+			snap.project ? theme.dim(sanitizeLabelText(snap.project) + (snap.branch ? ` · ${sanitizeLabelText(snap.branch)}` : "")) : "",
+			snap.title ? theme.muted(sanitizeLabelText(snap.title)) : "",
 		].filter(Boolean);
-		let right = "";
-		for (const candidate of candidates) {
-			const next = right ? `${candidate}   ${right}` : candidate;
-			if (leftWidth + 2 + visibleWidth(next) > total) break;
-			right = next;
-		}
-		const gap = Math.max(0, total - leftWidth - visibleWidth(right));
-		const line = truncateToWidth(`${left}${right ? `${" ".repeat(gap)}${right}` : ""}`, total, "…", true);
-
-		this.hitboxes = [];
-		let x = visibleWidth(brandPlain) + 3;
-		for (const part of tabParts) {
-			this.hitboxes.push({ x, width: visibleWidth(part.plain), view: part.tab.view });
-			x += visibleWidth(part.plain) + 3;
-		}
-
-		if (this.rows() === 1) return [line];
-		const active = tabParts.find(part => part.tab.view === snap.view);
-		let rule = theme.border("─".repeat(total));
-		if (active) {
-			const activeStart = this.hitboxes.find(hit => hit.view === active.tab.view)?.x ?? 0;
-			const activeWidth = Math.min(visibleWidth(active.plain), Math.max(0, total - activeStart));
-			if (activeWidth > 0) {
-				rule = `${theme.border("─".repeat(activeStart))}${theme.accent("━".repeat(activeWidth))}${theme.border("─".repeat(Math.max(0, total - activeStart - activeWidth)))}`;
+		// The state chip is the one part of the right side that always
+		// survives: truncate it to the remaining room, then add context only
+		// when it fits beside it.
+		const status = candidates[0]!;
+		const statusRoom = Math.max(0, fit - leftWidth - 2);
+		let right = statusRoom >= 3 ? truncateToWidth(status, statusRoom, "…") : "";
+		if (right) {
+			for (const candidate of candidates.slice(1)) {
+				const next = `${candidate}   ${right}`;
+				if (leftWidth + 2 + visibleWidth(next) <= fit) right = next;
 			}
 		}
-		return [line, rule];
+		const gap = Math.max(0, fit - leftWidth - visibleWidth(right));
+		const line = truncateToWidth(`${left}${right ? `${" ".repeat(gap)}${right}` : ""}`, fit, "…", true);
+
+		this.hitboxes = [];
+		const offset = (total - fit) / 2;
+		let x = visibleWidth(headPlain) + offset;
+		for (const part of tabParts) {
+			this.hitboxes.push({ x, width: visibleWidth(part.plain), view: part.tab.view });
+			x += visibleWidth(part.plain) + 1;
+		}
+		if (keys) this.hitboxes.push({ x: leftWidth - keys.length + offset, width: keys.length, view: "keys" });
+
+		const header = surfaceLine(line, total);
+		if (this.rows() === 1) return [header];
+		return [header, theme.border("─".repeat(total))];
 	}
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; focus?: boolean; render?: boolean } | undefined {
@@ -142,7 +145,8 @@ export class NavBar implements Component {
 			event.x >= candidate.x && event.x < candidate.x + candidate.width,
 		);
 		if (!hit) return undefined;
-		this.onSelect(hit.view);
+		if (hit.view === "keys") this.onKeys?.();
+		else this.onSelect(hit.view);
 		return { handled: true, render: true };
 	}
 

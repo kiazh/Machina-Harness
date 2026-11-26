@@ -123,7 +123,7 @@ export const musicCommand: Command = {
 		const choice = await host.pick("Music — what's playing", [
 			{
 				value: "toggle",
-				label: status?.state === "paused" ? "▶ Play" : "⏸ Pause / Play",
+				label: status?.state === "paused" ? "Play" : "Pause / Play",
 				description: statusLine(music),
 			},
 			{ value: "next", label: "Next track" },

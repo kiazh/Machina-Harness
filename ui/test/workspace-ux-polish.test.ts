@@ -57,7 +57,7 @@ test("breadcrumb is root-relative with the language right-aligned (finding 2)", 
 	pane.layout(6);
 	pane.setWorkspaceRoot("/tmp/ws-fixture");
 	const rows = plain(pane.render(60));
-	assert.match(rows[1] ?? "", /^src\/config\.py\s+Python$/, "path relative to the root; language right-aligned");
+	assert.match(rows[1] ?? "", /^src\/config\.py\s+Python\s*$/, "path relative to the root; language right-aligned");
 	assert.doesNotMatch(rows[1] ?? "", /tmp\/ws-fixture/, "the root prefix is stripped");
 	// Outside the root: basename only, never an absolute path.
 	const other = openDoc(store, "x\n", "file:///elsewhere/notes.md", "markdown");
@@ -102,10 +102,10 @@ test("explorer header groups the title with the current hidden-entries hint (fin
 	const pane = new ExplorerPane(model);
 	await model.load();
 	const header = plain(pane.render(50))[0] ?? "";
-	assert.match(header, /^workspace\s+h: show hidden\s*$/, `title left, hint right: ${header}`);
+	assert.match(header, /^\s*workspace\s+h: show hidden\s*$/, `title left, hint right: ${header}`);
 	assert.equal(visibleWidth(stripTerminalSequences(header)), 50, "the row fills the pane width");
 	await model.setHidden(true);
-	assert.match(plain(pane.render(50))[0] ?? "", /^workspace\s+h: hide hidden\s*$/);
+	assert.match(plain(pane.render(50))[0] ?? "", /^\s*workspace\s+h: hide hidden\s*$/);
 	// Files drop the leading glyph (indent only); directories keep ▸/▾.
 	const rows = plain(pane.render(50));
 	assert.ok(rows.some((row) => /^❯ ▸ src\s*$|^❯ ▸ src /u.test(row) || row.includes("▸ src")), "directory keeps its glyph");

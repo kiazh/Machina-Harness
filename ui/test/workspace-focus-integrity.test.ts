@@ -284,14 +284,12 @@ async function openEditorFile(app: App): Promise<{ integration: Integration; doc
 }
 
 const CtrlLeft = "\x1b[1;5D";
-function pressGuide(tui: { press(data: string): void }, key: string): void {
-	tui.press("\x0e");
-	tui.press(key);
+function pressAlt(tui: { press(data: string): void }, key: string): void {
+	tui.press(`\x1b${key}`);
 }
 const ESC = "\x1b";
 const ENTER = "\r";
 const CTRL_W = "\x17";
-const CTRL_T = "\x14";
 const CTRL_P = "\x10";
 const CTRL_SPACE = "\x00";
 
@@ -305,7 +303,7 @@ test("maximizing chat while the editor owns focus reconciles the region to the c
 	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(tui.focused, integration.pane, "the pane owns keys while editing");
 
-	pressGuide(tui, "c"); // F8: maximize chat
+	pressAlt(tui, "1"); // maximize chat
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).workspaceLayout?.editor, undefined, "the editor region is hidden");
 	assert.equal(internals(app).activeRegion, "chat-composer", "focus reconciled to the only visible region");
@@ -317,28 +315,27 @@ test("maximizing chat while the editor owns focus reconciles the region to the c
 	assert.equal(integration.tabs.count(), 1, "Ctrl+W in the composer does not close the hidden editor's tab");
 
 	// Ctrl+Left restores the split even after focus moves to the composer.
-	pressGuide(tui, "s");
+	pressAlt(tui, "3");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await app.exit();
 });
 
-test("Ctrl+N then N re-asserts focus when only the composer remains visible", async () => {
+test("Alt+Q re-asserts focus when only the composer remains visible", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 	await openEditorFile(app);
 
-	// Close the explorer so a chat maximize leaves a single-region cycle.
-	tui.press(CTRL_T);
+	// The explorer starts closed, so a chat maximize leaves a single-region cycle.
 	assert.equal(internals(app).workspaceLayout?.explorer, undefined, "the explorer drawer is closed");
-	pressGuide(tui, "c");
+	pressAlt(tui, "1");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).activeRegion, "chat-composer");
 
 	// Simulate focus drift (a losing component cleared it); the shortcut hands the
 	// only visible region its focus instead of early-returning.
 	tui.setFocus(null);
-	pressGuide(tui, "n");
+	pressAlt(tui, "q");
 	assert.equal(internals(app).activeRegion, "chat-composer");
 	assert.equal(tui.focused, internals(app).editor, "focus shortcut re-asserted composer focus");
 	await app.exit();
@@ -374,10 +371,11 @@ test("closing the last dialog restores the composer as the recorded region", asy
 	await app.start();
 	await waitForWorkspace(app);
 	await openEditorFile(app);
-	pressGuide(tui, "n"); // editor → explorer
+	pressAlt(tui, "e"); // the explorer is an explicit drawer
+	pressAlt(tui, "q"); // editor → explorer
 	assert.equal(internals(app).activeRegion, "explorer");
 
-	pressGuide(tui, "h"); // shortcuts picker dialog
+	pressAlt(tui, "h"); // shortcuts picker dialog
 	assert.equal(internals(app).dialogs.length, 1, "a dialog is open");
 	internals(app).dialogs[0]!.cancel();
 	await settle();
@@ -454,12 +452,13 @@ test("moving focus off the editor dismisses the inline completion", async () => 
 	await app.start();
 	await waitForWorkspace(app);
 	await openEditorFile(app);
+	pressAlt(tui, "e"); // the explorer is an explicit drawer
 	armCompletion(client);
 	tui.press(CTRL_SPACE);
 	await settle();
 	assert.ok(internals(app).completionSession, "the suggestion is active in the editor");
 
-	pressGuide(tui, "n"); // editor → explorer: the list's region loses focus
+	pressAlt(tui, "q"); // editor → explorer: the list's region loses focus
 	assert.equal(internals(app).activeRegion, "explorer");
 	assert.equal(internals(app).completionSession, undefined, "the editor-scoped suggestion was dismissed");
 	await app.exit();
@@ -570,7 +569,7 @@ test("a hidden editor cannot keep keys: drift is reconciled before Ctrl+S saves"
 	integration.store.insertText(documentId, "dirty");
 	assert.equal(integration.store.getDocument(documentId)?.dirty, true);
 
-	pressGuide(tui, "c"); // F8: maximize chat, unmount the pane
+	pressAlt(tui, "1"); // maximize chat, unmount the pane
 	assert.equal(internals(app).workspaceLayout?.editor, undefined);
 
 	// Two independent drift sources: the TUI still targets the removed pane,
@@ -817,7 +816,7 @@ for (const leaveEditor of [false, true]) {
 				tui.press(key);
 				pane.handleInput(key);
 			}
-			if (leaveEditor) pressGuide(tui, "n");
+			if (leaveEditor) pressAlt(tui, "q");
 			await new Promise((resolve) => setTimeout(resolve, 220));
 			await settle();
 			const calls = client.requests.filter((r) => r.method === "workspace.intelligence" && r.params.operation === "completion");
@@ -840,6 +839,7 @@ test("explorer mouse previews preserve explorer focus and keep Problems open", a
 	try {
 		await waitForWorkspace(app);
 		await openEditorFile(app);
+		(app as unknown as { shell: { onWorkspaceExplorerToggle?: () => void } }).shell.onWorkspaceExplorerToggle?.();
 		const state = app as unknown as {
 			openProblems(): void;
 			setFocusForRegion(region: string): void;

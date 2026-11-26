@@ -13,6 +13,12 @@ function coordinatorWithCounter(reducedMotion = false): { coordinator: Animation
 	return { coordinator, renders: () => renders };
 }
 
+test("the working pulse turns the snowflake through four forms", () => {
+	assert.deepEqual([...ICONS.workingFrames], ["✶", "✼", "✽", "✻"]);
+	for (const frame of ICONS.workingFrames) assert.equal(visibleWidth(frame), 1, `${frame} must be one cell`);
+	assert.equal(new Set(ICONS.workingFrames).size, 4, "four distinct forms animate");
+});
+
 test("streaming response frame animates on the shared timer and settles on completion", (t) => {
 	t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: 1000 });
 	const coordinator = new AnimationCoordinator(() => {}, false);
@@ -24,10 +30,11 @@ test("streaming response frame animates on the shared timer and settles on compl
 	transcript.apply(event({ type: "message.start" }));
 	transcript.apply(event({ type: "message.delta", text: "Hello" }));
 	assert.equal(coordinator.timerCount, 1);
-	const first = view.render(80).map(stripTerminalSequences).join("\n");
+	const rawFirst = view.render(80).join("\n");
+	const first = stripTerminalSequences(rawFirst);
 	t.mock.timers.tick(200);
-	const second = view.render(80).map(stripTerminalSequences).join("\n");
-	assert.notEqual(second, first, "the frame marker advances while text streams");
+	const second = stripTerminalSequences(view.render(80).join("\n"));
+	assert.notEqual(second, first, "the snowflake turns while text streams");
 	transcript.apply(event({ type: "message.complete", text: "Hello", tokens: 0, cancelled: false }));
 	assert.equal(coordinator.timerCount, 0, "completion retires the frame animation");
 	const settled = view.render(80).map(stripTerminalSequences).join("\n");

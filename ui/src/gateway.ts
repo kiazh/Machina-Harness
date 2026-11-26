@@ -7,6 +7,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { type GatewayEvent, RpcError } from "./protocol.ts";
 import { isWorkspaceEvent, type WorkspaceEvent } from "./workspace/protocol.ts";
+import { describeError, uiLog } from "./debug.ts";
+
+const log = uiLog.scope("gateway");
 
 type Pending = {
 	resolve: (value: unknown) => void;
@@ -52,6 +55,7 @@ export class JsonRpcChannel {
 		try {
 			frame = JSON.parse(line);
 		} catch {
+			log.trace("frame.unparseable", { length: line.length });
 			return;
 		}
 		if (typeof frame !== "object" || frame === null) return;
@@ -132,6 +136,7 @@ export class GatewayClient {
 	}
 
 	start(): void {
+		log.debug("spawn", { python: this.options.python, cwd: this.options.cwd ?? process.cwd() });
 		const proc = spawn(this.options.python, ["-m", "machina.gateway"], {
 			cwd: this.options.cwd ?? process.cwd(),
 			env: { ...process.env, ...this.options.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
@@ -152,16 +157,19 @@ export class GatewayClient {
 		this.stdoutInterface.on("line", (line) => channel.handleLine(line));
 		this.stderrInterface = createInterface({ input: proc.stderr! });
 		this.stderrInterface.on("line", (line) => {
+			log.debug("stderr", { line });
 			this.stderrTail.push(line);
 			if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift();
 		});
 		proc.stdin?.on("error", () => {}); // EPIPE when the gateway dies; surfaced via 'exit'
 
 		proc.on("error", (error) => {
+			log.error("spawn.failed", { error: describeError(error) });
 			channel.close(new Error(`could not start the gateway (${this.options.python}): ${error.message}`));
 			if (!this.stopping) this.onExit?.(null, this.stderr());
 		});
 		proc.on("exit", (code) => {
+			log.warn("exit", { code, stopping: this.stopping, tail: this.stderr().slice(-5) });
 			channel.close(new Error(`gateway exited (code ${code})`));
 			if (!this.stopping) this.onExit?.(code, this.stderr());
 		});
@@ -189,6 +197,7 @@ export class GatewayClient {
 	private async stopProcess(): Promise<void> {
 		const proc = this.proc;
 		if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+		log.debug("stop", { pid: proc.pid ?? null });
 		this.stopping = true;
 		let hasExited = false;
 		const exited = new Promise<void>((resolve) => proc.once("exit", () => { hasExited = true; resolve(); }));

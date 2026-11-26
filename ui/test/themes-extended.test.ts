@@ -99,6 +99,18 @@ test("new skins keep text, muted and dim readable with dim below muted", () => {
 	}
 });
 
+test("Moonstone keeps helper text readable on both chrome and raised surfaces", () => {
+	const { background, surface, raisedSurface, border, text, muted, faint, accent } = semanticPalette("moonstone")!;
+	assert.ok(luminance(background) < luminance(surface) && luminance(surface) < luminance(raisedSurface));
+	for (const fill of [background, surface, raisedSurface]) {
+		assert.ok(contrast(text, fill) >= 10, "primary text");
+		assert.ok(contrast(muted, fill) >= 7, "secondary text");
+		assert.ok(contrast(faint, fill) >= 6, "helper text");
+		assert.ok(contrast(accent, fill) >= 7, "keyboard action");
+		assert.ok(contrast(border, fill) >= 3, "separator");
+	}
+});
+
 test("new skins keep every accent role >= 4.5:1 and distinct", () => {
 	const roles = ["accent", "secondary", "success", "warning", "error", "info"] as const;
 	for (const name of NEW_SKINS) {

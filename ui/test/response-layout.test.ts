@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { AssistantTurn } from "../src/components/AssistantTurn.ts";
+import { ICONS } from "../src/design/icons.ts";
 
 const SHORT = "hello **world**";
 const LONG = Array.from({ length: 24 }, (_, i) => `Paragraph ${i}: ${"detail ".repeat(6)}`).join("\n\n");
@@ -64,8 +65,8 @@ test("streaming text is exact and the marker disappears on canonical text", () =
 	turn.setText("Short again.");
 	assert.equal(turn.getText(), "Short again.", "canonical text replaces the streamed text exactly");
 	const text = plainLines(turn, 100).join("\n");
-	assert.match(text, /Short again/);
-	assert.doesNotMatch(text, /^.*[·•].*$/m, "no streaming marker remains after completion");
+	assert.match(text, /· Short again/);
+	for (const frame of ICONS.workingFrames) assert.ok(!text.includes(frame), `no ${frame} marker remains after completion`);
 });
 
 test("the measure caps at 96 and follows narrower panes", () => {

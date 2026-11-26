@@ -420,18 +420,18 @@ test("METHOD_NOT_FOUND disables the workspace quietly with one notice and never 
 
 // ─── successful open + geometry ─────────────────────────────────────────────
 
-test("successful open starts chat-first and reveals the editor on the first file", async () => {
+test("a workspace opens with the editor visible beside the chat", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 
 	const layout = internals(app).workspaceLayout;
-	assert.equal(layout?.effectiveMode, "chat", "a fresh workspace is a full-width chat");
-	assert.equal(layout?.editor, undefined, "no empty editor column is reserved");
+	assert.equal(layout?.effectiveMode, "split", "the editor is part of the default layout");
+	assert.ok((layout?.editor?.columns ?? 0) >= 48, "the editor column is real, not a placeholder");
 	assert.equal(internals(app).integration?.controller.phase, "ready");
 	await internals(app).openWorkspacePath("src/a.ts");
 	const split = internals(app).workspaceLayout;
-	assert.equal(split?.effectiveMode, "split", "opening a file reveals the editor");
+	assert.equal(split?.effectiveMode, "split", "the split survives opening a file");
 	assert.ok((split?.editor?.columns ?? 0) >= 48, "editor column keeps its minimum at 160 cols");
 	assert.ok((split?.chat?.columns ?? 0) >= 40, "chat column keeps its minimum");
 	const opens = client.requests.filter((entry) => entry.method === "workspace.open");
@@ -538,7 +538,7 @@ async function bootFramed(columns: number, rows: number): Promise<{
 	return { app, tui, term, client };
 }
 
-test("at 160x48 a fresh workspace does not reserve an empty editor", async () => {
+test("at 160x48 a fresh workspace shows the empty editor beside the chat", async () => {
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
 		let screen = tui.getScreenLines().map(stripTerminalSequences);
@@ -546,13 +546,13 @@ test("at 160x48 a fresh workspace does not reserve an empty editor", async () =>
 		for (const line of screen) assert.ok(visibleWidth(line) <= 160);
 		let joined = screen.join("\n");
 		assert.match(joined, /Ask anything/, "chat composer visible");
-		assert.doesNotMatch(joined, /No open files/, "no empty editor pane is composed");
-		assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
+		assert.match(joined, /No open files/, "the editor waits with an honest empty state");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 		await internals(app).openWorkspacePath("src/a.ts");
 		tui.renderNow(true);
 		screen = tui.getScreenLines().map(stripTerminalSequences);
 		joined = screen.join("\n");
-		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "opening a file composes the editor");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "opening a file fills the editor");
 		assert.match(joined, /src\/a\.ts|a\.ts/, "the opened file is visible");
 	} finally {
 		await app.exit();
@@ -630,12 +630,11 @@ test("a direct viewport click restores the caret with no key input (item 1)", as
 
 // ─── keys ───────────────────────────────────────────────────────────────────
 
-function pressGuide(tui: FakeTUI, key: string): void {
-	tui.press("\x0e");
-	tui.press(key);
+function pressAlt(tui: FakeTUI, key: string): void {
+	tui.press(`\x1b${key}`);
 }
 
-test("Ctrl+N pane commands work from the editor and composer", async () => {
+test("Alt+1/2/3 pane commands work from the editor and composer", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
@@ -645,11 +644,11 @@ test("Ctrl+N pane commands work from the editor and composer", async () => {
 
 	// Pane commands work from the composer too; the editor can be brought
 	// into view without relying on modified arrows.
-	pressGuide(tui, "c");
+	pressAlt(tui, "1");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat", "composer can maximize chat");
-	pressGuide(tui, "e");
+	pressAlt(tui, "2");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "editor", "composer can bring the editor in");
-	pressGuide(tui, "s");
+	pressAlt(tui, "3");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 
 	// Editor region: the global bindings win there.
@@ -657,11 +656,11 @@ test("Ctrl+N pane commands work from the editor and composer", async () => {
 	assert.equal(internals(app).activeRegion, "editor");
 
 	// Ctrl+Left while already split is a no-op, never a second toggle.
-	pressGuide(tui, "s");
+	pressAlt(tui, "3");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "already split: no-op");
 	assert.equal(internals(app).integration?.controller.getLayoutInput().requestedMode, "split");
 
-	pressGuide(tui, "c");
+	pressAlt(tui, "1");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat", "chat maximized");
 	// Hiding the editor reconciles focus to the composer. Ctrl+Left remains
 	// available to restore the split from maximized chat.
@@ -675,7 +674,7 @@ test("Ctrl+N pane commands work from the editor and composer", async () => {
 	composerEditor.handleInput("\x1b[1;5D");
 	assert.equal(composerEditor.getCursor().col, 6, "focused composer moves one word");
 	composerEditor.setText("");
-	pressGuide(tui, "s");
+	pressAlt(tui, "3");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await runCommand({ name: "workspace", args: "split" }, app);
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "the split stays reachable via the command");
@@ -688,10 +687,10 @@ test("Ctrl+N pane commands work from the editor and composer", async () => {
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "editor");
 	internals(app).setFocusForRegion("editor");
 	assert.equal(internals(app).activeRegion, "editor");
-	pressGuide(tui, "c");
+	pressAlt(tui, "1");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 	assert.equal(internals(app).activeRegion, "chat-composer", "the hidden editor never keeps the keys");
-	pressGuide(tui, "s");
+	pressAlt(tui, "3");
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "composer Ctrl+Left restores the split from maximized chat");
 	await runCommand({ name: "workspace", args: "split" }, app);
 	assert.equal(internals(app).workspaceLayout?.effectiveMode, "split", "the 50/50 split stays reachable");
@@ -761,8 +760,7 @@ test("Ctrl+V with the editor focused falls through to the view; the composer kee
 	assert.equal(loads.length, 0, "the composer image path never ran");
 
 	// Composer region: the global image-aware handler consumes it (as before).
-	pressGuide(tui, "n"); // next → explorer
-	pressGuide(tui, "n"); // next → chat-composer
+	pressAlt(tui, "q"); // next → chat-composer
 	assert.equal(internals(app).activeRegion, "chat-composer");
 	const consumed = dispatch("\x16");
 	assert.deepEqual(consumed, { consume: true }, "composer region: Ctrl+V is consumed by the global handler");
@@ -880,24 +878,24 @@ test("the far-right grip toggles the explorer through the app's request path", a
 	await waitForWorkspace(app);
 	await internals(app).openWorkspacePath("a.ts");
 	const state = internals(app);
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the first file opens the explorer");
-	assert.ok(internals(app).workspaceLayout?.explorer, "the tree is docked in the split");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "the explorer starts closed");
 	internals(app).shell.onWorkspaceExplorerToggle?.();
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "the grip closes the explorer");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the grip opens the explorer");
+	assert.ok(internals(app).workspaceLayout?.explorer, "the drawer docks");
+	internals(app).shell.onWorkspaceExplorerToggle?.();
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "the grip closes it again");
 	assert.equal(internals(app).workspaceLayout?.explorer, undefined, "the drawer column is gone");
 	internals(app).shell.onWorkspaceExplorerToggle?.();
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "the grip reopens it");
-	assert.ok(internals(app).workspaceLayout?.explorer, "the drawer docks again");
 	// Ctrl+T keeps its behavior alongside the grip; Ctrl+Shift+E is the
-	// browser-safe alias and Ctrl+N then T the terminal fallback.
+	// browser-safe alias and Alt+E the terminal fallback.
 	tui.press("\x14");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+T still toggles");
 	tui.press("\x14");
 	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true);
-	pressGuide(tui, "t");
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Ctrl+N T toggles");
-	pressGuide(tui, "t");
-	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "Ctrl+N T reopens it");
+	pressAlt(tui, "e");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, false, "Alt+E toggles");
+	pressAlt(tui, "e");
+	assert.equal(state.integration!.controller.getLayoutInput().explorerRequested, true, "Alt+E reopens it");
 	// Ctrl+Shift+E is the browser-safe alias: Chrome/Edge reserve Ctrl+T
 	// before the page can forward it. It arrives as a Kitty CSI-u sequence.
 	tui.press("\x1b[69;6u");
@@ -995,24 +993,24 @@ test("a fresh workspace persists the explorer open; an explicit stored false sta
 	await third.app.exit();
 });
 
-test("the shortcuts picker lists Ctrl+W, drops /attach and documents the split keys", async () => {
+test("the shortcuts picker lists single-key alternatives and documents the split keys", async () => {
 	const { app } = makeApp();
 	const items = (app as unknown as { shortcutItems(): Array<{ value: string; label: string; description?: string }> }).shortcutItems();
 	const values = items.map((item) => item.value);
 	assert.ok(values.includes("closetab"), "Ctrl+W row present");
-	assert.equal(values.includes("attach"), false, "/attach removed from the shortcut picker");
+	assert.ok(values.includes("attach"), "the new selection attachment shortcut is listed");
 	const closetab = items.find((item) => item.value === "closetab");
-	assert.equal(closetab?.label, "Ctrl+W / Ctrl+N then X - close tab");
+	assert.equal(closetab?.label, "Ctrl+W / Alt+X · close file tab");
 	const chatmax = items.find((item) => item.value === "chatmax");
-	assert.equal(chatmax?.label, "Ctrl+N then C chat · E editor · S split");
+	assert.equal(chatmax?.label, "Alt+1 chat · Alt+2 editor · Alt+3 split");
 	const intel = items.find((item) => item.value === "intel");
-	assert.match(intel?.description ?? "", /macOS input-source and Windows IME may steal Ctrl\+Space/, "the cross-platform Ctrl+Space caveat names the fallback");
+	assert.match(intel?.description ?? "", /input method captures Ctrl\+Space, use Alt\+I/);
 	assert.match(intel?.description ?? "", /\/editor complete/);
 	const wsroot = items.find((item) => item.value === "wsroot");
 	assert.match(wsroot?.description ?? "", /ratio\|side/, "workspace subcommands stay discoverable");
 });
 
-test("Ctrl+N then N cycles composer → editor → explorer and retargets TUI focus", async () => {
+test("Alt+Q cycles editor → explorer → composer and retargets TUI focus", async () => {
 	const { app, tui } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
@@ -1020,17 +1018,17 @@ test("Ctrl+N then N cycles composer → editor → explorer and retargets TUI fo
 	assert.equal(internals(app).activeRegion, "editor");
 	assert.equal(tui.focused, internals(app).integration?.pane, "editing focus moved to the pane");
 
-	// The first file reveals the explorer, so it is part of the cycle.
-	pressGuide(tui, "n");
+	pressAlt(tui, "e"); // the explorer is an explicit drawer
+	pressAlt(tui, "q");
 	assert.equal(internals(app).activeRegion, "explorer");
 	assert.notEqual(tui.focused, internals(app).integration?.pane);
 
-	pressGuide(tui, "n");
+	pressAlt(tui, "q");
 	assert.equal(internals(app).activeRegion, "chat-composer", "cycles back to the composer");
-	pressGuide(tui, "n");
+	pressAlt(tui, "q");
 	assert.equal(internals(app).activeRegion, "editor", "the editor follows the composer");
-	pressGuide(tui, "p");
-	assert.equal(internals(app).activeRegion, "chat-composer", "Ctrl+N then P cycles in reverse");
+	pressAlt(tui, "w");
+	assert.equal(internals(app).activeRegion, "chat-composer", "Alt+W cycles in reverse");
 	await app.exit();
 });
 
@@ -1764,7 +1762,7 @@ test("footer workspace hints appear with a live workspace and clear on close", a
 	await app.start();
 	await waitForWorkspace(app);
 	const footer = (app as unknown as { footer: { workspaceHints: string } }).footer;
-	assert.equal(footer.workspaceHints, "Ctrl+T / Ctrl+Shift+E explorer · Ctrl+N then T/C/E/S panes");
+	assert.equal(footer.workspaceHints, "Alt+E files · Alt+1/2/3 layout");
 	await runCommand({ name: "workspace", args: "close" }, app);
 	assert.equal(footer.workspaceHints, "", "closed workspace clears the hints");
 	await app.exit();
@@ -1887,6 +1885,7 @@ test("a populated docked explorer paints a bounded panel, never a full-page rect
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
 		await internals(app).openWorkspacePath("src/a.ts");
+		internals(app).shell.onWorkspaceExplorerToggle?.();
 		client.handlers.set("workspace.list", listMany(60));
 		const { explorerModel, explorerPane } = explorerInternals(app);
 		await explorerModel.reload("");
@@ -1905,7 +1904,7 @@ test("a populated docked explorer paints a bounded panel, never a full-page rect
 		const rendered = explorerPane.render(explorerWidth);
 		const panelRows = rendered.length;
 		const plain = rendered.map(stripTerminalSequences).join("\n");
-		assert.match(plain, /^workspace/m, "the header stays");
+		assert.match(plain, /^\s*workspace/m, "the header stays");
 		assert.match(plain, /\+\d+ more/, "hidden rows are disclosed, not dropped");
 		assert.ok(
 			panelRows <= LAYOUT_BUDGETS.explorerMaxTreeRows + 2,
@@ -1934,6 +1933,7 @@ test("a short docked explorer stays content-sized while its budget stays capped"
 	const { app, tui } = await bootFramed(160, 48);
 	try {
 		await internals(app).openWorkspacePath("src/a.ts");
+		internals(app).shell.onWorkspaceExplorerToggle?.();
 		tui.renderNow(true);
 		const layout = internals(app).workspaceLayout;
 		if (!layout?.explorer) assert.fail("the drawer is docked at 160 cols");

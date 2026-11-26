@@ -393,7 +393,7 @@ export class WorkspaceController {
 	private disposed = false;
 
 	// Layout intent (plan §7/§8).
-	private requestedMode: WorkspaceMode = "chat";
+	private requestedMode: WorkspaceMode = "split";
 	/** Mode a chat maximize restores to; only "split" | "editor" are non-chat. */
 	private restoreMode: "split" | "editor" = "split";
 	private splitRatioValue = 0.5;
@@ -1265,7 +1265,7 @@ export class WorkspaceController {
 	/** Adopt persisted layout intent (the app decides when); no document I/O. */
 	applyRestoredLayout(state: WorkspacePersistedState): void {
 		const restoringFiles = Array.isArray(state.openUris) && state.openUris.length > 0;
-		this.requestedMode = restoringFiles ? state.requestedMode : "chat";
+		this.requestedMode = restoringFiles ? state.requestedMode : "split";
 		this.splitRatioValue = clampSplitRatio(state.splitRatio);
 		this.explorerRequested = restoringFiles ? state.explorerRequested === true : false;
 		// Absent/unknown sides fall back to the default, never to the previous

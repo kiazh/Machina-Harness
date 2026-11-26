@@ -1,8 +1,4 @@
-// Full-screen live command center. Categories are real cards, not table
-// sections: each card owns its border, title and rows, and the selected row
-// expands its retained logs inside the same card. One column, centered on wide
-// terminals, so the page reads like a stack of bounded evidence panels instead
-// of a spreadsheet.
+// A live work index with a separate evidence view for the selected item.
 import {
 	Key,
 	matchesKey,
@@ -12,9 +8,12 @@ import {
 	type TUI,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
-import { renderCard } from "../design/box.ts";
-import { sanitizeDisplay } from "../design/text.ts";
-import { theme } from "../theme.ts";
+import { inspectLayout, selectionWindow } from "../design/inspect.ts";
+import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
+import { selectionBar, theme } from "../theme.ts";
+import { describeError, uiLog } from "../debug.ts";
+
+const log = uiLog.scope("status");
 
 export interface StatusRow {
 	/** Stable identity so refresh does not lose selection/expansion. */
@@ -22,12 +21,12 @@ export interface StatusRow {
 	label: string;
 	detail?: string;
 	state?: string;
-	running?: boolean;
 	/** ISO timestamp used for the updated column. */
 	updatedAt?: string;
-	project?: string;
 	/** Bounded local evidence shown under the selected row. */
 	logs?: string[];
+	/** Actual output when the retained log also contains setup and bookkeeping. */
+	preview?: string[];
 }
 
 export interface StatusSnapshot {
@@ -42,44 +41,24 @@ export interface StatusSnapshot {
 	approvals: number;
 	updatedAt: string;
 	error?: string;
-	project?: string;
-	running?: boolean;
 }
 
 type StatusFilter = "all" | "sessions" | "agents" | "shells" | "tools" | "mcp" | "harnesses";
 
 const FILTERS: ReadonlyArray<{ id: StatusFilter; label: string }> = [
-	{ id: "all", label: "ALL" },
-	{ id: "sessions", label: "SESSIONS" },
-	{ id: "agents", label: "AGENTS" },
-	{ id: "shells", label: "SHELLS" },
-	{ id: "tools", label: "TOOLS" },
+	{ id: "all", label: "All" },
+	{ id: "sessions", label: "Sessions" },
+	{ id: "agents", label: "Agents" },
+	{ id: "shells", label: "Shells" },
+	{ id: "tools", label: "Tools" },
 	{ id: "mcp", label: "MCP" },
-	{ id: "harnesses", label: "HARNESSES" },
+	{ id: "harnesses", label: "Harnesses" },
 ];
 
-interface ScreenLine {
-	text: string;
-	right?: string;
-	key?: string;
-	row?: StatusRow;
-	section?: string;
-	kind: "row" | "detail" | "empty";
-}
-
-interface StatusCard {
-	title: string;
-	/** Content lines as authored (before right-alignment). */
-	content: ScreenLine[];
-	/** Rendered card rows, already indented. */
-	rendered: string[];
-	/** Parallel to rendered: the content line for content rows. */
-	meta: Array<ScreenLine | undefined>;
-	/** First selectable key in the card (for border clicks). */
-	firstKey?: string;
-	hasSelection: boolean;
-	left: number;
-	width: number;
+interface ActivityEntry {
+	key: string;
+	row: StatusRow;
+	section: string;
 }
 
 interface Hitbox {
@@ -92,10 +71,10 @@ interface Hitbox {
 
 function stateStyle(state: string | undefined): (text: string) => string {
 	const value = (state ?? "").toLowerCase();
-	if (/(running|connected|ok|ready|active|approved|live)/.test(value)) return theme.success;
 	if (/(error|failed|denied|disconnected|offline)/.test(value)) return theme.error;
-	if (/(pending|queued|paused|starting|idle|inactive|disabled|installed)/.test(value)) return theme.warning;
-	return theme.dim;
+	if (/(pending|queued|paused|starting)/.test(value)) return theme.warning;
+	if (/\b(running|connected|ok|ready|active|approved|live|passed)\b/.test(value) && !/\bnot\b/.test(value)) return theme.success;
+	return theme.muted;
 }
 
 function between(left: string, right: string, width: number): string {
@@ -105,17 +84,8 @@ function between(left: string, right: string, width: number): string {
 	return `${first}${" ".repeat(gap)} ${truncateToWidth(right, width, "…")}`;
 }
 
-/** Keep a state chip beside the content, truncating the content first. */
-function withState(left: string, state: string, width: number): string {
-	const separator = `  ${theme.dim("·")} `;
-	const room = Math.max(0, width - visibleWidth(separator) - visibleWidth(state));
-	const first = truncateToWidth(left, room, "…");
-	return `${first}${separator}${state}`;
-}
-
-function centered(text: string, width: number): string {
-	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
-	return `${" ".repeat(pad)}${text}`;
+function lineText(text: string): string {
+	return sanitizeDisplay(text).replace(/\s+/g, " ").trim();
 }
 
 function age(iso: string | undefined): string {
@@ -129,14 +99,6 @@ function age(iso: string | undefined): string {
 	return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-function windowStartForBlock(start: number, end: number, height: number, length: number): number {
-	if (length <= height) return 0;
-	const blockHeight = Math.max(1, end - start);
-	if (blockHeight >= height) return Math.max(0, Math.min(start, length - height));
-	const preferred = start - Math.floor((height - blockHeight) / 2);
-	return Math.max(0, Math.min(length - height, preferred));
-}
-
 export class StatusPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => StatusSnapshot;
@@ -145,8 +107,10 @@ export class StatusPage implements Component {
 	private viewportRows: number | undefined;
 	private selectedKey: string | undefined;
 	private logScroll = 0;
+	private logPage = { size: 1, max: 0 };
 	private readonly expanded = new Set<string>();
 	private hitboxes: Hitbox[] = [];
+	private wheelRegions: Array<{ x: number; width: number; y0: number; y1: number; kind: "list" | "detail" }> = [];
 
 	constructor(
 		tui: TUI,
@@ -162,16 +126,13 @@ export class StatusPage implements Component {
 		this.viewportRows = rows;
 	}
 
-	enter(_direction?: 1 | -1): void {
-		this.tui.requestRender();
-	}
-
 	dispose(): void {
-		this.hitboxes = [];
+		this.invalidate();
 	}
 
 	invalidate(): void {
 		this.hitboxes = [];
+		this.wheelRegions = [];
 	}
 
 	handleInput(data: string): boolean {
@@ -229,6 +190,27 @@ export class StatusPage implements Component {
 	}
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; focus?: boolean; render?: boolean } | undefined {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? 0;
+			if (!delta) return undefined;
+			const region = this.wheelRegions.find(area =>
+				event.x >= area.x && event.x < area.x + area.width && event.y >= area.y0 && event.y < area.y1);
+			if (!region) return undefined;
+			if (region.kind === "list") {
+				this.moveSelection(delta > 0 ? "\x1b[B" : "\x1b[A");
+				return { handled: true, render: true };
+			}
+			if (this.selectedKey && !this.expanded.has(this.selectedKey) && delta > 0) {
+				this.expanded.add(this.selectedKey);
+				this.logScroll = 0;
+			} else if (this.scrollSelectedLogs(delta > 0 ? 1 : -1)) {
+				// Paged the retained output.
+			} else {
+				return undefined;
+			}
+			this.tui.requestRender();
+			return { handled: true, render: true };
+		}
 		if (event.type !== "click" || event.button !== "left") return undefined;
 		const hit = this.hitboxes.find(candidate =>
 			event.y === candidate.y && event.x >= candidate.x && event.x < candidate.x + candidate.width,
@@ -242,22 +224,24 @@ export class StatusPage implements Component {
 			return { handled: true, focus: true, render: true };
 		}
 		if (hit.key) {
-			this.selectedKey = hit.key;
-			if (this.expanded.has(hit.key)) this.expanded.delete(hit.key);
-			else this.expanded.add(hit.key);
+			if (this.selectedKey !== hit.key) {
+				this.selectedKey = hit.key;
+				this.logScroll = 0;
+			}
 			this.tui.requestRender();
 			return { handled: true, focus: true, render: true };
 		}
-		return { handled: true, focus: true };
+		return undefined;
 	}
 
 	render(width: number): string[] {
 		const columns = Math.max(1, width);
-		const rows = Math.max(8, this.viewportRows ?? this.tui.terminal.rows ?? 24);
+		const rows = Math.max(1, this.viewportRows ?? this.tui.terminal.rows ?? 24);
 		let lines: string[];
 		try {
 			lines = this.build(columns, rows);
 		} catch (error) {
+			log.error("render.failed", { error: describeError(error) });
 			lines = [
 				theme.error("Activity is unavailable."),
 				theme.dim(` ${error instanceof Error ? error.message : String(error)}`),
@@ -271,26 +255,23 @@ export class StatusPage implements Component {
 		const snap = this.snapshot();
 		const out: string[] = [];
 		const push = (line = ""): void => { out.push(line); };
-		const live = snap.running
-			? `${theme.success("●")} ${theme.success("live")}`
-			: `${theme.dim("○")} ${theme.dim("idle")}`;
-		const project = sanitizeDisplay(snap.project || "global");
 		push(between(
-			` ${theme.accentBold("ACTIVITY")}  ${theme.dim(`· ${project}`)}`,
-			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
+			`  ${theme.bold(theme.text("Recent work"))}`,
+			width >= 62 ? theme.muted(snap.updatedAt ? `Updated ${lineText(snap.updatedAt)}  ` : "Refreshing…  ") : "",
 			width,
 		));
 
-		const filters = FILTERS.map((entry) => {
+		const filters = FILTERS.map((entry, index) => {
 			const count = this.filterCount(snap, entry.id);
 			const active = entry.id === this.filter;
-			const plain = `${active ? "● " : "  "}${entry.label} ${count}`;
+			const short = width < 52 && rows < 14;
+			const name = short && entry.label.length > 5 ? entry.label.slice(0, 4) : entry.label;
+			const label = `${index + 1} ${name}${width >= 65 && count ? ` ${count}` : ""}`;
+			const plain = active ? `[${label}]` : ` ${label} `;
 			return {
 				entry,
 				plain,
-				text: active
-					? `${theme.accent("●")} ${theme.accentBold(entry.label)} ${theme.dim(String(count))}`
-					: `  ${theme.muted(entry.label)} ${theme.dim(String(count))}`,
+				text: active ? selectionBar(plain, visibleWidth(plain)) : theme.text(plain),
 			};
 		});
 		const filterRows: Array<{
@@ -301,17 +282,18 @@ export class StatusPage implements Component {
 		for (const piece of filters) {
 			const pieceWidth = visibleWidth(piece.plain);
 			let row = filterRows.at(-1);
-			const nextWidth = row ? row.plainWidth + 3 + pieceWidth : pieceWidth;
+			const nextWidth = row ? row.plainWidth + 1 + pieceWidth : pieceWidth;
 			if (!row || nextWidth > Math.max(1, width - 1)) {
 				row = { text: "", pieces: [], plainWidth: 0 };
 				filterRows.push(row);
 			}
-			const x = 1 + (row.pieces.length ? row.plainWidth + 3 : 0);
-			row.text += `${row.pieces.length ? "   " : ""}${piece.text}`;
-			row.plainWidth += (row.pieces.length ? 3 : 0) + pieceWidth;
+			const x = 1 + (row.pieces.length ? row.plainWidth + 1 : 0);
+			row.text += `${row.pieces.length ? " " : ""}${piece.text}`;
+			row.plainWidth += (row.pieces.length ? 1 : 0) + pieceWidth;
 			row.pieces.push({ entry: piece.entry.id, x, width: pieceWidth });
 		}
 		this.hitboxes = [];
+		this.wheelRegions = [];
 		const filterTop = out.length;
 		for (const [rowIndex, row] of filterRows.entries()) {
 			push(truncateToWidth(` ${row.text}`, width, "…", true));
@@ -325,262 +307,140 @@ export class StatusPage implements Component {
 			}
 		}
 		if (snap.error) {
-			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(sanitizeDisplay(snap.error))}`, width, "…", true));
+			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(lineText(snap.error))}`, width, "…", true));
 		}
-		push("");
+		if (rows >= 12) push("");
 
-		const headerRows = out.length;
-		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		let cards = this.buildCards(snap, width, bodyHeight);
-		const rowsInCards = cards.flatMap(card => card.content.filter(line => line.kind === "row" && line.key));
-		const before = this.selectedKey;
-		this.ensureSelection(rowsInCards);
-		if (this.selectedKey !== before) cards = this.buildCards(snap, width, bodyHeight);
-
-		if (!cards.length || !rowsInCards.length) {
-			const card = this.emptyCard(width, rowsInCards.length === 0 && cards.length > 0);
-			const top = Math.max(0, Math.floor((bodyHeight - card.length) / 2));
-			for (let index = 0; index < bodyHeight; index++) {
-				const line = card[index - top];
-				push(line ?? "");
+		const bottom = Math.max(out.length, rows - 1);
+		const bodyTop = out.length;
+		const height = Math.max(1, bottom - out.length);
+		const layout = inspectLayout(width, height);
+		const entries = this.rows(snap);
+		const selected = entries.find(item => item.key === this.selectedKey) ?? entries[0];
+		if (this.selectedKey !== selected?.key) this.logScroll = 0;
+		this.selectedKey = selected?.key;
+		if (!selected) {
+			push(`  ${theme.text(this.filter === "all" ? "No recent activity." : "No activity in this category.")}`);
+			push(`  ${theme.dim(this.filter === "all" ? "New sessions, tools and shell work appear here." : "Press 1 to see all activity.")}`);
+		} else {
+			const index: Array<ActivityEntry | string> = [];
+			for (const entry of entries) {
+				const previous = index.at(-1);
+				if (layout.split && (typeof previous === "string" || previous?.section !== entry.section)) index.push(entry.section);
+				index.push(entry);
 			}
-			push(truncateToWidth(
-				` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · PgUp/PgDn logs · Esc chat")}`,
-				width,
-				"…",
-				true,
-			));
-			return out.slice(0, rows);
-		}
-
-		const flat: string[] = [];
-		const meta: Array<{ line?: ScreenLine; key?: string; left: number; width: number }> = [];
-		const ranges: Array<{ start: number; end: number; key?: string }> = [];
-		for (const [cardIndex, card] of cards.entries()) {
-			if (cardIndex > 0) {
-				flat.push("");
-				meta.push({ left: 0, width });
-			}
-			const start = flat.length;
-			for (const [lineIndex, line] of card.rendered.entries()) {
-				flat.push(line);
-				const content = card.meta[lineIndex];
-				meta.push({
-					line: content,
-					key: content?.key ?? card.firstKey,
-					left: card.left,
-					width: card.width,
-				});
-			}
-			ranges.push({ start, end: flat.length, key: card.firstKey });
-		}
-
-		const selectedFlat = meta.findIndex(entry => entry.line?.kind === "row" && entry.line.key === this.selectedKey);
-		const selectedCard = ranges.find(range => selectedFlat >= range.start && selectedFlat < range.end)
-			?? ranges.find(range => range.key === cards.find(card => card.hasSelection)?.firstKey)
-			?? ranges[0]!;
-		const offset = windowStartForBlock(selectedCard.start, selectedCard.end, bodyHeight, flat.length);
-		for (let index = 0; index < bodyHeight; index++) {
-			const lineIndex = offset + index;
-			const line = flat[lineIndex];
-			if (line === undefined) {
-				push("");
-				continue;
-			}
-			push(truncateToWidth(line, width));
-			const info = meta[lineIndex];
-			if (info?.key) {
-				this.hitboxes.push({
-					x: info.left,
-					width: info.width,
-					y: headerRows + index,
-					key: info.key,
-				});
+			const start = selectionWindow(index.indexOf(selected), layout.listRows, index.length);
+			const list = index.slice(start, start + layout.listRows);
+			const gap = layout.split || height <= 5 ? 0 : 1;
+			const detailHeight = Math.max(1, height - (layout.split ? 0 : list.length + gap));
+			const detail = this.detail(selected, layout.detailWidth, detailHeight, !layout.split);
+			const listRow = (offset: number, y: number): string => {
+				const line = list[offset];
+				if (!line) return "";
+				if (typeof line === "string") return theme.bold(theme.text(` ${line}`));
+				this.hitboxes.push({ x: layout.inset, width: layout.listWidth, y, key: line.key });
+				const current = line === selected;
+				const state = lineText(line.row.state ?? "");
+				const label = between(`${current ? "❯" : " "} ${lineText(line.row.label)}`,
+					current ? state : stateStyle(line.row.state)(state), layout.listWidth);
+				return current ? selectionBar(label, layout.listWidth) : theme.text(label);
+			};
+			const listBottom = layout.split ? bottom : Math.min(bottom, bodyTop + list.length);
+			this.wheelRegions = layout.split
+				? [
+					{ x: layout.inset, width: layout.listWidth, y0: bodyTop, y1: bottom, kind: "list" },
+					{ x: layout.inset + layout.listWidth + 3, width: layout.detailWidth, y0: bodyTop, y1: bottom, kind: "detail" },
+				]
+				: [
+					{ x: layout.inset, width: layout.listWidth, y0: bodyTop, y1: listBottom, kind: "list" },
+					{ x: layout.inset, width: layout.listWidth, y0: listBottom, y1: bottom, kind: "detail" },
+				];
+			if (layout.split) {
+				for (let i = 0; i < height; i++) push(layout.combine(listRow(i, out.length), detail[i]));
+			} else {
+				for (let i = 0; i < list.length; i++) push(layout.combine(listRow(i, out.length)));
+				if (gap) push("");
+				for (const line of detail) if (out.length < bottom) push(layout.combine("", line));
 			}
 		}
-		push(truncateToWidth(
-			` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · PgUp/PgDn logs · Esc chat")}`,
-			width,
-			"…",
-			true,
-		));
-		return out.slice(0, rows);
+		while (out.length < bottom) push("");
+		const help = selected?.row.logs?.length ? "↑↓ Select   Space Output   PgUp/PgDn Read" : "↑↓ Select   Enter Open";
+		push(`  ${theme.muted(`${help}   ? Keys`)}`);
+		return out;
 	}
 
-	private buildCards(snap: StatusSnapshot, width: number, bodyHeight?: number): StatusCard[] {
-		const all = this.filter === "all";
-		const sections: Array<{ title: string; entries: StatusRow[]; empty: string; category: StatusFilter }> = [];
-		if (all || this.filter === "sessions") {
-			sections.push({ title: "Sessions", entries: snap.sessions ?? [], empty: "No persisted sessions yet.", category: "sessions" });
+	private detail(entry: ActivityEntry, width: number, height: number, stacked: boolean): string[] {
+		const row = entry.row;
+		const updated = age(row.updatedAt);
+		const name = lineText(row.label);
+		const titles = wrapDisplay(name, Math.min(width, 80)).slice(0, height >= 8 ? 2 : 1);
+		const lines = titles.map(title => theme.bold(theme.text(title)));
+		if (height >= 3) {
+			const state = stateStyle(row.state)(lineText(row.state ?? "unknown"));
+			lines.push(`${stacked ? `${theme.muted(entry.section)} · ` : ""}${state}${updated ? theme.muted(` · ${updated}`) : ""}`);
 		}
-		if (all || this.filter === "agents") {
-			sections.push({ title: "Agents", entries: snap.agents, empty: "No active agents.", category: "agents" });
+		if (row.detail && height >= 6) lines.push(theme.text(lineText(row.detail)));
+		const logs = row.logs ?? [];
+		if (!logs.length) {
+			this.logPage = { size: 1, max: 0 };
+			if (height >= 5) lines.push("", theme.muted("No additional details."));
+			return lines;
 		}
-		if (all || this.filter === "shells") {
-			sections.push({ title: "Shells", entries: snap.shells, empty: "No foreground or background shells.", category: "shells" });
+		const expanded = this.expanded.has(entry.key);
+		const output = Boolean(row.preview) || entry.section === "Shells";
+		const heading = output ? (expanded ? "Retained output" : "Output preview") : "Details";
+		if (height - lines.length >= 5) lines.push("", theme.bold(theme.text(heading)));
+		const source = !expanded && row.preview ? row.preview : logs;
+		const capacity = Math.max(1, height - lines.length);
+		const wrapped: string[] = [];
+		for (const raw of source) {
+			wrapped.push(...wrapDisplay(raw, width));
+			if (!expanded && wrapped.length > Math.min(3, capacity)) break;
 		}
-		if (all || this.filter === "tools") {
-			sections.push({ title: "Tools", entries: snap.tools, empty: "No recent tool calls.", category: "tools" });
+		if (!wrapped.length) {
+			lines.push(theme.muted("No output yet. Space shows details."));
+			return lines;
 		}
-		if (all || this.filter === "mcp") {
-			sections.push({ title: "MCP", entries: snap.mcp, empty: "No MCP servers configured.", category: "mcp" });
-		}
-		if (all || this.filter === "harnesses") {
-			sections.push({ title: "Harnesses", entries: snap.harnesses, empty: "No external harnesses detected.", category: "harnesses" });
-		}
-		if (all && (snap.queued > 0 || snap.approvals > 0)) {
-			sections.push({
-				title: "Queue",
-				entries: [{
-					id: "queue:summary",
-					label: "queued guidance",
-					detail: `${snap.queued} · pending approvals ${snap.approvals}`,
-					state: snap.queued ? "queued" : "idle",
-					logs: [`Queued guidance: ${snap.queued}`, `Pending approvals: ${snap.approvals}`],
-				}],
-				empty: "No queued guidance.",
-				category: "all",
-			});
-		}
-
-		const cardWidth = Math.max(24, width - 4);
-		const left = 2;
-		const inner = Math.max(12, cardWidth - 6);
-		const cards: StatusCard[] = [];
-		for (const section of sections) {
-			if (all && section.entries.length === 0) continue;
-			const content: ScreenLine[] = [];
-			if (!section.entries.length) {
-				content.push({ text: `${theme.dim(section.empty)}`, kind: "empty" });
-			}
-			for (const [index, entry] of section.entries.entries()) {
-				const key = entry.id ?? `${section.category}:${index}:${entry.label}`;
-				const selected = key === this.selectedKey;
-				const expanded = this.expanded.has(key);
-				const marker = entry.running ? theme.success("●") : theme.dim("○");
-				const detail = entry.detail ? theme.muted(`  ${sanitizeDisplay(entry.detail)}`) : "";
-				const state = sanitizeDisplay(entry.state || "—");
-				const updated = age(entry.updatedAt);
-				const stateText = `${stateStyle(entry.state)(state)}${updated ? ` ${theme.dim(`· ${updated}`)}` : ""}`;
-				const arrow = entry.logs?.length
-					? (expanded ? theme.accent(" ▾") : theme.dim(" ▸"))
-					: "";
-				content.push({
-					text: withState(
-						` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}${arrow}`,
-						stateText,
-						inner,
-					),
-					key,
-					row: entry,
-					section: section.title,
-					kind: "row",
-				});
-				if (!selected) continue;
-				const logs = entry.logs ?? [];
-				if (expanded) {
-					const budget = bodyHeight === undefined
-						? 40
-						: Math.max(1, Math.min(40, bodyHeight - 8 - (section.entries.length - 1)));
-					const maxStart = Math.max(0, logs.length - budget);
-					this.logScroll = Math.min(this.logScroll, maxStart);
-					const start = this.logScroll;
-					const shown = logs.slice(start, start + budget);
-					if (start > 0) {
-						content.push({ text: `  ${theme.dim(`↑ ${start} earlier · PgUp`)}`, kind: "detail" });
-					}
-					for (const log of shown) {
-						for (const part of sanitizeDisplay(log).split("\n")) {
-							content.push({
-								text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
-								kind: "detail",
-							});
-						}
-					}
-					const later = logs.length - start - shown.length;
-					if (later > 0) {
-						content.push({ text: `  ${theme.dim(`↓ ${later} later · PgDn`)}`, kind: "detail" });
-					}
-				} else {
-					const shown = logs.slice(0, 1);
-					for (const log of shown) {
-						for (const part of sanitizeDisplay(log).split("\n")) {
-							content.push({
-								text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
-								kind: "detail",
-							});
-						}
-					}
-					const remaining = logs.length - shown.length;
-					if (remaining > 0) {
-						const last = content.at(-1);
-						if (last) last.text += `  ${theme.dim(`· +${remaining} more`)}`;
-					}
-				}
-			}
-			const hasSelection = content.some(line => line.kind === "row" && line.key === this.selectedKey);
-			const renderedCard = renderCard(
-				content.map(line => line.right ? between(line.text, line.right, inner) : line.text),
-				{
-					width: cardWidth,
-					title: `${section.title} · ${section.entries.length}`,
-					paddingX: 2,
-					paddingY: false,
-					fill: hasSelection ? "toolBg" : "assistantBg",
-					titleTone: hasSelection ? theme.accentBold : theme.muted,
-				},
-			);
-			const rendered = renderedCard.map(line => `${" ".repeat(left)}${line}`);
-			const meta: Array<ScreenLine | undefined> = [undefined, ...content, undefined];
-			cards.push({
-				title: section.title,
-				content,
-				rendered,
-				meta,
-				firstKey: content.find(line => line.key)?.key,
-				hasSelection,
-				left,
-				width: cardWidth,
-			});
-		}
-		return cards;
-	}
-
-	private emptyCard(width: number, filtered: boolean): string[] {
-		const cardWidth = Math.max(24, Math.min(76, width - 4));
-		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
-		const lines = filtered
-			? [theme.dim("No activity matches this filter."), "", theme.dim("Choose another category, or press 1 for everything.")]
-			: [theme.text("Nothing running."), "", theme.dim("Send a prompt, start a shell, or connect an MCP server.")];
-		return renderCard(lines.map(line => centered(line, cardWidth - 6)), {
-			width: cardWidth,
-			title: "Activity",
-			paddingX: 2,
-			paddingY: true,
-			fill: "assistantBg",
-		}).map(line => `${" ".repeat(left)}${line}`);
+		const more = wrapped.length > Math.min(3, capacity) || Boolean(row.preview);
+		const spaceForLogs = Math.max(1, capacity - Number(expanded ? wrapped.length > Math.min(40, capacity) : more));
+		const size = expanded ? Math.min(40, spaceForLogs) : Math.min(3, spaceForLogs);
+		const max = expanded ? Math.max(0, wrapped.length - size) : 0;
+		const first = expanded ? Math.min(this.logScroll, max) : 0;
+		this.logPage = { size, max };
+		lines.push(...wrapped.slice(first, first + size).map(line => theme.text(line)));
+		if (capacity > size && (expanded ? max > 0 : more)) lines.push(theme.muted(expanded
+			? `${first + 1}–${Math.min(first + size, wrapped.length)} of ${wrapped.length} lines · PgUp/PgDn`
+			: row.preview ? "Space shows full details" : "More lines · Space to expand"));
+		return lines;
 	}
 
 	/** Selectable rows in reading order (shared by keys and the viewport). */
-	private rows(): ScreenLine[] {
-		return this.buildCards(this.snapshot(), this.tui.terminal.columns ?? 80)
-			.flatMap(card => card.content)
-			.filter(line => line.kind === "row" && line.key);
-	}
-
-	private ensureSelection(rows: ScreenLine[]): void {
-		const keys = rows.flatMap(line => line.key ? [line.key] : []);
-		if (!keys.length) {
-			this.selectedKey = undefined;
-			return;
+	private rows(snap = this.snapshot()): ActivityEntry[] {
+		const groups = [
+			["sessions", "Sessions", snap.sessions ?? []],
+			["agents", "Agents", snap.agents],
+			["shells", "Shells", snap.shells],
+			["tools", "Tools", snap.tools],
+			["mcp", "MCP", snap.mcp],
+			["harnesses", "Harnesses", snap.harnesses],
+		] as const;
+		const entries: ActivityEntry[] = groups.flatMap(([filter, section, items]) => this.filter === "all" || this.filter === filter
+			? items.map((row, i) => ({ key: row.id ?? `${filter}:${i}:${row.label}`, row, section }))
+			: []);
+		if (this.filter === "all" && (snap.queued || snap.approvals)) {
+			entries.push({ key: "queue:summary", section: "Queue", row: {
+				label: "queued guidance", state: "queued",
+				logs: [`Queued guidance: ${snap.queued}`, `Pending approvals: ${snap.approvals}`],
+			} });
 		}
-		if (!this.selectedKey || !keys.includes(this.selectedKey)) this.selectedKey = keys[0];
+		return entries;
 	}
 
 	selectDefault(): void {
 		const rows = this.rows();
 		this.selectedKey = rows.find(line => line.key && !line.key.startsWith("queue:"))?.key
 			?? rows.find(line => line.key)?.key;
+		this.logScroll = 0;
 		this.tui.requestRender();
 	}
 
@@ -589,16 +449,17 @@ export class StatusPage implements Component {
 		this.logScroll = 0;
 	}
 
-	private logBudget(): number {
-		return Math.max(1, Math.min(40, (this.viewportRows ?? this.tui.terminal.rows ?? 24) - 12));
-	}
-
 	private scrollSelectedLogs(direction: 1 | -1): boolean {
 		const selected = this.rows().find(line => line.key === this.selectedKey);
-		const logs = selected?.row?.logs ?? [];
-		if (!selected?.key || !this.expanded.has(selected.key) || logs.length <= this.logBudget()) return false;
-		const max = Math.max(0, logs.length - this.logBudget());
-		this.logScroll = Math.max(0, Math.min(max, this.logScroll + direction * this.logBudget()));
+		if (!selected?.row.logs?.length) return false;
+		if (!this.expanded.has(selected.key)) {
+			if (direction === 1) {
+				this.expanded.add(selected.key);
+				return true;
+			}
+			return false;
+		}
+		this.logScroll = Math.max(0, Math.min(this.logPage.max, this.logScroll + direction * this.logPage.size));
 		return true;
 	}
 

@@ -419,7 +419,7 @@ test("openWorkspace mints the identity, persists intent and restore round-trips"
 
 	h.controller.setMode("editor");
 	h.controller.setRatio(0.62);
-	assert.equal(h.controller.getLayoutInput().explorerRequested, false, "fresh intent stays chat-first");
+	assert.equal(h.controller.getLayoutInput().explorerRequested, false, "the explorer stays an explicit drawer");
 	h.controller.toggleExplorer();
 	await delay(60);
 	assert.equal(h.persistence.saves.length, 2, "meaningful changes coalesce into one debounced save");
@@ -520,7 +520,7 @@ test("a failed workspace open notifies and leaves the controller usable", async 
 	assert.equal(identity, undefined);
 	assert.equal(h.controller.phase, "closed");
 	assert.ok(h.notices.some((notice) => notice.kind === "error" && notice.text.includes("backend offline")));
-	assert.equal(h.controller.getLayoutInput().requestedMode, "chat");
+	assert.equal(h.controller.getLayoutInput().requestedMode, "split");
 	assert.equal((await h.controller.openUri(fileUri("a.ts"))).status, "no-workspace");
 	await h.controller.dispose();
 });
@@ -820,7 +820,6 @@ test("tab overflow evicts the oldest clean tab and releases its document", async
 	}
 	assert.equal(h.tabs.count(), WORKSPACE_MAX_OPEN_TABS);
 	assert.equal(h.store.documents().length, WORKSPACE_MAX_OPEN_TABS, "evicted buffers are closed");
-	assert.equal(h.controller.getLayoutInput().explorerRequested, true, "the first file reveals the tree");
 	const evictedUri = fileUri("tab-0.ts");
 	assert.ok(
 		h.gateway.callsOf("workspace.documentClose").some((call) => call.params.uri === evictedUri),

@@ -126,12 +126,11 @@ test("? opens shortcuts on an empty composer and Esc restores input", async (t) 
 	assert.equal(requests.filter(method => method === "prompt.submit").length, 1);
 });
 
-test("Ctrl+N then H opens shortcuts without erasing a draft and ? stays text inside forms", async (t) => {
+test("Alt+H opens shortcuts without erasing a draft and ? stays text inside forms", async (t) => {
 	const { app, tui, type } = await boot();
 	t.after(() => app.exit());
 	type("A question?");
-	type("\x0e");
-	type("h");
+	type("\x1bh");
 	tui.renderNow(true);
 	assert.match(tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Keyboard shortcuts/);
 	type("\x1b");
@@ -160,7 +159,7 @@ test("shortcuts keep their close controls visible in a small terminal", async (t
 	tui.renderNow(true);
 	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
 	assert.match(screen, /Keyboard shortcuts/);
-	assert.match(screen, /enter\/esc close/);
+	assert.match(screen, /Enter\/Esc close/);
 	type("\x1b");
 });
 
@@ -419,9 +418,9 @@ test("the status tab takes over the full viewport", async (t) => {
 	tui.renderNow(true);
 	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
 	assert.match(screen, / MACHINA/);
-	assert.match(screen, /ACTIVITY/);
-	assert.match(screen, /AGENTS/);
-	assert.match(screen, /HARNESSES/);
+	assert.match(screen, /Recent work/);
+	assert.match(screen, /3 Agents/);
+	assert.match(screen, /7 Harnesses/);
 });
 
 test("a structured question renders its options and sends the selected answer", async (t) => {

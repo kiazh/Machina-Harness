@@ -25,7 +25,7 @@ test("activity empty guidance explains how to create activity", () => {
 	assert.match(empty, /Press Enter while a reply is running/);
 	assert.match(empty, /long-running command/);
 	assert.match(empty, /\/delegate <task>/);
-	assert.match(empty, /Ctrl\+N then A/);
+	assert.match(empty, /Alt\+←/);
 
 	const noSession = activityEmptyGuidance(false);
 	assert.match(noSession, /No active session/);

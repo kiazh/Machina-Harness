@@ -15,6 +15,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from machina.core.config import config
+
+logger = logging.getLogger(__name__)
 
 SNAPSHOT_VERSION = 1
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -917,9 +920,16 @@ MAX_FILE_DIFF_BYTES = 120 * 1024
 
 
 def diff_files(
-    payload: dict[str, Any], *, max_chars: int = MAX_DIFF_BYTES
+    payload: dict[str, Any],
+    *,
+    max_chars: int = MAX_DIFF_BYTES,
+    path: str | None = None,
 ) -> dict[str, Any]:
-    """Bounded per-file diffs for the Changes inspector."""
+    """Bounded per-file diffs for the Changes inspector.
+
+    ``path`` selects one file before the byte budget is applied, so a large
+    earlier file in the same prompt cannot hide a later one.
+    """
     workspace = Path(str(payload.get("workspace") or ""))
     files: list[dict[str, Any]] = []
     total = 0
@@ -931,6 +941,8 @@ def diff_files(
         if target is None:
             continue
         relative = _relative(target, workspace)
+        if path is not None and relative != path:
+            continue
         if raw.get("binary"):
             files.append(
                 {
@@ -964,12 +976,29 @@ def diff_files(
             }
         )
         total += len(text)
+    if truncated:
+        logger.debug(
+            "diff_files truncated files=%d total=%d max=%d path=%s",
+            len(files),
+            total,
+            max_chars,
+            path or "-",
+        )
     return {
         "files": files,
         "truncated": truncated,
         "totalChars": total,
         "maxChars": max_chars,
     }
+
+
+def _stat_int(value: Any, fallback: int = 0) -> int:
+    """Manifests are user-editable files; bad counters must not break the list."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(0, parsed)
 
 
 def summarize(payload: dict[str, Any]) -> dict[str, Any]:
@@ -989,8 +1018,8 @@ def summarize(payload: dict[str, Any]) -> dict[str, Any]:
             change = "added" if not raw.get("existed") else "modified"
         if change == "unchanged":
             continue
-        file_additions = int(raw.get("additions") or 0)
-        file_deletions = int(raw.get("deletions") or 0)
+        file_additions = _stat_int(raw.get("additions"))
+        file_deletions = _stat_int(raw.get("deletions"))
         additions += file_additions
         deletions += file_deletions
         files.append(
@@ -1005,9 +1034,9 @@ def summarize(payload: dict[str, Any]) -> dict[str, Any]:
     recorded_stats = payload.get("stats")
     if isinstance(recorded_stats, dict):
         stats = {
-            "files": int(recorded_stats.get("files") or len(files)),
-            "additions": int(recorded_stats.get("additions") or additions),
-            "deletions": int(recorded_stats.get("deletions") or deletions),
+            "files": _stat_int(recorded_stats.get("files")) or len(files),
+            "additions": _stat_int(recorded_stats.get("additions")) or additions,
+            "deletions": _stat_int(recorded_stats.get("deletions")) or deletions,
         }
     else:
         stats = {"files": len(files), "additions": additions, "deletions": deletions}
@@ -1058,6 +1087,7 @@ def undo_snapshot(
         elif target.exists():
             target.unlink()
         restored.append(str(target))
+    logger.debug("undo_snapshot files=%d skipped=%d", len(restored), len(entries) - len(restored))
     return restored
 
 

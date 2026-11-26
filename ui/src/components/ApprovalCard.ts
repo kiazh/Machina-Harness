@@ -1,12 +1,12 @@
 // Exact approval review: a dedicated bounded bordered widget — never a
 // warning dump plus a generic picker. Shows the sanitized argv with argument
 // boundaries, session/turn/request binding, cwd, timeout, capabilities,
-// network, content identity and bounded evidence. Deny is selected first.
+// network, content identity and bounded evidence. Allow once is selected first.
 // Allow options are refused while critical fields do not fit.
 
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import { sanitizeDisplay } from "../design/text.ts";
-import { selectionBar, theme } from "../theme.ts";
+import { isOpaqueBackground, selectionBar, surfaceLine, theme } from "../theme.ts";
 import { renderCard } from "../design/box.ts";
 import { panelInset } from "../design/spacing.ts";
 import { DiffBlock } from "./DiffBlock.ts";
@@ -14,6 +14,11 @@ import { DiffBlock } from "./DiffBlock.ts";
 /** One physical row for identity fields that must never split the frame. */
 function oneLine(text: string): string {
 	return sanitizeDisplay(text).replace(/\s*\r?\n\s*/g, " ").trim();
+}
+
+/** Collapse embedded newlines without trimming indentation. */
+function flatLine(text: string): string {
+	return sanitizeDisplay(text).replace(/\s*\r?\n\s*/g, " ").replace(/\s+$/, "");
 }
 
 export interface ApprovalDetails {
@@ -36,7 +41,6 @@ export interface ApprovalDetails {
 	contentLength?: number;
 	fileDiff?: { diff?: string; truncated?: boolean };
 	durable?: boolean | null;
-	status?: string;
 }
 
 export interface ApprovalDecision {
@@ -62,7 +66,7 @@ export class ApprovalCard implements Component {
 	private recorded = "needs approval";
 	private readonly tui: TUI | undefined;
 	private readonly onDecision?: (decision: ApprovalDecision) => void;
-	private selected = 2;
+	private selected = 0;
 	private evidenceTop = 0;
 	private resolving = false;
 	private error = "";
@@ -86,7 +90,7 @@ export class ApprovalCard implements Component {
 	}
 
 	setError(message: string): void {
-		this.error = sanitizeDisplay(message);
+		this.error = flatLine(message);
 		this.resolving = false;
 	}
 
@@ -164,7 +168,9 @@ export class ApprovalCard implements Component {
 			if (clean(d.contentPreview).split("\n").length > 6) rows.push("  … preview truncated");
 		}
 		if (d.durable === false) rows.push("! Local-only approval (database unavailable); cross-worker guarantees are degraded.");
-		return rows.map((line) => clean(line));
+		// No rendered evidence row may carry a newline: it would paint extra
+		// terminal rows and break the dock's height math.
+		return rows.map(flatLine);
 	}
 
 	render(width: number): string[] {
@@ -223,12 +229,12 @@ export class ApprovalCard implements Component {
 	};
 
 	setRecorded(status: string): void {
-		this.recorded = sanitizeDisplay(status);
+		this.recorded = flatLine(status);
 	}
 
 	private renderEvidence(width: number): string[] {
 		const indentWidth = panelInset(width);
-		const cardWidth = Math.max(24, Math.min(104, width - indentWidth));
+		const cardWidth = Math.max(1, Math.min(104, width - indentWidth));
 		const content = Math.max(8, cardWidth - 6);
 		const d = this.details;
 		const title = `${theme.warning("●")} ${theme.text(oneLine(d.tool ?? d.operation))} ${theme.muted(oneLine(d.target))} ${theme.dim("·")} ${theme.warning(this.recorded)}`;
@@ -254,7 +260,7 @@ export class ApprovalCard implements Component {
 			titleTone: theme.muted,
 		});
 		const indent = " ".repeat(indentWidth);
-		return ["", ...card.map(line => `${indent}${line}`)];
+		return ["", ...card.map(line => truncateToWidth(`${indent}${line}`, width, "", true))];
 	}
 
 	private renderDock(width: number): string[] {
@@ -264,54 +270,47 @@ export class ApprovalCard implements Component {
 		const tight = this.lastRows <= 10;
 		const blocked = this.isAllowBlocked();
 		const question = `Allow ${oneLine(this.details.tool ?? this.details.operation)} · ${oneLine(this.details.target)}?`;
-		const request = `request: ${oneLine(this.details.requestId).slice(0, 16)}`;
 		const descriptions = ["Only this exact action", "Where supported by policy", "Do not run this action"];
-		const widthForChoices = tight ? width : Math.max(20, Math.min(112, width) - (compact ? 4 : 8));
+		const inner = Math.max(1, width - 2);
 		const choices = DECISIONS.map((option, index) => {
 			const mark = index === this.selected ? "›" : " ";
-			const description = !compact && widthForChoices >= 56 ? `  ${theme.dim(descriptions[index]!)}` : "";
-			const line = truncateToWidth(`${mark} ${option.label}${description}`, widthForChoices, "…", true);
-			return index === this.selected ? selectionBar(line, widthForChoices) : line;
+			const description = !compact && !tight && width >= 56 ? `  ${theme.dim(descriptions[index]!)}` : "";
+			const line = truncateToWidth(` ${mark} ${option.label}${description}`, inner, "…", true);
+			return index === this.selected ? selectionBar(line, inner) : theme.text(line);
 		});
 		const hint = this.resolving
 			? "Resolving…"
 			: blocked
 				? "Allow blocked · resize to review · Esc deny"
-				: "↑↓ choose · Enter select · Esc deny";
-		if (tight) {
-			const lines = [
-				theme.border("─".repeat(Math.max(0, width))),
-				truncateToWidth(question, width, "…", true),
-				...choices,
-				theme.dim(truncateToWidth(hint, width)),
-			];
-			return lines.map(line => truncateToWidth(line, width));
+				: "Enter confirm · ↑↓ choose · Esc deny · PgUp/PgDn evidence";
+		// A full-width dock immediately above the composer, never a floating
+		// box in the middle of the transcript. The request id stays visible so
+		// a queued request is identifiable while it waits.
+		const request = `request: ${truncateToWidth(oneLine(this.details.requestId), 16, "")}`;
+		const label = truncateToWidth(` Approval required · ${this.recorded}`, width, "…", true);
+		let heading = label;
+		if (width >= 72) {
+			const room = Math.max(1, inner - visibleWidth(request) - 1);
+			const clipped = truncateToWidth(` Approval required · ${this.recorded}`, room, "…", true);
+			heading = `${clipped}${" ".repeat(Math.max(1, room - visibleWidth(clipped) + 1))}${theme.muted(request)} `;
 		}
-		const cardWidth = Math.max(24, Math.min(width, 112));
-		const padX = compact ? 1 : 2;
-		const inner = Math.max(8, cardWidth - 2 - padX * 2);
-		const heading = truncateToWidth(question, inner, "…", true);
-		const room = Math.max(0, inner - visibleWidth(request) - 1);
-		const first = truncateToWidth(question, room, "…", true);
-		const headingLine = width >= 70
-			? `${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))} ${theme.dim(request)}`
-			: heading;
-		const lines: string[] = [
-			headingLine,
-			...choices,
-			"",
-			theme.dim(truncateToWidth(hint, inner)),
+		const body = [
+			surfaceLine(theme.text(truncateToWidth(` ${question}`, width, "…", true)), width, true),
+			...choices.map(line => surfaceLine(line, width, true)),
+			...(this.error ? [surfaceLine(` ${theme.error(truncateToWidth(this.error, Math.max(0, width - 1), "…"))}`, width, true)] : []),
+			surfaceLine(truncateToWidth(` ${theme.muted(hint)}`, width, "…"), width, true),
 		];
-		if (this.error) lines.splice(2, 0, theme.error(truncateToWidth(this.error, inner, "…")));
-		const card = renderCard(lines, {
-			width: cardWidth,
-			title: `Approval required · ${this.recorded}`,
-			paddingX: padX,
-			paddingY: false,
-			fill: "toolBg",
-		});
-		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
-		return card.map(line => `${" ".repeat(left)}${line}`);
+		if (!isOpaqueBackground()) {
+			// Transparent canvas: the same dock, drawn as a real box. Very narrow
+			// widths clip the frame rather than overflow the pane.
+			const title = truncateToWidth(` Approval required · ${this.recorded}`, Math.max(0, width - 4), "…", true);
+			const fill = Math.max(0, width - 4 - visibleWidth(title));
+			const top = `${theme.border("╭─")}${theme.bold(theme.warning(title))}${theme.border(`${"─".repeat(fill)}─╮`)}`;
+			const bottom = theme.border(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
+			return [truncateToWidth(top, width, "", true), ...body, truncateToWidth(bottom, width, "", true)];
+		}
+		const lines = [surfaceLine(theme.bold(theme.warning(heading)), width, true), ...body];
+		return tight ? lines : [...lines, surfaceLine("", width, true)];
 	}
 
 	invalidate(): void {}

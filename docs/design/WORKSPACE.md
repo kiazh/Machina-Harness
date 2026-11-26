@@ -34,23 +34,22 @@ language servers.
 
 | Key | Action | Fallback |
 |---|---|---|
-| Ctrl+P / Ctrl+N then O | Quick Open | `/quickopen` |
+| Ctrl+P / Alt+O | Quick Open | `/quickopen` |
 | Ctrl+S | Save the active document (compare-and-swap; conflicts are shown) | command palette |
-| Ctrl+Shift+A / Ctrl+N then V | Attach the editor selection to the next message | `/attach` |
-| Ctrl+Space / Ctrl+N then I | Completion | `/editor complete` |
-| Ctrl+N, then D / R | Definition / References | command palette |
-| Ctrl+N, then M | Rename preview (only where the server supports it; otherwise an honest notice) | — |
-| Ctrl+N, then N / P | Cycle focus: chat → editor → explorer → problems | commands |
-| Ctrl+N, then C / E / S | Maximize chat / maximize editor / restore the 50/50 split | `/workspace chat\|editor\|split` |
-| Ctrl+T / Ctrl+N then T | Toggle explorer (some terminals use Ctrl+T for a new tab; Ctrl+N then T is the fallback) | `/explorer` |
-| Ctrl+W / Ctrl+N then X | Close the active editor tab (dirty → Save/Discard/Cancel). **Not** bound in the chat composer, where it remains delete-word-backward | `/editor close` |
+| Alt+T / Ctrl+Shift+A | Attach the editor selection to the next message | `/attach` |
+| Ctrl+Space / Alt+I | Completion | `/editor complete` |
+| Alt+G / Alt+R | Definition / References | command palette |
+| Alt+M | Rename preview where supported by the language server | — |
+| Alt+Q / Alt+W | Cycle focus: chat → editor → explorer → problems | click the pane |
+| Alt+1 / Alt+2 / Alt+3 | Maximize chat / maximize editor / restore split | `/workspace chat\|editor\|split` |
+| Alt+E / Ctrl+T / Ctrl+Shift+E | Toggle explorer | `/explorer` |
+| Ctrl+W / Alt+X | Close the active editor tab (dirty → Save/Discard/Cancel). Ctrl+W still deletes a word in the composer. | `/editor close` |
 | Esc | Dismisses the top editor popup first; a second Esc stops a running turn | — |
 
-The pane commands work from either the composer or the editor: `Ctrl+N` then `C`
-maximizes chat, `E` brings the editor in, and `S` restores the split.
+The pane commands work from either the composer or the editor.
 `Ctrl+Left/Right` stays available for
 word motion in text fields. Editor word motion also works with `alt+arrows`.
-All shortcuts can be changed in `/settings` → Keyboard shortcuts. Some terminals intercept `Ctrl+W` (close tab/window), `Ctrl+T` (new tab), or `Ctrl+P` (command palette) before the app sees them; the `Ctrl+N`-prefixed forms and command fallbacks above always work. macOS may reserve `Ctrl+Space` for input-source switching and `Ctrl+Left/Right` for Mission Control; Windows IMEs may reserve `Ctrl+Space`. Use the prefixed forms or command fallbacks.
+Change shortcuts in `/settings` → Keyboard shortcuts. If a terminal or input method intercepts Ctrl shortcuts, use the listed alternatives. On macOS, Option shortcuts require the terminal to forward Option as Meta; command and mouse routes still work.
 
 ## Language servers
 

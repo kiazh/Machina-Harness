@@ -223,9 +223,10 @@ test("R4-094(c2) mouse clicks map through the composer window start", () => {
 	const rows = box.render(60).map(stripTerminalSequences);
 	const rowIndex = rows.findIndex((row) => row.includes("line8"));
 	assert.ok(rowIndex >= 0, "the target row is inside the window");
+	const x = rows[rowIndex]!.indexOf("line8") + 1;
 	const click = {
-		type: "click", button: "left", x: 5, y: rowIndex,
-		screenX: 5, screenY: rowIndex, width: 60, height: rows.length,
+		type: "click", button: "left", x, y: rowIndex,
+		screenX: x, screenY: rowIndex, width: 60, height: rows.length,
 		shift: false, alt: false, ctrl: false,
 	} as never;
 	box.handleMouse(click);

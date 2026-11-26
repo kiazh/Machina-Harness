@@ -249,7 +249,7 @@ test("(a) events for a hidden agent session are buffered and appear when switchi
 	assert.equal(internals(app).sessionTails.get(CHILD.id)?.blocks.length, 2, "deltas and tool are buffered while hidden");
 
 	// Ctrl+Shift+→ cycles to the child session.
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id, "cycle key switched to the child session");
 	tui.renderNow(true);
@@ -287,7 +287,7 @@ test("(b) buffered tail over fetched history has no duplicates", async (t) => {
 		toolCalls: 1,
 		cancelled: false,
 	});
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	tui.renderNow(true);
@@ -339,14 +339,14 @@ test("(d) Down on the empty composer opens the subagent menu with run state and 
 
 	// Give the child a live turn, then hide it again: the menu must show
 	// its run state while the main session stays visible.
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	// Delegated work is already running in the gateway; the child view is read-only.
 	internals(app).inFlight.add(CHILD.id);
 	await app.submitTurn("child task");
 	assert.equal(client.requests.some((request) => request.method === "prompt.submit"), false);
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, MAIN.id, "cycling wraps back to the main session");
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);
@@ -447,7 +447,7 @@ test("(f) session switching preserves in-flight guards and token totals", async 
 	await app.submitTurn("second main turn");
 	assert.equal(state.inFlight.has(MAIN.id), true);
 
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	assert.equal(state.inFlight.has(MAIN.id), true, "hidden in-flight guard survives the switch");
@@ -455,7 +455,7 @@ test("(f) session switching preserves in-flight guards and token totals", async 
 	assert.equal(state.sessionTokensById.get(MAIN.id), 42, "token totals survive the switch");
 	assert.equal(state.sessionTokensById.get(CHILD.id), undefined, "the child's token state is untouched");
 
-	type("\x0e"); type("k");
+	type("\x1bk");
 	await settle();
 	assert.equal(app.session()?.id, MAIN.id);
 	assert.equal(state.footer.tokens, 42, "returning restores the preserved total");
@@ -524,7 +524,7 @@ test("a live child appears as a running tab and streams into its inspection view
 	});
 	assert.equal(client.requests.filter((request) => request.method === "session.family").length, familyReads,
 		"streamed text does not poll the family catalog");
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	tui.renderNow(true);
 	assert.equal(app.session()?.id, CHILD.id);
@@ -554,23 +554,23 @@ test("a child paused for approval keeps its inspection tab", async (t) => {
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, false);
 });
 
-test("Ctrl+N then D closes the selected idle child and returns to main", async (t) => {
+test("Alt+0 closes the selected idle child and returns to main", async (t) => {
 	const { app, type } = await boot({
 		sessions: [MAIN, CHILD],
 		resume: [[CHILD.id, { session: CHILD, history: [] }], [MAIN.id, { session: MAIN, history: [] }]],
 	});
 	t.after(() => app.exit());
 	await settle();
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
-	type("\x0e"); type("d");
+	type("\x1b0");
 	await settle();
 	assert.equal(app.session()?.id, MAIN.id);
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id), undefined);
 });
 
-test("Ctrl+N then D leaves a running child tab open", async (t) => {
+test("Alt+0 leaves a running child tab open", async (t) => {
 	const { app, client, type } = await boot({
 		sessions: [MAIN, CHILD],
 		resume: [[CHILD.id, { session: CHILD, history: [] }], [MAIN.id, { session: MAIN, history: [] }]],
@@ -580,9 +580,9 @@ test("Ctrl+N then D leaves a running child tab open", async (t) => {
 	client.emit(MAIN.id, "parent-turn", {
 		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
 	});
-	type("\x0e"); type("j");
+	type("\x1bj");
 	await settle();
-	type("\x0e"); type("d");
+	type("\x1b0");
 	await settle();
 	assert.equal(app.session()?.id, CHILD.id);
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, true);

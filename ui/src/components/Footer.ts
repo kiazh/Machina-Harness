@@ -6,8 +6,8 @@
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { ICONS } from "../design/icons.ts";
 import { ACTIVITY_INTERVAL_MS, type AnimationCoordinator, type AnimationSubscription } from "../design/motion.ts";
-import { sanitizeDisplay } from "../design/text.ts";
-import { theme } from "../theme.ts";
+import { sanitizeLabelText } from "../design/text.ts";
+import { chromeInner, surfaceLine, theme } from "../theme.ts";
 
 /** Cooldown between learning acknowledgments (ms). */
 const GROWTH_COOLDOWN_MS = 30_000;
@@ -31,7 +31,7 @@ export class Footer implements Component {
 	/** Subagents in the visible session's family (0 hides the segment). */
 	subagents = 0;
 	/**
-	 * Workspace key hints (e.g. "Ctrl+T explorer · Ctrl+N then C/E/S panes"), set by
+	 * Workspace key hints (e.g. "Alt+E files · Alt+1/2/3 layout"), set by
 	 * the App only while the workspace is available. Hidden first when the
 	 * row runs out of room; compact viewports drop it entirely.
 	 */
@@ -152,27 +152,28 @@ export class Footer implements Component {
 			? theme.dim(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`)
 			: "";
 		const tail = `${status}${agents}${tokens}`;
-		const metadata = theme.dim(sanitizeDisplay([this.model, this.branch, this.mode].filter(Boolean).join(" · ")));
+		const metadata = theme.dim(sanitizeLabelText([this.model, this.branch, this.mode].filter(Boolean).join(" · ")));
 		const core = metadata ? `${metadata} ${theme.dim("·")} ${tail}` : tail;
-		const hint = this.keyHint ? theme.accent(this.keyHint) : theme.dim("? shortcuts · / commands");
-		const room = Math.max(0, width - 2);
+		const hint = this.keyHint ? theme.accent(sanitizeLabelText(this.keyHint)) : theme.dim("? shortcuts · / commands");
+		const fit = chromeInner(width);
+		const room = Math.max(0, fit - 2);
 		let left = core;
 		if (visibleWidth(left) > room) {
 			const budget = Math.max(0, room - visibleWidth(tail) - 3);
 			left = budget >= 4 ? `${truncateToWidth(metadata, budget)} / ${tail}` : truncateToWidth(tail, room);
 		}
-		const baseRight = !this.compact && visibleWidth(left) + visibleWidth(hint) + 5 <= width
+		const baseRight = !this.compact && visibleWidth(left) + visibleWidth(hint) + 5 <= fit
 			? `${hint}  ${square}` : square;
 		// Workspace hints sit before the shortcuts hint and are the first
 		// segment dropped when the row is too tight (plan §12 discoverability).
 		let right = baseRight;
 		if (this.workspaceHints && !this.compact) {
-			const ws = theme.dim(this.workspaceHints);
+			const ws = theme.dim(sanitizeLabelText(this.workspaceHints));
 			const withWs = `${ws} · ${baseRight}`;
-			if (visibleWidth(left) + visibleWidth(withWs) + 5 <= width) right = withWs;
+			if (visibleWidth(left) + visibleWidth(withWs) + 5 <= fit) right = withWs;
 		}
-		const gap = Math.max(0, width - visibleWidth(left) - visibleWidth(right));
-		return [truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width)];
+		const gap = Math.max(0, fit - visibleWidth(left) - visibleWidth(right));
+		return [surfaceLine(truncateToWidth(`${left}${" ".repeat(gap)}${right}`, fit), width)];
 	}
 
 	invalidate(): void {}

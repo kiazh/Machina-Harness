@@ -856,8 +856,6 @@ test("A03 F-30 returning to a session rehydrates approvals the UI never saw", as
 	client.responses.set("approvals.resolve", {});
 	const entry = approvalDialogsOf<{ card: { handleInput(data: string): void } }>(app).get("req-hydrate");
 	assert.ok(entry, "the rehydrated card is keyed by the row's request_id");
-	entry.card.handleInput("\x1b[A");
-	entry.card.handleInput("\x1b[A");
 	entry.card.handleInput("\r");
 	entry.card.handleInput("\r");
 	await drain();
@@ -883,7 +881,7 @@ test("A03 F-30 returning to a session rehydrates approvals the UI never saw", as
 	await app.exit();
 });
 
-test("A04 deliberate Allow sends one bound resolve, Deny is the safe default", async () => {
+test("A04 Enter allows once and sends one bound resolve", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	client.autoSubmit = { turnId: "t" };
@@ -892,8 +890,6 @@ test("A04 deliberate Allow sends one bound resolve, Deny is the safe default", a
 	client.emit(ev(SESSION_A.id, "t", { type: "message.start" }));
 	client.emit(approvalEvent(SESSION_A.id, "t"));
 	const card = approvalCard(app);
-	card.handleInput("\x1b[A");
-	card.handleInput("\x1b[A");
 	card.handleInput("\r");
 	card.handleInput("\r");
 	await Promise.resolve();

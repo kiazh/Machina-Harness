@@ -50,8 +50,19 @@ test("reference approval dock separates vertical choices from transcript evidenc
  const choices = ["Allow once", "Allow for this session", "Deny"].map(label => rows.findIndex(row => row.includes(label)));
  assert.ok(choices.every(i => i >= 0));
  assert.equal(new Set(choices).size, 3);
- assert.match(rows[choices[2]!]!, /›.*Deny/);
+  assert.match(rows[choices[0]!]!, /›.*Allow once/);
  assert.doesNotMatch(rows.join("\n"), /argv:|Capabilities:|┌/);
+});
+
+test("approval evidence never exceeds a narrow terminal", () => {
+	const card = new ApprovalCard(
+		{ requestId: "r", sessionId: "s", operation: "write_file", target: "install.sh", argv: [], cwd: "/repo", backend: "local", capabilities: [] },
+		{ docked: true } as ConstructorParameters<typeof ApprovalCard>[1],
+	);
+	for (const width of [8, 12, 20, 24, 40]) {
+		const rows = card.evidence.render(width);
+		assert.ok(rows.every(row => visibleWidth(row) <= width), `width ${width}: ${rows.map(visibleWidth).join(",")}`);
+	}
 });
 
 test("native approval frame docks controls above composer at 140x52, 80x24, and 40x9", async (t) => {
@@ -71,7 +82,7 @@ test("native approval frame docks controls above composer at 140x52, 80x24, and 
    if (rows! >= 24) assert.match(screen.join("\n"), /needs approval/);
    if (rows === 9) {
     assert.match(screen.join("\n"), /Allow blocked/);
-    fixture.type("\x1b[A"); fixture.type("\x1b[A"); fixture.type("\r");
+     fixture.type("\r");
     assert.equal(fixture.requests.filter(r => r.method === "approvals.resolve").length, 0, "unreviewable Allow stays blocked");
    }
    fixture.type("\x1b");
@@ -83,6 +94,21 @@ test("native approval frame docks controls above composer at 140x52, 80x24, and 
   } finally {await fixture.app.exit();}
  }
  t.diagnostic("Native pi-tui frames: reference layout plus clipped-terminal approval safety");
+});
+
+test("a fresh Enter allows only the active request, once", async () => {
+ const {referenceFixture} = await import("./support/reference.ts");
+ const fixture = await referenceFixture(80,24);
+ try {
+  fixture.emit(fixture.approval("second-request"));
+  fixture.type("\r");
+  await new Promise(resolve => setImmediate(resolve));
+  fixture.type("\x1b[13;1:2u");
+  const decisions = fixture.requests.filter(r => r.method === "approvals.resolve");
+  assert.deepEqual(decisions.map(r => r.params), [
+   {requestId:"demo-7f2a", sessionId:"reference-session", verdict:"approved", grant:"once"},
+  ]);
+ } finally {await fixture.app.exit();}
 });
 
 test("command strip tabs switch screens without leaving the shell", async () => {
@@ -97,8 +123,21 @@ test("command strip tabs switch screens without leaving the shell", async () => 
 		clickTab("Activity");
 		await new Promise(resolve => setImmediate(resolve));
 		fixture.tui.renderNow(true);
+		assert.equal((fixture.app as unknown as { view: string }).view, "status", "a pending approval never blocks navigation");
+		fixture.type("\x1b");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
+		assert.match(fixture.plain().join("\n"), /Allow write_file/, "returning to Chat restores the decision");
+		clickTab("Chat");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
+		assert.equal((fixture.app as unknown as { view: string }).view, "chat");
+		assert.match(fixture.plain().join("\n"), /Allow write_file/, "the decision is still waiting");
+		clickTab("Activity");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
 		assert.equal((fixture.app as unknown as { view: string }).view, "status");
-		assert.match(fixture.plain().join("\n"), /ACTIVITY/);
+		assert.match(fixture.plain().join("\n"), /Recent work/);
 		clickTab("Chat");
 		await new Promise(resolve => setImmediate(resolve));
 		fixture.tui.renderNow(true);
@@ -124,6 +163,79 @@ test("approval queue and externally resolved requests advance the dock without i
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(fixture.requests.at(-1)!.params, {requestId:"second-request", sessionId:"reference-session", verdict:"denied", grant:"once"});
  } finally {await fixture.app.exit();}
+});
+
+test("an approval arriving while on Activity does not steal its focus or hide Keys", async () => {
+	const { referenceFixture } = await import("./support/reference.ts");
+	const fixture = await referenceFixture();
+	try {
+		fixture.app.openStatus();
+		fixture.tui.renderNow(true);
+		const page = fixture.tui.getFocusedComponent();
+		fixture.emit(fixture.approval("late-approval"));
+		fixture.tui.renderNow(true);
+		assert.equal(fixture.tui.getFocusedComponent()?.constructor.name, page?.constructor.name);
+		fixture.type("?");
+		fixture.tui.renderNow(true);
+		assert.match(fixture.plain().join("\n"), /Keyboard shortcuts/);
+		fixture.type("\x1b");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
+		assert.equal(fixture.tui.getFocusedComponent()?.constructor.name, page?.constructor.name);
+	} finally {
+		await fixture.app.exit();
+	}
+});
+
+test("a hostile approval payload stays one row per row", async () => {
+	const { referenceFixture } = await import("./support/reference.ts");
+	const fixture = await referenceFixture();
+	try {
+		fixture.type("\x1b"); // deny the demo request, then deliver a hostile one
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.emit({
+			...fixture.approval("hostile-approval"),
+			tool: "write_file\nnext",
+			target: "install.sh\n\x1b[2Jowned",
+			argv: ["a\nb", "\x1b]0;title\x07"],
+		});
+		fixture.tui.renderNow(true);
+		const screen = fixture.plain();
+		assert.equal(screen.length, (fixture.tui.terminal as { rows: number }).rows, "the dock never changes the frame height");
+		// eslint-disable-next-line no-control-regex -- leaked control bytes are exactly what this asserts.
+		for (const line of screen) assert.doesNotMatch(line, /[\x00-\x1f\x7f]/, `control byte in ${JSON.stringify(line)}`);
+		assert.match(screen.join("\n"), /Allow write_file/);
+	} finally {
+		await fixture.app.exit();
+	}
+});
+
+test("malformed gateway frames never crash or open an unbound approval", async () => {
+	const { referenceFixture } = await import("./support/reference.ts");
+	const fixture = await referenceFixture();
+	try {
+		fixture.type("\x1b"); // deny the demo request first
+		await new Promise(resolve => setImmediate(resolve));
+		const frames: Array<Record<string, unknown>> = [
+			{ type: "tool.start" },
+			{ type: "tool.start", id: 7, name: null, args: 5 },
+			{ type: "tool.complete", id: 7, result: null },
+			{ type: "message.delta", text: null },
+			{ type: "message.complete", text: 42 },
+			{ type: "needs_approval" },
+			{ type: "permission.required", requestId: 42, sessionId: null },
+			{ type: "permission.resolved", requestId: 42 },
+			{ type: "error", message: null },
+		];
+		for (const frame of frames) {
+			assert.doesNotThrow(() => fixture.emit(frame), `frame ${String(frame.type)} must not crash the UI`);
+		}
+		fixture.tui.renderNow(true);
+		assert.equal(fixture.plain().length, (fixture.tui.terminal as { rows: number }).rows);
+		assert.doesNotMatch(fixture.plain().join("\n"), /Approval required/, "an unidentifiable frame never opens a card");
+	} finally {
+		await fixture.app.exit();
+	}
 });
 
 test("terminal completion retires unanswered approval controls without sending a decision", async () => {

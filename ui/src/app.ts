@@ -18,6 +18,7 @@ import {
 	type OverlayOptions,
 	type OverlayHandle,
 	type SelectItem,
+	truncateToWidth,
 	type TUI,
 } from "@earendil-works/pi-tui";
 import { ArgumentAwareAutocompleteProvider } from "./autocomplete.ts";
@@ -38,13 +39,14 @@ import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
-import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides } from "./keybindings.ts";
+import { APP_BINDINGS, AppKeybindings, effectiveShortcutRows, parseBindingOverrides, platformKeyLabel, type BindingOverrides } from "./keybindings.ts";
 import { KeybindingsDialog } from "./components/KeybindingsDialog.ts";
 import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
 import { loadKeyRows, redactSecret } from "./features/keys.ts";
 import { addProvider, removeProvider } from "./features/settings.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
-import { sanitizePastedText, wrapDisplay } from "./design/text.ts";
+import { sanitizePastedText } from "./design/text.ts";
+import { describeError, redactParamsForLog, uiLog } from "./debug.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
@@ -68,6 +70,7 @@ import type {
 	MCPServerView,
 	ProvidersListResult,
 	ReviewFindingInfo,
+	ReviewRunInfo,
 	ReviewRunResult,
 	InitializeResult,
 	ResumeResult,
@@ -125,6 +128,7 @@ export interface AppOptions {
 	provider?: string;
 	sessionId?: string;
 	mode?: string;
+	readClipboardImage?: () => Promise<ImageAttachment | null>;
 }
 
 /** The default profile (first-touch identity); maps to the shared agent. */
@@ -329,11 +333,17 @@ export class App implements FeatureHost {
 	private screenRefreshTimer: ReturnType<typeof setInterval> | undefined;
 	private statusRefreshing = false;
 	private changesTurns: ChangeTurnInfo[] = [];
-	private changesScope: "session" | "workspace" = "session";
 	private changesError = "";
-	private changesUpdatedAt = "";
 	private changesRefreshing = false;
+	private changesEpoch = 0;
+	/** Badge count for the command strip; never derived from off-screen page data. */
+	private changesCount = 0;
 	private readonly changesDiff = new Map<string, ChangesDiffState>();
+	/** Failures already handed to the chat, keyed by turn and message. */
+	private readonly handledErrors = new Set<string>();
+	/** Findings already handed to the chat, keyed `turnId:fingerprint`. */
+	private readonly sentFindings = new Map<string, { turnId: string; finding: ReviewFindingInfo; cleared?: boolean; queued?: boolean }>();
+	private readonly pendingFixes = new Set<string>();
 	private statusHarnesses: StatusRow[] = [];
 	private readonly harnessJobs = new Map<string, HarnessJobView>();
 	private statusMcp: StatusRow[] = [];
@@ -345,8 +355,6 @@ export class App implements FeatureHost {
 	private explorerBurstStartedAt = 0;
 	private explorerBurstCount = 0;
 	private explorerBurstKey = "";
-	private lastStatusSwitchAt = 0;
-	private lastStatusSwitchDirection: 1 | -1 | 0 = 0;
 	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
 	private readonly turnSession = new TurnSessionStore({
 		visibleSessionId: () => this.current?.id,
@@ -376,8 +384,13 @@ export class App implements FeatureHost {
 	});
 	/** Bounded retained tool outputs for /output inspection (all sessions). */
 	private readonly outputStore = new OutputStore();
-	private readonly dialogs: Array<{ handle: OverlayHandle; cancel: () => void }> = [];
+	private readonly dialogs: Array<{ handle: OverlayHandle; cancel: () => void; hidden: boolean }> = [];
 	private exiting = false;
+	private logValue: ReturnType<typeof uiLog.scope> | undefined;
+	/** Lazy so prototype-based tests and partially built instances stay safe. */
+	private get log() {
+		return (this.logValue ??= uiLog.scope("app"));
+	}
 	/** Gateway exit can arrive from both the error and exit events. */
 	private gatewayExitHandled = false;
 	/** Re-entrancy guard: a Down pressed while the subagent list is still
@@ -457,6 +470,12 @@ export class App implements FeatureHost {
 		this.transcript = new Transcript(this.transcriptView, new ThinkingIndicator(this.coordinator), this.coordinator);
 
 		this.composer = new ComposerBox(tui, editorTheme, { paddingX: 1 });
+		this.composer.imageShortcut = platformKeyLabel(APP_BINDINGS.pasteImageDirect.key);
+		this.composer.onPasteImage = () => {
+			if (this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane) return;
+			this.setFocusForRegion("chat-composer");
+			this.pasteFromClipboard(true);
+		};
 		this.editor = this.composer.editor;
 		// Caret blink: the composer's block obeys the shared phase, and every
 		// draft edit re-derives whether a caret is actually on screen (an empty
@@ -486,6 +505,10 @@ export class App implements FeatureHost {
 			() => this.navSnapshot(),
 			(view) => this.selectNav(view),
 			() => this.tui.terminal.rows,
+			() => {
+				if (!this.dialogs.length && !this.quickOpenPane
+					&& (this.view !== "chat" || !this.turnSession.approvalDialogCount())) this.openShortcutReference();
+			},
 		);
 		this.shell.setNavBar(this.navBar);
 		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
@@ -520,13 +543,12 @@ export class App implements FeatureHost {
 			() => this.changesSnapshot(),
 			(turnId) => this.changesDiffState(turnId),
 			{
-				onSelectTurn: (turnId) => {
-					this.ensureChangesDiff(turnId);
-				},
+				onOpenDiff: () => this.ensureChangesDiff(true),
 				onReview: (turnId) => { void this.startChangeReview(turnId); },
 				onCancelReview: (turnId) => { void this.cancelChangeReview(turnId); },
-				onToggleScope: () => { this.toggleChangesScope(); },
-				onFixFinding: (turnId, finding) => { void this.requestFindingFix(turnId, finding); },
+				onFixFinding: (turnId, finding) => { void this.fixFindingInChat(turnId, finding); },
+				onFixFailure: (turnId, code, reason) => { void this.fixFailureInChat(turnId, code, reason); },
+				onClearHandled: (turnId) => this.clearHandledFindings(turnId),
 			},
 		);
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
@@ -535,11 +557,18 @@ export class App implements FeatureHost {
 	}
 
 	async start(): Promise<void> {
+		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
+		this.log.info("start", {
+			sessionId: this.options.sessionId ?? null,
+			model: this.options.model ?? null,
+			provider: this.options.provider ?? null,
+			mode: this.options.mode ?? null,
+			workspace: workspaceFlagOn,
+		});
 		// Clear vacated rows when content shrinks (closed menus, finished
 		// turns). Without this, filled rows linger as ghost bands behind
 		// newer output.
 		this.tui.setClearOnShrink(true);
-		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
 		this.shell.sync();
 		if (isViewportTUI(this.tui)) {
 			this.tui.setLayoutRoot(this.shell.root);
@@ -584,9 +613,15 @@ export class App implements FeatureHost {
 			initializedCwd = init.cwd;
 			initializedCwdFull = typeof init.cwdFull === "string" && init.cwdFull ? init.cwdFull : undefined;
 				Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
+			this.log.info("gateway.ready", {
+				version: init.version,
+				model: init.model,
+				provider: init.provider,
+				cwd: init.cwd,
+			});
 			try {
 				const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
-				this.keybindings.set(parseBindingOverrides(config.keybindings));
+				this.applyKeybindings(parseBindingOverrides(config.keybindings));
 				if (typeof config.theme === "string" && config.theme) {
 					setSkin(config.theme);
 					// The startup frame is already on screen. Use the same
@@ -648,6 +683,7 @@ export class App implements FeatureHost {
 				// Mode display is best-effort.
 			}
 		} catch (error) {
+			this.log.error("start.failed", { error: describeError(error), stderr: this.client.stderr().slice(-8) });
 			this.footer.status = "offline";
 			this.transcript.clear();
 			this.transcript.addNotice(`Could not start: ${message(error)}`, "error");
@@ -671,6 +707,7 @@ export class App implements FeatureHost {
 		// Join the background first-touch work now that the session is visible.
 		// Neither the profile row nor the music bar may block session creation.
 		await Promise.all([profileReady, nowPlayingReady]);
+		this.log.info("ready", { session: this.current?.id ?? null, view: this.view });
 		this.tui.requestRender();
 	}
 
@@ -723,26 +760,38 @@ export class App implements FeatureHost {
 
 	// ─── FeatureHost ─────────────────────────────────────────────────────────
 	async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-		const result = await this.client.request<T>(method, params, App.requestTimeoutMs(method, params));
-		if (["mode.get", "mode.set", "mode.revoke"].includes(method)) {
-			const responseSession = (result as { sessionId?: unknown; session_id?: unknown }).sessionId
-				?? (result as { sessionId?: unknown; session_id?: unknown }).session_id;
-			const requestedSession = params.sessionId ?? params.session_id;
-			const sessionId = typeof responseSession === "string"
-				? responseSession
-				: typeof requestedSession === "string"
-					? requestedSession
-					: undefined;
-			// A delayed response for a previous session must never rewrite the
-			// footer after a session switch. Updates without a session scope
-			// (the global mode query) keep their established behavior.
-			if (sessionId !== undefined && this.current?.id !== sessionId) return result;
-			const mode = (result as { mode?: string }).mode;
-			if (typeof mode === "string") this.footer.mode = mode;
-			this.tui.requestRender();
+		const started = Date.now();
+		try {
+			const result = await this.client.request<T>(method, params, App.requestTimeoutMs(method, params));
+			if (this.log.enabled) this.log.debug("rpc.ok", { method, ms: Date.now() - started, params: redactParamsForLog(method, params) });
+			if (["mode.get", "mode.set", "mode.revoke"].includes(method)) {
+				const responseSession = (result as { sessionId?: unknown; session_id?: unknown }).sessionId
+					?? (result as { sessionId?: unknown; session_id?: unknown }).session_id;
+				const requestedSession = params.sessionId ?? params.session_id;
+				const sessionId = typeof responseSession === "string"
+					? responseSession
+					: typeof requestedSession === "string"
+						? requestedSession
+						: undefined;
+				// A delayed response for a previous session must never rewrite the
+				// footer after a session switch. Updates without a session scope
+				// (the global mode query) keep their established behavior.
+				if (sessionId !== undefined && this.current?.id !== sessionId) return result;
+				const mode = (result as { mode?: string }).mode;
+				if (typeof mode === "string") this.footer.mode = mode;
+				this.tui.requestRender();
+			}
+			if (method === "session.setModel") this.adoptSessionRoute(result);
+			return result;
+		} catch (error) {
+			this.log.warn("rpc.failed", {
+				method,
+				ms: Date.now() - started,
+				params: redactParamsForLog(method, params),
+				error: describeError(error),
+			});
+			throw error;
 		}
-		if (method === "session.setModel") this.adoptSessionRoute(result);
-		return result;
 	}
 
 	/**
@@ -872,7 +921,7 @@ export class App implements FeatureHost {
 			this.tui,
 			this.keybindings.get(),
 			(overrides) => {
-				this.keybindings.set(overrides);
+				this.applyKeybindings(overrides);
 				this.keybindingSave = this.keybindingSave.catch(() => {}).then(() =>
 					this.client.request("config.set", { key: "keybindings", value: JSON.stringify(overrides), persist: true }, 30_000),
 				).catch((error: unknown) => this.print(`Could not save keybindings: ${String(error)}`, "warning"));
@@ -880,6 +929,11 @@ export class App implements FeatureHost {
 			() => close(),
 		), { width: 68, maxHeight: 18, anchor: "center" });
 		await this.keybindingSave;
+	}
+
+	private applyKeybindings(overrides: BindingOverrides): void {
+		this.keybindings.set(overrides);
+		this.composer.imageShortcut = platformKeyLabel(overrides.pasteImageDirect ?? APP_BINDINGS.pasteImageDirect.key);
 	}
 
 	async openKeysEditor(): Promise<void> {
@@ -1150,8 +1204,10 @@ export class App implements FeatureHost {
 	 * untouched draft never appears in history.
 	 */
 	private showNewChat(title?: string): void {
+		this.log.debug("chat.new", { hasTitle: Boolean(title?.trim()) });
 		if (this.current) this.turnSession.saveSessionTokens(this.current.id);
 		this.current = undefined;
+		this.resetChanges();
 		this.draftSessionTitle = title?.trim() || undefined;
 		this.turnSession.resetSessionTokens();
 		this.clearImages();
@@ -1184,8 +1240,10 @@ export class App implements FeatureHost {
 					...(agent ? { agent } : {}),
 				})
 				.then(({ session }) => {
+					this.log.info("session.create", { id: session.id, titleLength: (session.title ?? "").length });
 					this.draftSessionTitle = undefined;
 					this.current = session;
+					this.resetChanges();
 					this.flushPendingQuestions(session.id);
 					this.rememberSession(session.id);
 					this.turnSession.resetSessionTokens();
@@ -1206,6 +1264,7 @@ export class App implements FeatureHost {
 	}
 
 	switchTo(session: SessionInfo, history: HistoryEntry[]): void {
+		this.log.info("session.switch", { id: session.id, history: history.length });
 		if (this.current?.id === session.id) {
 			// Same-id re-resume of the visible session (`/resume <current>`,
 			// picking the current row in a session list): the fetched history
@@ -1271,7 +1330,8 @@ export class App implements FeatureHost {
 	}
 
 	updateSession(session: SessionInfo): void {
-		if (session.id !== this.current?.id) {
+		const switched = session.id !== this.current?.id;
+		if (switched) {
             this.clearImages();
             this.editor.setText("");
 			this.footer.dispose();
@@ -1280,6 +1340,7 @@ export class App implements FeatureHost {
 			this.invalidateApprovals(session.id);
 		}
 		this.current = session;
+		if (switched) this.resetChanges();
 		this.syncAgentCount();
 		this.tui.requestRender();
 	}
@@ -1348,9 +1409,9 @@ export class App implements FeatureHost {
 		finally { this.syncWorkspaceShell(); this.tui.requestRender(); }
 	}
 
-	private async queueSteering(text: string): Promise<void> {
+	private async queueSteering(text: string, fromDraft = true): Promise<boolean> {
 		const session = this.current;
-		if (!session || this.turnSession.isSteeringBusy(session.id)) return;
+		if (!session || this.turnSession.isSteeringBusy(session.id)) return false;
 		this.turnSession.setSteeringBusy(session.id, true);
 		const version = this.activity.queueVersion(session.id);
 		try {
@@ -1359,10 +1420,12 @@ export class App implements FeatureHost {
 				if (this.activity.queueVersion(session.id) === version) this.activity.setQueue(session.id, result.items ?? []);
 			}
 			else this.turnSession.pushSteering(session.id, text);
-			if (this.current?.id === session.id && this.editor.getExpandedText().trim() === text.trim()) this.editor.setText("");
+			if (fromDraft && this.current?.id === session.id && this.editor.getExpandedText().trim() === text.trim()) this.editor.setText("");
 			if (!result.queued && !this.turnSession.isInFlight(session.id)) await this.flushSteering(session.id);
+			return true;
 		} catch (error) {
-			this.print(`Could not queue steering: ${message(error)}. Your draft is retained.`, "error");
+			this.print(`Could not queue steering: ${message(error)}.${fromDraft ? " Your draft is retained." : ""}`, "error");
+			return false;
 		} finally {
 			this.turnSession.setSteeringBusy(session.id, false);
 			this.tui.requestRender();
@@ -1412,27 +1475,34 @@ export class App implements FeatureHost {
 
 	/** Open the full-page live status tab (also `/activity`). */
 	openStatus(): void {
-		this.openStatusTab(1);
+		this.openScreen("status");
 	}
 
-	/** Open the per-prompt Changes screen (also `/changes`). */
-	openChanges(scope: "session" | "workspace" = "session"): void {
-		this.changesScope = scope;
-		if (!this.current) this.changesScope = "workspace";
+	/**
+	 * Open the per-prompt Changes screen. Changes always belong to the open
+	 * chat: with no chat there is nothing to review, and browsing another
+	 * chat's work from here would misattribute it.
+	 */
+	openChanges(): void {
 		this.openScreen("changes");
 	}
 
 	/** Command-strip click: switch screens without changing the app's key map. */
 	private selectNav(view: NavView): void {
+		if (this.quickOpenPane) return;
+		// A visible dialog owns the screen; one hidden by the dock does not.
+		if (this.dialogs.some(dialog => !dialog.hidden)) return;
 		if (view === "chat") {
 			if (this.view !== "chat") this.closeScreen();
+			if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
+			else this.setFocusForRegion("chat-composer");
 			return;
 		}
 		if (view === "activity") {
 			this.openStatus();
 			return;
 		}
-		this.openChanges(this.changesScope);
+		this.openChanges();
 	}
 
 	private navActivityCount(): number {
@@ -1454,13 +1524,9 @@ export class App implements FeatureHost {
 			project,
 			branch: this.footer.branch,
 			model: this.footer.model,
-			provider: this.current?.provider,
 			status: this.footer.status,
-			running: this.running,
 			activityCount: this.navActivityCount(),
-			changeCount: this.changesTurns.length,
-			approvals: this.turnSession.approvalDialogCount(),
-			queued: this.activity.queuedCount(),
+			changeCount: this.changesCount,
 		};
 	}
 
@@ -1482,7 +1548,6 @@ export class App implements FeatureHost {
 				label: row.main ? `Main · ${row.session.title || "untitled"}` : (row.session.title || "Subagent"),
 				detail,
 				state: row.running ? "running" : "idle",
-				running: row.running,
 				logs: [
 					`Session: ${row.session.id}`,
 					`Title: ${row.session.title || "untitled"}`,
@@ -1503,7 +1568,6 @@ export class App implements FeatureHost {
 				label: `Session ${sessionId.slice(0, 8)}`,
 				detail: this.turnSession.activeToolLabel(sessionId) ? `tool ${this.turnSession.activeToolLabel(sessionId)}` : "turn in flight",
 				state: "running",
-				running: true,
 				logs: [
 					`Session: ${sessionId}`,
 					"State: running (outside the visible family)",
@@ -1511,20 +1575,24 @@ export class App implements FeatureHost {
 				],
 			});
 		}
-		const shells: StatusRow[] = this.activity.allJobs().slice(0, 24).map(({ sessionId, job }) => ({
-			id: `shell:${sessionId}:${job.id}`,
-			label: job.foreground ? "foreground shell" : "background shell",
-			detail: `${titles.get(sessionId) ?? sessionId.slice(0, 8)} · ${job.command}`,
-			state: job.status,
-			running: job.status === "running" || job.status === "stopping",
-			logs: [
-				`Session: ${titles.get(sessionId) ?? sessionId.slice(0, 8)}`,
-				`Command: ${job.command}`,
-				`Status: ${job.status}`,
-				`Return code: ${job.returncode ?? "pending"}`,
-				...(job.output ? ["", "Output:", ...job.output.split(/\r?\n/).slice(0, 12)] : []),
-			],
-		}));
+		const shells: StatusRow[] = this.activity.allJobs().slice(0, 24).map(({ sessionId, job }) => {
+			const title = titles.get(sessionId) ?? sessionId.slice(0, 8);
+			const output = job.output ? job.output.trimEnd().split(/\r?\n/).slice(-12) : [];
+			return {
+				id: `shell:${sessionId}:${job.id}`,
+				label: job.command || "Shell command",
+				detail: `${job.foreground ? "Foreground shell" : "Background shell"} · ${title}`,
+				state: job.status,
+				preview: output.slice(-3),
+				logs: [
+					`Session: ${title}`,
+					`Command: ${job.command}`,
+					`Status: ${job.status}`,
+					`Return code: ${job.returncode ?? "pending"}`,
+					...(output.length ? ["", "Output:", ...output] : []),
+				],
+			};
+		});
 		const tools: StatusRow[] = this.activity.allTools(24).map((tool) => {
 			const kind = tool.name.startsWith("mcp_")
 				? "MCP"
@@ -1533,12 +1601,13 @@ export class App implements FeatureHost {
 					: "TOOL";
 			const display = toolCallDisplayName(tool.name, tool.args) || tool.name;
 			const duration = tool.completedAt ? `${Math.max(0, tool.completedAt - tool.startedAt)}ms` : "running";
+			const result = tool.result ? tool.result.split(/\r?\n/).slice(0, 12) : [];
 			return {
 				id: `tool:${tool.sessionId}:${tool.id}`,
 				label: `${kind} · ${display}`,
 				detail: titles.get(tool.sessionId) ?? tool.sessionId.slice(0, 8),
 				state: tool.status,
-				running: tool.status === "running",
+				preview: result,
 				logs: [
 					`Tool: ${tool.name}`,
 					`Session: ${titles.get(tool.sessionId) ?? tool.sessionId}`,
@@ -1546,7 +1615,7 @@ export class App implements FeatureHost {
 					`Status: ${tool.status}`,
 					...(tool.outcome ? [`Outcome: ${tool.outcome}`] : []),
 					...(tool.args && Object.keys(tool.args).length ? [`Arguments: ${JSON.stringify(tool.args)}`] : []),
-					...(tool.result ? ["", "Result:", ...tool.result.split(/\r?\n/).slice(0, 12)] : []),
+					...(result.length ? ["", "Result:", ...result] : []),
 				],
 			};
 		});
@@ -1554,9 +1623,7 @@ export class App implements FeatureHost {
 			(total, row) => total + this.turnSession.queuedSteering(row.session.id).length,
 			0,
 		);
-		const project = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 		return {
-			project: project || undefined,
 			agents,
 			sessions: this.statusSessions,
 			harnesses: [...this.statusHarnesses, ...this.harnessJobRows()],
@@ -1567,7 +1634,6 @@ export class App implements FeatureHost {
 			approvals: this.turnSession.approvalDialogCount(),
 			updatedAt: this.statusUpdatedAt,
 			error: this.statusError,
-			running: this.running,
 		};
 	}
 
@@ -1594,7 +1660,6 @@ export class App implements FeatureHost {
 							? "needs direction"
 							: (job.command[0] ?? `${job.platform} run`),
 				state: job.needs_input && job.status !== "running" ? "needs input" : job.status,
-				running: job.status === "running",
 				updatedAt: job.ended_at ?? job.started_at ?? undefined,
 				logs: [
 					`Job: ${job.id}`,
@@ -1674,7 +1739,6 @@ export class App implements FeatureHost {
 							state,
 							running,
 							updatedAt: session.lastActivity ?? undefined,
-							project,
 							logs: [
 								`Session: ${session.id}`,
 								`Title: ${session.title || "untitled"}`,
@@ -1695,9 +1759,13 @@ export class App implements FeatureHost {
 				// queue summary (or a stale session list) can be selected for one
 				// frame. Once the real session list arrives after opening the tab,
 				// move the default selection to the current chat.
-				if (this.statusDefaultPending && this.statusSessions.length && this.view === "status") {
-					this.statusPage.selectDefault();
+				if (this.statusDefaultPending && this.view === "status") {
+					// One attempt only: a failed or empty list must not move the
+					// user's selection 15s later on the next retry.
 					this.statusDefaultPending = false;
+					if (sessionsResult.status === "fulfilled" && this.statusSessions.length) {
+						this.statusPage.selectDefault();
+					}
 				}
 			}
 			if (interop.status === "fulfilled" && interop.value) {
@@ -1706,7 +1774,6 @@ export class App implements FeatureHost {
 					label: row.label || row.platform,
 					detail: [row.version, row.scope, row.notes?.[0]].filter(Boolean).join(" · "),
 					state: row.running ? "running" : row.installed ? "installed" : "not installed",
-					running: row.running,
 					logs: [
 						`Platform: ${row.platform}`,
 						`Installed: ${row.installed ? "yes" : "no"}`,
@@ -1723,7 +1790,6 @@ export class App implements FeatureHost {
 					label: server.display_name || server.id,
 					detail: [server.transport, server.server_version, server.error].filter(Boolean).join(" · "),
 					state: server.error ? "error" : server.state,
-					running: server.state === "connected" || server.state === "connecting",
 					logs: [
 						`ID: ${server.id}`,
 						`Transport: ${server.transport}`,
@@ -1736,6 +1802,12 @@ export class App implements FeatureHost {
 			}
 			const failures = [interop, mcp].filter((result) => result.status === "rejected").length;
 			this.statusError = failures ? `Live status refresh incomplete (${failures} source${failures === 1 ? "" : "s"} unavailable).` : "";
+			this.log.debug("status.refresh", {
+				sessions: this.statusSessions.length,
+				harnesses: this.statusHarnesses.length,
+				mcp: this.statusMcp.length,
+				failures,
+			});
 			this.statusUpdatedAt = new Date().toLocaleTimeString();
 		} finally {
 			this.statusRefreshing = false;
@@ -1743,30 +1815,10 @@ export class App implements FeatureHost {
 		}
 	}
 
-	private openStatusTab(direction: 1 | -1): void {
-		this.openScreen("status", direction);
-	}
-
-	/**
-	 * Fixed screen directions: Activity is the left screen, Changes is the
-	 * right screen. From chat, Ctrl+N then -> opens Changes and <- opens
-	 * Activity. While a full screen is open, either arrow (or Esc) returns to
-	 * chat; the screens never swap positions.
-	 */
-	private switchScreen(direction: 1 | -1): void {
-		if (this.view !== "chat") {
-			this.closeScreen();
-			return;
-		}
-		if (direction === -1) this.openScreen("status", -1);
-		else this.openScreen("changes", 1);
-	}
-
-	private openScreen(screen: "status" | "changes", direction: 1 | -1 = 1): void {
+	private openScreen(screen: "status" | "changes"): void {
 		if (this.exiting) return;
+		this.log.info("screen.open", { screen, session: this.current?.id ?? null, current: this.view });
 		if (this.view === screen) {
-			if (screen === "status") this.statusPage.enter(direction);
-			else this.changesPage.enter(direction);
 			if (screen === "status") void this.refreshStatusData();
 			else void this.refreshChangesData();
 			this.tui.requestRender();
@@ -1776,7 +1828,6 @@ export class App implements FeatureHost {
 		this.disposeActivePage();
 		this.view = screen;
 		const page = screen === "status" ? this.statusPage : this.changesPage;
-		page.enter(direction);
 		this.shell.setPage(page);
 		this.tui.setFocus(page);
 		this.footer.keyHint = "";
@@ -1788,8 +1839,6 @@ export class App implements FeatureHost {
 			this.refreshFamily();
 			void this.refreshStatusData();
 		} else {
-			if (!this.current && this.changesScope === "session") this.changesScope = "workspace";
-			this.changesUpdatedAt = "";
 			this.changesError = "";
 			this.changesPage.syncSelection();
 			this.ensureChangesDiff();
@@ -1805,14 +1854,16 @@ export class App implements FeatureHost {
 	private closeScreen(): void {
 		if (this.view === "chat") return;
 		const previous = this.view;
+		this.log.info("screen.close", { screen: previous });
 		this.view = "chat";
 		this.clearScreenTimer();
 		if (previous === "status") this.statusPage.dispose();
 		else this.changesPage.dispose();
 		this.shell.setPage(undefined);
-		this.tui.setFocus(this.editor);
 		this.footer.keyHint = "";
-		this.tui.requestRender();
+		// A pending decision takes focus back on return; otherwise the composer.
+		if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
+		else this.setFocusForRegion("chat-composer");
 	}
 
 	private clearScreenTimer(): void {
@@ -1828,78 +1879,177 @@ export class App implements FeatureHost {
 	}
 
 	private changesSnapshot(): ChangesSnapshot {
-		const project = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 		return {
 			turns: this.changesTurns,
-			scope: this.changesScope,
-			project: project || undefined,
-			updatedAt: this.changesUpdatedAt,
+			hasChat: Boolean(this.current),
 			error: this.changesError || undefined,
-			running: this.running,
+			canFix: this.canFixInChat(),
+			handledErrors: this.handledErrors,
+			sentFindings: this.sentFindings,
 		};
 	}
 
+	private canFixInChat(): boolean {
+		const chat = this.current;
+		return Boolean(chat && (!chat.parentSessionId || chat.isFork || chat.harnessPlatform));
+	}
+
+	private resetChanges(): void {
+		this.log.debug("changes.reset", { session: this.current?.id ?? null });
+		this.changesEpoch++;
+		this.changesTurns = [];
+		this.changesCount = 0;
+		this.changesDiff.clear();
+		this.handledErrors.clear();
+		this.sentFindings.clear();
+		this.pendingFixes.clear();
+		this.changesError = "";
+		this.changesRefreshing = false;
+		this.changesPage.syncSelection();
+		void this.refreshChangesData();
+		if (this.current) void this.refreshChangeBadge(this.current.id);
+	}
+
 	private async refreshChangesData(): Promise<void> {
-		if (this.view !== "changes" || this.changesRefreshing) return;
+		const sessionId = this.current?.id;
+		if (!sessionId || this.view !== "changes" || this.changesRefreshing) return;
+		const epoch = this.changesEpoch;
+		const started = Date.now();
 		this.changesRefreshing = true;
 		try {
 			const result = await this.request<ChangesListResult>("changes.list", {
-				sessionId: this.current?.id,
-				scope: this.changesScope,
+				sessionId,
+				scope: "session",
 				limit: 60,
 			});
-			if (this.view !== "changes") return;
-			this.changesTurns = Array.isArray(result.turns) ? result.turns : [];
-			this.changesUpdatedAt = new Date().toLocaleTimeString();
+			if (epoch !== this.changesEpoch || this.view !== "changes") return;
+			this.applyChangesList(Array.isArray(result.turns) ? result.turns : [], sessionId);
 			this.changesError = "";
-			const live = new Set(this.changesTurns.map(turn => turn.id));
-			for (const id of this.changesDiff.keys()) {
-				if (!live.has(id)) this.changesDiff.delete(id);
-			}
-			this.changesPage.syncSelection();
-			this.ensureChangesDiff();
+			this.log.debug("changes.list", { session: sessionId, count: this.changesCount, ms: Date.now() - started });
+			this.ensureChangesDiff(true);
 		} catch (error) {
-			if (this.view !== "changes") return;
+			if (epoch !== this.changesEpoch || this.view !== "changes") return;
+			this.log.warn("changes.list.failed", { session: sessionId, ms: Date.now() - started, error: describeError(error) });
 			this.changesError = `Could not read prompt changes: ${message(error)}`;
-			this.changesUpdatedAt = new Date().toLocaleTimeString();
 		} finally {
-			this.changesRefreshing = false;
-			this.tui.requestRender();
+			if (epoch === this.changesEpoch) {
+				this.changesRefreshing = false;
+				if (this.view === "changes") this.tui.requestRender();
+			}
 		}
+	}
+
+	/**
+	 * Keep the command-strip Changes count honest while Chat is open. This is
+	 * the only off-screen read of the list; it neither renders the page nor
+	 * touches its turns, reviews, diffs, or handled ledgers.
+	 */
+	private async refreshChangeBadge(sessionId: string): Promise<void> {
+		if (this.view !== "chat" || this.current?.id !== sessionId) return;
+		const epoch = this.changesEpoch;
+		try {
+			const result = await this.request<ChangesListResult>("changes.list", {
+				sessionId,
+				scope: "session",
+				limit: 60,
+			});
+			if (epoch !== this.changesEpoch || this.current?.id !== sessionId) return;
+			this.changesCount = Array.isArray(result.turns)
+				? result.turns.filter(turn => turn.sessionId === sessionId).length
+				: 0;
+			this.log.trace("changes.badge", { session: sessionId, count: this.changesCount });
+			this.tui.requestRender();
+		} catch {
+			// The badge keeps its last known value; the page reports real errors.
+		}
+	}
+
+	/** A list response must not downgrade a review this UI just ran or cancelled. */
+	private preferReview(
+		full: ReviewRunInfo | null | undefined,
+		compact: ReviewRunInfo | null | undefined,
+	): ReviewRunInfo | null | undefined {
+		if (!full) return compact;
+		if (!compact) return full;
+		const stamp = (run: ReviewRunInfo): number => {
+			const raw = run.finishedAt ?? run.startedAt ?? run.createdAt;
+			const value = raw ? Date.parse(raw) : NaN;
+			return Number.isFinite(value) ? value : 0;
+		};
+		if (compact.id === full.id && compact.status === full.status) {
+			return compact.findings.length > full.findings.length ? compact : full;
+		}
+		return stamp(compact) > stamp(full) ? compact : full;
+	}
+
+	/** Merge a list response, keeping any full review already fetched. */
+	private applyChangesList(turns: ChangeTurnInfo[], sessionId: string): void {
+		const previous = new Map(this.changesTurns.map(turn => [turn.id, turn.review]));
+		this.changesTurns = turns.filter(turn => turn.sessionId === sessionId).map(turn => ({
+			...turn,
+			review: this.preferReview(previous.get(turn.id), turn.review) ?? null,
+		}));
+		this.changesCount = this.changesTurns.length;
+		const live = new Set(this.changesTurns.map(turn => turn.id));
+		for (const id of this.changesDiff.keys()) {
+			if (!live.has(id)) this.changesDiff.delete(id);
+		}
+		for (const code of this.handledErrors) {
+			if (!live.has(code.split("\0")[0] ?? "")) this.handledErrors.delete(code);
+		}
+		for (const [key, entry] of this.sentFindings) {
+			if (!live.has(entry.turnId)) this.sentFindings.delete(key);
+		}
+		this.changesPage.syncSelection();
 	}
 
 	private changesDiffState(turnId: string | undefined): ChangesDiffState {
 		if (!turnId) return { loading: false, files: [], truncated: false };
-		return this.changesDiff.get(turnId) ?? { turnId, loading: true, files: [], truncated: false };
+		return this.changesDiff.get(turnId) ?? { loading: true, files: [], truncated: false };
 	}
 
-	private ensureChangesDiff(turnId?: string): void {
-		const id = turnId ?? this.changesPage.selectedTurn;
+	private ensureChangesDiff(retry = false): void {
+		const id = this.changesPage.selectedDiffTurn;
 		if (!id) return;
 		const cached = this.changesDiff.get(id);
-		if (cached?.loading || (cached && !cached.error)) return;
-		this.changesDiff.set(id, { turnId: id, loading: true, files: [], truncated: false });
-		void this.loadChangesDiff(id);
+		const file = this.changesPage.selectedDiffFile;
+		const missing = Boolean(file && cached && !cached.loading && !cached.error
+			&& !cached.files.some(item => item.path === file));
+		if (cached && !missing && (!retry || !cached.error)) return;
+		const pending = { loading: true, files: cached?.files ?? [], truncated: cached?.truncated ?? false };
+		this.changesDiff.set(id, pending);
+		void this.loadChangesDiff(id, pending, missing ? file : undefined);
 	}
 
-	private async loadChangesDiff(turnId: string): Promise<void> {
+	private async loadChangesDiff(turnId: string, pending: ChangesDiffState, path?: string): Promise<void> {
+		const started = Date.now();
 		try {
 			const result = await this.request<ChangeDiffResult>("changes.diff", {
 				snapshotId: turnId,
 				sessionId: this.current?.id,
+				...(path ? { path } : {}),
+			});
+			if (this.changesDiff.get(turnId) !== pending) return;
+			const returned = Array.isArray(result.files) ? result.files : [];
+			this.log.debug("changes.diff", {
+				turn: turnId,
+				path: path ?? null,
+				files: returned.length,
+				truncated: Boolean(result.truncated),
+				ms: Date.now() - started,
 			});
 			this.changesDiff.set(turnId, {
-				turnId,
 				loading: false,
-				files: Array.isArray(result.files) ? result.files : [],
-				truncated: Boolean(result.truncated),
+				files: path ? [...returned, ...pending.files.filter(item => item.path !== path)] : returned,
+				truncated: path ? pending.truncated : Boolean(result.truncated),
 			});
 		} catch (error) {
+			if (this.changesDiff.get(turnId) !== pending) return;
+			this.log.warn("changes.diff.failed", { turn: turnId, path: path ?? null, ms: Date.now() - started, error: describeError(error) });
 			this.changesDiff.set(turnId, {
-				turnId,
 				loading: false,
-				files: [],
-				truncated: false,
+				files: pending.files,
+				truncated: pending.truncated,
 				error: message(error),
 			});
 		}
@@ -1907,6 +2057,7 @@ export class App implements FeatureHost {
 	}
 
 	private async startChangeReview(turnId: string): Promise<void> {
+		const epoch = this.changesEpoch;
 		try {
 			const result = await this.request<ReviewRunResult>("review.start", {
 				snapshotId: turnId,
@@ -1914,77 +2065,120 @@ export class App implements FeatureHost {
 				engine: "rules",
 				force: true,
 			});
+			if (epoch !== this.changesEpoch) return;
 			const turn = this.changesTurns.find(item => item.id === turnId);
 			if (turn) turn.review = result.review;
+			this.log.info("review.start", {
+				turn: turnId,
+				status: result.review.status,
+				findings: result.review.findings.length,
+			});
+			this.changesError = "";
 			this.tui.requestRender();
-			void this.refreshChangesData();
-			if (this.view === "changes"
-				&& result.review?.status === "complete"
-				&& result.review.findings.length) {
-				// The user asked for the review; if it found something, ask the
-				// explicit action question immediately instead of hiding it
-				// behind another key press.
-				void this.requestFindingFix(turnId, result.review.findings[0]!);
-			}
 		} catch (error) {
-			this.transcript.addNotice(`Could not start the review: ${message(error)}`, "warning");
+			if (epoch !== this.changesEpoch) return;
+			this.log.warn("review.start.failed", { turn: turnId, error: describeError(error) });
+			this.changesError = `Could not start the review: ${message(error)}`;
 			this.tui.requestRender();
 		}
 	}
 
-	/**
-	 * Explain one finding and ask before sending a repair prompt. This is the
-	 * action request the Changes screen exposes; the agent receives nothing
-	 * until the human picks "Implement fix".
-	 */
-	private async requestFindingFix(
+	private async fixFindingInChat(
 		turnId: string,
 		finding: ReviewFindingInfo,
 	): Promise<void> {
 		const turn = this.changesTurns.find(item => item.id === turnId);
-		const location = finding.file
-			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
-			: "the changed files";
-		const title = [
-			`Review issue · ${finding.severity.toUpperCase()}`,
-			finding.title,
-			location,
-			"",
-			...wrapDisplay(finding.body || "No additional explanation.", 58),
-			"",
-			"Implement the fix in this chat?",
-		].join("\n");
-		const choice = await this.pickCentered(title, [
-			{
-				value: "fix",
-				label: "Implement fix",
-				description: "Send a focused repair prompt to this chat",
-			},
-			{
-				value: "dismiss",
-				label: "Not now",
-				description: "Keep the finding; change nothing",
-			},
-		], { count: false });
-		if (choice?.value !== "fix") return;
-
-		const prompt = this.findingFixPrompt(turn, finding);
-		const sessionId = this.current?.id;
-		if (sessionId && this.turnSession.isInFlight(sessionId)) {
-			this.closeScreen();
-			await this.queueSteering(prompt);
-			this.print("Fix queued as steering for the running turn.", "guidance");
-			return;
-		}
+		if (!turn || !this.canFixInChat() || turn.sessionId !== this.current?.id) return;
+		const key = `${turn.id}:${finding.fingerprint}`;
+		if (this.sentFindings.has(key) || this.pendingFixes.has(key)) return;
+		this.log.info("finding.fix", { turn: turnId, fingerprint: finding.fingerprint, severity: finding.severity });
 		this.closeScreen();
-		await this.submitTurn(prompt);
+		await this.recordFix(key, this.findingFixPrompt(turn, finding),
+			queued => this.sentFindings.set(key, { turnId: turn.id, finding, ...(queued ? { queued: true } : {}) }));
+	}
+
+	/** Hide handled entries without offering to send the historical finding again. */
+	private clearHandledFindings(turnId: string): void {
+		let cleared = 0;
+		for (const entry of this.sentFindings.values()) {
+			if (entry.turnId === turnId && !entry.cleared) {
+				entry.cleared = true;
+				cleared++;
+			}
+		}
+		this.log.debug("finding.clear_handled", { turn: turnId, cleared });
+		this.tui.requestRender();
+	}
+
+	/**
+	 * Hand a failed review or unreadable diff to the current chat. The exact
+	 * reason travels with the prompt so the agent can fix the cause, not guess.
+	 */
+	private async fixFailureInChat(turnId: string, code: string, reason: string): Promise<void> {
+		const turn = this.changesTurns.find(item => item.id === turnId);
+		if (!turn || !this.canFixInChat() || turn.sessionId !== this.current?.id || this.handledErrors.has(code)) return;
+		this.log.info("failure.fix", { turn: turnId, code: code.slice(0, 80) });
+		await this.recordFix(code, this.failurePrompt(turn, reason), () => this.handledErrors.add(code));
+	}
+
+	private async recordFix(key: string, prompt: string, record: (queued: boolean) => void): Promise<void> {
+		if (this.pendingFixes.has(key)) return;
+		const epoch = this.changesEpoch;
+		this.pendingFixes.add(key);
+		try {
+			const delivery = await this.sendFollowUp(prompt);
+			this.log.info("fix.delivery", { key: key.slice(0, 120), delivery });
+			if (delivery !== "failed" && epoch === this.changesEpoch) record(delivery === "queued");
+		} finally {
+			if (epoch === this.changesEpoch) {
+				this.pendingFixes.delete(key);
+				this.tui.requestRender();
+			}
+		}
+	}
+
+	private failurePrompt(turn: ChangeTurnInfo, reason: string): string {
+		const source = (turn.prompt || "").replace(/\s+/g, " ").trim().slice(0, 240);
+		const files = turn.files.slice(0, 5).map((file) => file.path).join(", ");
+		return [
+			source ? `Follow up on the prompt: "${source}".` : "Follow up on an earlier prompt.",
+			"The local review of that prompt did not finish:",
+			reason,
+			files ? `Changed files: ${files}` : "",
+			"",
+			"Find out why the review or diff failed, fix the cause, then re-run the review. Do not change unrelated behavior.",
+		].filter((line) => line !== "").join("\n");
+	}
+
+	/** Send a repair prompt to the open chat, or queue it behind the running turn. */
+	private async sendFollowUp(prompt: string): Promise<"sent" | "queued" | "failed"> {
+		const sessionId = this.current?.id;
+		if (!sessionId) return "failed";
+		try {
+			if (this.turnSession.isInFlight(sessionId)) {
+				if (this.turnSession.isSteeringBusy(sessionId)) {
+					this.turnSession.pushSteering(sessionId, prompt);
+					this.print("Kept in this chat's queue. It will run after the current reply.", "guidance");
+					return "queued";
+				}
+				return await this.queueSteering(prompt, false) ? "sent" : "failed";
+			}
+			await this.submitTurn(prompt);
+			return "sent";
+		} catch (error) {
+			const unknown = this.turnSession.isInFlight(sessionId);
+			this.print(unknown
+				? `Fix delivery is unconfirmed: ${message(error)}. Check the chat before retrying.`
+				: `Could not send the fix: ${message(error)}`, unknown ? "warning" : "error");
+			return "failed";
+		}
 	}
 
 	private findingFixPrompt(
-		turn: ChangeTurnInfo | undefined,
+		turn: ChangeTurnInfo,
 		finding: ReviewFindingInfo,
 	): string {
-		const source = (turn?.prompt || "")
+		const source = (turn.prompt || "")
 			.replace(/\s+/g, " ")
 			.trim()
 			.slice(0, 240);
@@ -2004,49 +2198,23 @@ export class App implements FeatureHost {
 	}
 
 	private async cancelChangeReview(turnId: string): Promise<void> {
+		const epoch = this.changesEpoch;
 		try {
 			const result = await this.request<ReviewRunResult>("review.cancel", {
 				snapshotId: turnId,
 				sessionId: this.current?.id,
 			});
+			if (epoch !== this.changesEpoch) return;
 			const turn = this.changesTurns.find(item => item.id === turnId);
 			if (turn) turn.review = result.review;
+			this.log.info("review.cancel", { turn: turnId, status: result.review.status });
 			this.tui.requestRender();
 		} catch (error) {
+			if (epoch !== this.changesEpoch) return;
+			this.log.warn("review.cancel.failed", { turn: turnId, error: describeError(error) });
 			this.transcript.addNotice(`Could not cancel the review: ${message(error)}`, "warning");
 			this.tui.requestRender();
 		}
-	}
-
-	private toggleChangesScope(): void {
-		this.changesScope = this.changesScope === "session" && this.current ? "workspace" : "session";
-		if (this.changesScope === "session" && !this.current) this.changesScope = "workspace";
-		this.changesTurns = [];
-		this.changesDiff.clear();
-		this.changesUpdatedAt = "";
-		this.changesError = "";
-		this.changesPage.syncSelection();
-		void this.refreshChangesData();
-		this.tui.requestRender();
-	}
-
-	private statusTabDirection(data: string): 1 | -1 | 0 {
-		if (this.keybindings.matches(data, "statusLeft")) return -1;
-		if (this.keybindings.matches(data, "statusRight")) return 1;
-		return 0;
-	}
-
-	/**
-	 * Plain left/right are screen keys only where they have no editing job:
-	 * an empty composer with no autocomplete. In a full screen they close it;
-	 * everywhere else the focused editor keeps ordinary cursor movement.
-	 */
-	private plainScreenNavigationAllowed(): boolean {
-		if (this.view !== "chat") return true;
-		return this.activeRegion === "chat-composer"
-			&& this.editor.getText().length === 0
-			&& !this.editor.isShowingAutocomplete()
-			&& !this.commandRunning;
 	}
 
 	async inspectActivity(): Promise<void> {
@@ -2065,8 +2233,8 @@ export class App implements FeatureHost {
 			for (const job of jobs.jobs) this.activity.setJob(session.id, job);
 			if (this.current?.id !== session.id) return;
 			const items = [
-				...queued.items.map((item) => ({ label: `Queued · ${sanitizeDisplay(item.text).replace(/\n/g, " ").slice(0, 80)}`, value: `q:${item.id}` })),
-				...jobs.jobs.map((job) => ({ label: `${job.status} · ${sanitizeDisplay(job.command).slice(0, 75)}`, value: `j:${job.id}` })),
+				...queued.items.map((item) => ({ label: `Queued · ${truncateToWidth(sanitizeDisplay(item.text), 80, "…")}`, value: `q:${item.id}` })),
+				...jobs.jobs.map((job) => ({ label: `${job.status} · ${truncateToWidth(sanitizeDisplay(job.command), 75, "…")}`, value: `j:${job.id}` })),
 				...this.familyRows().filter((row) => !row.main).map((row) => ({ label: `Agent ${row.running ? "working" : "idle"} · ${row.session.title}`, value: `a:${row.session.id}` })),
 			];
 			if (this.turnSession.queuedSteering(session.id).length > 0) items.unshift({ label: "Retry retained steering", value: "retry" });
@@ -2145,7 +2313,7 @@ export class App implements FeatureHost {
 	/**
 	 * Down on an empty composer: the same family picker as /agents sessions.
 	 * Selecting switches through FamilyStore.open (the one-resume-at-a-time
-	 * path shared with Ctrl+N then J/K); choosing the visible session is a
+	 * path shared with Alt+J/K); choosing the visible session is a
 	 * no-op. Listing failures are reported quietly.
 	 */
 	private async openSubagentMenu(): Promise<void> {
@@ -2190,7 +2358,7 @@ export class App implements FeatureHost {
 		return this.family.isMember(sessionId);
 	}
 
-	/** Ctrl+N then J/K: cycle the family; wraps around. */
+	/** Cycle the family; wraps around. */
 	private cycleFamily(direction: 1 | -1): Promise<void> {
 		return this.family.cycle(direction);
 	}
@@ -2454,16 +2622,19 @@ export class App implements FeatureHost {
 				dialog.handle.hide();
 				this.dialogs.splice(this.dialogs.indexOf(dialog), 1);
 				const previous = this.dialogs.at(-1);
-				if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
-				else if (previous) { previous.handle.setHidden(false); previous.handle.focus(); }
+				if (this.view === "chat" && this.turnSession.approvalDialogCount()) this.showApprovalDock();
+				else if (previous) { previous.handle.setHidden(false); previous.hidden = false; previous.handle.focus(); }
 				// The composer owns focus after the last dialog (finding 3):
 				// route through the region router so activeRegion agrees, or the
 				// editor-scoped gates would still think the editor owns keys.
-				else if (!this.exiting) this.setFocusForRegion("chat-composer");
+				else if (!this.exiting) {
+					if (this.view === "chat") this.setFocusForRegion("chat-composer");
+					else this.tui.setFocus(this.view === "status" ? this.statusPage : this.changesPage);
+				}
 				// Recompute the recorded region against the component that now
 				// owns focus; a dialog close must never leave editor-scoped gates
 				// armed behind the composer.
-				this.reconcileFocus();
+				if (this.view === "chat") this.reconcileFocus();
 				this.syncCursorBlink();
 				this.tui.requestRender();
 				done(value);
@@ -2477,11 +2648,11 @@ export class App implements FeatureHost {
 				maxHeight: "100%",
 				anchor: "bottom-center",
 			});
-			const dialog = { handle, cancel: () => close() };
+			const dialog = { handle, cancel: () => close(), hidden: false };
 			this.dialogs.push(dialog);
 			// Late management RPCs may finish after an approval arrives. Preserve
 			// their draft invisibly until the bound decision releases focus.
-			if (this.turnSession.approvalDialogCount()) { handle.setHidden(true); this.showApprovalDock(); }
+			if (this.view === "chat" && this.turnSession.approvalDialogCount()) this.showApprovalDock();
 			this.syncCursorBlink();
 			this.tui.requestRender();
 		});
@@ -2694,7 +2865,7 @@ export class App implements FeatureHost {
     }
 
 	/**
-	 * `?` / Ctrl+N then H shortcut picker rows, from the single source shared with
+	 * Keyboard shortcut rows, from the single source shared with
 	 * `/help` (design/shortcuts.ts). Workspace rows only make sense while the
 	 * feature is live, but they stay listed so the shortcuts remain
 	 * discoverable; unavailable ones no-op with one notice.
@@ -2705,6 +2876,34 @@ export class App implements FeatureHost {
 			label: row.label,
 			...(row.description === undefined ? {} : { description: row.description }),
 		}));
+	}
+
+	private openShortcutReference(): { consume: true } {
+		void this.openDialog((close) => new Picker("Keyboard shortcuts", this.shortcutItems(), (item) => {
+			close();
+			if (item.value === "commands") {
+				this.closeScreen();
+				const command = parseCommand("/help");
+				if (command) void runCommand(command, this);
+			}
+		}, () => close(), SHORTCUTS_VISIBLE_ROWS, "↑↓ browse · Enter/Esc close", this.tui));
+		return { consume: true };
+	}
+
+	private pasteFromClipboard(imageOnly: boolean): void {
+		const epoch = this.imageEpoch;
+		this.loadImages(async () => {
+			const image = await (this.options.readClipboardImage ?? clipboardImage)();
+			if (image) return [image];
+			if (imageOnly) throw new Error("No image found on the clipboard. Copy an image or drop an image file into chat.");
+			const text = await clipboardText();
+			if (epoch !== this.imageEpoch || this.exiting) return [];
+			const paths = imagePaths(text);
+			if (paths) return Promise.all(paths.map(readImageFile));
+			if (text) this.editor.insertTextAtCursor(sanitizePastedText(text));
+			else this.print("No image or text found in the clipboard. Drop an image file to attach it.", "info");
+			return [];
+		});
 	}
 
 	private onInput(data: string): { consume: boolean } | undefined {
@@ -2729,6 +2928,10 @@ export class App implements FeatureHost {
 		}
 		const repeated = isKeyRepeat(data);
 		const normalized = normalizeModifierArrow(data);
+		if (repeated && matchesKey(normalized, Key.enter)
+			&& (this.turnSession.approvalDialogCount() || this.view !== "chat" || this.activeRegion === "chat-composer")) {
+			return { consume: true };
+		}
 		if (this.pendingAbortEscAt && !matchesKey(normalized, Key.escape)) this.clearPendingAbortEsc();
 		if (repeated && this.pendingAbortEscAt && matchesKey(normalized, Key.escape)) return { consume: true };
 		if (repeated && this.pendingKeyLeader) return { consume: true };
@@ -2764,7 +2967,7 @@ export class App implements FeatureHost {
 		for (const leader of this.keybindings.leaders()) {
 			if (matchesKey(normalized, leader as Parameters<typeof matchesKey>[1])) {
 				this.pendingKeyLeader = { key: leader, at: Date.now() };
-				this.footer.keyHint = `${leader.toUpperCase()} then key · ←/→ status · Esc cancels`;
+				this.footer.keyHint = `${leader.toUpperCase()} then key · Esc cancels`;
 				this.pendingKeyLeaderTimer = setTimeout(() => {
 					this.pendingKeyLeader = undefined;
 					this.pendingKeyLeaderTimer = undefined;
@@ -2805,35 +3008,76 @@ export class App implements FeatureHost {
 		// input dispatch so the panes (including Problems) get the remaining
 		// rows instead of being clipped by the grown composer.
 		this.scheduleWorkspaceChromeSync();
-		if (this.dialogs.length || this.turnSession.approvalDialogCount()) return undefined; // focused dialogs own their keys
+		// A visible dialog owns its keys. A dialog merely hidden by the approval
+		// dock must still let the screen strip navigate; Esc keeps going to the
+		// page it belongs to, never to the dialog underneath.
+		if (this.dialogs.length) {
+			if (this.dialogs.some(dialog => !dialog.hidden)) return undefined;
+			const navKey = this.keybindings.matches(data, "showChat")
+				|| this.keybindings.matches(data, "statusLeft")
+				|| this.keybindings.matches(data, "activity")
+				|| this.keybindings.matches(data, "statusRight");
+			const pageKey = this.view !== "chat" && (
+				matchesKey(data, Key.escape)
+				|| this.keybindings.matches(data, "shortcuts")
+				|| matchesKey(data, Key.question)
+				|| matchesKey(data, Key.shift("?"))
+				|| matchesKey(data, Key.shift("/"))
+			);
+			if (!(navKey || pageKey)) return undefined;
+		}
 
-		const statusDirection = this.statusTabDirection(data);
+		const questionKey = matchesKey(data, Key.question) || matchesKey(data, Key.shift("?")) || matchesKey(data, Key.shift("/"));
+		const tabKey = !this.quickOpenPane && (
+			this.keybindings.matches(data, "showChat")
+			|| this.keybindings.matches(data, "statusLeft")
+			|| this.keybindings.matches(data, "activity")
+			|| this.keybindings.matches(data, "statusRight"));
+		// A pending approval owns decisions, not navigation: browsing Activity
+		// or Changes and coming back to decide is always allowed. While a page
+		// is open, the page owns its own keys (Esc closes it).
+		if (this.turnSession.approvalDialogCount() && this.view === "chat" && !tabKey) return undefined;
+		if (!this.quickOpenPane) {
+			// Activity ← Chat → Changes. The arrows walk one linear strip, so
+			// Chat is reachable from either side and Esc always returns to it.
+			if (this.keybindings.matches(data, "statusLeft")) {
+				if (this.view === "changes") this.closeScreen();
+				else if (this.view === "chat") this.openStatus();
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "statusRight")) {
+				if (this.view === "status") this.closeScreen();
+				else if (this.view === "chat") this.openScreen("changes");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "showChat")) {
+				this.selectNav("chat");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "activity")) {
+				if (this.view !== "status") this.openStatus();
+				return { consume: true };
+			}
+		}
 		if (this.view !== "chat") {
-			if (statusDirection !== 0) {
-				this.lastStatusSwitchAt = Date.now();
-				this.lastStatusSwitchDirection = statusDirection;
-				this.switchScreen(statusDirection);
+			// A page owns its content keys, never the chat draft. Stop and exit
+			// stay global: watching a run from Activity must still cancel it.
+			if (this.keybindings.matches(data, "stop")) {
+				if (this.running) this.cancel();
+				this.tui.requestRender();
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "exit") && !this.running) {
+				void this.exit();
 				return { consume: true };
 			}
 			if (matchesKey(data, Key.escape)) {
-				this.lastStatusSwitchAt = Date.now();
 				this.closeScreen();
 				return { consume: true };
 			}
+			if (this.keybindings.matches(data, "shortcuts") || questionKey) return this.openShortcutReference();
 			if (this.view === "status") this.statusPage.handleInput(data);
 			else this.changesPage.handleInput(data);
-			return { consume: true };
-		}
-		if (statusDirection !== 0 && this.plainScreenNavigationAllowed()) {
-			// A repeat after closing must not immediately reopen the same page
-			// while the user is still holding that arrow. The opposite arrow is
-			// a deliberate new choice and opens immediately.
-			if (this.lastStatusSwitchDirection !== statusDirection
-				|| Date.now() - this.lastStatusSwitchAt >= 250) {
-				this.lastStatusSwitchAt = Date.now();
-				this.lastStatusSwitchDirection = statusDirection;
-				this.switchScreen(statusDirection);
-			}
 			return { consume: true };
 		}
 
@@ -2896,41 +3140,19 @@ export class App implements FeatureHost {
 			if (workspaceKey) return workspaceKey;
 		}
 
-        // Region-aware Ctrl+V: with the editor focused, the key belongs to the
-        // editor view's own clipboard path (the TUI focus is the EditorPane →
-        // EditorView.handleInput, which pastes via the injected clipboard).
-        // Returning undefined lets the focused component see it; the composer
-        // (and forwarded ⌘V) keep the image-aware global handler below.
-        if (this.keybindings.matches(data, "pasteImage") && this.activeRegion === "editor") return undefined;
-        if (this.keybindings.matches(data, "pasteImage") || this.keybindings.matches(data, "pasteImageMac")) {
-            const epoch = this.imageEpoch;
-            this.loadImages(async () => {
-                const image = await clipboardImage();
-                if (image) return [image];
-                const text = await clipboardText();
-                if (epoch !== this.imageEpoch || this.exiting) return [];
-                const paths = imagePaths(text);
-                if (paths) return Promise.all(paths.map(readImageFile));
-                if (text) this.editor.insertTextAtCursor(sanitizePastedText(text));
-                else this.print("No image or text found in the clipboard. Drop an image file to attach it.", "info");
-                return [];
-            });
+        // Ctrl+V belongs to the focused file editor. The explicit image
+        // shortcut reaches the composer even when the terminal owns Ctrl+V.
+        const paste = this.keybindings.matches(data, "pasteImage");
+        const macPaste = this.keybindings.matches(data, "pasteImageMac");
+        const imageOnly = this.keybindings.matches(data, "pasteImageDirect");
+        if (paste && !imageOnly && this.activeRegion === "editor") return undefined;
+        if (paste || macPaste || imageOnly) {
+            this.pasteFromClipboard(imageOnly);
             return { consume: true };
         }
 
-		const questionKey = matchesKey(data, Key.question) || matchesKey(data, Key.shift("?")) || matchesKey(data, Key.shift("/"));
 		if (this.keybindings.matches(data, "shortcuts") || (questionKey && !this.editor.getText() && !this.editor.isShowingAutocomplete())) {
-			// Selecting the `/help - all commands` row dispatches the real
-			// command, which prints the full command reference; other rows are
-			// documentation and just close.
-			void this.openDialog((close) => new Picker("Keyboard shortcuts", this.shortcutItems(), (item) => {
-				close();
-				if (item.value === "commands") {
-					const command = parseCommand("/help");
-					if (command) void runCommand(command, this);
-				}
-			}, () => close(), SHORTCUTS_VISIBLE_ROWS, "↑↓ browse · enter/esc close", this.tui));
-			return { consume: true };
+			return this.openShortcutReference();
 		}
 
 		if (this.keybindings.matches(data, "stop")) {
@@ -2965,13 +3187,9 @@ export class App implements FeatureHost {
 			this.clear();
 			return { consume: true };
 		}
-		// Agent family: Ctrl+N then J/K cycles from the composer. Ctrl+Shift+Arrow
+		// Agent family: Alt+J/K cycles from the composer. Ctrl+Shift+Arrow
 		// remains available for word selection in the file editor.
 		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
-		if (this.keybindings.matches(data, "activity")) {
-			this.openStatus();
-			return { consume: true };
-		}
 		if (this.keybindings.matches(data, "agentClose")) {
 			void this.family.closeCurrent();
 			return { consume: true };
@@ -3201,7 +3419,7 @@ export class App implements FeatureHost {
 	// ─── workspace keys (plan §8) ───────────────────────────────────────────
 
 	/**
-	 * Ctrl+T / Ctrl+Shift+E / Ctrl+N then T. Ctrl+Shift+E is the browser-safe
+	 * Ctrl+T / Ctrl+Shift+E / Alt+E. Ctrl+Shift+E is the browser-safe
 	 * alias because Chrome/Edge reserve Ctrl+T before the page sees it.
 	 */
 	private matchesExplorerKey(data: string): boolean {
@@ -3230,7 +3448,7 @@ export class App implements FeatureHost {
 			return { consume: true };
 		}
 		if (!this.workspaceLayoutActive) return undefined;
-		// Ctrl+T / Ctrl+Shift+E / Ctrl+N then T - explorer toggle.
+		// Ctrl+T / Ctrl+Shift+E / Alt+E: explorer toggle.
 		if (this.matchesExplorerKey(data)) {
 			this.workspaceSurface?.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
 			return { consume: true };
@@ -3243,14 +3461,14 @@ export class App implements FeatureHost {
 			this.closeActiveWorkspaceTab();
 			return { consume: true };
 		}
-		// Ctrl+N then N/P cycles focus without modifier-arrow ambiguity.
+		// Alt+Q/W cycles focus without modifier-arrow ambiguity.
 		const previousFocus = this.keybindings.matches(data, "focusPrevious");
 		if (this.keybindings.matches(data, "focusNext") || previousFocus) {
 			this.cycleFocus(previousFocus ? -1 : 1);
 			return { consume: true };
 		}
 		// Pane modes are available from every workspace region. Text fields keep
-		// their ordinary Ctrl+Arrow navigation because these use a prefix.
+		// their ordinary Ctrl+Arrow navigation.
 		if (ready && this.keybindings.matches(data, "restoreSplit")) {
 			this.workspaceHostSurface?.restoreSplit();
 			return { consume: true };
@@ -3280,7 +3498,7 @@ export class App implements FeatureHost {
 			void this.startCompletion();
 			return { consume: true };
 		}
-		// Ctrl+N then G/R — go to definition / find references.
+		// Alt+G/R: go to definition / find references.
 		if (this.keybindings.matches(data, "references")) {
 			void this.runDefinitionOrReferences("references");
 			return { consume: true };
@@ -3289,7 +3507,7 @@ export class App implements FeatureHost {
 			void this.runDefinitionOrReferences("definition");
 			return { consume: true };
 		}
-		// Ctrl+N then M — rename preview (honest "unavailable" until supported).
+		// Alt+M: rename preview (honest "unavailable" until supported).
 		if (this.keybindings.matches(data, "rename")) {
 			void this.runRenamePreview();
 			return { consume: true };
@@ -3507,7 +3725,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	/** Ctrl+N then D/R: request, pick among multiple targets, then jump. */
+	/** Request, pick among multiple targets, then jump. */
 	private async runDefinitionOrReferences(operation: "definition" | "references"): Promise<void> {
 		const integration = this.integration;
 		const context = this.activeEditorContext();
@@ -3571,7 +3789,7 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	/** Ctrl+N then M: prepare a rename preview when available. */
+	/** Prepare a rename preview when available. */
 	private async runRenamePreview(): Promise<void> {
 		const integration = this.integration;
 		const context = this.activeEditorContext();
@@ -4201,6 +4419,12 @@ export class App implements FeatureHost {
 			return;
 		}
 		const sessionId = this.current.id;
+		this.log.info("turn.submit", {
+			session: sessionId,
+			chars: text.length,
+			images: images.length,
+			steering: Boolean(steeringId),
+		});
 		if (this.turnSession.isInFlight(sessionId)) {
 			this.transcript.addNotice("The previous turn is still finishing. Try again shortly.", "warning");
 			this.tui.requestRender();
@@ -4218,6 +4442,7 @@ export class App implements FeatureHost {
             const result = await this.client.request<{ turnId?: string }>("prompt.submit", {
                 sessionId, text, ...(images.length ? { images } : {}), ...(steeringId ? { steeringId } : {}),
             });
+			this.log.debug("turn.accepted", { session: sessionId, turnId: result?.turnId ?? null });
 			if (this.turnSession.confirmTurn(sessionId, result?.turnId) === "mismatch") {
 				this.transcript.addNotice(
 					`Protocol error: turn ${result?.turnId?.slice(0, 8)} does not match the running turn. Keeping the current turn guard.`,
@@ -4229,7 +4454,13 @@ export class App implements FeatureHost {
 			// Rejection known to precede acceptance (no dispatch evidence)
 			// retires the submitting record. After possible dispatch the
 			// outcome is unknown: retain the guard, never auto-retry.
-			if (!this.turnSession.hadEvents(sessionId)) this.turnSession.clearInFlight(sessionId);
+			const dispatched = this.turnSession.hadEvents(sessionId);
+			this.log.warn("turn.submit.failed", {
+				session: sessionId,
+				dispatched,
+				error: describeError(error),
+			});
+			if (!dispatched) this.turnSession.clearInFlight(sessionId);
 			this.setRunning(this.turnSession.visibleInFlight());
 			throw error;
 		}
@@ -4260,6 +4491,7 @@ export class App implements FeatureHost {
 		this.clearPendingAbortEsc();
 		const inFlight = this.turnSession.inFlightSessions();
 		if (inFlight.length === 0) return;
+		this.log.info("turn.cancel", { sessions: inFlight });
 		// Cancel every in-flight turn, not just the most recent: two sessions
 		// can each have a turn running after a quick switch.
 		for (const sessionId of inFlight) {
@@ -4294,7 +4526,7 @@ export class App implements FeatureHost {
 			this.turnSession.startDelegated(childId);
 			this.refreshFamily();
 		} else if (event.phase === "text" || event.phase === "tool") {
-			const text = event.phase === "tool" ? `\n[using ${sanitizeDisplay(event.value).slice(0, 80)}]\n` : event.value;
+			const text = event.phase === "tool" ? `\n[using ${truncateToWidth(sanitizeDisplay(event.value), 80, "…")}]\n` : event.value;
 			this.turnSession.appendDelegated(childId, text);
 			const delta: GatewayEvent = {
 				protocolVersion: 2, sessionId: childId, turnId, type: "message.delta", text,
@@ -4321,6 +4553,15 @@ export class App implements FeatureHost {
 
 	private onEvent(event: GatewayEvent): void {
 		if (this.exiting) return;
+		// Every frame is routed by session; a frame without a usable session id
+		// cannot be bound to a chat and must not reach turn or approval state.
+		if (typeof event.sessionId !== "string" || !event.sessionId) {
+			if (this.log.enabled) this.log.warn("event.invalid_session", { type: event.type });
+			return;
+		}
+		if (event.type !== "message.delta" && this.log.enabled) {
+			this.log.trace("event", { type: event.type, session: event.sessionId, turn: event.turnId });
+		}
 		for (const handler of [...this.featureEventHandlers]) handler(event);
 		if (event.type === "shell.job") {
 			this.activity.setJob(event.sessionId, event.job as unknown as ShellJob);
@@ -4447,9 +4688,24 @@ export class App implements FeatureHost {
 		// Retain reported output for local inspection (visible or not, but
 		// only for the bound turn). Never refetched, never re-executed.
 		if (event.type === "tool.complete") {
-			this.outputStore.put(event.sessionId, event.id, event.name, event.result, event.truncated ?? false);
+			if (typeof event.id === "string" && event.id) {
+				this.outputStore.put(
+					event.sessionId,
+					event.id,
+					typeof event.name === "string" && event.name ? event.name : "unknown tool",
+					typeof event.result === "string" ? event.result : "",
+					event.truncated ?? false,
+				);
+			}
 		}
 		if ((event.type === "needs_approval" || event.type === "permission.required")) {
+			// A malformed frame has no resolvable identity; dropping it is safer
+			// than opening a card whose request id cannot be a string.
+			if (typeof event.requestId !== "string" || !event.requestId
+				|| typeof event.sessionId !== "string" || !event.sessionId) {
+				if (this.log.enabled) this.log.warn("approval.invalid", { type: event.type });
+				return;
+			}
 			// R4-065: a pause frame can carry a terminal status — the broker's
 			// deadline (or another transport) already resolved the request.
 			// That is a resolution, not a card: retire any open card and
@@ -4482,6 +4738,10 @@ export class App implements FeatureHost {
 			return;
 		}
 		if ((event.type === "approval.resolved" || event.type === "permission.resolved")) {
+			if (typeof event.requestId !== "string" || !event.requestId) {
+				if (this.log.enabled) this.log.warn("approval.resolved.invalid", { type: event.type });
+				return;
+			}
 			// The decision is durable regardless of which session is visible.
 			this.turnSession.deletePendingApproval(event.requestId);
 			if (event.sessionId !== this.current?.id) return;
@@ -4552,18 +4812,30 @@ export class App implements FeatureHost {
 			// Keep turn state until terminal completion (AH-032). The error
 			// notice is already rendered by transcript.apply(); final
 			// accounting arrives with message.complete.
+			this.log.warn("gateway.error", { session: event.sessionId, message: event.message });
 			this.setRunning(true);
-			if (this.current?.id === event.sessionId && isKiroQuotaError(event.message)) {
+			if (this.current?.id === event.sessionId
+				&& typeof event.message === "string"
+				&& isKiroQuotaError(event.message)) {
 				void this.switchKiroFallback(event.sessionId);
 			}
 		} else if (summary) {
 			if (event.type === "message.complete" && event.cancelled) this.turnSession.setInterrupted(event.sessionId, true);
+			if (event.type === "message.complete") {
+				this.log.info("turn.complete", {
+					session: event.sessionId,
+					turnId: event.turnId,
+					cancelled: event.cancelled,
+					tokens: summary.tokens,
+				});
+			}
 			this.turnSession.accountCompletion(event.sessionId, summary.tokens);
 			this.turnSession.retireTurn(event.sessionId, event.turnId);
 			this.footer.tokens = this.turnSession.sessionTokens;
 			this.setRunning(this.turnSession.isInFlight(event.sessionId));
 			if (event.type === "message.complete" && !event.cancelled) {
 				setTimeout(() => { void this.flushSteering(event.sessionId); }, 0);
+				void this.refreshChangeBadge(event.sessionId);
 			}
 		}
 		this.tui.requestRender();
@@ -4652,6 +4924,15 @@ export class App implements FeatureHost {
 			transportTurnId: event.turnId,
 		};
 		if (this.turnSession.hasApprovalDialog(binding.requestId)) return;
+		this.log.info("approval.prompt", {
+			request: binding.requestId.slice(0, 12),
+			session: binding.sessionId,
+			operation: event.operation,
+			tool: event.tool ?? null,
+			target: event.target,
+			backend: event.backend,
+			timeout: event.timeout ?? null,
+		});
 		const fileDiff = event.fileDiff && typeof event.fileDiff === "object"
 			? event.fileDiff as { diff?: unknown; truncated?: unknown }
 			: undefined;
@@ -4678,7 +4959,6 @@ export class App implements FeatureHost {
 					? { diff: fileDiff.diff, truncated: fileDiff.truncated === true }
 					: undefined,
 				durable: event.durable,
-				status: event.status,
 			},
 			{
 				tui: this.tui,
@@ -4704,28 +4984,38 @@ export class App implements FeatureHost {
 
 	private showApprovalDock(): void {
 		const next = this.turnSession.firstApprovalDialog();
+		this.log.debug("approval.dock", {
+			waiting: this.turnSession.approvalDialogCount(),
+			view: this.view,
+			request: next?.requestId.slice(0, 12) ?? null,
+		});
 		if (next && !next.evidenceAdded) {
 			this.transcript.addComponent(next.card.evidence);
 			next.evidenceAdded = true;
 		}
 		this.shell.setDock(next?.card);
-		if (!isViewportTUI(this.tui)) {
-			// Classic test/embedded TUIs have no layout engine; retain their normal focus path.
-			this.tui.setFocus(next?.card ?? this.editor);
-		}
-		if (next) {
-			for (const dialog of this.dialogs) dialog.handle.setHidden(true);
-			this.footer.status = "awaiting_approval";
+		if (next) this.footer.status = "awaiting_approval";
+		else if (this.footer.status === "awaiting_approval") this.footer.status = this.running ? "working" : "ready";
+		// The dock owns the decision. A Quick Open list underneath would keep
+		// painting and compete for keys, so close it rather than leave it hidden.
+		if (next) this.closeQuickOpen();
+		const previous = this.dialogs.at(-1);
+		if (next && this.view === "chat") {
+			for (const dialog of this.dialogs) { dialog.handle.setHidden(true); dialog.hidden = true; }
 			this.shell.transcriptScroll.scrollToEnd();
 			this.tui.setFocus(next.card);
-		} else {
-			const previous = this.dialogs.at(-1);
-			if (previous) { previous.handle.setHidden(false); previous.handle.focus(); }
-			// Releasing the last approval returns focus to the composer
+		} else if (!next && previous) {
+			// The dock is gone: restore the dialog it hid so the draft is never
+			// stranded, and hand it the keys back.
+			for (const dialog of this.dialogs) {
+				if (dialog.hidden) { dialog.handle.setHidden(false); dialog.hidden = false; }
+			}
+			previous.handle.focus();
+		} else if (!next && this.view === "chat" && !this.exiting) {
+			// Releasing the last approval on Chat returns focus to the composer
 			// (finding 3) through the region router, so the editor-scoped gates
 			// read the region that actually owns keys.
-			else if (!this.exiting) this.setFocusForRegion("chat-composer");
-			if (this.footer.status === "awaiting_approval") this.footer.status = this.running ? "working" : "ready";
+			this.setFocusForRegion("chat-composer");
 		}
 		this.syncCursorBlink();
 		this.tui.requestRender();
@@ -4743,11 +5033,18 @@ export class App implements FeatureHost {
 			&& entry.sessionId === this.current?.id
 			&& (record.turnId === entry.transportTurnId || (entry.originTurnId !== undefined && record.turnId === entry.originTurnId));
 		if (!bound) {
+			this.log.warn("approval.unbound", { request: requestId.slice(0, 12), session: entry.sessionId });
 			entry.close();
 			this.turnSession.deletePendingApproval(requestId);
 			return;
 		}
 		entry.card.setResolving(true);
+		this.log.info("approval.decide", {
+			request: requestId.slice(0, 12),
+			session: entry.sessionId,
+			verdict: decision.verdict,
+			grant: decision.grant,
+		});
 		this.tui.requestRender();
 		try {
 			await this.client.request("approvals.resolve", {
@@ -4757,11 +5054,14 @@ export class App implements FeatureHost {
 				grant: decision.grant,
 			});
 		} catch (error) {
+			this.log.warn("approval.failed", { request: requestId.slice(0, 12), error: describeError(error) });
 			entry.card.setError(error instanceof Error ? error.message : String(error));
+			this.shell.invalidateChrome(); // the error row changes the dock height
 			this.tui.requestRender();
 			return;
 		}
 		// Decision recorded; execution is proven only by later tool events.
+		this.log.info("approval.recorded", { request: requestId.slice(0, 12), verdict: decision.verdict });
 		entry.card.setRecorded(`approval ${decision.verdict}`);
 		entry.close();
 		this.turnSession.deletePendingApproval(requestId);

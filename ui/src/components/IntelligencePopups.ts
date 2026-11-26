@@ -23,7 +23,7 @@ import {
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
-import { normalizeWidth, sanitizeDisplay, truncateDisplay, wrapDisplay } from "../design/text.ts";
+import { normalizeWidth, sanitizeLabelText, truncateDisplay, wrapDisplay } from "../design/text.ts";
 import { selectionBar, theme } from "../design/theme.ts";
 
 /** Semantic result of one popup key press; the parent decides what to do. */
@@ -235,8 +235,8 @@ export class CompletionPopup implements Component {
 			const selected = index === geometry.selected;
 			const marker = selected ? "▶" : " ";
 			const glyph = completionKindGlyph(item.kind);
-			const label = sanitizeDisplay(item.label);
-			const detail = item.detail ? `  ${sanitizeDisplay(item.detail)}` : "";
+			const label = sanitizeLabelText(item.label);
+			const detail = item.detail ? `  ${sanitizeLabelText(item.detail)}` : "";
 			let row = truncateDisplay(`${marker} ${glyph} ${label}${detail}`, content);
 			if (selected) {
 				row = selectionBar(row, content);

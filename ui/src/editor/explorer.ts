@@ -608,6 +608,12 @@ export class ExplorerPane implements Component {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? 0;
+			if (!delta) return undefined;
+			this.model.move(delta > 0 ? 1 : -1);
+			return { handled: true, focus: true, render: true };
+		}
 		if (event.button !== "left") return undefined;
 		const rows = this.layoutRows();
 		const row = rows[event.y];
@@ -768,12 +774,17 @@ export class ExplorerPane implements Component {
 			case "header": {
 				// Finding 5: `workspace` on the left, a dim toggle hint on the
 				// right stating the current hidden-entries mode (press h or
-				// click the row to flip it).
-				const hintText = row.hidden ? "h: hide hidden" : "h: show hidden";
+				// click the row to flip it). One cell of padding each side keeps
+				// the row off the pane border; a narrow drawer shortens the hint
+				// instead of clipping it.
+				const inner = Math.max(1, this.lastWidth - 2);
+				const full = row.hidden ? "h: hide hidden" : "h: show hidden";
+				const short = row.hidden ? "h: hide" : "h: show";
+				const hintText = inner - displayWidth(this.title) - 3 >= displayWidth(full) ? full : short;
 				const hint = theme.dim(hintText);
-				const title = theme.accentBold(this.title);
-				const gap = Math.max(1, this.lastWidth - displayWidth(this.title) - displayWidth(hintText));
-				return `${title}${" ".repeat(gap)}${hint}`;
+				const title = theme.bold(theme.text(this.title));
+				const gap = Math.max(1, inner - displayWidth(this.title) - displayWidth(hintText));
+				return truncateDisplay(` ${title}${" ".repeat(gap)}${hint} `, this.lastWidth);
 			}
 			case "entry": {
 				const prefix = row.selected ? SELECTED_PREFIX : PLAIN_PREFIX;

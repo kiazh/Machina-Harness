@@ -211,7 +211,7 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 		current = reading({ title: "Second Track", state: "paused", elapsed: 65 });
 		await settle(t, NOWPLAYING_POLL_MS);
 		const paused = screen(tui);
-		assert.match(musicLine(paused) ?? "", /⏸ Second Track/, `paused state rendered: ${musicLine(paused)}`);
+		assert.match(musicLine(paused) ?? "", /\|\| Second Track/, `paused state rendered: ${musicLine(paused)}`);
 		assert.equal(frameIndex(musicLine(paused)), -1, "no playing sound frame while paused");
 		assert.equal(musicAnimHandle(app), undefined, "pause retired the music subscription");
 

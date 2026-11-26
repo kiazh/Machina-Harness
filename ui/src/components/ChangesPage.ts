@@ -1,19 +1,16 @@
-// Full-screen prompt-centric change review. Each block is one agent turn, not
-// a commit: the prompt that asked for the change, the files that turn touched,
-// the stable diff for those files, and the review run attached to that prompt.
-// One numbered timeline replaces the old list/inspector split; selecting a
-// prompt expands its evidence inline. The page is read-only; starting a review
-// is the only action and it never edits or re-runs the work itself.
+// Prompt history on one side, the selected prompt's evidence on the other.
+// The unit is an agent turn, not a commit.
 import {
 	Key,
 	matchesKey,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 	type Component,
 	type TUI,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
-import { renderCard } from "../design/box.ts";
+import { inspectLayout, selectionWindow } from "../design/inspect.ts";
 import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
 import type {
 	ChangeDiffFileInfo,
@@ -22,11 +19,13 @@ import type {
 	ReviewFindingInfo,
 	ReviewRunInfo,
 } from "../protocol.ts";
-import { theme } from "../theme.ts";
+import { selectionBar, theme } from "../theme.ts";
+import { describeError, uiLog } from "../debug.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
+const log = uiLog.scope("changes");
+
 export interface ChangesDiffState {
-	turnId?: string;
 	loading: boolean;
 	files: ChangeDiffFileInfo[];
 	truncated: boolean;
@@ -35,39 +34,26 @@ export interface ChangesDiffState {
 
 export interface ChangesSnapshot {
 	turns: ChangeTurnInfo[];
-	scope: "session" | "workspace";
-	project?: string;
-	updatedAt: string;
+	hasChat?: boolean;
 	error?: string;
-	running?: boolean;
+	canFix?: boolean;
+	/** Failures already handed to the chat by the Fix action. */
+	handledErrors?: ReadonlySet<string>;
+	/** Findings already handed to the chat, keyed `turnId:fingerprint`. */
+	sentFindings?: ReadonlyMap<string, { turnId: string; finding: ReviewFindingInfo; cleared?: boolean; queued?: boolean }>;
 }
 
 type InspectorTab = "files" | "diff" | "review";
-type HitKind = "turn" | "file";
+const INSPECTOR_TABS: readonly InspectorTab[] = ["files", "diff", "review"];
+type HitKind = "turn" | "file" | "finding" | "fix" | "failure" | "clear" | "tab";
 
 interface ScreenLine {
 	text: string;
 	right?: string;
 	key?: string;
-	kind: "blank" | "prompt" | "turn" | "detail" | "file";
-	turnId?: string;
-	filePath?: string;
-}
-
-interface ChangeCard {
-	id: string;
-	content: ScreenLine[];
-	rendered: string[];
-	meta: Array<{
-		line?: ScreenLine;
-		cardId?: string;
-		kind?: "turn" | "file";
-		key?: string;
-		left: number;
-		width: number;
-	}>;
-	left: number;
-	width: number;
+	kind: "detail" | "file" | "finding" | "fix" | "failure" | "clear";
+	hitWidth?: number;
+	tabs?: Array<{ x: number; width: number; tab: InspectorTab }>;
 }
 
 interface Hitbox {
@@ -85,38 +71,21 @@ function between(left: string, right: string, width: number): string {
 	return `${first}${" ".repeat(gap)} ${truncateToWidth(right, width, ".")}`;
 }
 
-function centered(text: string, width: number): string {
-	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
-	return `${" ".repeat(pad)}${text}`;
-}
-
-/** Keep a state chip beside the content, truncating the content first. */
-function withState(left: string, state: string, width: number): string {
-	const separator = `  ${theme.dim("·")} `;
-	const room = Math.max(0, width - visibleWidth(separator) - visibleWidth(state));
-	const first = truncateToWidth(left, room, "…");
-	return `${first}${separator}${state}`;
-}
-
-/** Card content sits inside the card padding, so drop the page indentation. */
+/** Strip the legacy indentation used by the individual evidence formatters. */
 function unindent(text: string): string {
 	return text.startsWith("     ") ? text.slice(5) : text;
 }
 
-function age(iso: string | undefined): string {
-	if (!iso) return "";
-	const then = new Date(iso).getTime();
-	if (!Number.isFinite(then)) return "";
-	const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-	if (seconds < 60) return "now";
-	if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-	if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
-	return `${Math.floor(seconds / 86_400)}d ago`;
+function oneLine(text: string, width: number): string {
+	const flat = sanitizeDisplay(text).replace(/\s+/g, " ").trim();
+	return truncateToWidth(flat || "(prompt not recorded)", width, "…");
 }
 
-function oneLine(text: string, width: number): string {
-	const flat = text.split(/\r?\n/).map(part => part.trim()).filter(Boolean).join(" ");
-	return truncateToWidth(flat || "(prompt not recorded)", width, "…");
+/** If a directory is too long to fit, keep the filename instead. */
+function pathLabel(path: string, width: number): string {
+	const clean = sanitizeDisplay(path).replace(/\s*[\r\n]+\s*/g, " ");
+	const name = clean.split(/[/\\]/).at(-1) ?? clean;
+	return visibleWidth(clean) <= width ? clean : truncateToWidth(name === clean ? clean : `…/${name}`, width, "…");
 }
 
 function fileTone(change: string): (text: string) => string {
@@ -156,24 +125,16 @@ function highestSeverity(review: ReviewRunInfo): string {
 }
 
 function reviewChip(review: ReviewRunInfo | null | undefined): string {
-	if (!review) return theme.dim("review —");
+	if (!review) return theme.muted("Not reviewed");
 	if (review.status === "running" || review.status === "queued") {
-		return theme.warning(`review ${review.status}`);
+		return theme.warning(`Review ${review.status}`);
 	}
-	if (review.status === "failed") return theme.error("review failed");
-	if (review.status === "cancelled") return theme.dim("review cancelled");
+	if (review.status === "failed") return theme.error("Review failed");
+	if (review.status === "cancelled") return theme.muted("Review cancelled");
 	const count = review.findingsCount ?? review.findings.length;
-	if (count === 0) return theme.success("review clean");
+	if (count === 0) return theme.success("No findings");
 	const tone = severityTone(highestSeverity(review));
-	return tone(`review ${count}`);
-}
-
-function reviewTone(review: ReviewRunInfo | null | undefined): (text: string) => string {
-	if (!review) return theme.dim;
-	if (review.status === "running" || review.status === "queued") return theme.warning;
-	if (review.status === "failed") return theme.error;
-	if (review.status === "cancelled") return theme.dim;
-	return review.findings.length ? severityTone(highestSeverity(review)) : theme.success;
+	return tone(`${count} ${count === 1 ? "finding" : "findings"}`);
 }
 
 function preferredFile(files: ChangeFileInfo[]): string | undefined {
@@ -184,62 +145,50 @@ function preferredFile(files: ChangeFileInfo[]): string | undefined {
 	return file?.path;
 }
 
-function windowStart(selected: number, height: number, length: number): number {
-	if (length <= height) return 0;
-	if (selected < 0) return 0;
-	return Math.max(0, Math.min(length - height, selected - Math.floor(height / 2)));
-}
-
-/**
- * Keep the whole selected block on screen. A block taller than the viewport
- * anchors at its first line; a smaller block is centred with its detail.
- */
-function windowStartForBlock(start: number, end: number, height: number, length: number): number {
-	if (length <= height) return 0;
-	const blockHeight = Math.max(1, end - start);
-	if (blockHeight >= height) return Math.max(0, Math.min(start, length - height));
-	const preferred = start - Math.floor((height - blockHeight) / 2);
-	return Math.max(0, Math.min(length - height, preferred));
-}
-
 export class ChangesPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => ChangesSnapshot;
 	private readonly diff: (turnId: string | undefined) => ChangesDiffState;
-	private readonly onSelectTurn?: (turnId: string) => void;
+	private readonly onOpenDiff?: () => void;
 	private readonly onReview?: (turnId: string) => void;
 	private readonly onCancelReview?: (turnId: string) => void;
-	private readonly onToggleScope?: () => void;
 	private readonly onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
+	private readonly onFixFailure?: (turnId: string, code: string, reason: string) => void;
+	private readonly onClearHandled?: (turnId: string) => void;
 	private viewportRows: number | undefined;
 	private selectedTurnId: string | undefined;
 	private selectedFilePath: string | undefined;
 	private tab: InspectorTab = "files";
 	private promptExpanded = false;
 	private scroll = 0;
+	private pageSize = 1;
 	private selectedFindingIndex = 0;
 	private hitboxes: Hitbox[] = [];
+	private wheelRegions: Array<{ x: number; width: number; y0: number; y1: number; kind: "list" | "detail" }> = [];
+	private wrappedDiff?: { file: ChangeDiffFileInfo; width: number; rows: string[] };
 
 	constructor(
 		tui: TUI,
 		snapshot: () => ChangesSnapshot,
 		diff: (turnId: string | undefined) => ChangesDiffState,
 		options: {
-			onSelectTurn?: (turnId: string) => void;
+			onOpenDiff?: () => void;
 			onReview?: (turnId: string) => void;
 			onCancelReview?: (turnId: string) => void;
-			onToggleScope?: () => void;
 			onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
+			onFixFailure?: (turnId: string, code: string, reason: string) => void;
+			onClearHandled?: (turnId: string) => void;
 		} = {},
 	) {
 		this.tui = tui;
 		this.snapshot = snapshot;
 		this.diff = diff;
-		this.onSelectTurn = options.onSelectTurn;
+		this.onOpenDiff = options.onOpenDiff;
 		this.onReview = options.onReview;
 		this.onCancelReview = options.onCancelReview;
-		this.onToggleScope = options.onToggleScope;
 		this.onFixFinding = options.onFixFinding;
+		this.onFixFailure = options.onFixFailure;
+		this.onClearHandled = options.onClearHandled;
 	}
 
 	/** The shell charges the command strip against the viewport. */
@@ -247,33 +196,33 @@ export class ChangesPage implements Component {
 		this.viewportRows = rows;
 	}
 
-	enter(_direction?: 1 | -1): void {
-		this.tui.requestRender();
-	}
-
 	dispose(): void {
-		this.hitboxes = [];
+		this.invalidate();
 	}
 
 	invalidate(): void {
 		this.hitboxes = [];
+		this.wheelRegions = [];
+		this.wrappedDiff = undefined;
 	}
 
-	get selectedTurn(): string | undefined {
-		return this.selectedTurnId;
+	get selectedDiffTurn(): string | undefined {
+		return this.tab === "diff" ? this.selectedTurnId : undefined;
 	}
 
-	get selectedFile(): string | undefined {
-		return this.selectedFilePath;
+	/** The file whose diff the Diff view is showing (undefined elsewhere). */
+	get selectedDiffFile(): string | undefined {
+		return this.tab === "diff" ? this.selectedFilePath : undefined;
 	}
 
 	/** Keep the selection inside the current data without firing callbacks. */
-	syncSelection(): void {
-		const turns = this.snapshot().turns;
+	syncSelection(turns = this.snapshot().turns): void {
 		if (this.selectedTurnId && !turns.some(turn => turn.id === this.selectedTurnId)) {
 			this.selectedTurnId = undefined;
 			this.selectedFilePath = undefined;
+			this.promptExpanded = false;
 			this.scroll = 0;
+			this.selectedFindingIndex = 0;
 		}
 		if (!this.selectedTurnId && turns.length) this.selectedTurnId = turns[0]!.id;
 		const turn = turns.find(item => item.id === this.selectedTurnId);
@@ -285,26 +234,19 @@ export class ChangesPage implements Component {
 
 	handleInput(data: string): boolean {
 		const snap = this.snapshot();
-		this.syncSelection();
 		const turns = snap.turns;
+		this.syncSelection(turns);
 		if (!turns.length) return false;
 		const index = Math.max(0, turns.findIndex(turn => turn.id === this.selectedTurnId));
+		if ((data === "f" || matchesKey(data, Key.enter)) && this.fixFailure()) return true;
 		if (data === "1" || data === "2" || data === "3") {
-			const next = (["files", "diff", "review"] as const)[Number(data) - 1]!;
-			if (next === "review" && this.tab !== "review") this.selectedFindingIndex = 0;
-			this.tab = next;
-			this.scroll = 0;
-			this.tui.requestRender();
+			this.showTab(INSPECTOR_TABS[Number(data) - 1]!);
 			return true;
 		}
 		if (matchesKey(data, Key.tab) || data === "\x1b[Z") {
-			const order: InspectorTab[] = ["files", "diff", "review"];
-			const current = order.indexOf(this.tab);
-			const next = order[(current + (data === "\x1b[Z" ? -1 : 1) + order.length) % order.length]!;
-			if (next === "review" && this.tab !== "review") this.selectedFindingIndex = 0;
-			this.tab = next;
-			this.scroll = 0;
-			this.tui.requestRender();
+			const current = INSPECTOR_TABS.indexOf(this.tab);
+			const next = (current + (data === "\x1b[Z" ? -1 : 1) + INSPECTOR_TABS.length) % INSPECTOR_TABS.length;
+			this.showTab(INSPECTOR_TABS[next]!);
 			return true;
 		}
 		if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
@@ -321,12 +263,22 @@ export class ChangesPage implements Component {
 			return true;
 		}
 		if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
-			this.scroll = Math.max(0, this.scroll + (matchesKey(data, Key.pageUp) ? -10 : 10));
+			this.scroll = Math.max(0, this.scroll + (matchesKey(data, Key.pageUp) ? -this.pageSize : this.pageSize));
 			this.tui.requestRender();
 			return true;
 		}
 		if (data === "n" || data === "p") {
 			this.moveFinding(data === "p" ? -1 : 1);
+			return true;
+		}
+		if (data === "c" && this.tab === "review") {
+			const turn = turns[index];
+			if (turn && this.handledFindings(turn).length) {
+				this.onClearHandled?.(turn.id);
+				this.selectedFindingIndex = 0;
+				this.scroll = 0;
+				this.tui.requestRender();
+			}
 			return true;
 		}
 		if (data === "[") {
@@ -339,19 +291,22 @@ export class ChangesPage implements Component {
 		}
 		if (data === " ") {
 			this.promptExpanded = !this.promptExpanded;
+			this.scroll = 0;
 			this.tui.requestRender();
 			return true;
 		}
 		if (matchesKey(data, Key.enter) || data === "a") {
 			if (this.tab === "review") {
 				const turn = turns[index];
-				const finding = this.currentFinding(turn);
-				if (turn && finding) {
-					this.onFixFinding?.(turn.id, finding);
-					return true;
-				}
+				const active = turn ? this.activeFindings(turn) : [];
+				const finding = active[Math.min(this.selectedFindingIndex, active.length - 1)];
+				if (turn && finding) this.fixSelectedFinding(`${turn.id}:${finding.fingerprint}`);
+				return true;
 			}
-			if (this.tab === "files") this.tab = "diff";
+			if (this.tab === "files" && matchesKey(data, Key.enter)) {
+				this.showTab("diff");
+				return true;
+			}
 			this.scroll = 0;
 			this.tui.requestRender();
 			return true;
@@ -369,10 +324,8 @@ export class ChangesPage implements Component {
 		if (data === "r") {
 			const turn = turns[index];
 			if (turn) {
-				this.tab = "review";
-				this.scroll = 0;
+				this.showTab("review");
 				this.onReview?.(turn.id);
-				this.tui.requestRender();
 			}
 			return true;
 		}
@@ -384,15 +337,29 @@ export class ChangesPage implements Component {
 			}
 			return true;
 		}
-		if (data === "w") {
-			this.onToggleScope?.();
-			this.tui.requestRender();
-			return true;
-		}
 		return false;
 	}
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; focus?: boolean; render?: boolean } | undefined {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? 0;
+			if (!delta) return undefined;
+			const region = this.wheelRegions.find(area =>
+				event.x >= area.x && event.x < area.x + area.width && event.y >= area.y0 && event.y < area.y1);
+			if (!region) return undefined;
+			if (region.kind === "list") {
+				const turns = this.snapshot().turns;
+				const index = Math.max(0, turns.findIndex(turn => turn.id === this.selectedTurnId));
+				this.selectIndex(Math.max(0, Math.min(turns.length - 1, index + (delta > 0 ? 1 : -1))));
+			} else if (this.tab === "files" && !this.promptExpanded) {
+				this.cycleFile(delta > 0 ? 1 : -1);
+			} else {
+				const step = Math.max(1, Math.floor(this.pageSize / 2));
+				this.scroll = Math.max(0, this.scroll + (delta > 0 ? step : -step));
+				this.tui.requestRender();
+			}
+			return { handled: true, focus: true, render: true };
+		}
 		if (event.type !== "click" || event.button !== "left") return undefined;
 		const hit = this.hitboxes.find(candidate =>
 			event.y === candidate.y && event.x >= candidate.x && event.x < candidate.x + candidate.width,
@@ -400,13 +367,27 @@ export class ChangesPage implements Component {
 		if (!hit) return undefined;
 		if (hit.kind === "turn") {
 			this.selectIndex(this.snapshot().turns.findIndex(turn => turn.id === hit.value));
+		} else if (hit.kind === "failure") {
+			this.fixFailure(hit.value);
+		} else if (hit.kind === "tab") {
+			const tab = INSPECTOR_TABS.find(candidate => candidate === hit.value);
+			if (tab) this.showTab(tab);
+		} else if (hit.kind === "finding") {
+			this.selectedFindingIndex = Number(hit.value);
+			this.scroll = 0;
+			this.tui.requestRender();
+		} else if (hit.kind === "fix") {
+			this.fixSelectedFinding(hit.value);
+		} else if (hit.kind === "clear") {
+			this.onClearHandled?.(hit.value);
+			this.selectedFindingIndex = 0;
+			this.scroll = 0;
+			this.tui.requestRender();
 		} else {
 			const turn = this.snapshot().turns.find(item => item.id === this.selectedTurnId);
 			if (turn?.files.some(file => file.path === hit.value)) {
 				this.selectedFilePath = hit.value;
-				this.tab = "diff";
-				this.scroll = 0;
-				this.tui.requestRender();
+				this.showTab("diff");
 			}
 		}
 		return { handled: true, focus: true, render: true };
@@ -414,11 +395,12 @@ export class ChangesPage implements Component {
 
 	render(width: number): string[] {
 		const columns = Math.max(1, width);
-		const rows = Math.max(8, this.viewportRows ?? this.tui.terminal.rows ?? 24);
+		const rows = Math.max(1, this.viewportRows ?? this.tui.terminal.rows ?? 24);
 		let lines: string[];
 		try {
 			lines = this.build(columns, rows);
 		} catch (error) {
+			log.error("render.failed", { error: describeError(error) });
 			lines = [
 				theme.error("Changes are unavailable."),
 				theme.dim(` ${error instanceof Error ? error.message : String(error)}`),
@@ -438,9 +420,66 @@ export class ChangesPage implements Component {
 			this.scroll = 0;
 			this.selectedFindingIndex = 0;
 			this.promptExpanded = false;
-			this.onSelectTurn?.(turn.id);
+			this.wrappedDiff = undefined;
+			if (this.tab === "diff") this.onOpenDiff?.();
 		}
 		this.tui.requestRender();
+	}
+
+	private showTab(tab: InspectorTab): void {
+		if (tab === "review" && this.tab !== "review") this.selectedFindingIndex = 0;
+		this.tab = tab;
+		this.promptExpanded = false;
+		this.scroll = 0;
+		if (tab === "diff") this.onOpenDiff?.();
+		this.tui.requestRender();
+	}
+
+	private failureCode(turn: ChangeTurnInfo, reason: string): string {
+		return `${turn.id}\0${this.tab}\0${reason}`;
+	}
+
+	private reviewFailure(turn: ChangeTurnInfo | undefined): string | undefined {
+		const review = turn?.review;
+		if (!review || review.status !== "failed") return undefined;
+		const error = review.error?.trim();
+		if (error) return error;
+		if (typeof review.summary === "string" && review.summary.trim()) return review.summary.trim();
+		return "Review failed without an error message.";
+	}
+
+	private fixFailure(expected?: string): boolean {
+		if (this.promptExpanded || this.tab === "files") return false;
+		const snap = this.snapshot();
+		const turn = snap.turns.find(item => item.id === this.selectedTurnId);
+		if (!turn || snap.canFix === false) return false;
+		const reason = this.tab === "review" ? this.reviewFailure(turn) : this.diff(turn.id).error;
+		if (!reason) return false;
+		const code = this.failureCode(turn, reason);
+		if ((expected !== undefined && code !== expected) || snap.handledErrors?.has(code)) return false;
+		this.onFixFailure?.(turn.id, code, reason);
+		return true;
+	}
+
+	/** A failure the user can hand to the chat, with the reason in full. */
+	private failureBody(turn: ChangeTurnInfo, title: string, message: string, body: ScreenLine[], width: number, height: number): void {
+		const snap = this.snapshot();
+		const code = this.failureCode(turn, message);
+		body.push({ text: theme.error(title), kind: "detail" });
+		if (snap.canFix === false) {
+			body.push({ text: theme.muted(snap.hasChat === false
+				? "Open a chat to hand this failure to the agent."
+				: "Subagent chats are for inspection. Return to the main chat to fix this."), kind: "detail" });
+		} else if (snap.handledErrors?.has(code)) {
+			body.push({ text: theme.muted("Sent to chat. Press Esc to see the reply."), kind: "detail" });
+		} else {
+			const action = "Enter  Fix this";
+			body.push({ text: selectionBar(action, visibleWidth(action)), kind: "failure", key: code, hitWidth: Math.min(width, visibleWidth(action)) });
+		}
+		const lines = wrapDisplay(message, Math.min(width, 76));
+		this.pageSize = Math.max(1, height - body.length);
+		const start = this.scroll = Math.min(this.scroll, Math.max(0, lines.length - this.pageSize));
+		for (const line of lines.slice(start, start + this.pageSize)) body.push({ text: theme.text(line), kind: "detail" });
 	}
 
 	private cycleFile(direction: 1 | -1): void {
@@ -450,237 +489,177 @@ export class ChangesPage implements Component {
 		const next = (current + direction + turn.files.length) % turn.files.length;
 		this.selectedFilePath = turn.files[next]!.path;
 		this.scroll = 0;
+		if (this.tab === "diff") this.onOpenDiff?.();
 		this.tui.requestRender();
 	}
 
-	private currentFinding(turn: ChangeTurnInfo | undefined): ReviewFindingInfo | undefined {
-		const findings = turn?.review?.findings ?? [];
-		if (!findings.length) return undefined;
-		return findings[Math.max(0, Math.min(findings.length - 1, this.selectedFindingIndex))];
+	private fixSelectedFinding(expected: string): void {
+		const snap = this.snapshot();
+		const turn = snap.turns.find(item => item.id === this.selectedTurnId);
+		if (this.tab !== "review" || this.promptExpanded || !turn || snap.canFix === false || turn.review?.status !== "complete") return;
+		const active = this.activeFindings(turn, snap);
+		const finding = active[Math.min(this.selectedFindingIndex, active.length - 1)];
+		if (finding && `${turn.id}:${finding.fingerprint}` === expected) this.onFixFinding?.(turn.id, finding);
 	}
 
 	private moveFinding(direction: 1 | -1): void {
 		if (this.tab !== "review") return;
 		const turn = this.snapshot().turns.find(item => item.id === this.selectedTurnId);
-		const findings = turn?.review?.findings ?? [];
+		const findings = turn ? this.activeFindings(turn) : [];
 		if (!findings.length) return;
 		this.selectedFindingIndex = Math.max(
 			0,
 			Math.min(findings.length - 1, this.selectedFindingIndex + direction),
 		);
-		this.scroll = Math.max(0, this.selectedFindingIndex - 1);
+		this.scroll = 0;
 		this.tui.requestRender();
 	}
 
 	private build(width: number, rows: number): string[] {
 		const snap = this.snapshot();
-		this.syncSelection();
+		this.syncSelection(snap.turns);
 		const out: string[] = [];
 		const push = (line = ""): void => { out.push(line); };
 		const turns = snap.turns;
-		const totals = turns.reduce(
-			(total, turn) => ({
-				files: total.files + turn.stats.files,
-				additions: total.additions + turn.stats.additions,
-				deletions: total.deletions + turn.stats.deletions,
-			}),
-			{ files: 0, additions: 0, deletions: 0 },
-		);
-		const live = snap.running
-			? `${theme.success("●")} ${theme.success("live")}`
-			: `${theme.dim("○")} ${theme.dim("idle")}`;
+		const title = snap.hasChat === false ? "Changes" : "Changes in this chat";
 		push(between(
-			` ${theme.accentBold("CHANGES")}  ${theme.dim(`· ${sanitizeDisplay(snap.project || "global")}`)}`,
-			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
-			width,
-		));
-		const session = snap.scope === "session";
-		push(between(
-			` ${theme.accentBold(session ? "THIS CHAT" : "ALL CHATS")} ${theme.dim("·")} ${theme.dim(`${turns.length} ${turns.length === 1 ? "prompt" : "prompts"}`)} ${theme.dim("·")} ${theme.dim("w switch")}`,
-			`${theme.text(`${totals.files} files`)} ${theme.success(`+${totals.additions}`)} ${theme.error(`−${totals.deletions}`)} `,
+			`  ${theme.bold(theme.text(title))}`,
+			width >= 60 && turns.length
+				? theme.muted(`${turns.length} ${turns.length === 1 ? "prompt" : "prompts"}  `)
+				: "",
 			width,
 		));
 		if (snap.error) {
-			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(sanitizeDisplay(snap.error))}`, width, ".", true));
+			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(oneLine(snap.error, width))}`, width, ".", true));
 		}
-		push("");
+		if (rows >= 12) push("");
 
-		const headerRows = out.length;
-		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		if (!turns.length) {
-			const card = this.emptyCard(width);
-			const top = Math.max(0, Math.floor((bodyHeight - card.length) / 2));
-			for (let index = 0; index < bodyHeight; index++) push(card[index - top] ?? "");
-			push(truncateToWidth(
-				` ${theme.dim("← Activity · Ctrl+N → · Esc chat")}`,
-				width,
-				".",
-				true,
-			));
-			this.hitboxes = [];
-			return out.slice(0, rows);
-		}
-
-		const cards = this.buildCards(turns, width, bodyHeight);
-		const flat: string[] = [];
-		const meta: Array<ChangeCard["meta"][number]> = [];
-		const ranges: Array<{ start: number; end: number; id: string }> = [];
-		for (const [index, card] of cards.entries()) {
-			if (index > 0) {
-				flat.push("");
-				meta.push({ left: 0, width });
-			}
-			const start = flat.length;
-			flat.push(...card.rendered);
-			meta.push(...card.meta);
-			ranges.push({ start, end: flat.length, id: card.id });
-		}
-		const selectedCard = ranges.find(range => range.id === this.selectedTurnId) ?? ranges[0]!;
-		const offset = windowStartForBlock(selectedCard.start, selectedCard.end, bodyHeight, flat.length);
 		this.hitboxes = [];
-		for (let index = 0; index < bodyHeight; index++) {
-			const flatIndex = offset + index;
-			const line = flat[flatIndex];
-			if (line === undefined) {
-				push("");
-				continue;
+		this.wheelRegions = [];
+		const bottom = Math.max(out.length, rows - 1);
+		const bodyTop = out.length;
+		const height = Math.max(1, bottom - out.length);
+		const selectedIndex = turns.findIndex(turn => turn.id === this.selectedTurnId);
+		const turn = turns[selectedIndex];
+		if (!turn) {
+			if (snap.hasChat === false) {
+				push(`  ${theme.text("No chat yet.")}`);
+				push(`  ${theme.muted("Changes belong to a chat; send a message to start one.")}`);
+			} else {
+				push(`  ${theme.text("No changes in this chat yet.")}`);
+				push(`  ${theme.muted("Each prompt in this chat that changes a file appears here.")}`);
 			}
-			push(truncateToWidth(line, width));
-			const info = meta[flatIndex];
-			if (info?.cardId) {
-				this.hitboxes.push({
-					x: info.left,
-					width: info.width,
-					y: headerRows + index,
-					kind: info.kind === "file" ? "file" : "turn",
-					value: info.kind === "file" ? info.key ?? info.cardId : info.cardId,
-				});
+		} else {
+			const layout = inspectLayout(width, height);
+			const heading = layout.split ? 1 : 0;
+			const listSize = Math.max(1, layout.listRows - heading);
+			const start = selectionWindow(selectedIndex, listSize, turns.length);
+			const visible = turns.slice(start, start + listSize);
+			const stackedGap = !layout.split && height >= 8 ? 1 : 0;
+			const detailHeight = Math.max(1, height - (layout.split ? heading : visible.length + stackedGap));
+			const detail: ScreenLine[] = [];
+			const inner = layout.detailWidth;
+			this.detailLines(turn, detail, inner, layout.split ? height : detailHeight);
+			const detailX = layout.inset + (layout.split ? layout.listWidth + 3 : 0);
+			const listRow = (offset: number): string => {
+				const entry = visible[offset];
+				if (!entry) return "";
+				const index = start + offset;
+				const isCurrent = entry === turn;
+				const prefix = `${isCurrent ? "❯" : " "} ${String(index + 1).padStart(2, "0")}  `;
+				const label = `${prefix}${oneLine(entry.prompt, Math.max(1, layout.listWidth - visibleWidth(prefix)))}`;
+				this.hitboxes.push({ x: layout.inset, width: layout.listWidth, y: out.length, kind: "turn", value: entry.id });
+				return isCurrent ? selectionBar(label, layout.listWidth) : theme.text(label);
+			};
+			const detailRow = (offset: number): string => {
+				const line = detail[offset];
+				if (!line) return "";
+				if (line.kind === "fix" || line.kind === "failure" || line.kind === "clear" || line.kind === "finding" || line.kind === "file") {
+					this.hitboxes.push({ x: detailX, width: line.hitWidth ?? inner, y: out.length, kind: line.kind, value: line.key ?? "" });
+				}
+				for (const tab of line.tabs ?? []) {
+					const visible = Math.min(tab.width, inner - tab.x);
+					if (visible > 0) this.hitboxes.push({ x: detailX + tab.x, width: visible, y: out.length, kind: "tab", value: tab.tab });
+				}
+				const text = unindent(line.text);
+				return truncateToWidth(line.right ? between(text, line.right, inner) : text, inner, "…");
+			};
+			if (layout.split) {
+				push(layout.combine(theme.bold(theme.text(` Prompts  ${selectedIndex + 1}/${turns.length}`)), detailRow(0)));
+				for (let index = 0; index < height - heading; index++) push(layout.combine(listRow(index), detailRow(index + 1)));
+				this.wheelRegions = [
+					{ x: layout.inset, width: layout.listWidth, y0: bodyTop, y1: bottom, kind: "list" },
+					{ x: layout.inset + layout.listWidth + 3, width: layout.detailWidth, y0: bodyTop, y1: bottom, kind: "detail" },
+				];
+			} else {
+				for (let index = 0; index < visible.length; index++) push(layout.combine(listRow(index)));
+				if (stackedGap) push("");
+				for (let index = 0; index < detailHeight; index++) push(layout.combine("", detailRow(index)));
+				this.wheelRegions = [
+					{ x: 0, width, y0: bodyTop, y1: bodyTop + visible.length, kind: "list" },
+					{ x: 0, width, y0: bodyTop + visible.length, y1: bottom, kind: "detail" },
+				];
 			}
 		}
-		push(truncateToWidth(
-			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · n/p finding · Enter fix · r review · w scope · Esc close")}`,
-			width,
-			".",
-			true,
-		));
+		while (out.length < bottom) push("");
+		const keys = this.promptExpanded ? "Space Back   PgUp/PgDn Read" : this.tab === "review"
+			? "N/P Finding   PgUp/PgDn Read   R Review"
+			: "↑↓ Prompt   [ ] File   Space Full prompt";
+		push(truncateToWidth(`  ${theme.muted(`${keys}   ? Keys`)}`, width, "…", true));
 		return out.slice(0, rows);
-	}
-
-	private buildCards(turns: ChangeTurnInfo[], width: number, bodyHeight: number): ChangeCard[] {
-		const cardWidth = Math.max(24, width - 4);
-		const left = 2;
-		const inner = Math.max(12, cardWidth - 6);
-		const contentBudget = Math.max(3, Math.min(18, bodyHeight - 10));
-		const cards: ChangeCard[] = [];
-		for (const [index, turn] of turns.entries()) {
-			const selected = turn.id === this.selectedTurnId;
-			const content: ScreenLine[] = [];
-			const stats = `${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
-			const route = [turn.provider, turn.model].filter(Boolean).join(" / ");
-			const meta = [stats, route ? theme.dim(route) : "", theme.dim(age(turn.createdAt))].filter(Boolean).join(theme.dim("  ·  "));
-			content.push({ text: withState(meta, reviewChip(turn.review), inner), kind: "turn" });
-			const files = turn.files.slice(0, 3).map(file => sanitizeDisplay(file.path)).join(" · ");
-			const more = turn.files.length > 3 ? `  +${turn.files.length - 3}` : "";
-			content.push({ text: theme.dim(`${files || "no files"}${more}`), kind: "turn" });
-			if (selected) this.detailLines(turn, content, inner, contentBudget);
-			const title = `${String(index + 1).padStart(2, "0")} ❯ ${oneLine(turn.prompt, Math.max(16, cardWidth - 16))}`;
-			const rendered = renderCard(
-				content.map(line => line.right ? between(unindent(line.text), line.right, inner) : unindent(line.text)),
-				{
-					width: cardWidth,
-					title,
-					paddingX: 2,
-					paddingY: false,
-					fill: selected ? "toolBg" : "assistantBg",
-					titleTone: selected ? theme.accentBold : theme.muted,
-				},
-			).map(line => `${" ".repeat(left)}${line}`);
-			const lineMeta = content.map<ChangeCard["meta"][number]>(line => ({
-				line,
-				cardId: turn.id,
-				kind: line.kind === "file" ? "file" : "turn",
-				key: line.kind === "file" ? line.key : undefined,
-				left,
-				width: cardWidth,
-			}));
-			cards.push({
-				id: turn.id,
-				content,
-				rendered,
-				meta: [
-					{ cardId: turn.id, kind: "turn", left, width: cardWidth },
-					...lineMeta,
-					{ cardId: turn.id, kind: "turn", left, width: cardWidth },
-				],
-				left,
-				width: cardWidth,
-			});
-		}
-		return cards;
-	}
-
-	private emptyCard(width: number): string[] {
-		const cardWidth = Math.max(24, Math.min(76, width - 4));
-		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
-		const guidance = [
-			theme.accentBold("No prompt changes recorded yet."),
-			"",
-			theme.dim("Each completed agent turn that changes a file appears here."),
-			theme.dim("The card keeps the prompt, files, diff, and review."),
-			"",
-			theme.dim("Send a prompt that edits a file, then reopen this screen."),
-		];
-		return renderCard(guidance.map(line => centered(line, cardWidth - 6)), {
-			width: cardWidth,
-			title: "Changes",
-			paddingX: 2,
-			paddingY: true,
-			fill: "assistantBg",
-		}).map(line => `${" ".repeat(left)}${line}`);
 	}
 
 	private detailLines(
 		turn: ChangeTurnInfo,
 		body: ScreenLine[],
 		width: number,
-		available: number,
+		height: number,
 	): void {
-		const content = Math.max(8, width - 4);
+		const available = Math.max(1, height);
 		if (this.promptExpanded) {
-			for (const line of wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), content).slice(0, 8)) {
-				body.push({ text: `     ${theme.text(line)}`, kind: "detail" });
-			}
+			body.push({ text: theme.bold(theme.text("Full prompt")), kind: "detail" });
+			const lines = wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), Math.min(72, width));
+			this.pageSize = Math.max(1, available - (lines.length > available ? 1 : 0));
+			const start = this.scroll = Math.min(this.scroll, Math.max(0, lines.length - this.pageSize));
+			const end = Math.min(lines.length, start + this.pageSize);
+			for (const line of lines.slice(start, end)) body.push({ text: theme.text(line), kind: "detail" });
+			if (lines.length > available) body.push({ text: theme.dim(`${start + 1}–${end}/${lines.length} · PgUp/PgDn`), kind: "detail" });
+			return;
 		}
 		const findings = turn.review
 			? (turn.review.findingsCount ?? turn.review.findings.length)
 			: 0;
 		const tabs: Array<{ id: InspectorTab; label: string }> = [
-			{ id: "files", label: `FILES ${turn.files.length}` },
-			{ id: "diff", label: "DIFF" },
-			{ id: "review", label: findings ? `REVIEW ${findings}` : "REVIEW" },
+			{ id: "files", label: `1 Files ${turn.files.length}` },
+			{ id: "diff", label: "2 Diff" },
+			{ id: "review", label: findings ? `3 Review ${findings}` : "3 Review" },
 		];
-		body.push({
-			text: `     ${tabs.map(tab => tab.id === this.tab
-				? theme.accentBold(tab.label)
-				: theme.dim(tab.label)).join("   ")}`,
-			kind: "detail",
+		const tabHits: NonNullable<ScreenLine["tabs"]> = [];
+		let x = 0;
+		const labels = tabs.map(tab => {
+			const active = tab.id === this.tab;
+			const label = active ? `[${tab.label}]` : ` ${tab.label} `;
+			const width = visibleWidth(label);
+			tabHits.push({ x, width, tab: tab.id });
+			x += width + 1;
+			return active ? selectionBar(label, width) : theme.text(label);
 		});
-		body.push({ text: "", kind: "blank" });
+		body.push({ text: labels.join(" "), tabs: tabHits, kind: "detail" });
+		// One breathing row between the view switch and its evidence.
+		if (available >= 8) body.push({ text: "", kind: "detail" });
 		if (this.tab === "files") {
-			this.fileLines(turn, body, width, available);
+			if (available >= 6) {
+				const heading = wrapDisplay(turn.prompt || "(prompt not recorded)", Math.min(76, width)).slice(0, 2);
+				for (const line of heading) body.push({ text: theme.bold(theme.text(line)), kind: "detail" });
+				const stats = `${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
+				body.push({ text: `${stats}   ${reviewChip(turn.review)}`, kind: "detail" }, { text: "", kind: "detail" });
+			}
+			this.fileLines(turn, body, width, Math.max(1, available - body.length));
 		} else if (this.tab === "diff") {
-			this.diffLines(turn, body, width, available);
+			this.diffLines(turn, body, width, height);
 		} else {
 			this.reviewLines(turn, body, width, available);
 		}
-		body.push({
-			text: `     ${theme.dim(this.tab === "files"
-				? "Enter opens the diff · [ ] changes file · Space shows the full prompt"
-				: this.tab === "diff"
-					? "PgUp/PgDn scrolls · [ ] changes file · Space shows the full prompt"
-					: "Enter / a asks to implement · n/p chooses · Space shows the full prompt")}`,
-			kind: "detail",
-		});
 	}
 
 	private fileLines(
@@ -693,19 +672,18 @@ export class ChangesPage implements Component {
 			body.push({ text: `     ${theme.dim("No files were captured for this prompt.")}`, kind: "detail" });
 			return;
 		}
-		const content = Math.max(8, width - 24);
 		const selectedIndex = Math.max(0, turn.files.findIndex(file => file.path === this.selectedFilePath));
-		const start = windowStart(selectedIndex, available, turn.files.length);
+		const start = selectionWindow(selectedIndex, available, turn.files.length);
 		for (const file of turn.files.slice(start, start + available)) {
 			const selected = file.path === this.selectedFilePath;
 			const tone = fileTone(file.change);
 			const stats = file.binary ? theme.dim("binary") : `${theme.success(`+${file.additions}`)} ${theme.error(`−${file.deletions}`)}`;
+			const content = Math.max(1, width - 5 - visibleWidth(stats));
 			body.push({
-				text: `     ${selected ? theme.accent("▸") : " "} ${tone(fileLetter(file))} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), content, "…"))}`,
+				text: `     ${selected ? theme.accent("▸") : " "} ${tone(fileLetter(file))} ${theme.text(pathLabel(file.path, content))}`,
 				right: stats,
 				key: file.path,
 				kind: "file",
-				filePath: file.path,
 			});
 		}
 		if (start > 0 || start + available < turn.files.length) {
@@ -720,19 +698,19 @@ export class ChangesPage implements Component {
 		turn: ChangeTurnInfo,
 		body: ScreenLine[],
 		width: number,
-		available: number,
+		height: number,
 	): void {
 		const file = turn.files.find(item => item.path === this.selectedFilePath) ?? turn.files[0];
 		if (!file) {
 			body.push({ text: `     ${theme.dim("No file selected.")}`, kind: "detail" });
 			return;
 		}
-		const content = Math.max(8, width - 6);
 		const state = this.diff(turn.id);
 		const diffFile = state.files.find(item => item.path === file.path);
+		const position = `${this.fileIndex(turn, file.path)}/${turn.files.length}`;
 		body.push({
-			text: `     ${theme.accent("◂")} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), content, "…"))} ${theme.accent("▸")}`,
-			right: theme.dim(`${this.fileIndex(turn, file.path)}/${turn.files.length}`),
+			text: theme.bold(theme.text(pathLabel(file.path, Math.max(1, width - position.length - 1)))),
+			right: theme.muted(position),
 			kind: "detail",
 		});
 		if (file.binary || diffFile?.binary) {
@@ -740,7 +718,7 @@ export class ChangesPage implements Component {
 			return;
 		}
 		if (state.error) {
-			body.push({ text: `     ${theme.error(state.error)}`, kind: "detail" });
+			this.failureBody(turn, "Could not load this diff", state.error, body, width, height);
 			return;
 		}
 		if (state.loading && !diffFile) {
@@ -751,19 +729,60 @@ export class ChangesPage implements Component {
 			body.push({ text: `     ${theme.dim("No textual diff recorded for this file.")}`, kind: "detail" });
 			return;
 		}
-		const diffLines = diffFile.text.replace(/\r\n/g, "\n").split("\n");
-		if (diffLines.at(-1) === "") diffLines.pop();
-		const start = Math.min(this.scroll, Math.max(0, diffLines.length - 1));
-		const shown = diffLines.slice(start, start + available);
-		for (const line of shown) {
-			body.push({ text: `     ${truncateToWidth(styleDiffLine(line), content, "…")}`, kind: "detail" });
+		if (this.wrappedDiff?.file !== diffFile || this.wrappedDiff.width !== width) {
+			const lines = sanitizeDisplay(diffFile.text).split("\n");
+			if (lines.at(-1) === "") lines.pop();
+			this.wrappedDiff = { file: diffFile, width, rows: lines.flatMap(line =>
+				wrapTextWithAnsi(line.startsWith(" ") ? theme.text(line) : styleDiffLine(line), width)) };
 		}
-		if (start + shown.length < diffLines.length || diffFile.truncated || state.truncated) {
+		const diffLines = this.wrappedDiff.rows;
+		const available = Math.max(1, height - body.length);
+		const paged = diffLines.length > available || diffFile.truncated || state.truncated;
+		this.pageSize = Math.max(1, available - Number(paged));
+		const start = this.scroll = Math.min(this.scroll, Math.max(0, diffLines.length - this.pageSize));
+		const shown = diffLines.slice(start, start + this.pageSize);
+		for (const line of shown) {
+			body.push({ text: `     ${line}`, kind: "detail" });
+		}
+		if (paged) {
 			body.push({
-				text: `     ${theme.dim(`… ${Math.max(0, diffLines.length - start - shown.length)} more diff lines${diffFile.truncated || state.truncated ? " (truncated)" : ""} · PgDn scrolls`)}`,
+				text: `     ${theme.muted(`${start + 1}–${start + shown.length} of ${diffLines.length} rows${diffFile.truncated || state.truncated ? " · Truncated" : ""}`)}`,
 				kind: "detail",
 			});
 		}
+	}
+
+	private activeFindings(turn: ChangeTurnInfo, snap = this.snapshot()): ReviewFindingInfo[] {
+		return (turn.review?.findings ?? []).filter(finding => !snap.sentFindings?.has(`${turn.id}:${finding.fingerprint}`));
+	}
+
+	private handledFindings(turn: ChangeTurnInfo): Array<{ finding: ReviewFindingInfo; queued: boolean }> {
+		const sent = this.snapshot().sentFindings;
+		return sent
+			? [...sent.values()]
+				.filter(item => item.turnId === turn.id && !item.cleared)
+				.map(item => ({ finding: item.finding, queued: item.queued === true }))
+			: [];
+	}
+
+	/** A snapshot review cannot verify subsequent working-tree fixes. */
+	private handledLines(
+		turn: ChangeTurnInfo,
+		handled: Array<{ finding: ReviewFindingInfo; queued: boolean }>,
+		body: ScreenLine[],
+		width: number,
+	): void {
+		if (!handled.length) return;
+		const clear = `C  Clear handled · ${handled.length}`;
+		body.push({ text: theme.muted(clear), kind: "clear", key: turn.id, hitWidth: Math.min(width, visibleWidth(clear)) });
+		for (const item of handled.slice(0, 4)) {
+			const tag = item.queued ? "Queued" : "Sent";
+			body.push({
+				text: `${theme.muted(tag)}  ${theme.text(oneLine(item.finding.title, Math.max(1, width - tag.length - 2)))}`,
+				kind: "detail",
+			});
+		}
+		if (handled.length > 4) body.push({ text: theme.muted(`+${handled.length - 4} more handled`), kind: "detail" });
 	}
 
 	private reviewLines(
@@ -772,85 +791,96 @@ export class ChangesPage implements Component {
 		width: number,
 		available: number,
 	): void {
-		const content = Math.max(10, width - 6);
 		const review = turn.review;
 		if (!review) {
-			body.push({ text: `     ${theme.dim("No review run for this prompt.")}`, kind: "detail" });
-			body.push({ text: `     ${theme.text("Press r to run the local rules review.")}`, kind: "detail" });
-			body.push({ text: `     ${theme.dim("It reads this prompt's stable diff only; it never edits files.")}`, kind: "detail" });
+			body.push({ text: theme.text("No review yet. Press R to check this diff."), kind: "detail" });
 			return;
 		}
-		const tone = reviewTone(review);
-		body.push({
-			text: `     ${tone(`● ${review.status}`)} ${theme.dim("·")} ${theme.text(review.engine)} ${theme.dim("·")} ${reviewChip(review)}`,
-			right: theme.dim(age(review.finishedAt || review.startedAt || review.createdAt)),
-			kind: "detail",
-		});
-		if (review.summary) {
-			for (const line of wrapDisplay(sanitizeDisplay(review.summary), content)) {
-				body.push({ text: `     ${theme.text(line)}`, kind: "detail" });
+		const failure = this.reviewFailure(turn);
+		const findings = review.findings;
+		const handled = this.handledFindings(turn);
+		const active = this.activeFindings(turn);
+		if (review.status !== "complete" || !findings.length) {
+			if (failure) {
+				this.failureBody(turn, "Review failed", failure, body, width, available);
+				return;
 			}
-		}
-		if (review.error) {
-			body.push({ text: `     ${theme.error(truncateToWidth(review.error, content, "…"))}`, kind: "detail" });
-		}
-		if (!review.findings.length) {
-			body.push({ text: `     ${theme.success("No findings in this run.")}`, kind: "detail" });
+			const pending = review.status === "running" || review.status === "queued";
+			const text = review.status === "complete" ? theme.success("No findings in this run.")
+				: pending ? theme.warning(`Review ${review.status} · X cancels`) : theme.dim(`Review ${review.status}`);
+			body.push({ text, kind: "detail" });
+			this.handledLines(turn, handled, body, width);
 			return;
 		}
-		this.selectedFindingIndex = Math.max(
-			0,
-			Math.min(review.findings.length - 1, this.selectedFindingIndex),
-		);
-		const start = Math.min(this.scroll, Math.max(0, review.findings.length - 1));
-		let rendered = 0;
-		let index = start;
-		for (; index < review.findings.length; index++) {
-			if (rendered >= available && index !== this.selectedFindingIndex) break;
-			rendered += this.pushFinding(review.findings[index]!, body, content, index === this.selectedFindingIndex);
+		if (!active.length) {
+			body.push({ text: theme.muted("All displayed findings were handed to chat."), kind: "detail" });
+			this.handledLines(turn, handled, body, width);
+			return;
 		}
-		if (index < review.findings.length) {
-			body.push({ text: `     ${theme.dim("… more findings · PgDn scrolls")}`, kind: "detail" });
-		}
-		const total = review.findingsCount ?? review.findings.length;
-		if (total > review.findings.length) {
-			body.push({
-				text: `     ${theme.dim(`Top ${review.findings.length} of ${total} findings shown in severity order.`)}`,
-				kind: "detail",
-			});
-		}
-		body.push({
-			text: review.status === "running" || review.status === "queued"
-				? `     ${theme.dim("x cancels · the run reads only this prompt's diff")}`
-				: `     ${theme.dim("r re-runs the local rules review")}`,
-			kind: "detail",
-		});
-	}
-
-	private pushFinding(
-		finding: ReviewFindingInfo,
-		body: ScreenLine[],
-		content: number,
-		selected = false,
-	): number {
-		const tone = severityTone(finding.severity);
-		const location = finding.file
-			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
-			: "prompt";
-		body.push({
-			text: `     ${selected ? theme.accent("▸") : " "} ${tone(finding.severity.toUpperCase().padEnd(8))} ${theme.text(truncateToWidth(finding.title, Math.max(10, content - 12), "…"))}`,
-			right: theme.dim(truncateToWidth(location, 30, "…")),
-			kind: "detail",
-		});
-		let used = 1;
-		if (finding.body) {
-			for (const line of wrapDisplay(sanitizeDisplay(finding.body), Math.max(10, content - 4)).slice(0, 2)) {
-				body.push({ text: `       ${theme.dim(line)}`, kind: "detail" });
-				used++;
+		const selected = this.selectedFindingIndex = Math.min(this.selectedFindingIndex, active.length - 1);
+		const finding = active[selected]!;
+		const canFix = this.snapshot().canFix !== false;
+		const action = "Enter  Fix in Chat";
+		const compact = available <= 4;
+		const count = `${selected + 1}/${active.length}${(review.findingsCount ?? 0) > findings.length ? ` shown (${review.findingsCount} total)` : ""}`;
+		const position = active.length > 1 ? ` · ${width >= 38 ? "Finding " : ""}${count}` : "";
+		const severity = finding.severity.toUpperCase();
+		const lineNumber = finding.line ? `:${finding.line}` : "";
+		const pathWidth = Math.max(1, width - visibleWidth(severity + position + lineNumber) - 3);
+		const location = finding.file ? `${pathLabel(finding.file, pathWidth)}${lineNumber}` : "Changed files";
+		const title = wrapDisplay(finding.title || "Review finding", Math.min(width, 76)).slice(0, available >= 7 ? 2 : 1);
+		const actionLine: ScreenLine = {
+			text: canFix ? selectionBar(action, visibleWidth(action))
+				: theme.text(this.snapshot().hasChat === false
+					? "Open a chat to fix this finding"
+					: "Subagent chat: return to the main chat to fix"),
+			kind: canFix ? "fix" : "detail",
+			key: canFix ? `${turn.id}:${finding.fingerprint}` : undefined,
+			hitWidth: canFix ? Math.min(width, visibleWidth(action)) : undefined,
+		};
+		// A short list above the reading area beats a third column of clipped titles.
+		const showOther = available >= 12 && active.length > 1;
+		const other: Array<{ index: number; entry: ReviewFindingInfo }> = [];
+		if (showOther) {
+			const size = Math.min(3, active.length);
+			const start = selectionWindow(selected, size, active.length);
+			for (const [offset, entry] of active.slice(start, start + size).entries()) {
+				if (start + offset !== selected) other.push({ index: start + offset, entry });
 			}
+			body.push({ text: theme.muted("Other findings"), kind: "detail" });
+			for (const { index, entry } of other) {
+				const text = `  ${index + 1}. ${oneLine(entry.title, Math.max(1, width - 6))}`;
+				body.push({ text: theme.text(text), kind: "finding", key: String(index) });
+			}
+			body.push({ text: "", kind: "detail" });
 		}
-		body.push({ text: "", kind: "blank" });
-		return used + 1;
+		for (const line of title) body.push({ text: theme.bold(theme.text(line)), kind: "detail" });
+		body.push({
+			text: `${severityTone(finding.severity)(severity)} · ${theme.text(location)}${theme.muted(position)}`,
+			kind: "detail",
+		});
+		const gap = available >= 9 ? 1 : 0;
+		if (gap) body.push({ text: "", kind: "detail" });
+		const explanation = wrapDisplay(finding.body || "No additional detail.", Math.min(width, 76));
+		// Reserve the action plus handled lines so paging never pushes the fix
+		// off the pane; at degenerate heights the explanation yields first.
+		const handledRows = handled.length ? 1 + Math.min(4, handled.length) + (handled.length > 4 ? 1 : 0) : 0;
+		const reserveHandled = Math.min(handledRows, Math.max(0, available - body.length - 2));
+		let page = Math.max(0, available - body.length - 1 - reserveHandled);
+		const pages = explanation.length > page;
+		// A pager line is optional; never trade the last explanation line for it.
+		const pager = pages && !compact && page > 1;
+		if (pager) page -= 1;
+		this.pageSize = Math.max(1, page);
+		const top = this.scroll = Math.min(this.scroll, Math.max(0, explanation.length - page));
+		for (const line of explanation.slice(top, top + page)) {
+			body.push({ text: theme.text(line), kind: "detail" });
+		}
+		if (pager) {
+			body.push({ text: theme.muted(`${top + 1}–${Math.min(top + page, explanation.length)} of ${explanation.length} lines`), kind: "detail" });
+		}
+		body.push(actionLine);
+		this.handledLines(turn, handled, body, width);
 	}
 
 	private fileIndex(turn: ChangeTurnInfo, path: string): number {

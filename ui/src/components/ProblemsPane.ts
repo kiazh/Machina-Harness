@@ -57,7 +57,7 @@ export interface ProblemRowOptions {
 
 /** One diagnostic row: `path:line:col severity message (source)`. */
 export function formatProblemRow(row: ProblemRow, options: ProblemRowOptions = {}): string {
-	const where = `${problemDisplayPath(row.uri, options.root)}:${row.line + 1}:${row.character + 1}`;
+	const where = sanitizeDisplay(`${problemDisplayPath(row.uri, options.root)}:${row.line + 1}:${row.character + 1}`);
 	const marker = SEVERITY_MARKERS[row.severity] ?? "?";
 	const message = sanitizeDisplay(row.message);
 	const source = row.source !== undefined && row.source.length > 0 ? ` (${sanitizeDisplay(row.source)})` : "";
@@ -220,6 +220,15 @@ export class ProblemsPane implements Component, Focusable {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? 0;
+			const rows = this.currentRows();
+			if (!delta || !rows.length) return undefined;
+			this.selectionValue = Math.max(0, Math.min(rows.length - 1, this.selectionValue + (delta > 0 ? 1 : -1)));
+			this.selectedRow = rows[this.selectionValue]!;
+			this.requestRenderCallback?.();
+			return { handled: true, focus: true, render: true };
+		}
 		if (event.button !== "left") return undefined;
 		const y = Number.isFinite(event.y) ? Math.floor(event.y) : -1;
 		// Row 0 is the header; item rows start below it.

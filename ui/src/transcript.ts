@@ -11,7 +11,10 @@ import { TurnSummary as TurnSummaryLine } from "./components/TurnSummary.ts";
 import { UserTurn } from "./components/UserTurn.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
 import type { NoticeKind } from "./features/index.ts";
+import { uiLog } from "./debug.ts";
 import type { GatewayEvent, HistoryEntry } from "./protocol.ts";
+
+const log = uiLog.scope("transcript");
 
 export interface TurnSummary {
 	tokens: number;
@@ -230,6 +233,10 @@ export class Transcript {
 			return undefined;
 		case "message.delta":
 			this.hideSpinner();
+			if (typeof event.text !== "string" || !event.text) {
+				log.warn("message.delta.invalid", { session: event.sessionId, turn: event.turnId, type: typeof event.text });
+				return undefined;
+			}
 			if (!this.current) {
 				this.current = new AssistantTurn("", this.activity);
 				this.current.setStreaming(true);
@@ -247,6 +254,10 @@ export class Transcript {
 		case "tool.start": {
 			this.hideSpinner();
 			this.stopAssistant();
+			if (typeof event.id !== "string" || !event.id) {
+				log.warn("tool.start.invalid", { session: event.sessionId, turn: event.turnId, name: event.name });
+				return undefined;
+			}
 			this.current = undefined; // text after the tool starts a new block
 			const card = new ToolTurn(event.name, event.args, this.activity);
 			this.turnTools += 1;
@@ -260,6 +271,10 @@ export class Transcript {
 		}
 		case "tool.complete": {
 			// Unknown tool IDs never manufacture a tool card.
+			if (typeof event.id !== "string" || !event.id) {
+				log.warn("tool.complete.invalid", { session: event.sessionId, turn: event.turnId, name: event.name });
+				return undefined;
+			}
 			const card = this.tools.get(event.id);
 			card?.settle(
 				{ text: event.result, backendTruncated: event.truncated ?? false, locallyTruncated: false },
@@ -276,7 +291,12 @@ export class Transcript {
 			case "error":
 				this.hideSpinner();
 				this.stopAssistant();
-				this.addNotice(event.message, "error");
+				this.addNotice(
+					typeof event.message === "string" && event.message
+						? event.message
+						: "The gateway reported an error without a message.",
+					"error",
+				);
 				return undefined;
 		case "message.stopping":
 			// AH-AUDIT-028: cleanup state — the turn is stopping but
@@ -310,6 +330,7 @@ export class Transcript {
 			// Duplicate terminal delivery for an already-retired turn is inert.
 			if (this.lastCompletedTurn !== undefined && this.lastCompletedTurn === event.turnId) return undefined;
 			this.lastCompletedTurn = event.turnId;
+			const completion = typeof event.text === "string" ? event.text : "";
 			// AH-AUDIT-027: reconcile with the canonical final content.
 			// Deltas alone may omit a withheld redaction tail: when the
 			// canonical text extends what was displayed, append exactly
@@ -318,13 +339,13 @@ export class Transcript {
 			// replaces streamed content instead of extending it, reconcile
 			// the current text block to the canonical content so discarded
 			// raw deltas are never exposed alongside it.
-			if (!this.wroteText && event.text) {
-				this.retain(new AssistantTurn(event.text));
-				this.resetDisplayed(event.text);
-			} else if (event.text && event.text !== this.displayedText()) {
+			if (!this.wroteText && completion) {
+				this.retain(new AssistantTurn(completion));
+				this.resetDisplayed(completion);
+			} else if (completion && completion !== this.displayedText()) {
 				const displayed = this.displayedText();
-				if (event.text.startsWith(displayed)) {
-					const missing = event.text.slice(displayed.length);
+				if (completion.startsWith(displayed)) {
+					const missing = completion.slice(displayed.length);
 					if (missing) {
 						if (this.current) this.current.append(missing);
 						else {
@@ -334,11 +355,11 @@ export class Transcript {
 						this.appendDisplayed(missing);
 					}
 				} else if (this.current) {
-					this.current.setText(event.text);
-					this.resetDisplayed(event.text);
+					this.current.setText(completion);
+					this.resetDisplayed(completion);
 				} else {
-					this.retain(new AssistantTurn(event.text));
-					this.resetDisplayed(event.text);
+					this.retain(new AssistantTurn(completion));
+					this.resetDisplayed(completion);
 				}
 			}
 			if (event.cancelled) {

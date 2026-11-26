@@ -131,6 +131,11 @@ def _setup_gateway_logging() -> None:
     core_logger.setLevel(logging.DEBUG)
     core_logger.addHandler(file_handler)
 
+    # Workspace snapshots/reviews log at DEBUG to the same file.
+    workspace_logger = logging.getLogger("machina.workspace")
+    workspace_logger.setLevel(logging.DEBUG)
+    workspace_logger.addHandler(file_handler)
+
     logger.info("Gateway logging initialized: %s", log_file)
     # Pay instrumentation's one-time import/regex cost now, never mid-turn.
     warm()

@@ -130,7 +130,7 @@ test("a denied Automation permission reads as needs-permission, never as Nothing
 
 test("paused shows the paused glyph; the animation only runs while playing", () => {
 	const paused = plainLines(bar({ state: "paused" }, 3), 90);
-	assert.match(paused[0]!, /⏸/);
+	assert.match(paused[0]!, /\|\|/);
 	const playing = bar();
 	assert.ok(
 		SOUND_FRAMES.some((frame) => plainLines(playing, 90)[0]!.includes(frame)),

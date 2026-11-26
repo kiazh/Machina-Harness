@@ -2,35 +2,37 @@ import { KeybindingsManager, matchesKey, parseKey, setKeybindings, TUI_KEYBINDIN
 import { SHORTCUT_ROWS, type ShortcutRow } from "./design/shortcuts.ts";
 
 export const APP_BINDINGS = {
-	shortcuts: { label: "Show shortcuts", key: "ctrl+n h" },
+	shortcuts: { label: "Show shortcuts", key: "alt+h" },
 	stop: { label: "Stop / clear / exit", key: "ctrl+c" },
 	cancelTurn: { label: "Stop active reply (press Escape twice)", key: "escape" },
 	pasteImage: { label: "Paste image", key: "ctrl+v" },
 	pasteImageMac: { label: "Paste image (macOS)", key: "super+v" },
+	pasteImageDirect: { label: "Read image from system clipboard", key: "alt+v" },
 	agentMenu: { label: "Agent menu", key: "down" },
 	exit: { label: "Exit empty chat", key: "ctrl+d" },
 	clear: { label: "Clear chat", key: "ctrl+l" },
-	agentNext: { label: "Next agent", key: "ctrl+n j" },
-	agentPrevious: { label: "Previous agent", key: "ctrl+n k" },
-	agentClose: { label: "Close idle agent tab", key: "ctrl+n d" },
-	activity: { label: "View activity and queued prompts", key: "ctrl+n a" },
-	statusLeft: { label: "Activity screen (←)", key: "left" },
-	statusRight: { label: "Changes screen (→)", key: "right" },
+	agentNext: { label: "Next agent", key: "alt+j" },
+	agentPrevious: { label: "Previous agent", key: "alt+k" },
+	agentClose: { label: "Close idle agent tab", key: "alt+0" },
+	activity: { label: "View activity and queued prompts", key: "alt+a" },
+	showChat: { label: "Show Chat", key: "alt+down" },
+	statusLeft: { label: "Show Activity (left of Chat)", key: "alt+left" },
+	statusRight: { label: "Show Changes (right of Chat)", key: "alt+right" },
 	quickOpen: { label: "Quick open", key: "ctrl+p" },
 	explorer: { label: "Toggle file tree", key: "ctrl+t" },
-	explorerAlt: { label: "Toggle file tree (fallback)", key: "ctrl+n t" },
+	explorerAlt: { label: "Toggle file tree (fallback)", key: "alt+e" },
 	explorerSafe: { label: "Toggle file tree (browser-safe)", key: "ctrl+shift+e" },
 	closeTab: { label: "Close file tab", key: "ctrl+w" },
-	focusNext: { label: "Next pane", key: "ctrl+n n" },
-	focusPrevious: { label: "Previous pane", key: "ctrl+n p" },
-	chatMaximize: { label: "Maximize chat", key: "ctrl+n c" },
-	editorMaximize: { label: "Maximize editor", key: "ctrl+n e" },
-	restoreSplit: { label: "Restore split", key: "ctrl+n s" },
+	focusNext: { label: "Next pane", key: "alt+q" },
+	focusPrevious: { label: "Previous pane", key: "alt+w" },
+	chatMaximize: { label: "Maximize chat", key: "alt+1" },
+	editorMaximize: { label: "Maximize editor", key: "alt+2" },
+	restoreSplit: { label: "Restore split", key: "alt+3" },
 	attach: { label: "Attach selection", key: "ctrl+shift+a" },
 	complete: { label: "Inline completion", key: "ctrl+space" },
-	references: { label: "Find references", key: "ctrl+n r" },
-	definition: { label: "Go to definition", key: "ctrl+n g" },
-	rename: { label: "Rename symbol", key: "ctrl+n m" },
+	references: { label: "Find references", key: "alt+r" },
+	definition: { label: "Go to definition", key: "alt+g" },
+	rename: { label: "Rename symbol", key: "alt+m" },
 	save: { label: "Save file", key: "ctrl+s" },
 } as const;
 
@@ -38,40 +40,21 @@ export type AppBindingId = keyof typeof APP_BINDINGS;
 export type BindingOverrides = Record<string, string>;
 export type KeyPlatform = "macos" | "windows" | "linux";
 
-/** Platform-sensitive fallbacks for keys commonly intercepted by terminals. */
-const PLATFORM_ALIASES: Partial<Record<AppBindingId, Record<KeyPlatform, string[]>>> = {
-	// The plain arrows are the documented screen keys. The old Ctrl+N chord
-	// remains a fallback for terminals or habits that still use it.
-	statusLeft: {
-		macos: ["ctrl+n left"],
-		windows: ["ctrl+n left"],
-		linux: ["ctrl+n left"],
-	},
-	statusRight: {
-		macos: ["ctrl+n right"],
-		windows: ["ctrl+n right"],
-		linux: ["ctrl+n right"],
-	},
-	complete: {
-		macos: ["ctrl+n i"],
-		windows: ["ctrl+n i"],
-		linux: ["ctrl+n i"],
-	},
-	closeTab: {
-		macos: ["ctrl+n x"],
-		windows: ["ctrl+n x"],
-		linux: ["ctrl+n x"],
-	},
-	quickOpen: {
-		macos: ["ctrl+n o"],
-		windows: ["ctrl+n o"],
-		linux: ["ctrl+n o"],
-	},
-	attach: {
-		macos: ["ctrl+n v"],
-		windows: ["ctrl+n v"],
-		linux: ["ctrl+n v"],
-	},
+/** Single-chord fallbacks when the terminal reserves a primary shortcut. */
+const ALIASES: Partial<Record<AppBindingId, string[]>> = {
+	complete: ["alt+i"],
+	closeTab: ["alt+x"],
+	quickOpen: ["alt+o"],
+	attach: ["alt+t"],
+};
+
+// Old settings (including copied defaults) should not keep the old leader
+// armed. Other custom sequences are kept.
+const OLD_LEADER_KEYS: Partial<Record<AppBindingId, string>> = {
+	shortcuts: "h", pasteImageDirect: "b", agentNext: "j", agentPrevious: "k", agentClose: "d",
+	activity: "a", showChat: "1", statusLeft: "2", statusRight: "3", explorerAlt: "t",
+	focusNext: "n", focusPrevious: "p", chatMaximize: "c", editorMaximize: "e",
+	restoreSplit: "s", references: "r", definition: "g", rename: "m",
 };
 
 export function keyPlatform(platform: NodeJS.Platform = process.platform): KeyPlatform {
@@ -118,8 +101,8 @@ export function platformKeyLabel(key: string, platform: KeyPlatform = keyPlatfor
 		.join(" / ");
 }
 
-export function bindingAliases(id: AppBindingId, platform: KeyPlatform = keyPlatform()): string[] {
-	return PLATFORM_ALIASES[id]?.[platform] ?? [];
+export function bindingAliases(id: AppBindingId): string[] {
+	return ALIASES[id] ?? [];
 }
 
 export function bindingRows(overrides: BindingOverrides): Array<{ id: string; label: string; key: string }> {
@@ -139,9 +122,11 @@ export function parseBindingOverrides(raw: unknown): BindingOverrides {
 		const parsed: unknown = JSON.parse(raw);
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 		const allowed = new Set(bindingRows({}).map((row) => row.id));
-		return Object.fromEntries(Object.entries(parsed).filter(([id, key]) =>
-			allowed.has(id) && typeof key === "string" && key.length <= 64 && /^[a-z0-9+?_-]+(?: [a-z0-9+?_-]+)?$/i.test(key),
-		)) as BindingOverrides;
+		return Object.fromEntries(Object.entries(parsed).filter(([id, key]) => {
+			if (!allowed.has(id) || typeof key !== "string" || !/^[a-z0-9+?_-]+(?: [a-z0-9+?_-]+)?$/i.test(key) || key.length > 64) return false;
+			const old = OLD_LEADER_KEYS[id as AppBindingId];
+			return !old || key.toLowerCase() !== `ctrl+n ${old}`;
+		})) as BindingOverrides;
 	} catch {
 		return {};
 	}
@@ -149,11 +134,6 @@ export function parseBindingOverrides(raw: unknown): BindingOverrides {
 
 export class AppKeybindings {
 	private overrides: BindingOverrides = {};
-	private readonly platform: KeyPlatform;
-
-	constructor(platform: KeyPlatform = keyPlatform()) {
-		this.platform = platform;
-	}
 
 	set(overrides: BindingOverrides): void {
 		this.overrides = { ...overrides };
@@ -166,19 +146,15 @@ export class AppKeybindings {
 
 	matches(data: string, id: AppBindingId): boolean {
 		const key = this.overrides[id] ?? APP_BINDINGS[id].key;
-		if (key.includes(" ")) return data === key;
-		if (matchesKey(data, key as Parameters<typeof matchesKey>[1])) return true;
+		if (key.includes(" ") ? data === key : matchesKey(data, key as Parameters<typeof matchesKey>[1])) return true;
 		return this.overrides[id] === undefined
-			&& bindingAliases(id, this.platform).some((alias) => alias.includes(" ") ? data === alias : matchesKey(data, alias as Parameters<typeof matchesKey>[1]));
+			&& bindingAliases(id).some((alias) => matchesKey(data, alias as Parameters<typeof matchesKey>[1]));
 	}
 
 	leaders(): string[] {
-		const sequences = Object.keys(APP_BINDINGS).flatMap((id) => {
-			const bindingId = id as AppBindingId;
-			const key = this.overrides[id] ?? APP_BINDINGS[bindingId].key;
-			const aliases = this.overrides[id] === undefined ? bindingAliases(bindingId, this.platform) : [];
-			return [key, ...aliases].filter((candidate) => candidate.includes(" "));
-		});
+		const sequences = Object.entries(this.overrides)
+			.filter(([id, key]) => Object.hasOwn(APP_BINDINGS, id) && key.includes(" "))
+			.map(([, key]) => key);
 		return [...new Set(sequences.map((key) => key.split(" ")[0]!))];
 	}
 }
@@ -193,27 +169,27 @@ export function bindingConflicts(
 	overrides: BindingOverrides,
 	id: string,
 	key: string,
-	platform: KeyPlatform = keyPlatform(),
 ): string[] {
 	return bindingRows(overrides)
 		.filter((row) => {
 			if (row.id === id) return false;
 			if (row.key.split(" / ").includes(key)) return true;
 			return overrides[row.id] === undefined
-				&& bindingAliases(row.id as AppBindingId, platform).includes(key);
+				&& bindingAliases(row.id as AppBindingId).includes(key);
 		})
 		.map((row) => row.label);
 }
 
 const SHORTCUT_BINDINGS: Record<string, string[]> = {
-	send: ["tui.input.submit"], newline: ["tui.input.newLine"], image: ["pasteImage", "pasteImageMac"],
+	send: ["tui.input.submit"], newline: ["tui.input.newLine"], image: ["pasteImageDirect", "pasteImage", "pasteImageMac"],
 	stop: ["cancelTurn"], cancel: ["stop"], exit: ["exit"], clear: ["clear"],
 	complete: ["tui.input.tab"], subagents: ["agentMenu"], tabs: ["agentNext", "agentPrevious", "agentClose"],
 	quickopen: ["quickOpen"], save: ["save"], closetab: ["closeTab"], explorer: ["explorer", "explorerAlt", "explorerSafe"],
 	intel: ["complete"], focus: ["focusNext", "focusPrevious"], chatmax: ["chatMaximize", "editorMaximize", "restoreSplit"],
+	attach: ["attach"],
 	help: ["shortcuts"],
 	activity: ["activity"],
-	status: ["statusLeft", "statusRight"],
+	status: ["showChat", "statusLeft", "statusRight"],
 };
 
 export function effectiveShortcutRows(overrides: BindingOverrides): ShortcutRow[] {

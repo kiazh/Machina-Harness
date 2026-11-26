@@ -1,7 +1,7 @@
 // Quiet agent family strip: plain names, one accent for the active chat,
 // and a small dot for a running child. No pills, brackets, or counters.
 import { type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { sanitizeDisplay } from "../design/text.ts";
+import { sanitizeLabelText } from "../design/text.ts";
 import { theme } from "../design/theme.ts";
 import type { FamilySession } from "../features/types.ts";
 
@@ -26,7 +26,7 @@ export class AgentTabBar {
 		let column = 1;
 		for (const [index, row] of this.rows().entries()) {
 			const title = row.main ? "main" : row.session.title.split(":", 1)[0] || "agent";
-			const label = sanitizeDisplay(title).slice(0, 18);
+			const label = truncateToWidth(sanitizeLabelText(title), 18, "…");
 			const dot = row.running ? " •" : "";
 			const size = visibleWidth(label) + visibleWidth(dot);
 			if (column + size > width) break;

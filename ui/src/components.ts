@@ -18,11 +18,12 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 import { ACTIVITY_INTERVAL_MS, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
+import { ICONS } from "./design/icons.ts";
 import { hasTerminalPasteResidue, sanitizeDisplay, sanitizePastedText } from "./design/text.ts";
 import { LIMITS } from "./design/tokens.ts";
 import { transcriptInset } from "./design/spacing.ts";
 import { Menu } from "./components/Menu.ts";
-import { isOpaqueBackground, styleComposerText, theme } from "./theme.ts";
+import { isOpaqueBackground, styleComposerText, surfaceLine, theme } from "./theme.ts";
 
 export { Footer } from "./components/Footer.ts";
 
@@ -59,12 +60,12 @@ export class ThinkingIndicator implements Component {
 
 	render(width: number): string[] {
 		if (!this.sub) return [];
-		const dot = this.activity.frame(["✻", "✶", "✳", "✢"], ACTIVITY_INTERVAL_MS, this.startedAt);
+		const dot = theme.accent(this.activity.frame(ICONS.workingFrames, ACTIVITY_INTERVAL_MS, this.startedAt));
 		const secs = Math.floor((Date.now() - this.startedAt) / 1000);
 		const base = this.baseMessage.replace(/[.\s]+$/, "");
 		const msg = secs > 0 ? `${base} (${secs}s · esc to interrupt)` : base;
 		const gutter = " ".repeat(transcriptInset(width));
-		return [truncateToWidth(`${gutter}${theme.accent(dot)} ${theme.muted(msg)}`, width)];
+		return [truncateToWidth(`${gutter}${dot} ${theme.muted(msg)}`, width)];
 	}
 
 	invalidate(): void {}
@@ -328,16 +329,17 @@ export class ComposerInput extends Editor {
 
 /** Muted composer placeholder (the Editor cannot render its own). */
 export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
+const COMPOSER_TITLE = "  MESSAGE";
 
 /**
- * Codex-style composer: a filled input block with a left accent bar. Wraps
- * the Editor in a background box — focus and input stay on the inner
- * editor. While the editor is empty, a muted placeholder fills the same rows
- * so the block never jumps in height.
+ * Docked input on a raised surface. Rendering and hit-testing share the
+ * same editor width so wrapping and cursor placement agree at the edge.
  */
 export class ComposerBox extends Box {
 	readonly editor: ComposerInput;
 	placeholder = COMPOSER_PLACEHOLDER;
+	imageShortcut = "Alt+V";
+	onPasteImage?: () => void;
 	private readonly tui: TUI;
 	private degradedMode = false;
 	/** Last measured chrome height, keyed by the inputs that can change it. */
@@ -383,25 +385,42 @@ export class ComposerBox extends Box {
 	}
 
 	override render(width: number): string[] {
-		const inner = Math.max(1, width - 2);
 		const prefix = (index: number): string => index === 0 ? theme.accent("❯ ") : "  ";
 		const total = Math.max(0, width);
-		const framed = total >= 8 && (this.tui.terminal.rows ?? 24) >= 12;
-		// Focus is the composer's only strong signal: the frame lifts to the
-		// accent while the keyboard belongs here, then recedes for the editor.
-		const frameTone = this.editor.focused ? theme.accent : theme.border;
-		const topRule = frameTone(`╭${"─".repeat(Math.max(0, total - 2))}╮`);
-		const bottomRule = frameTone(`╰${"─".repeat(Math.max(0, total - 2))}╯`);
-		const withRules = (rows: string[]): string[] =>
+		const { framed, inset, outer, editorWidth: inner } = this.geometry(total);
+		const margin = " ".repeat(inset);
+		const tint = this.editor.focused ? theme.accentBold : theme.text;
+		const title = COMPOSER_TITLE;
+		const imageKey = this.imageAction();
+		const room = imageKey ? outer - title.length - visibleWidth(imageKey) : 0;
+		const transparent = !isOpaqueBackground();
+		const paint = (line: string) => `${margin}${surfaceLine(truncateToWidth(line, outer, "…", true), outer, true)}`;
+		// Transparent canvas: a real box (corners, title rule, side rules) so
+		// the input is an object on the terminal instead of floating text.
+		const boxTop = (): string => {
+			const width = Math.max(0, outer - 4);
+			const label = " MESSAGE ";
+			const image = imageKey ? ` ${imageKey.trim()} ` : "";
+			const fill = Math.max(0, width - visibleWidth(label) - visibleWidth(image));
+			const middle = truncateToWidth(
+				`${tint(label)}${theme.border("─".repeat(fill))}${image ? theme.accent(image) : ""}`,
+				width,
+				"",
+			);
+			return `${margin}${theme.border("╭─")}${middle}${theme.border("─╮")}`;
+		};
+		const boxBottom = (): string => `${margin}${theme.border(`╰${"─".repeat(Math.max(0, outer - 2))}╯`)}`;
+		const heading = transparent ? boxTop() : paint(`${tint(title)}${room >= 3 ? `${" ".repeat(room)}${theme.accent(imageKey)}` : ""}`);
+		const withDock = (rows: string[]): string[] =>
 			framed
 				? [
-					topRule,
-					...rows.map(line => `${frameTone("│")} ${truncateToWidth(line, Math.max(0, total - 4), "…", true)} ${frameTone("│")}`),
-					bottomRule,
+					heading,
+					...rows.map(line => paint(`  ${truncateToWidth(line, outer - 4, "…")}`)),
+					transparent ? boxBottom() : paint(""),
 				]
 				: rows;
 		if (this.degradedMode) {
-			const rows = withRules([truncateToWidth(
+			const rows = withDock([truncateToWidth(
 				`${theme.accent("❯ ")}${theme.muted(truncateToWidth("Too small - resize to continue (draft kept)", inner))}`,
 				total,
 			)]);
@@ -424,11 +443,22 @@ export class ComposerBox extends Box {
 				inputStart++;
 			}
 		}
-		const rows = withRules(body.map((line, index) =>
+		const rows = withDock(body.map((line, index) =>
 			truncateToWidth(`${index === inputStart ? prefix(0) : "  "}${line}`, total),
 		));
 		this.rememberMeasurement(width, rows.length);
 		return rows;
+	}
+
+	private geometry(width: number) {
+		const framed = width >= 8 && (this.tui.terminal.rows ?? 24) >= 12;
+		const inset = framed ? transcriptInset(width) : 0;
+		const outer = width - inset * 2;
+		return { framed, inset, outer, editorWidth: Math.max(1, outer - (framed ? 6 : 2)) };
+	}
+
+	private imageAction(): string {
+		return this.onPasteImage ? `Paste image · ${this.imageShortcut}  ` : "";
 	}
 
 	private rememberMeasurement(width: number, rows: number): void {
@@ -443,15 +473,24 @@ export class ComposerBox extends Box {
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Box["handleMouse"]> {
-		const framed = event.width >= 8 && (this.tui.terminal.rows ?? 24) >= 12;
+		const { framed, inset, outer, editorWidth } = this.geometry(event.width);
+		const imageAction = visibleWidth(this.imageAction());
+		if (framed && this.onPasteImage && outer - COMPOSER_TITLE.length - imageAction >= 3 && event.type === "click" && event.button === "left"
+			&& event.y === 0 && event.x >= inset + outer - imageAction && event.x < inset + outer) {
+			this.onPasteImage();
+			return { handled: true, render: true, target: {
+				component: this, originX: event.screenX - event.x, originY: event.screenY - event.y,
+				width: event.width, height: event.height,
+			} };
+		}
 		const topRule = framed ? 1 : 0;
-		const xOffset = framed ? 4 : 2;
-		if (event.x < xOffset || event.y < topRule) return undefined;
+		const xOffset = inset + (framed ? 4 : 2);
+		if (event.x < xOffset || event.x >= xOffset + editorWidth || event.y < topRule) return undefined;
 		return super.handleMouse({
 			...event,
 			y: event.y - topRule,
 			x: event.x - xOffset,
-			width: Math.max(1, event.width - (framed ? 6 : 2)),
+			width: editorWidth,
 		});
 	}
 }

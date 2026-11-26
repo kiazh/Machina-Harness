@@ -73,7 +73,7 @@ the workspace components).
   cycle, and the footer workspace hints.
 - **macOS input-source switch** defaults to Ctrl+Space: completion fallback is the
   command/palette path (`/editor complete`).
-- Some terminals map Ctrl+T (new tab) or Ctrl+Shift+W/Ctrl+W (close tab); Ctrl+N then T,
+- Some terminals map Ctrl+T (new tab) or Ctrl+Shift+W/Ctrl+W (close tab); Alt+E,
   `/explorer`, and the notch grip remain the fallbacks. Ctrl+W is never bound in the chat composer:
   the close-tab binding fires only while another region owns focus, so the composer's
   delete-word stays intact.

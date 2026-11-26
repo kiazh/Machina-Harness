@@ -26,6 +26,7 @@ import {
 	parseColor,
 	rgbColor,
 	styleTextWithAnsi,
+	truncateToWidth,
 	type TextAttributes,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -147,7 +148,7 @@ const SKINS: Record<string, SkinDef> = {
 			secondary: "#d3869b",
 			success: "#b8bb26",
 			warning: "#fabd2f",
-			error: "#fb4934",
+			error: "#fb5642",
 			info: "#8ec07c",
 			neutral: "#282828",
 		},
@@ -176,10 +177,10 @@ const SKINS: Record<string, SkinDef> = {
 			muted: "#9aa4b7",
 			dim: "#929db1",
 			accent: "#88c0d0",
-			secondary: "#d57780",
+			secondary: "#d9858d",
 			success: "#a3be8c",
 			warning: "#ebcb8b",
-			error: "#bf616a",
+			error: "#d08a91",
 			info: "#81a1c1",
 			neutral: "#2e3440",
 		},
@@ -225,7 +226,7 @@ const SKINS: Record<string, SkinDef> = {
 			// AA lift of CODEX_SEMANTIC_START.faint on the green-black canvas.
 			dim: "#818c84",
 			accent: CODEX_SEMANTIC_START.accent,
-			secondary: CODEX_SEMANTIC_START.accentSoft,
+			secondary: "#86a893",
 			success: CODEX_SEMANTIC_START.success,
 			warning: CODEX_SEMANTIC_START.warning,
 			error: CODEX_SEMANTIC_START.danger,
@@ -256,11 +257,11 @@ const SKINS: Record<string, SkinDef> = {
 			text: "#ffffff",
 			muted: "#adb7c9",
 			dim: "#6aa1c8",
-			accent: "#0088ff",
+			accent: "#309fff",
 			secondary: "#2affdf",
 			success: "#9eff80",
 			warning: "#ffc600",
-			error: "#ff0088",
+			error: "#ff5eb4",
 			info: "#ff9d00",
 			neutral: "#193549",
 		},
@@ -308,7 +309,7 @@ const SKINS: Record<string, SkinDef> = {
 			secondary: "#c678dd",
 			success: "#98c379",
 			warning: "#e5c07b",
-			error: "#e06c75",
+			error: "#e1727b",
 			info: "#d19a66",
 			neutral: "#282c34",
 		},
@@ -324,7 +325,7 @@ const SKINS: Record<string, SkinDef> = {
 			secondary: "#8b7ec8",
 			success: "#879a39",
 			warning: "#d0a215",
-			error: "#d14d41",
+			error: "#d25145",
 			info: "#3aa99f",
 			neutral: "#100f0f",
 		},
@@ -356,7 +357,7 @@ const SKINS: Record<string, SkinDef> = {
 			secondary: "#ae81ff",
 			success: "#a6e22e",
 			warning: "#e6db74",
-			error: "#f92672",
+			error: "#fa4b8a",
 			info: "#fd971f",
 			neutral: "#272822",
 		},
@@ -384,11 +385,11 @@ const SKINS: Record<string, SkinDef> = {
 			text: "#93a1a1",
 			muted: "#839496",
 			dim: "#78929a",
-			accent: "#268bd2",
-			secondary: "#d33682",
+			accent: "#3194da",
+			secondary: "#dd649f",
 			success: "#859900",
 			warning: "#b58900",
-			error: "#dc322f",
+			error: "#e56563",
 			info: "#2aa198",
 			neutral: "#002b36",
 		},
@@ -451,9 +452,9 @@ const SKINS: Record<string, SkinDef> = {
 			accent: "#2f5fd0",
 			secondary: "#6a4fc7",
 			success: "#1a7f37",
-			warning: "#9a6700",
+			warning: "#976500",
 			error: "#cf222e",
-			info: "#1a7f8a",
+			info: "#197a84",
 			neutral: "#f4f4f5",
 		},
 	},
@@ -1245,19 +1246,19 @@ const SKINS: Record<string, SkinDef> = {
 	},
 
 	"moonstone": {
-		description: "Moonstone Nocturne - obsidian canvas, bone ink, acid-lime signal",
+		description: "Moonstone · plum graphite, porcelain ink and mint controls",
 		art: ["  * . *  ", "  |MOON| ", "  * . *  ", "         "],
 		base: {
-			text: "#f4efe4",
-			muted: "#9a9d99",
-			dim: "#7c817d",
-			accent: "#d7ff5f",
-			secondary: "#c5a5ea",
-			success: "#9fe3a3",
-			warning: "#ffc46b",
-			error: "#ff7a6b",
-			info: "#7fd1c8",
-			neutral: "#08090b",
+			text: "#f8eff9",
+			muted: "#d1c5dc",
+			dim: "#baadca",
+			accent: "#8ef0cf",
+			secondary: "#d1b4f6",
+			success: "#b6e594",
+			warning: "#ffcf81",
+			error: "#ff9cae",
+			info: "#a1dafa",
+			neutral: "#1b1828",
 		},
 	},
 
@@ -1284,6 +1285,8 @@ export function isValidTheme(name: string): boolean {
 	return SKIN_NAMES.includes(name);
 }
 
+const MOONSTONE = { surface: "#282339", raisedSurface: "#342e47", border: "#887b9c" };
+
 /** Raw semantic hex palette for a skin (derived; no Color objects). */
 export function semanticPalette(name: string): SemanticPalette | undefined {
 	const def = SKINS[name];
@@ -1302,6 +1305,7 @@ export function semanticPalette(name: string): SemanticPalette | undefined {
 		warning: def.base.warning,
 		danger: def.base.error,
 		selection: def.base.accent,
+		...(name === "moonstone" ? MOONSTONE : {}),
 	};
 }
 
@@ -1326,9 +1330,16 @@ const skinColors: Record<string, Record<PaletteName, Color>> = Object.fromEntrie
 			toolOkBg: mixColors(neutral, parseColor(def.base.success), 0.13),
 			toolErrBg: mixColors(neutral, parseColor(def.base.error), 0.13),
 			background: neutral,
-			promptBg: name === "moonstone" ? parseColor(def.base.text) : mixColors(neutral, text, 0.1),
-			promptInk: name === "moonstone" ? neutral : text,
+			promptBg: mixColors(neutral, text, 0.1),
+			promptInk: text,
 		};
+		if (name === "moonstone") {
+			const surface = parseColor(MOONSTONE.surface);
+			const raised = parseColor(MOONSTONE.raisedSurface);
+			full.border = parseColor(MOONSTONE.border);
+			full.assistantBg = full.toolBg = surface;
+			full.userBg = full.promptBg = raised;
+		}
 		// Keep readable roles legible on canvas, overlays and tinted cards.
 		// Accent hue is retained; adjust lightness only when contrast needs it.
 		const surfaces = [neutral, mixColors(neutral, text, 0.035), full.userBg, full.assistantBg, full.toolBg, full.toolOkBg, full.toolErrBg];
@@ -1495,14 +1506,40 @@ export function repairFill(bg: PaletteName, filledLine: string): string {
 	return `${open}${repaired}${BG_CLOSE}`;
 }
 
+/** Content width of a chrome row: transparent chrome spends two cells on edges. */
+export function chromeInner(width: number): number {
+	const total = Math.max(1, Math.floor(width));
+	return opaqueBackground ? total : Math.max(1, total - 2);
+}
+
+/**
+ * One chrome row on a transparent canvas: no fill, so a dim `│` edge on each
+ * side keeps the region readable. In opaque mode the row is returned as-is.
+ */
+export function chromeLine(line: string, width: number): string {
+	const total = Math.max(0, Math.floor(width));
+	if (opaqueBackground || total < 3) return line;
+	const edge = foregroundAnsi(colors().border, mode);
+	const inner = total - 2;
+	// Silent clip: the edge cells replace two padding cells, so no ellipsis is
+	// added to rows that were already sized for the full width.
+	const clipped = truncateToWidth(line, inner, "");
+	const pad = " ".repeat(Math.max(0, inner - visibleWidth(clipped)));
+	return `${edge}│${clipped}${pad}│\x1b[0m`;
+}
+
 /** Paint a complete overlay row, including whitespace and nested ANSI resets.
  * Ordinary text always has explicit ink; a terminal's own light/dark defaults
  * must never decide whether a menu label or form value can be read.
  */
-export function surfaceLine(line: string, width: number): string {
+export function surfaceLine(line: string, width: number, raised = false): string {
+	const total = Math.max(0, Math.floor(width));
+	// Transparent canvas paints no fill, so chrome keeps a visible outline:
+	// without it the bars, panes and composer dissolve into the terminal.
+	if (!opaqueBackground) return chromeLine(line, total);
 	const palette = semanticPalette(currentSkin)!;
 	const ink = foregroundAnsi(colors().text, mode);
-	const fill = bgAnsi(parseColor(palette.surface));
+	const fill = bgAnsi(parseColor(raised ? palette.raisedSurface : palette.surface));
 	const padded = `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
 	const body = padded.split(FULL_RESET).join(`${FULL_RESET}${ink}${fill}`)
 		.split("\x1b[39m").join(`\x1b[39m${ink}`)

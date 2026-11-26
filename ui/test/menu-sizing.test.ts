@@ -19,6 +19,22 @@ function items(count: number) {
 	return Array.from({ length: count }, (_, i) => ({ value: `v${i}`, label: `Row ${i}` }));
 }
 
+test("the wheel moves the menu selection without activating a row", () => {
+	const picked: string[] = [];
+	const menu = new Menu("Themes", [
+		{ value: "a", label: "Alpha" },
+		{ value: "b", label: "Beta" },
+	]);
+	menu.onSelect = item => picked.push(item.value);
+	menu.render(60);
+	menu.handleMouse({ type: "wheel", button: "none", wheelDelta: 1, x: 4, y: 3 } as never);
+	menu.handleMouse({ type: "wheel", button: "none", wheelDelta: 1, x: 4, y: 3 } as never);
+	assert.equal(menu.getSelectedItem()?.value, "b");
+	assert.deepEqual(picked, [], "the wheel only moves the selection");
+	menu.handleMouse({ type: "wheel", button: "none", wheelDelta: -1, x: 4, y: 3 } as never);
+	assert.equal(menu.getSelectedItem()?.value, "a");
+});
+
 test("a menu with 50+ items is bounded by the default row cap", () => {
 	const menu = new Menu("Skins", items(53));
 	const lines = clean(menu);

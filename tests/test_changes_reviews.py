@@ -148,6 +148,44 @@ def test_rules_review_is_clean_for_a_small_change(
     assert "No issues" in review["summary"]
 
 
+def test_a_large_first_file_does_not_hide_later_diffs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace = _workspace(monkeypatch, tmp_path)
+    big = workspace / "src" / "big.py"
+    small = workspace / "src" / "small.py"
+    big.parent.mkdir(parents=True)
+    big.write_text("old\n", encoding="utf-8")
+    small.write_text("old\n", encoding="utf-8")
+    dense = "".join(f"line {index:03d} {'x' * 80}\n" for index in range(100))
+    turn = snapshots.begin_turn(
+        session_id="session-budget",
+        workspace=workspace,
+        prompt="Touch two files",
+        provider="hermes",
+        model="qwen/qwen4-max",
+    )
+    assert turn is not None
+    snapshots.record_before_write(big)
+    big.write_text(dense, encoding="utf-8")
+    snapshots.record_before_write(small)
+    small.write_text(dense.replace("x", "y"), encoding="utf-8")
+    snapshots.end_turn(turn)
+    found = snapshots.latest_snapshot(workspace=workspace, session_id="session-budget")
+    assert found is not None
+    payload = found[0]
+
+    bounded_big = snapshots.diff_files(payload, max_chars=1_000_000, path="src/big.py")
+    budget = len(bounded_big["files"][0]["text"])
+    bounded = snapshots.diff_files(payload, max_chars=budget)
+    assert bounded["truncated"] is True
+    assert [item["path"] for item in bounded["files"]] == ["src/big.py"]
+
+    selected = snapshots.diff_files(payload, max_chars=budget, path="src/small.py")
+    assert [item["path"] for item in selected["files"]] == ["src/small.py"]
+    assert "line 000 yyyy" in selected["files"][0]["text"]
+
+
 def test_gateway_lists_prompt_changes_and_starts_a_review(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

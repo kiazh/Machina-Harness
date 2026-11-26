@@ -8,6 +8,12 @@ export const ICONS = {
 	toolRunning: "●",
 	toolRunningDouble: "●●",
 	toolActiveFrames: ["·", "•", "●", "•"] as const,
+	/**
+	 * Working pulse: the snowflake cycles its four six-spoked forms
+	 * (`✶` pointed → `✼` open centre → `✽` heavy → `✻` solid), so it reads
+	 * as a flake turning rather than a shape swapping in place.
+	 */
+	workingFrames: ["✶", "✼", "✽", "✻"] as const,
 	success: "✔",
 	successAlt: "✓",
 	error: "✖",

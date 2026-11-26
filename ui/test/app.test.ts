@@ -165,7 +165,7 @@ class ChannelClient {
 	}
 }
 
-function makeApp(session: SessionInfo) {
+function makeApp(session: SessionInfo, options?: ConstructorParameters<typeof App>[2]) {
 	const tui = new FakeTUI();
 	const client = new FakeClient();
 	client.responses.set("initialize", {
@@ -177,7 +177,7 @@ function makeApp(session: SessionInfo) {
 	});
 	client.responses.set("session.create", { session });
 	client.responses.set("prompt.submit", {});
-	const app = new App(tui, client as unknown as GatewayClient);
+	const app = new App(tui, client as unknown as GatewayClient, options);
 	return { app, tui, client };
 }
 
@@ -260,20 +260,42 @@ test("plain command reports render through Markdown", async () => {
 	}
 });
 
-test("plain arrows open Activity left and Changes right when the composer is empty", async () => {
+test("Activity ← Chat → Changes walk one strip and keep the composer draft", async () => {
 	const { app } = makeApp(SESSION_A);
 	await app.start();
 	try {
 		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
 		const view = () => (app as unknown as { view: string }).view;
+		const editor = (app as unknown as { editor: { getText(): string; setText(text: string): void } }).editor;
+		editor.setText("work in progress");
+		assert.equal(input("\x1b[D"), undefined, "a plain left arrow without Alt stays unbound");
+		input("\x1b[1;3D"); // Alt+Left
+		assert.equal(view(), "status", "Alt+Left from Chat opens Activity");
+		input("\x1b[1;3C"); // Alt+Right
+		assert.equal(view(), "chat", "Alt+Right steps back toward Chat");
+		input("\x1b[1;3C");
+		assert.equal(view(), "changes", "Alt+Right from Chat opens Changes");
+		input("\x1b[1;3D");
+		assert.equal(view(), "chat", "Alt+Left steps back toward Chat");
+		assert.equal(editor.getText(), "work in progress");
+		editor.setText("");
 		input("\x1b[D");
-		assert.equal(view(), "status");
-		input("\x1b[D");
-		assert.equal(view(), "chat");
-		input("\x1b[C");
-		assert.equal(view(), "changes");
-		input("\x1b[C");
-		assert.equal(view(), "chat");
+		assert.equal(view(), "chat", "plain arrows never navigate the shell");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("Alt+1/2/3 switch the workspace layout, not the screen", async () => {
+	const { app } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
+		const view = () => (app as unknown as { view: string }).view;
+		input("\x1b1");
+		input("\x1b2");
+		input("\x1b3");
+		assert.equal(view(), "chat", "layout keys never leave Chat");
 	} finally {
 		await app.exit();
 	}
@@ -294,10 +316,46 @@ test("plain arrows keep editing when the composer has text", async () => {
 	}
 });
 
-test("a review finding asks for confirmation before sending a fix", async () => {
-	const { app, client } = makeApp(SESSION_A);
+test("Ctrl+V, Alt+V, and clicking Paste image all attach without sending", async () => {
+	let reads = 0;
+	const { app, client } = makeApp(SESSION_A, {
+		readClipboardImage: async () => {
+			reads++;
+			return { name: "copied.png", mediaType: "image/png", data: "iVBORw0KGgo=" };
+		},
+	});
 	await app.start();
 	try {
+		const state = app as unknown as { onInput(data: string): unknown; editor: { getText(): string }; composer: Component };
+		state.onInput("\x16");
+		await new Promise(resolve => setImmediate(resolve));
+		state.onInput("\x1bv");
+		await new Promise(resolve => setImmediate(resolve));
+		const x = stripTerminalSequences(state.composer.render(80)[0]!).indexOf("Paste image") + 1;
+		assert.ok(x > 0);
+		state.composer.handleMouse?.({ type: "click", button: "left", x, y: 0, width: 80, height: 3 } as never);
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(reads, 3);
+		assert.equal(state.editor.getText(), "[image 1] [image 2] [image 3] ");
+		assert.ok(!client.requests.some(r => r.method === "prompt.submit"));
+	} finally {
+		await app.exit();
+	}
+});
+
+for (const state of ["idle chat", "busy chat", "no chat"] as const) {
+test(`review stays inline and Fix never opens a new chat (${state})`, async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 80, rows: 24 } as TUI["terminal"];
+	await app.start();
+	try {
+		if (state !== "no chat") {
+			await app.submitTurn("Original conversation");
+			if (state === "idle chat") {
+				client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+			}
+		}
+		client.responses.set("prompt.steer", { queued: true, items: [] });
 		const turnId = "a".repeat(32);
 		const finding = {
 			rule: "hardcoded-secret",
@@ -320,7 +378,7 @@ test("a review finding asks for confirmation before sending a fix", async () => 
 			startedAt: new Date().toISOString(),
 			finishedAt: new Date().toISOString(),
 			summary: "1 finding: 1 high",
-			findings: [finding],
+			findings: [finding, { ...finding, title: "Second finding from the full review", fingerprint: "second" }],
 			error: null,
 		};
 		const turn: ChangeTurnInfo = {
@@ -335,67 +393,437 @@ test("a review finding asks for confirmation before sending a fix", async () => 
 			files: [],
 			review: null,
 		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", { files: [] });
 		client.responses.set("review.start", { review });
-		const internals = app as unknown as {
-			view: string;
-			changesTurns: ChangeTurnInfo[];
-			pickCentered: (title: string, items: unknown[]) => Promise<{ value: string } | undefined>;
-			submitTurn: (text: string) => Promise<void>;
-			startChangeReview: (turnId: string) => Promise<void>;
-		};
-		internals.changesTurns = [turn];
-		internals.view = "changes";
-		let asked = "";
-		internals.pickCentered = async (title) => {
-			asked = title;
-			return { value: "dismiss" };
-		};
-		let sent = "";
-		internals.submitTurn = async (text) => { sent = text; };
-		await internals.startChangeReview(turnId);
-		assert.match(asked, /Possible API secret key added/);
-		assert.match(asked, /Implement the fix in this chat\?/);
-		assert.equal(sent, "", "dismissing the action request sends nothing");
+		const internals = app as unknown as { onInput(data: string): unknown; view: string };
+		const editor = (app as unknown as { editor: { getText(): string; setText(text: string): void } }).editor;
+		editor.setText("unsent draft");
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		const before = client.requests.length;
+		app.openChanges();
+		await settle();
+		if (state === "no chat") {
+			// Changes belong to a chat: with no chat there is nothing to review.
+			const screen = stripTerminalSequences(tui.focused!.render(80).join("\n"));
+			assert.match(screen, /No chat yet/);
+			assert.doesNotMatch(screen, /Possible API secret/);
+			internals.onInput("\r");
+			await settle();
+			assert.ok(!client.requests.slice(before).some(r => r.method.startsWith("prompt.")));
+			assert.equal(internals.view, "changes");
+			assert.equal(editor.getText(), "unsent draft");
+			return;
+		}
+		assert.ok(!client.requests.slice(before).some(r => r.method === "changes.diff"));
+		client.responses.set("changes.list", { turns: [{ ...turn, review: { ...review, findings: [finding], findingsCount: 2 } }] });
+		internals.onInput("r");
+		await settle();
+		app.openChanges(); // refresh with the compact response of the same review
+		await settle();
+		assert.equal(tui.hasOverlay(), false);
+		assert.match(stripTerminalSequences(tui.focused!.render(80).join("\n")), /Possible API secret/);
+		internals.onInput("n");
+		assert.ok(stripTerminalSequences(tui.focused!.render(80).join("\n")).includes("Second finding from the full review"), "refresh must keep the full review navigable");
+		internals.onInput("p");
+		tui.focused!.render(80);
+		assert.ok(!client.requests.slice(before).some(r => r.method.startsWith("prompt.")));
+		internals.onInput("\r");
+		await settle();
+		const requests = client.requests.slice(before);
+		assert.ok(!requests.some(r => r.method === "session.create"));
+		const repair = requests.find(r => r.method === "prompt.submit" || r.method === "prompt.steer");
+		assert.equal(repair?.method, state === "busy chat" ? "prompt.steer" : "prompt.submit");
+		assert.equal(repair?.params.sessionId, SESSION_A.id);
+		assert.match(String(repair?.params.text), /\[HIGH\] Possible API secret key added/);
+		assert.equal(internals.view, "chat");
+		assert.equal(editor.getText(), "unsent draft");
+	} finally {
+		await app.exit();
+	}
+});
+}
 
-		internals.pickCentered = async () => ({ value: "fix" });
-		await internals.startChangeReview(turnId);
-		assert.match(sent, /\[HIGH\] Possible API secret key added/);
-		assert.match(sent, /portfolio-plan\.md/);
+test("Activity shows the command and the shell's output before its metadata", async () => {
+	const { app, tui, client } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	client.responses.set("shell.jobs", { jobs: [{ id: "job-1", command: "npm run check", status: "exited", output: "1282 tests passed", returncode: 0 }] });
+	await app.start();
+	try {
+		await app.submitTurn("Check the workspace");
+		app.openStatus();
+		await new Promise(resolve => setImmediate(resolve));
+		const page = tui.focused as Component & { handleInput(data: string): void };
+		page.handleInput("4");
+		const text = () => stripTerminalSequences(page.render(100).join("\n"));
+		assert.match(text(), /❯ npm run check/);
+		assert.match(text(), /1282 tests passed/);
+		assert.doesNotMatch(text(), /Return code/);
+		page.handleInput(" ");
+		assert.match(text(), /Return code: 0/);
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a diff file omitted by the budget is fetched by path", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 110, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Touch two files");
+		const turn: ChangeTurnInfo = {
+			id: "b".repeat(32), sessionId: SESSION_A.id, prompt: "Touch two files",
+			createdAt: new Date().toISOString(), provider: "fixture", model: "preview", status: "complete",
+			stats: { files: 2, additions: 2, deletions: 0 },
+			files: [
+				{ path: "big.ts", change: "modified", additions: 1, deletions: 0, binary: false },
+				{ path: "small.ts", change: "modified", additions: 1, deletions: 0, binary: false },
+			],
+			review: null,
+		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", {
+			files: [{ path: "big.ts", change: "modified", binary: false, truncated: true, text: "+big content\n" }],
+			truncated: true,
+		});
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		app.openChanges();
+		await settle();
+		const page = tui.focused as Component & { handleInput(data: string): void; render(width: number): string[] };
+		const text = () => stripTerminalSequences(page.render(110).join("\n"));
+		page.handleInput("2");
+		await settle();
+		assert.match(text(), /big content/);
+		client.responses.set("changes.diff", {
+			files: [{ path: "small.ts", change: "modified", binary: false, truncated: false, text: "+small tail\n" }],
+		});
+		page.handleInput("]");
+		await settle();
+		assert.match(text(), /small tail/);
+		const calls = client.requests.filter(request => request.method === "changes.diff");
+		assert.equal(calls.at(-1)?.params.path, "small.ts");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("the Changes count refreshes after a completed turn while Chat is open", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		client.responses.set("changes.list", {
+			turns: [{
+				id: "t".repeat(32), sessionId: SESSION_A.id, prompt: "Edit a file",
+				createdAt: new Date().toISOString(), provider: "fixture", model: "preview", status: "complete",
+				stats: { files: 1, additions: 1, deletions: 0 }, files: [], review: null,
+			}],
+		});
+		await app.submitTurn("Edit a file");
+		client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 1, cancelled: false }));
+		await new Promise(resolve => setImmediate(resolve));
+		const count = (app as unknown as { navSnapshot(): { changeCount: number } }).navSnapshot().changeCount;
+		assert.equal(count, 1, "the command strip counts this chat's changed prompt without opening Changes");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a stale list response cannot erase a review this UI just ran", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 110, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Review the installer");
+		const turnId = "d".repeat(32);
+		const finding = {
+			rule: "hardcoded-secret", severity: "high" as const, title: "Possible API secret key added",
+			body: "Remove it.", file: "install.sh", line: 4, fingerprint: "f1",
+		};
+		const review: ReviewRunInfo = {
+			id: "review-local", snapshotId: turnId, sessionId: SESSION_A.id, engine: "rules", status: "complete",
+			provider: "fixture", model: "preview", createdAt: new Date().toISOString(),
+			startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+			summary: "1 finding", findings: [finding], error: null,
+		};
+		const turn: ChangeTurnInfo = {
+			id: turnId, sessionId: SESSION_A.id, prompt: "Review the installer",
+			createdAt: new Date().toISOString(), provider: "fixture", model: "preview", status: "complete",
+			stats: { files: 1, additions: 1, deletions: 0 },
+			files: [{ path: "install.sh", change: "modified", additions: 1, deletions: 0, binary: false }],
+			review: null,
+		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", { files: [] });
+		client.responses.set("review.start", { review });
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		app.openChanges();
+		await settle();
+		const page = tui.focused as Component & { handleInput(data: string): void; render(width: number): string[] };
+		const text = () => stripTerminalSequences(page.render(110).join("\n"));
+		page.handleInput("r");
+		await settle();
+		assert.match(text(), /Possible API secret/)
+		// A poll issued before the run returns "no review"; it must not erase it.
+		client.responses.set("changes.list", { turns: [{ ...turn, review: null }] });
+		app.openChanges();
+		await settle();
+		assert.match(text(), /Possible API secret/, "the local run survives an older list response");
+		// A genuinely newer run does replace it.
+		client.responses.set("changes.list", {
+			turns: [{ ...turn, review: { ...review, id: "review-newer", status: "cancelled", findings: [], finishedAt: new Date(Date.now() + 5_000).toISOString() } }],
+		});
+		app.openChanges();
+		await settle();
+		assert.match(text(), /Review cancelled/);
+	} finally {
+		await app.exit();
+	}
+});
+
+test("Clear handled hides sent findings without offering them again", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Fix the installer");
+		client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+		const finding = {
+			rule: "hardcoded-secret", severity: "high" as const, title: "Possible API secret key added",
+			body: "Remove it.", file: "install.sh", line: 4, fingerprint: "abc123",
+		};
+		const second = { ...finding, title: "Unquoted variable expands", fingerprint: "def456" };
+		const turnId = "a".repeat(32);
+		const turn: ChangeTurnInfo = {
+			id: turnId, sessionId: SESSION_A.id, prompt: "Fix the installer",
+			createdAt: new Date().toISOString(), provider: "fixture", model: "preview", status: "complete",
+			stats: { files: 1, additions: 1, deletions: 0 },
+			files: [{ path: "install.sh", change: "modified", additions: 1, deletions: 0, binary: false }],
+			review: {
+				id: "review-clear", snapshotId: turnId, sessionId: SESSION_A.id, engine: "rules", status: "complete",
+				provider: "fixture", model: "preview", createdAt: new Date().toISOString(),
+				startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+				summary: "2 findings", findings: [finding, second], findingsCount: 2, error: null,
+			},
+		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", { files: [] });
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		app.openChanges();
+		await settle();
+		const page = tui.focused as Component & { handleInput(data: string): void; render(width: number): string[] };
+		const text = () => stripTerminalSequences(page.render(100).join("\n"));
+		page.handleInput("3");
+		page.render(100);
+		page.handleInput("\r");
+		await settle();
+		assert.equal(client.requests.filter(request => request.method === "prompt.submit").length, 2);
+		app.openChanges();
+		await settle();
+		assert.match(text(), /Sent {2}Possible API secret/);
+		assert.match(text(), /Unquoted variable expands/);
+		page.handleInput("c");
+		await settle();
+		assert.doesNotMatch(text(), /Clear handled|Sent {2}Possible API secret/);
+		page.handleInput("n");
+		assert.match(text(), /Unquoted variable expands/);
+		assert.doesNotMatch(text(), /Possible API secret key added/, "a cleared finding is never offered again");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a page keeps the global stop key live", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Start a long run");
+		app.openStatus();
+		const before = client.requests.filter(request => request.method === "prompt.cancel").length;
+		(app as unknown as { onInput(data: string): unknown }).onInput("\x03");
+		const after = client.requests.filter(request => request.method === "prompt.cancel").length;
+		assert.equal(after, before + 1, "Ctrl+C cancels the run without leaving Activity");
+		assert.equal((app as unknown as { view: string }).view, "status");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("an approval hidden behind a dialog still lets the user browse Activity", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Start a run");
+		const internals = app as unknown as {
+			onInput(data: string): unknown;
+			openShortcutReference(): unknown;
+			dialogs: unknown[];
+			view: string;
+		};
+		internals.openShortcutReference();
+		assert.equal(internals.dialogs.length, 1);
+		client.emit(ev({
+			type: "needs_approval", requestId: "req-nav", operation: "write_file", tool: "write_file",
+			target: "install.sh", argv: [], cwd: "/tmp", backend: "local", capabilities: [],
+		}));
+		await new Promise(resolve => setImmediate(resolve));
+		internals.onInput("\x1b[1;3D");
+		assert.equal(internals.view, "status", "a dialog hidden by the dock must not block navigation");
+		internals.onInput("\x1b");
+		assert.equal(internals.view, "chat");
+		assert.equal((app as unknown as { footer: { status: string } }).footer.status, "awaiting_approval");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a dialog hidden by an approval reappears when the approval resolves elsewhere", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Start a run");
+		const internals = app as unknown as {
+			onInput(data: string): unknown;
+			openShortcutReference(): unknown;
+			dialogs: Array<{ hidden: boolean }>;
+			view: string;
+		};
+		internals.openShortcutReference();
+		client.emit(ev({
+			type: "needs_approval", requestId: "req-restore", operation: "write_file", tool: "write_file",
+			target: "install.sh", argv: [], cwd: "/tmp", backend: "local", capabilities: [],
+		}));
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(internals.dialogs[0]?.hidden, true, "the dock hides the draft form on Chat");
+		internals.onInput("\x1b[1;3D");
+		client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(internals.dialogs[0]?.hidden, false, "an externally ended approval restores the draft");
+		assert.equal(internals.view, "status");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("Changes hands a failed review to the current chat, never a new one", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Original conversation");
+		client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+		const turn: ChangeTurnInfo = {
+			id: "c".repeat(32),
+			sessionId: SESSION_A.id,
+			prompt: "Check the installer",
+			createdAt: new Date().toISOString(),
+			provider: "fixture",
+			model: "preview",
+			status: "complete",
+			stats: { files: 1, additions: 1, deletions: 0 },
+			files: [{ path: "install.sh", change: "modified", additions: 1, deletions: 0, binary: false }],
+			review: {
+				id: "review-failed",
+				snapshotId: "c".repeat(32),
+				sessionId: SESSION_A.id,
+				engine: "rules",
+				status: "failed",
+				provider: "fixture",
+				model: "preview",
+				createdAt: new Date().toISOString(),
+				startedAt: new Date().toISOString(),
+				finishedAt: new Date().toISOString(),
+				summary: "rules engine crashed",
+				findings: [],
+				error: "rules engine crashed while parsing the diff",
+			},
+		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", { files: [] });
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		app.openChanges();
+		await settle();
+		const page = tui.focused as Component & { handleInput(data: string): void; render(width: number): string[] };
+		page.handleInput("3");
+		const screen = stripTerminalSequences(page.render(100).join("\n"));
+		assert.match(screen, /rules engine crashed while parsing the diff/);
+		assert.match(screen, /Fix this/);
+		const sessionsBefore = client.requests.filter(request => request.method === "session.create").length;
+		client.responses.delete("prompt.submit");
+		page.handleInput("\r");
+		await settle();
+		const rejected = stripTerminalSequences(page.render(100).join("\n"));
+		assert.ok(rejected.includes("Fix this"), "a rejected handoff stays actionable");
+		assert.ok(!rejected.includes("Sent to chat"));
+		client.responses.set("prompt.submit", {});
+		page.handleInput("\r");
+		await settle();
+		const submits = client.requests.filter(request => request.method === "prompt.submit");
+		assert.equal(submits.length, 3, "one original turn, one rejected handoff, and one accepted handoff");
+		assert.equal(submits.at(-1)?.params.sessionId, SESSION_A.id);
+		assert.match(String(submits.at(-1)?.params.text), /rules engine crashed while parsing the diff/);
+		assert.match(String(submits.at(-1)?.params.text), /install\.sh/);
+		const sessionsAfter = client.requests.filter(request => request.method === "session.create").length;
+		assert.equal(sessionsAfter, sessionsBefore, "the fix never opens a new chat");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("Changes does not display another chat's cached or late results", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Open the first chat");
+		const oldTurn = {
+			id: "old-turn", sessionId: SESSION_A.id, prompt: "Previous chat changed this",
+			stats: { additions: 1, deletions: 0 }, files: [],
+		};
+		let finishOld!: (result: unknown) => void;
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		client.responses.set("changes.list", { turns: [oldTurn] });
+		client.responses.set("changes.diff", { files: [] });
+		app.openChanges();
+		await settle();
+		const text = () => stripTerminalSequences(tui.focused!.render(100).join("\n"));
+		assert.match(text(), /Previous chat changed this/);
+		client.responses.set("changes.list", new Promise(resolve => { finishOld = resolve; }));
+		app.openChanges();
+		client.responses.set("changes.list", { turns: [{ ...oldTurn, id: "new-turn", sessionId: SESSION_B.id, prompt: "Current chat changed this" }] });
+		app.switchTo(SESSION_B, []);
+		app.openChanges();
+		assert.doesNotMatch(text(), /Previous chat changed this/);
+		finishOld({ turns: [oldTurn] });
+		await settle();
+		assert.match(text(), /Current chat changed this/);
+		assert.doesNotMatch(text(), /Previous chat changed this/);
 	} finally {
 		await app.exit();
 	}
 });
 
 test("status sessions are listed with the current session first but only in-flight turns are active", async () => {
-	const { app, client } = makeApp(SESSION_A);
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 110, rows: 26 } as TUI["terminal"];
 	client.responses.set("interop.status", { platforms: [] });
 	client.responses.set("mcp.list", { servers: [] });
 	client.responses.set("shell.jobs", { jobs: [] });
 	client.responses.set("prompt.steering", { items: [] });
-	client.responses.set("session.list", { sessions: [SESSION_A, SESSION_B] });
+	client.responses.set("session.list", { sessions: [SESSION_B, SESSION_A] });
 	await app.start();
 	try {
+		await app.submitTurn("Open the current chat");
 		app.openStatus();
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		const snapshot = (app as unknown as {
-			statusSnapshot(): {
-				project?: string;
-				sessions: Array<{ label: string; state: string; running: boolean }>;
-			};
-		}).statusSnapshot();
-		assert.equal(snapshot.project, "tmp");
-		assert.deepEqual(
-			snapshot.sessions.map((session) => [session.label, session.state, session.running]),
-			[
-				["session A", "inactive", false],
-				["session B", "inactive", false],
-			],
-		);
-		assert.equal(
-			(app as unknown as { statusPage: { selectedKey?: string } }).statusPage.selectedKey,
-			`session:${SESSION_A.id}`,
-			"the loaded current session replaces the temporary queue default",
-		);
+		await new Promise(resolve => setImmediate(resolve));
+		const rows = tui.focused!.render(110).map(stripTerminalSequences);
+		const active = rows.findIndex(row => /❯ session A\s+active/.test(row));
+		const inactive = rows.findIndex(row => /session B\s+inactive/.test(row));
+		assert.ok(active >= 0 && inactive > active, "the running current session comes first and the saved session stays inactive");
+		assert.ok(rows.some(row => row.includes("Project: tmp")));
 	} finally {
 		await app.exit();
 	}

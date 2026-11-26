@@ -8,7 +8,7 @@
 //   full (≥24 rows):             2-row (16–23):        1-row (reduced):
 //     ▂▄▆ Title         1:24/3:30   ▂▄▆ Title  1:24/3:30   ▂▄▆ Title — Artist · 1:24
 //     Artist · source
-//     ▶ 1:24 ─████── 3:30
+//     1:24 ─████── 3:30
 //
 // The leading glyph animates while audio is playing (one shared
 // AnimationCoordinator, reduced-motion aware). Elapsed time interpolates
@@ -111,7 +111,8 @@ export class NowPlayingBar implements PinnedBarBudget {
 	private glyph(): string {
 		const state = this.state;
 		if (state?.state === "playing") return theme.accent(this.animation.frame(SOUND_FRAMES, 250));
-		if (state?.state === "paused") return theme.secondary("⏸");
+		// A one-cell ASCII pause marker; the playing state keeps its meter.
+		if (state?.state === "paused") return theme.secondary("||");
 		return theme.muted("♪");
 	}
 
@@ -168,8 +169,9 @@ export class NowPlayingBar implements PinnedBarBudget {
 	private transportLine(width: number): string {
 		const state = this.state;
 		const playing = state?.state === "playing";
+		// The transport shows the action it would take.
 		const glyph = playing
-			? theme.accent("⏸")
+			? theme.accent("||")
 			: state?.state === "paused"
 				? theme.secondary("▶")
 				: theme.muted("▶");

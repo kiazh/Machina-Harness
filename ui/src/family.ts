@@ -249,7 +249,7 @@ export class FamilyStore {
 		}
 	}
 
-	/** Ctrl+N then J/K: cycle the family; wraps around. */
+	/** Cycle the family; wraps around. */
 	async cycle(direction: 1 | -1): Promise<void> {
 		const rows = this.rows();
 		if (rows.length < 2) return;
