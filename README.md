@@ -1197,7 +1197,7 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Go to definition / find references | `Ctrl+N`, then `G` / `R` |
 | Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
 | Switch between agents | `Ctrl+N`, then `J` / `K` |
-| Activity / Changes screens | `Ctrl+N`, then `←` / `→` (right: Activity then Changes; left: Changes then Activity); `/changes` opens Changes directly |
+| Activity / Changes screens | `←` for Activity, `→` for Changes, when the composer is empty; either arrow or Esc closes the full screen. Arrows keep editing when the composer has text. `/changes` opens Changes directly |
 | Change keyboard shortcuts | `/settings` → Keyboard shortcuts |
 | Paste an image | `Ctrl+V` |
 | Stop a response | `Esc` after dismissing any open popup |

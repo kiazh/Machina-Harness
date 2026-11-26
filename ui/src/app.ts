@@ -344,6 +344,7 @@ export class App implements FeatureHost {
 	private explorerBurstCount = 0;
 	private explorerBurstKey = "";
 	private lastStatusSwitchAt = 0;
+	private lastStatusSwitchDirection: 1 | -1 | 0 = 0;
 	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
 	private readonly turnSession = new TurnSessionStore({
 		visibleSessionId: () => this.current?.id,
@@ -1710,24 +1711,18 @@ export class App implements FeatureHost {
 	}
 
 	/**
-	 * Screen carousel: chat -> Activity -> Changes -> chat.
-	 *
-	 * Right and left are symmetrical, so Ctrl+N then an arrow is the only
-	 * navigation needed. Activity keeps its existing Ctrl+N,A shortcut.
+	 * Fixed screen directions: Activity is the left screen, Changes is the
+	 * right screen. From chat, Ctrl+N then -> opens Changes and <- opens
+	 * Activity. While a full screen is open, either arrow (or Esc) returns to
+	 * chat; the screens never swap positions.
 	 */
 	private switchScreen(direction: 1 | -1): void {
-		if (this.view === "chat") {
-			if (direction === 1) this.openScreen("status", 1);
-			else this.openScreen("changes", -1);
+		if (this.view !== "chat") {
+			this.closeScreen();
 			return;
 		}
-		if (this.view === "status") {
-			if (direction === 1) this.openScreen("changes", 1);
-			else this.closeScreen();
-			return;
-		}
-		if (direction === 1) this.closeScreen();
-		else this.openScreen("status", -1);
+		if (direction === -1) this.openScreen("status", -1);
+		else this.openScreen("changes", 1);
 	}
 
 	private openScreen(screen: "status" | "changes", direction: 1 | -1 = 1): void {
@@ -1920,15 +1915,22 @@ export class App implements FeatureHost {
 	}
 
 	private statusTabDirection(data: string): 1 | -1 | 0 {
-		if (
-			this.keybindings.matches(data, "statusLeft") ||
-			this.keybindings.matches(data, "statusLeftCtrl")
-		) return -1;
-		if (
-			this.keybindings.matches(data, "statusRight") ||
-			this.keybindings.matches(data, "statusRightCtrl")
-		) return 1;
+		if (this.keybindings.matches(data, "statusLeft")) return -1;
+		if (this.keybindings.matches(data, "statusRight")) return 1;
 		return 0;
+	}
+
+	/**
+	 * Plain left/right are screen keys only where they have no editing job:
+	 * an empty composer with no autocomplete. In a full screen they close it;
+	 * everywhere else the focused editor keeps ordinary cursor movement.
+	 */
+	private plainScreenNavigationAllowed(): boolean {
+		if (this.view !== "chat") return true;
+		return this.activeRegion === "chat-composer"
+			&& this.editor.getText().length === 0
+			&& !this.editor.isShowingAutocomplete()
+			&& !this.commandRunning;
 	}
 
 	async inspectActivity(): Promise<void> {
@@ -2693,6 +2695,7 @@ export class App implements FeatureHost {
 		if (this.view !== "chat") {
 			if (statusDirection !== 0) {
 				this.lastStatusSwitchAt = Date.now();
+				this.lastStatusSwitchDirection = statusDirection;
 				this.switchScreen(statusDirection);
 				return { consume: true };
 			}
@@ -2705,11 +2708,14 @@ export class App implements FeatureHost {
 			else this.changesPage.handleInput(data);
 			return { consume: true };
 		}
-		if (statusDirection !== 0) {
-			// A repeat after closing must not immediately reopen a page while
-			// the user is still holding the arrow key.
-			if (Date.now() - this.lastStatusSwitchAt >= 250) {
+		if (statusDirection !== 0 && this.plainScreenNavigationAllowed()) {
+			// A repeat after closing must not immediately reopen the same page
+			// while the user is still holding that arrow. The opposite arrow is
+			// a deliberate new choice and opens immediately.
+			if (this.lastStatusSwitchDirection !== statusDirection
+				|| Date.now() - this.lastStatusSwitchAt >= 250) {
 				this.lastStatusSwitchAt = Date.now();
+				this.lastStatusSwitchDirection = statusDirection;
 				this.switchScreen(statusDirection);
 			}
 			return { consume: true };

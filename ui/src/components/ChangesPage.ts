@@ -408,7 +408,7 @@ export class ChangesPage implements Component {
 			width,
 		));
 		push(between(
-			` ${theme.dim("← Activity")} ${theme.dim("│")} ${theme.userBg(theme.accentBold(" CHANGES "))} ${theme.dim("│")} ${theme.muted(snap.scope === "session" ? "this chat" : "all chats")}`,
+			` ${theme.dim("← Activity")} ${theme.dim("│")} ${theme.userBg(theme.accentBold(" CHANGES "))} ${theme.dim("→")} ${theme.muted(snap.scope === "session" ? "this chat" : "all chats")}`,
 			`${theme.dim(`${turns.length} prompts`)} ${theme.dim("·")} ${theme.text(`${totals.files} files`)} ${theme.success(`+${totals.additions}`)} ${theme.error(`−${totals.deletions}`)} `,
 			width,
 		));
@@ -517,7 +517,7 @@ export class ChangesPage implements Component {
 			}
 		}
 		push(truncateToWidth(
-			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · PgUp/PgDn scroll · r review · w scope · Esc chat")}`,
+			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · PgUp/PgDn scroll · r review · w scope · ←/→/Esc close")}`,
 			width,
 			".",
 			true,

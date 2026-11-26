@@ -102,10 +102,14 @@ state, approval, output, ui, dialogs, layout, features, app).
 
 ## Changes and review runs
 
-- `Ctrl+N` then `→` cycles Chat → Activity → Changes → Chat; `←` reverses the
-  same dial. `/changes` opens the screen directly and `/changes all` includes
-  every chat in the workspace. The two pages are full-viewport surfaces, not
-  transcript panels.
+- Activity is the left screen and Changes is the right screen. On an empty
+  composer, `←` opens Activity and `→` opens Changes; with text in the
+  composer those arrows stay ordinary cursor movement. While either full
+  screen is open, `←`, `→`, or Esc returns to chat; the screens never swap
+  positions. The legacy `Ctrl+N` then `←`/`→` chord remains a fallback.
+  `/changes` opens Changes directly and `/changes all` includes every chat in
+  the workspace. The two pages are full-viewport surfaces, not transcript
+  panels.
 - The unit is **one prompt**, not a commit. A prompt row keeps its captured
   before/after content, so a later prompt editing the same file does not
   rewrite an earlier row's diff. Rows show age, prompt excerpt, file count,

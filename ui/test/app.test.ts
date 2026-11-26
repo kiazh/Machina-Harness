@@ -260,35 +260,18 @@ test("plain command reports render through Markdown", async () => {
 	}
 });
 
-test("Ctrl+N then an arrow opens and closes the full-page status tab", async () => {
-	const { app } = makeApp(SESSION_A);
-	await app.start();
-	try {
-		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
-		input("\x0e"); // Ctrl+N leader
-		input("\x1b[C"); // right arrow
-		assert.equal((app as unknown as { view: string }).view, "status");
-		input("\x0e"); // Ctrl+N leader
-		input("\x1b[D"); // left arrow
-		assert.equal((app as unknown as { view: string }).view, "chat");
-	} finally {
-		await app.exit();
-	}
-});
-
-test("Ctrl+N arrows cycle chat, Activity, Changes, then back to chat", async () => {
+test("plain arrows open Activity left and Changes right when the composer is empty", async () => {
 	const { app } = makeApp(SESSION_A);
 	await app.start();
 	try {
 		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
 		const view = () => (app as unknown as { view: string }).view;
-		input("\x0e");
-		input("\x1b[C");
+		input("\x1b[D");
 		assert.equal(view(), "status");
-		input("\x0e");
+		input("\x1b[D");
+		assert.equal(view(), "chat");
 		input("\x1b[C");
 		assert.equal(view(), "changes");
-		input("\x0e");
 		input("\x1b[C");
 		assert.equal(view(), "chat");
 	} finally {
@@ -296,20 +279,15 @@ test("Ctrl+N arrows cycle chat, Activity, Changes, then back to chat", async () 
 	}
 });
 
-test("Ctrl+N left opens Changes, then Activity, then chat", async () => {
+test("plain arrows keep editing when the composer has text", async () => {
 	const { app } = makeApp(SESSION_A);
 	await app.start();
 	try {
 		const input = (app as unknown as { onInput(data: string): unknown }).onInput.bind(app);
 		const view = () => (app as unknown as { view: string }).view;
-		input("\x0e");
+		input("a");
 		input("\x1b[D");
-		assert.equal(view(), "changes");
-		input("\x0e");
-		input("\x1b[D");
-		assert.equal(view(), "status");
-		input("\x0e");
-		input("\x1b[D");
+		input("\x1b[C");
 		assert.equal(view(), "chat");
 	} finally {
 		await app.exit();

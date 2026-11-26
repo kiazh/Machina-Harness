@@ -14,10 +14,8 @@ export const APP_BINDINGS = {
 	agentPrevious: { label: "Previous agent", key: "ctrl+n k" },
 	agentClose: { label: "Close idle agent tab", key: "ctrl+n d" },
 	activity: { label: "View activity and queued prompts", key: "ctrl+n a" },
-	statusLeft: { label: "Previous screen (Changes / Activity)", key: "ctrl+n left" },
-	statusRight: { label: "Next screen (Activity / Changes)", key: "ctrl+n right" },
-	statusLeftCtrl: { label: "Previous screen (Ctrl+Arrow)", key: "ctrl+n ctrl+left" },
-	statusRightCtrl: { label: "Next screen (Ctrl+Arrow)", key: "ctrl+n ctrl+right" },
+	statusLeft: { label: "Activity screen (←)", key: "left" },
+	statusRight: { label: "Changes screen (→)", key: "right" },
 	quickOpen: { label: "Quick open", key: "ctrl+p" },
 	explorer: { label: "Toggle file tree", key: "ctrl+t" },
 	explorerAlt: { label: "Toggle file tree (fallback)", key: "ctrl+n t" },
@@ -42,6 +40,18 @@ export type KeyPlatform = "macos" | "windows" | "linux";
 
 /** Platform-sensitive fallbacks for keys commonly intercepted by terminals. */
 const PLATFORM_ALIASES: Partial<Record<AppBindingId, Record<KeyPlatform, string[]>>> = {
+	// The plain arrows are the documented screen keys. The old Ctrl+N chord
+	// remains a fallback for terminals or habits that still use it.
+	statusLeft: {
+		macos: ["ctrl+n left"],
+		windows: ["ctrl+n left"],
+		linux: ["ctrl+n left"],
+	},
+	statusRight: {
+		macos: ["ctrl+n right"],
+		windows: ["ctrl+n right"],
+		linux: ["ctrl+n right"],
+	},
 	complete: {
 		macos: ["ctrl+n i"],
 		windows: ["ctrl+n i"],
@@ -203,7 +213,7 @@ const SHORTCUT_BINDINGS: Record<string, string[]> = {
 	intel: ["complete"], focus: ["focusNext", "focusPrevious"], chatmax: ["chatMaximize", "editorMaximize", "restoreSplit"],
 	help: ["shortcuts"],
 	activity: ["activity"],
-	status: ["statusLeft", "statusRight", "statusLeftCtrl", "statusRightCtrl"],
+	status: ["statusLeft", "statusRight"],
 };
 
 export function effectiveShortcutRows(overrides: BindingOverrides): ShortcutRow[] {
