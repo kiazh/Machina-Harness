@@ -168,11 +168,13 @@ export class ChangesPage implements Component {
 	private readonly onReview?: (turnId: string) => void;
 	private readonly onCancelReview?: (turnId: string) => void;
 	private readonly onToggleScope?: () => void;
+	private readonly onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
 	private selectedTurnId: string | undefined;
 	private selectedFilePath: string | undefined;
 	private tab: InspectorTab = "files";
 	private promptExpanded = false;
 	private scroll = 0;
+	private selectedFindingIndex = 0;
 	private hitboxes: Hitbox[] = [];
 
 	constructor(
@@ -184,6 +186,7 @@ export class ChangesPage implements Component {
 			onReview?: (turnId: string) => void;
 			onCancelReview?: (turnId: string) => void;
 			onToggleScope?: () => void;
+			onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
 		} = {},
 	) {
 		this.tui = tui;
@@ -193,6 +196,7 @@ export class ChangesPage implements Component {
 		this.onReview = options.onReview;
 		this.onCancelReview = options.onCancelReview;
 		this.onToggleScope = options.onToggleScope;
+		this.onFixFinding = options.onFixFinding;
 	}
 
 	enter(_direction?: 1 | -1): void {
@@ -238,7 +242,9 @@ export class ChangesPage implements Component {
 		if (!turns.length) return false;
 		const index = Math.max(0, turns.findIndex(turn => turn.id === this.selectedTurnId));
 		if (data === "1" || data === "2" || data === "3") {
-			this.tab = (["files", "diff", "review"] as const)[Number(data) - 1]!;
+			const next = (["files", "diff", "review"] as const)[Number(data) - 1]!;
+			if (next === "review" && this.tab !== "review") this.selectedFindingIndex = 0;
+			this.tab = next;
 			this.scroll = 0;
 			this.tui.requestRender();
 			return true;
@@ -246,7 +252,9 @@ export class ChangesPage implements Component {
 		if (matchesKey(data, Key.tab) || data === "\x1b[Z") {
 			const order: InspectorTab[] = ["files", "diff", "review"];
 			const current = order.indexOf(this.tab);
-			this.tab = order[(current + (data === "\x1b[Z" ? -1 : 1) + order.length) % order.length]!;
+			const next = order[(current + (data === "\x1b[Z" ? -1 : 1) + order.length) % order.length]!;
+			if (next === "review" && this.tab !== "review") this.selectedFindingIndex = 0;
+			this.tab = next;
 			this.scroll = 0;
 			this.tui.requestRender();
 			return true;
@@ -269,6 +277,10 @@ export class ChangesPage implements Component {
 			this.tui.requestRender();
 			return true;
 		}
+		if (data === "n" || data === "p") {
+			this.moveFinding(data === "p" ? -1 : 1);
+			return true;
+		}
 		if (data === "[") {
 			this.cycleFile(-1);
 			return true;
@@ -282,7 +294,15 @@ export class ChangesPage implements Component {
 			this.tui.requestRender();
 			return true;
 		}
-		if (matchesKey(data, Key.enter)) {
+		if (matchesKey(data, Key.enter) || data === "a") {
+			if (this.tab === "review") {
+				const turn = turns[index];
+				const finding = this.currentFinding(turn);
+				if (turn && finding) {
+					this.onFixFinding?.(turn.id, finding);
+					return true;
+				}
+			}
 			if (this.tab === "files") this.tab = "diff";
 			this.scroll = 0;
 			this.tui.requestRender();
@@ -368,6 +388,7 @@ export class ChangesPage implements Component {
 			this.selectedTurnId = turn.id;
 			this.selectedFilePath = preferredFile(turn.files);
 			this.scroll = 0;
+			this.selectedFindingIndex = 0;
 			this.promptExpanded = false;
 			this.onSelectTurn?.(turn.id);
 		}
@@ -381,6 +402,25 @@ export class ChangesPage implements Component {
 		const next = (current + direction + turn.files.length) % turn.files.length;
 		this.selectedFilePath = turn.files[next]!.path;
 		this.scroll = 0;
+		this.tui.requestRender();
+	}
+
+	private currentFinding(turn: ChangeTurnInfo | undefined): ReviewFindingInfo | undefined {
+		const findings = turn?.review?.findings ?? [];
+		if (!findings.length) return undefined;
+		return findings[Math.max(0, Math.min(findings.length - 1, this.selectedFindingIndex))];
+	}
+
+	private moveFinding(direction: 1 | -1): void {
+		if (this.tab !== "review") return;
+		const turn = this.snapshot().turns.find(item => item.id === this.selectedTurnId);
+		const findings = turn?.review?.findings ?? [];
+		if (!findings.length) return;
+		this.selectedFindingIndex = Math.max(
+			0,
+			Math.min(findings.length - 1, this.selectedFindingIndex + direction),
+		);
+		this.scroll = Math.max(0, this.selectedFindingIndex - 1);
 		this.tui.requestRender();
 	}
 
@@ -452,15 +492,9 @@ export class ChangesPage implements Component {
 		const selectedLine = left.lines.findIndex(line => line.key === this.selectedTurnId && line.kind === "turn");
 		const format = (line: PanelLine | undefined, panelWidth: number, selectedRow = false): string => {
 			if (!line) return " ".repeat(panelWidth);
-			let text = line.text;
-			if (selectedRow && line.kind === "turn") {
-				// Replace the row's own marker instead of stacking a second one.
-				const body = line.text.startsWith("      ")
-					? line.text.slice(6)
-					: line.text.startsWith("  ") ? line.text.slice(4) : line.text;
-				text = `${theme.accent("▸")} ${body}`;
-			}
-			const content = line.right ? between(text, line.right, panelWidth) : fit(text, panelWidth);
+			// The row already carries its own styled marker; never slice ANSI
+			// text to prepend another one.
+			const content = line.right ? between(line.text, line.right, panelWidth) : fit(line.text, panelWidth);
 			return selectedRow ? selectionBar(content, panelWidth) : content;
 		};
 		this.hitboxes = [];
@@ -517,7 +551,7 @@ export class ChangesPage implements Component {
 			}
 		}
 		push(truncateToWidth(
-			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · PgUp/PgDn scroll · r review · w scope · ←/→/Esc close")}`,
+			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · n/p finding · Enter fix · r review · w scope · Esc/←/→ close")}`,
 			width,
 			".",
 			true,
@@ -744,12 +778,21 @@ export class ChangesPage implements Component {
 		if (!review.findings.length) {
 			lines.push({ text: `  ${theme.success("No findings in this run.")}` });
 		} else {
+			this.selectedFindingIndex = Math.max(
+				0,
+				Math.min(review.findings.length - 1, this.selectedFindingIndex),
+			);
 			const start = Math.min(this.scroll, Math.max(0, review.findings.length - 1));
 			let rendered = 0;
 			let index = start;
 			for (; index < review.findings.length; index++) {
-				if (rendered >= available) break;
-				rendered += this.pushFinding(review.findings[index]!, lines, content);
+				if (rendered >= available && index !== this.selectedFindingIndex) break;
+				rendered += this.pushFinding(
+					review.findings[index]!,
+					lines,
+					content,
+					index === this.selectedFindingIndex,
+				);
 			}
 			if (index < review.findings.length) {
 				lines.push({ text: `  ${theme.dim(`… more findings · PgDn scrolls`)}` });
@@ -762,6 +805,11 @@ export class ChangesPage implements Component {
 			});
 		}
 		lines.push({ text: "" });
+		if (review.findings.length) {
+			lines.push({
+				text: `  ${theme.accentBold("Enter / a")} ${theme.text("ask to implement the selected fix")} ${theme.dim("· n/p chooses · it asks before sending anything")}`,
+			});
+		}
 		lines.push({
 			text: review.status === "running" || review.status === "queued"
 				? `  ${theme.dim("x cancels · the run reads only this prompt's diff")}`
@@ -769,18 +817,23 @@ export class ChangesPage implements Component {
 		});
 	}
 
-	private pushFinding(finding: ReviewFindingInfo, lines: PanelLine[], content: number): number {
+	private pushFinding(
+		finding: ReviewFindingInfo,
+		lines: PanelLine[],
+		content: number,
+		selected = false,
+	): number {
 		const tone = severityTone(finding.severity);
 		const location = finding.file
 			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
 			: "prompt";
 		lines.push({
-			text: `  ${tone(finding.severity.toUpperCase().padEnd(8))} ${theme.text(truncateToWidth(finding.title, Math.max(10, content - 10), "…"))}`,
+			text: `  ${selected ? theme.accent("▸") : " "} ${tone(finding.severity.toUpperCase().padEnd(8))} ${theme.text(truncateToWidth(finding.title, Math.max(10, content - 12), "…"))}`,
 			right: theme.dim(truncateToWidth(location, 30, "…")),
 		});
 		let used = 1;
 		if (finding.body) {
-			for (const line of wrapDisplay(sanitizeDisplay(finding.body), Math.max(10, content - 2)).slice(0, 2)) {
+			for (const line of wrapDisplay(sanitizeDisplay(finding.body), Math.max(10, content - 4)).slice(0, 2)) {
 				lines.push({ text: `    ${theme.dim(line)}` });
 				used++;
 			}

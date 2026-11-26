@@ -117,9 +117,16 @@ state, approval, output, ui, dialogs, layout, features, app).
 - The inspector has three views: `FILES` (bounded, selection-following file
   list), `DIFF` (stable unified diff for the selected file), and `REVIEW`
   (run status, summary, and findings with severity, file and line). `↑/↓`
-  selects prompts, `[`/`]` selects files, `1/2/3` or Tab switches views,
-  PgUp/PgDn scrolls the active view, `r` starts or re-runs the local rules
-  review, `x` cancels a running one, and `w` toggles this-chat/all-chats.
+  selects prompts, `[`/`]` selects files, `n`/`p` selects a finding, `1/2/3`
+  or Tab switches views, PgUp/PgDn scrolls the active view, `r` starts or
+  re-runs the local rules review, `x` cancels a running one, and `w` toggles
+  this-chat/all-chats.
+- Findings are actionable, never automatic. `Enter` (or `a`) on a selected
+  finding opens an action request that explains the issue and asks
+  `Implement fix` / `Not now`. Only an explicit `Implement fix` closes the
+  screen and sends a focused repair prompt to the chat; dismissing it changes
+  nothing. The action request also appears when a review the user just started
+  finds its first issue.
 - Narrow terminals keep the prompt list above an inline Inspector. Every
   section has an honest empty state; a binary file says so instead of
   pretending to have a text diff. The screen reads bounded local stores and

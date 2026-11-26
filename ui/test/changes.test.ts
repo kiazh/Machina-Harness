@@ -138,10 +138,22 @@ test("review tab shows findings and r starts a run for the selected prompt", () 
 	page.render(110);
 	assert.equal(page.handleInput("3"), true);
 	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /Possible API secret key/);
+	assert.match(rendered, /Possible API secret/);
 	assert.match(rendered, /src\/parser\.py:4/);
+	assert.match(rendered, /Enter \/ a/);
 	assert.equal(page.handleInput("r"), true);
 	assert.deepEqual(started, [firstId]);
+});
+
+test("Enter on a selected finding opens the fix action for that finding", () => {
+	const fixes: Array<[string, string]> = [];
+	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor, {
+		onFixFinding: (turnId, finding) => fixes.push([turnId, finding.rule]),
+	});
+	page.render(110);
+	page.handleInput("3");
+	assert.equal(page.handleInput("\r"), true);
+	assert.deepEqual(fixes, [[firstId, "hardcoded-secret"]]);
 });
 
 test("diff tab renders the stable diff and file cycling updates the target", () => {

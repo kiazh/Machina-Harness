@@ -7,7 +7,7 @@ import { stripTerminalSequences, type Component, type OverlayHandle, type Select
 import { App } from "../src/app.ts";
 import { JsonRpcChannel } from "../src/gateway.ts";
 import type { GatewayClient } from "../src/gateway.js";
-import type { GatewayEvent, SessionInfo } from "../src/protocol.js";
+import type { ChangeTurnInfo, GatewayEvent, ReviewRunInfo, SessionInfo } from "../src/protocol.js";
 
 const SESSION_A: SessionInfo = {
 	id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -289,6 +289,78 @@ test("plain arrows keep editing when the composer has text", async () => {
 		input("\x1b[D");
 		input("\x1b[C");
 		assert.equal(view(), "chat");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a review finding asks for confirmation before sending a fix", async () => {
+	const { app, client } = makeApp(SESSION_A);
+	await app.start();
+	try {
+		const turnId = "a".repeat(32);
+		const finding = {
+			rule: "hardcoded-secret",
+			severity: "high" as const,
+			title: "Possible API secret key added",
+			body: "Remove the value from source and rotate it if it was real.",
+			file: "portfolio-plan.md",
+			line: 0,
+			fingerprint: "abc123",
+		};
+		const review: ReviewRunInfo = {
+			id: "review-1",
+			snapshotId: turnId,
+			sessionId: SESSION_A.id,
+			engine: "rules",
+			status: "complete",
+			provider: "hermes",
+			model: "tencent/hy4-flash:free",
+			createdAt: new Date().toISOString(),
+			startedAt: new Date().toISOString(),
+			finishedAt: new Date().toISOString(),
+			summary: "1 finding: 1 high",
+			findings: [finding],
+			error: null,
+		};
+		const turn: ChangeTurnInfo = {
+			id: turnId,
+			sessionId: SESSION_A.id,
+			prompt: "do it again",
+			createdAt: new Date().toISOString(),
+			provider: "hermes",
+			model: "tencent/hy4-flash:free",
+			status: "complete",
+			stats: { files: 1, additions: 0, deletions: 0 },
+			files: [],
+			review: null,
+		};
+		client.responses.set("review.start", { review });
+		const internals = app as unknown as {
+			view: string;
+			changesTurns: ChangeTurnInfo[];
+			pickCentered: (title: string, items: unknown[]) => Promise<{ value: string } | undefined>;
+			submitTurn: (text: string) => Promise<void>;
+			startChangeReview: (turnId: string) => Promise<void>;
+		};
+		internals.changesTurns = [turn];
+		internals.view = "changes";
+		let asked = "";
+		internals.pickCentered = async (title) => {
+			asked = title;
+			return { value: "dismiss" };
+		};
+		let sent = "";
+		internals.submitTurn = async (text) => { sent = text; };
+		await internals.startChangeReview(turnId);
+		assert.match(asked, /Possible API secret key added/);
+		assert.match(asked, /Implement the fix in this chat\?/);
+		assert.equal(sent, "", "dismissing the action request sends nothing");
+
+		internals.pickCentered = async () => ({ value: "fix" });
+		await internals.startChangeReview(turnId);
+		assert.match(sent, /\[HIGH\] Possible API secret key added/);
+		assert.match(sent, /portfolio-plan\.md/);
 	} finally {
 		await app.exit();
 	}

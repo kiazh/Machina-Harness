@@ -43,7 +43,7 @@ import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
 import { loadKeyRows, redactSecret } from "./features/keys.ts";
 import { addProvider, removeProvider } from "./features/settings.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
-import { sanitizePastedText } from "./design/text.ts";
+import { sanitizePastedText, wrapDisplay } from "./design/text.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
@@ -66,6 +66,7 @@ import type {
 	KiroFallback,
 	MCPServerView,
 	ProvidersListResult,
+	ReviewFindingInfo,
 	ReviewRunResult,
 	InitializeResult,
 	ResumeResult,
@@ -518,6 +519,7 @@ export class App implements FeatureHost {
 				onReview: (turnId) => { void this.startChangeReview(turnId); },
 				onCancelReview: (turnId) => { void this.cancelChangeReview(turnId); },
 				onToggleScope: () => { this.toggleChangesScope(); },
+				onFixFinding: (turnId, finding) => { void this.requestFindingFix(turnId, finding); },
 			},
 		);
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
@@ -1881,10 +1883,89 @@ export class App implements FeatureHost {
 			if (turn) turn.review = result.review;
 			this.tui.requestRender();
 			void this.refreshChangesData();
+			if (this.view === "changes"
+				&& result.review?.status === "complete"
+				&& result.review.findings.length) {
+				// The user asked for the review; if it found something, ask the
+				// explicit action question immediately instead of hiding it
+				// behind another key press.
+				void this.requestFindingFix(turnId, result.review.findings[0]!);
+			}
 		} catch (error) {
 			this.transcript.addNotice(`Could not start the review: ${message(error)}`, "warning");
 			this.tui.requestRender();
 		}
+	}
+
+	/**
+	 * Explain one finding and ask before sending a repair prompt. This is the
+	 * action request the Changes screen exposes; the agent receives nothing
+	 * until the human picks "Implement fix".
+	 */
+	private async requestFindingFix(
+		turnId: string,
+		finding: ReviewFindingInfo,
+	): Promise<void> {
+		const turn = this.changesTurns.find(item => item.id === turnId);
+		const location = finding.file
+			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
+			: "the changed files";
+		const title = [
+			`Review issue · ${finding.severity.toUpperCase()}`,
+			finding.title,
+			location,
+			"",
+			...wrapDisplay(finding.body || "No additional explanation.", 58),
+			"",
+			"Implement the fix in this chat?",
+		].join("\n");
+		const choice = await this.pickCentered(title, [
+			{
+				value: "fix",
+				label: "Implement fix",
+				description: "Send a focused repair prompt to this chat",
+			},
+			{
+				value: "dismiss",
+				label: "Not now",
+				description: "Keep the finding; change nothing",
+			},
+		], { count: false });
+		if (choice?.value !== "fix") return;
+
+		const prompt = this.findingFixPrompt(turn, finding);
+		const sessionId = this.current?.id;
+		if (sessionId && this.turnSession.isInFlight(sessionId)) {
+			this.closeScreen();
+			await this.queueSteering(prompt);
+			this.print("Fix queued as steering for the running turn.", "guidance");
+			return;
+		}
+		this.closeScreen();
+		await this.submitTurn(prompt);
+	}
+
+	private findingFixPrompt(
+		turn: ChangeTurnInfo | undefined,
+		finding: ReviewFindingInfo,
+	): string {
+		const source = (turn?.prompt || "")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 240);
+		const location = finding.file
+			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
+			: "the changed files";
+		return [
+			source ? `Follow up on the prompt: "${source}".` : "Follow up on an earlier prompt.",
+			"A local review found this issue:",
+			`[${finding.severity.toUpperCase()}] ${finding.title}`,
+			`Location: ${location}`,
+			finding.body ? `Why: ${finding.body}` : "",
+			"",
+			"Read the current file, make the smallest correct fix, and do not change unrelated behavior.",
+			"Run the relevant tests and report exactly what changed.",
+		].filter((line) => line !== "").join("\n");
 	}
 
 	private async cancelChangeReview(turnId: string): Promise<void> {

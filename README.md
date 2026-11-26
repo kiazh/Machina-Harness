@@ -3173,7 +3173,7 @@ The terminal UI registers **53** slash commands. A bare `/` lists the registry, 
 | Command | Usage | Description |
 |---|---|---|
 | `/activity` | `/activity` | Open the live status tab; `/activity list` views queued steering, background commands, and agents |
-| `/changes` | `/changes [all]` | Review what each prompt changed: stable per-prompt diffs and attached review runs; `all` includes every chat in the workspace |
+| `/changes` | `/changes [all]` | Review what each prompt changed: stable per-prompt diffs and attached review runs. Findings explain themselves and ask before sending an `Implement fix` prompt; `all` includes every chat in the workspace |
 | `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K) |
 | `/approvals` | `/approvals [list\|allow <id>\|deny <id>\|revoke]` | List pending approvals, or allow/deny one |
 | `/attach` | `/attach` | Attach the editor selection to the next message |
