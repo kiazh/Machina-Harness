@@ -464,11 +464,11 @@ test("composer is a ruled input block with one accent marker", async () => {
 	assert.match(rows.at(-1) ?? "", /^─+$/, "the composer closes with a hairline rule");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
 	composer.editor.setText("hello");
-	assert.doesNotMatch(
-		composer.render(80).map((line) => stripTerminalSequences(line)).join("\n"),
-		/Ask anything/,
-		"placeholder hides once typing starts",
-	);
+	const typed = composer.render(80).map((line) => stripTerminalSequences(line));
+	assert.doesNotMatch(typed.join("\n"), /Ask anything/, "placeholder hides once typing starts");
+	assert.match(typed[1] ?? "", /^❯ hello/, "the prompt marker and draft share one row");
+	assert.equal(typed.length, 3, "typed composer stays one ruled input row plus two rules");
+	assert.match(typed.at(-1) ?? "", /^─+$/, "the closing rule stays below the draft");
 });
 
 test("composer draft uses theme ink before and after the editor cursor", async () => {
@@ -488,7 +488,7 @@ test("composer draft uses theme ink before and after the editor cursor", async (
 			const reset = line.indexOf("\x1b[0m", head);
 			const tail = line.indexOf("orld", reset);
 			assert.ok(head > 0 && reset > head && tail > reset, `${skin} renders text around the cursor`);
-			assert.ok(line.slice(0, head).endsWith(`${ink} `), `${skin} uses theme ink for typed text`);
+			assert.ok(line.slice(0, head).includes(ink), `${skin} uses theme ink for typed text`);
 			assert.ok(line.slice(reset, tail).includes(ink), `${skin} restores theme ink after the cursor`);
 		}
 	} finally {

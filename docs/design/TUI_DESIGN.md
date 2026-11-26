@@ -24,8 +24,9 @@ state, approval, output, ui, dialogs, layout, features, app).
 - Tool activity is one unframed `⏺ name args` line with a right-aligned
   status, capped at 108 columns. Results appear beneath it as `⎿` plus at
   most two preview rows; diff lines keep add/remove colors.
-- The composer is a ruled input block: a hairline rule above and below, a
-  `❯` accent marker, and plain input rows. Rules disappear below 12 rows to
+- The composer is a ruled input block: one acid accent rule above, one quiet
+  hairline below, and `❯` sitting on the same row as the draft. The inner
+  editor contributes no second gutter. Rules disappear below 12 rows to
   protect the status/footer line.
 - Notices and thinking use the same gutter. Thinking reads
   `✻ Thinking (3s · esc to interrupt)`. Below 40 columns, extra gutters
@@ -126,27 +127,35 @@ state, approval, output, ui, dialogs, layout, features, app).
   `/changes` opens Changes directly and `/changes all` includes every chat in
   the workspace. The two pages are full-viewport surfaces, not transcript
   panels.
-- The unit is **one prompt**, not a commit. A prompt row keeps its captured
+- Activity is a single full-width grid: a live header, wrapped text filters
+  (no pills), then spaced category rows. Each row carries its status and age
+  inline; the selected row opens its retained logs directly beneath it. There
+  is no second inspector column at any width.
+- Changes is a numbered prompt timeline. Each block starts with `NN ❯` and the
+  prompt, followed by the touched files and review state on one quiet line.
+  The selected block expands in place into three views: `FILES` (bounded,
+  selection-following file list), `DIFF` (stable unified diff for the selected
+  file), and `REVIEW` (run status, summary, and findings with severity, file
+  and line). `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
+  finding, `1/2/3` or Tab switches views, PgUp/PgDn scrolls the active view,
+  `r` starts or re-runs the local rules review, `x` cancels a running one, and
+  `w` toggles this-chat/all-chats. The viewport never opens on the second line
+  of a prompt.
+- The unit is **one prompt**, not a commit. A prompt block keeps its captured
   before/after content, so a later prompt editing the same file does not
-  rewrite an earlier row's diff. Rows show age, prompt excerpt, file count,
+  rewrite an earlier block's diff. Prompts show age, excerpt, file count,
   `+/-` line counts, and the attached review state.
-- The inspector has three views: `FILES` (bounded, selection-following file
-  list), `DIFF` (stable unified diff for the selected file), and `REVIEW`
-  (run status, summary, and findings with severity, file and line). `↑/↓`
-  selects prompts, `[`/`]` selects files, `n`/`p` selects a finding, `1/2/3`
-  or Tab switches views, PgUp/PgDn scrolls the active view, `r` starts or
-  re-runs the local rules review, `x` cancels a running one, and `w` toggles
-  this-chat/all-chats.
 - Findings are actionable, never automatic. `Enter` (or `a`) on a selected
   finding opens an action request that explains the issue and asks
   `Implement fix` / `Not now`. Only an explicit `Implement fix` closes the
   screen and sends a focused repair prompt to the chat; dismissing it changes
   nothing. The action request also appears when a review the user just started
   finds its first issue.
-- Narrow terminals keep the prompt list above an inline Inspector. Every
-  section has an honest empty state; a binary file says so instead of
-  pretending to have a text diff. The screen reads bounded local stores and
-  never edits files or re-runs the agent turn.
+- Every width uses the same timeline; the selected block expands in place
+  rather than stacking a second panel. Every section has an honest empty
+  state; a binary file says so instead of pretending to have a text diff. The
+  screen reads bounded local stores and never edits files or re-runs the agent
+  turn.
 
 ## Motion
 

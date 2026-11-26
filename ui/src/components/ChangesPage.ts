@@ -1,8 +1,9 @@
-// Full-screen prompt-centric change review. Each row is one agent turn, not a
-// commit: the prompt that asked for the change, the files that turn touched,
+// Full-screen prompt-centric change review. Each block is one agent turn, not
+// a commit: the prompt that asked for the change, the files that turn touched,
 // the stable diff for those files, and the review run attached to that prompt.
-// The page is read-only; starting a review is the only action and it never
-// edits or re-runs the work itself.
+// One numbered timeline replaces the old list/inspector split; selecting a
+// prompt expands its evidence inline. The page is read-only; starting a review
+// is the only action and it never edits or re-runs the work itself.
 import {
 	Key,
 	matchesKey,
@@ -20,7 +21,7 @@ import type {
 	ReviewFindingInfo,
 	ReviewRunInfo,
 } from "../protocol.ts";
-import { selectionBar, theme } from "../theme.ts";
+import { isOpaqueBackground, theme } from "../theme.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
 export interface ChangesDiffState {
@@ -43,14 +44,13 @@ export interface ChangesSnapshot {
 type InspectorTab = "files" | "diff" | "review";
 type HitKind = "turn" | "file";
 
-interface PanelLine {
+interface ScreenLine {
 	text: string;
 	right?: string;
 	key?: string;
-	kind?: HitKind;
+	kind: "blank" | "prompt" | "turn" | "detail" | "file";
 	turnId?: string;
 	filePath?: string;
-	row?: ChangeTurnInfo;
 }
 
 interface Hitbox {
@@ -73,6 +73,11 @@ function between(left: string, right: string, width: number): string {
 	return `${first}${" ".repeat(gap)} ${truncateToWidth(right, width, ".")}`;
 }
 
+function centered(text: string, width: number): string {
+	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
+	return `${" ".repeat(pad)}${text}`;
+}
+
 function age(iso: string | undefined): string {
 	if (!iso) return "";
 	const then = new Date(iso).getTime();
@@ -86,7 +91,7 @@ function age(iso: string | undefined): string {
 
 function oneLine(text: string, width: number): string {
 	const flat = text.split(/\r?\n/).map(part => part.trim()).filter(Boolean).join(" ");
-	return truncateToWidth(flat || "(prompt not recorded)", width, "…", true);
+	return truncateToWidth(flat || "(prompt not recorded)", width, "…");
 }
 
 function fileTone(change: string): (text: string) => string {
@@ -158,6 +163,34 @@ function windowStart(selected: number, height: number, length: number): number {
 	if (length <= height) return 0;
 	if (selected < 0) return 0;
 	return Math.max(0, Math.min(length - height, selected - Math.floor(height / 2)));
+}
+
+/** First line after the selected prompt's block, or the end of the page. */
+function nextTurnStart(body: ScreenLine[], selectedStart: number, selectedId: string | undefined): number {
+	for (let index = selectedStart + 1; index < body.length; index++) {
+		const line = body[index];
+		if (line?.kind === "prompt" && line.key !== selectedId) return index;
+	}
+	return body.length;
+}
+
+/**
+ * Keep the whole selected block on screen. A block taller than the viewport
+ * anchors at its first line; a smaller block is centred with its detail.
+ */
+function windowStartForBlock(start: number, end: number, height: number, length: number): number {
+	if (length <= height) return 0;
+	const blockHeight = Math.max(1, end - start);
+	if (blockHeight >= height) return Math.max(0, Math.min(start, length - height));
+	const preferred = start - Math.floor((height - blockHeight) / 2);
+	return Math.max(0, Math.min(length - height, preferred));
+}
+
+/** The chat header is a filled wordmark; pages keep the same anchor. */
+function wordmark(): string {
+	return isOpaqueBackground()
+		? theme.accentBg(theme.onAccent(" MACHINA "))
+		: theme.accentBold("MACHINA");
 }
 
 export class ChangesPage implements Component {
@@ -430,7 +463,6 @@ export class ChangesPage implements Component {
 		const out: string[] = [];
 		const push = (line = ""): void => { out.push(line); };
 		const turns = snap.turns;
-		const selected = turns.find(turn => turn.id === this.selectedTurnId);
 		const totals = turns.reduce(
 			(total, turn) => ({
 				files: total.files + turn.stats.files,
@@ -443,19 +475,21 @@ export class ChangesPage implements Component {
 			? `${theme.success("●")} ${theme.success("live")}`
 			: `${theme.dim("○")} ${theme.dim("idle")}`;
 		push(between(
-			` ${theme.accentBold("Machina")} ${theme.dim("·")} ${theme.text("Changes")}  ${theme.dim(`· ${sanitizeDisplay(snap.project || "global")}`)}`,
+			`${wordmark()} ${theme.muted("CHANGES")}  ${theme.dim(`· ${sanitizeDisplay(snap.project || "global")}`)}`,
 			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
 			width,
 		));
+		const session = snap.scope === "session";
 		push(between(
-			` ${theme.dim("← Activity")} ${theme.dim("·")} ${theme.accentBold("CHANGES")} ${theme.dim("→")} ${theme.muted(snap.scope === "session" ? "this chat" : "all chats")}`,
-			`${theme.dim(`${turns.length} prompts`)} ${theme.dim("·")} ${theme.text(`${totals.files} files`)} ${theme.success(`+${totals.additions}`)} ${theme.error(`−${totals.deletions}`)} `,
+			` ${theme.accentBold(session ? "THIS CHAT" : "ALL CHATS")} ${theme.dim("·")} ${theme.dim(`${turns.length} ${turns.length === 1 ? "prompt" : "prompts"}`)} ${theme.dim("·")} ${theme.dim("w switch")}`,
+			`${theme.text(`${totals.files} files`)} ${theme.success(`+${totals.additions}`)} ${theme.error(`−${totals.deletions}`)} `,
 			width,
 		));
 		if (snap.error) {
 			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(sanitizeDisplay(snap.error))}`, width, ".", true));
 		}
-		push(theme.border("─".repeat(width)));
+		push("");
+
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
 		if (!turns.length) {
@@ -463,14 +497,14 @@ export class ChangesPage implements Component {
 				theme.accentBold("No prompt changes recorded yet."),
 				"",
 				theme.dim("Each completed agent turn that changes a workspace file appears here."),
-				theme.dim("The row keeps the prompt, the files, the stable diff, and its review run."),
+				theme.dim("The block keeps the prompt, the files, the stable diff, and its review."),
 				"",
 				theme.dim("Send a prompt that edits a file, then reopen this screen."),
 			];
 			const top = Math.max(0, Math.floor((bodyHeight - guidance.length) / 2));
 			for (let index = 0; index < bodyHeight; index++) {
 				const line = guidance[index - top];
-				push(line ? `  ${line}` : "");
+				push(line ? centered(line, width) : "");
 			}
 			push(truncateToWidth(
 				` ${theme.dim("← Activity · Ctrl+N → · Esc chat")}`,
@@ -482,159 +516,88 @@ export class ChangesPage implements Component {
 			return out;
 		}
 
-		const wide = width >= 90 && bodyHeight >= 12;
-		const leftWidth = Math.max(38, Math.floor((width - 3) * 0.52));
-		const rightWidth = Math.max(24, width - leftWidth - 3);
-		const listHeight = Math.max(6, Math.floor(bodyHeight * 0.44));
-		const detailHeight = Math.max(3, bodyHeight - listHeight - 1);
-		const left = this.buildList(turns, selected, snap);
-		const detail = this.buildDetail(selected, snap, wide ? rightWidth : width, wide ? bodyHeight : detailHeight);
-		const selectedLine = left.lines.findIndex(line => line.key === this.selectedTurnId && line.kind === "turn");
-		const format = (line: PanelLine | undefined, panelWidth: number, selectedRow = false): string => {
-			if (!line) return " ".repeat(panelWidth);
-			// The row already carries its own styled marker; never slice ANSI
-			// text to prepend another one.
-			const content = line.right ? between(line.text, line.right, panelWidth) : fit(line.text, panelWidth);
-			return selectedRow ? selectionBar(content, panelWidth) : content;
-		};
+		const body: ScreenLine[] = [];
+		const contentBudget = Math.max(3, Math.min(20, bodyHeight - 10));
+		let selectedStart = 0;
+		for (const [index, turn] of turns.entries()) {
+			if (index > 0) body.push({ text: "", kind: "blank" });
+			const selected = turn.id === this.selectedTurnId;
+			if (selected) selectedStart = body.length;
+			const number = String(index + 1).padStart(2, "0");
+			const stats = `${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
+			body.push({
+				text: ` ${selected ? theme.accentBold(number) : theme.dim(number)} ${selected ? theme.accent("❯") : theme.muted("❯")} ${theme.text(oneLine(turn.prompt, Math.max(16, width - 34)))}  ${theme.dim("·")} ${stats}`,
+				key: turn.id,
+				kind: "prompt",
+				turnId: turn.id,
+			});
+			const files = turn.files.slice(0, 3).map(file => sanitizeDisplay(file.path)).join(" · ");
+			const more = turn.files.length > 3 ? `  +${turn.files.length - 3}` : "";
+			body.push({
+				text: `     ${theme.dim(`${files || "no files"}${more}`)}  ${theme.dim("·")} ${reviewChip(turn.review)}`,
+				key: turn.id,
+				kind: "turn",
+				turnId: turn.id,
+			});
+			if (selected) this.detailLines(turn, body, width, contentBudget);
+		}
+
+		const selectedEnd = nextTurnStart(body, selectedStart, this.selectedTurnId);
+		let offset = windowStartForBlock(selectedStart, selectedEnd, bodyHeight, body.length);
+		// Never open the viewport on the second line of an unselected prompt.
+		// Prefer the next prompt boundary when the selected block still fits;
+		// otherwise move back to the previous boundary.
+		if (offset > 0 && body[offset]?.kind !== "prompt") {
+			let forward = offset;
+			while (forward < selectedStart && body[forward]?.kind !== "prompt") forward++;
+			let backward = offset;
+			while (backward > 0 && body[backward]?.kind !== "prompt") backward--;
+			if (forward < selectedStart && selectedEnd - forward <= bodyHeight) offset = forward;
+			else if (selectedEnd - backward <= bodyHeight) offset = backward;
+		}
 		this.hitboxes = [];
-		if (wide) {
-			const leftOffset = windowStart(selectedLine, bodyHeight, left.lines.length);
-			for (let index = 0; index < bodyHeight; index++) {
-				const leftLine = left.lines[leftOffset + index];
-				const rightLine = detail.lines[index];
-				const selectedRow = leftLine?.key === this.selectedTurnId && leftLine.kind === "turn";
-				push(`${format(leftLine, leftWidth, selectedRow)}${theme.border(" │ ")}${format(rightLine, rightWidth)}`);
-				if (leftLine?.key && leftLine.kind) {
-					this.hitboxes.push({
-						x: 0,
-						width: leftWidth,
-						y: headerRows + index,
-						kind: leftLine.kind,
-						value: leftLine.key,
-					});
-				}
-				if (rightLine?.key && rightLine.kind) {
-					this.hitboxes.push({
-						x: leftWidth + 3,
-						width: rightWidth,
-						y: headerRows + index,
-						kind: rightLine.kind,
-						value: rightLine.key,
-					});
-				}
+		for (let index = 0; index < bodyHeight; index++) {
+			const line = body[offset + index];
+			if (!line) {
+				push("");
+				continue;
 			}
-		} else {
-			const leftOffset = windowStart(selectedLine, listHeight, left.lines.length);
-			for (let index = 0; index < listHeight; index++) {
-				const line = left.lines[leftOffset + index];
-				const selectedRow = line?.key === this.selectedTurnId && line.kind === "turn";
-				push(format(line, width, selectedRow));
-				if (line?.key && line.kind) {
-					this.hitboxes.push({
-						x: 0,
-						width,
-						y: headerRows + index,
-						kind: line.kind,
-						value: line.key,
-					});
-				}
-			}
-			const dividerLabel = " Inspector ";
-			push(truncateToWidth(
-				`${theme.border("─".repeat(Math.max(1, Math.floor((width - dividerLabel.length) / 2))))}${theme.accentBold(dividerLabel)}${theme.border("─".repeat(Math.max(1, width - dividerLabel.length - Math.floor((width - dividerLabel.length) / 2))))}`,
-				width,
-			));
-			const detailOffset = windowStart(0, detailHeight, detail.lines.length);
-			for (let index = 0; index < detailHeight; index++) {
-				push(format(detail.lines[detailOffset + index], width));
+			const content = line.right ? between(line.text, line.right, width) : fit(line.text, width);
+			push(content);
+			if (line.key && (line.kind === "prompt" || line.kind === "turn" || line.kind === "file")) {
+				this.hitboxes.push({
+					x: 0,
+					width,
+					y: headerRows + index,
+					kind: line.kind === "file" ? "file" : "turn",
+					value: line.key,
+				});
 			}
 		}
 		push(truncateToWidth(
-			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · n/p finding · Enter fix · r review · w scope · Esc/←/→ close")}`,
+			` ${theme.dim("↑↓ prompt · 1/2/3 view · [ ] file · n/p finding · Enter fix · r review · w scope · Esc close")}`,
 			width,
 			".",
 			true,
 		));
-		return out;
+		return out.slice(0, rows);
 	}
 
-	private buildList(
-		turns: ChangeTurnInfo[],
-		_selected: ChangeTurnInfo | undefined,
-		snap: ChangesSnapshot,
-	): { lines: PanelLine[] } {
-		const lines: PanelLine[] = [{
-			text: ` ${theme.accentBold("PROMPT CHANGES")}`,
-			right: theme.dim(String(turns.length)),
-		}];
-		let section = "";
-		for (const turn of turns) {
-			if (snap.scope === "workspace") {
-				const next = turn.sessionId.slice(0, 8) || "unknown";
-				if (next !== section) {
-					section = next;
-					lines.push({ text: "" });
-					lines.push({
-						text: `  ${theme.accent("▏")}${theme.accentBold(`SESSION ${section.toUpperCase()}`)}`,
-						right: theme.dim(age(turn.createdAt)),
-					});
-				}
-			}
-			const marker = turn.id === this.selectedTurnId ? theme.accent("▸") : theme.dim("·");
-			const review = reviewChip(turn.review);
-			lines.push({
-				text: `  ${marker} ${theme.dim(age(turn.createdAt).padStart(7))} ${theme.text(oneLine(turn.prompt, 160))}`,
-				right: review,
-				key: turn.id,
-				kind: "turn",
-				turnId: turn.id,
-				row: turn,
-			});
-			const model = [turn.provider, turn.model].filter(Boolean).join("/");
-			lines.push({
-				text: `      ${theme.muted(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}${model ? ` ${theme.dim(`· ${model}`)}` : ""}`,
-				key: turn.id,
-				kind: "turn",
-				turnId: turn.id,
-				row: turn,
-			});
-		}
-		return { lines };
-	}
-
-	private buildDetail(
-		turn: ChangeTurnInfo | undefined,
-		_snap: ChangesSnapshot,
-		panelWidth: number,
-		height: number,
-	): { lines: PanelLine[] } {
-		const lines: PanelLine[] = [];
-		if (!turn) {
-			lines.push({ text: ` ${theme.accentBold("INSPECTOR")}` });
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("Select a prompt to inspect its changes.")}` });
-			return { lines };
-		}
-		const content = Math.max(8, panelWidth - 4);
-		lines.push({
-			text: ` ${theme.accentBold("PROMPT")}`,
-			right: theme.dim(age(turn.createdAt)),
-		});
-		const prompt = sanitizeDisplay(turn.prompt || "(prompt not recorded)");
-		const wrapped = wrapDisplay(prompt, content);
-		const shown = this.promptExpanded ? wrapped : wrapped.slice(0, 3);
-		for (const line of shown) lines.push({ text: `  ${theme.text(line)}` });
-		if (!this.promptExpanded && wrapped.length > 3) {
-			lines.push({ text: `  ${theme.dim(`… ${wrapped.length - 3} more lines · Space expands`)}` });
-		}
-		lines.push({ text: "" });
+	private detailLines(
+		turn: ChangeTurnInfo,
+		body: ScreenLine[],
+		width: number,
+		available: number,
+	): void {
+		const content = Math.max(8, width - 6);
 		const route = [turn.provider, turn.model].filter(Boolean).join(" / ");
-		lines.push({
-			text: `  ${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}${route ? ` ${theme.dim("·")} ${theme.dim(route)}` : ""}`,
-			right: reviewChip(turn.review),
-		});
-		lines.push({ text: "" });
+		const meta = [route, age(turn.createdAt)].filter(Boolean).join("  ·  ");
+		if (meta) body.push({ text: `     ${theme.dim(meta)}`, kind: "detail" });
+		if (this.promptExpanded) {
+			for (const line of wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), content).slice(0, 8)) {
+				body.push({ text: `     ${theme.text(line)}`, kind: "detail" });
+			}
+		}
 		const findings = turn.review
 			? (turn.review.findingsCount ?? turn.review.findings.length)
 			: 0;
@@ -643,45 +606,49 @@ export class ChangesPage implements Component {
 			{ id: "diff", label: "DIFF" },
 			{ id: "review", label: findings ? `REVIEW ${findings}` : "REVIEW" },
 		];
-		lines.push({
-			text: ` ${tabs.map(tab => tab.id === this.tab
-				? theme.accentBold(` ${tab.label} `)
-				: theme.muted(` ${tab.label} `)).join(theme.dim("·"))}`,
+		body.push({
+			text: `     ${tabs.map(tab => tab.id === this.tab
+				? theme.accentBold(tab.label)
+				: theme.dim(tab.label)).join("   ")}`,
+			kind: "detail",
 		});
-		lines.push({ text: "" });
-
-		// The prompt block above consumes roughly twelve rows (more when it
-		// wraps). Reserve that honestly instead of generating a whole diff and
-		// letting the viewport silently discard it.
-		const available = Math.max(4, height - 14);
+		body.push({ text: "", kind: "blank" });
 		if (this.tab === "files") {
-			this.buildFiles(turn, lines, content, available);
+			this.fileLines(turn, body, width, available);
 		} else if (this.tab === "diff") {
-			this.buildDiff(turn, lines, content, available);
+			this.diffLines(turn, body, width, available);
 		} else {
-			this.buildReview(turn, lines, content, available);
+			this.reviewLines(turn, body, width, available);
 		}
-		return { lines };
+		body.push({
+			text: `     ${theme.dim(this.tab === "files"
+				? "Enter opens the diff · [ ] changes file · Space shows the full prompt"
+				: this.tab === "diff"
+					? "PgUp/PgDn scrolls · [ ] changes file · Space shows the full prompt"
+					: "Enter / a asks to implement · n/p chooses · Space shows the full prompt")}`,
+			kind: "detail",
+		});
 	}
 
-	private buildFiles(
+	private fileLines(
 		turn: ChangeTurnInfo,
-		lines: PanelLine[],
-		content: number,
+		body: ScreenLine[],
+		width: number,
 		available: number,
 	): void {
 		if (!turn.files.length) {
-			lines.push({ text: `  ${theme.dim("No files were captured for this prompt.")}` });
+			body.push({ text: `     ${theme.dim("No files were captured for this prompt.")}`, kind: "detail" });
 			return;
 		}
+		const content = Math.max(8, width - 24);
 		const selectedIndex = Math.max(0, turn.files.findIndex(file => file.path === this.selectedFilePath));
 		const start = windowStart(selectedIndex, available, turn.files.length);
 		for (const file of turn.files.slice(start, start + available)) {
 			const selected = file.path === this.selectedFilePath;
 			const tone = fileTone(file.change);
 			const stats = file.binary ? theme.dim("binary") : `${theme.success(`+${file.additions}`)} ${theme.error(`−${file.deletions}`)}`;
-			lines.push({
-				text: `  ${selected ? theme.accent("▸") : " "} ${tone(fileLetter(file))} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), Math.max(8, content - 18), "…"))}`,
+			body.push({
+				text: `     ${selected ? theme.accent("▸") : " "} ${tone(fileLetter(file))} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), content, "…"))}`,
 				right: stats,
 				key: file.path,
 				kind: "file",
@@ -689,137 +656,127 @@ export class ChangesPage implements Component {
 			});
 		}
 		if (start > 0 || start + available < turn.files.length) {
-			lines.push({
-				text: `  ${theme.dim(`${start + 1}-${Math.min(turn.files.length, start + available)} of ${turn.files.length} files · [ ] selects`)}`,
+			body.push({
+				text: `     ${theme.dim(`${start + 1}-${Math.min(turn.files.length, start + available)} of ${turn.files.length} files · [ ] selects`)}`,
+				kind: "detail",
 			});
 		}
-		lines.push({ text: "" });
-		lines.push({ text: `  ${theme.dim("Enter opens the diff · [ ] changes file")}` });
 	}
 
-	private buildDiff(
+	private diffLines(
 		turn: ChangeTurnInfo,
-		lines: PanelLine[],
-		content: number,
+		body: ScreenLine[],
+		width: number,
 		available: number,
 	): void {
 		const file = turn.files.find(item => item.path === this.selectedFilePath) ?? turn.files[0];
 		if (!file) {
-			lines.push({ text: `  ${theme.dim("No file selected.")}` });
+			body.push({ text: `     ${theme.dim("No file selected.")}`, kind: "detail" });
 			return;
 		}
+		const content = Math.max(8, width - 6);
 		const state = this.diff(turn.id);
 		const diffFile = state.files.find(item => item.path === file.path);
-		lines.push({
-			text: `  ${theme.accent("◂")} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), Math.max(8, content - 8), "…"))} ${theme.accent("▸")}`,
+		body.push({
+			text: `     ${theme.accent("◂")} ${theme.text(truncateToWidth(sanitizeDisplay(file.path), content, "…"))} ${theme.accent("▸")}`,
 			right: theme.dim(`${this.fileIndex(turn, file.path)}/${turn.files.length}`),
+			kind: "detail",
 		});
 		if (file.binary || diffFile?.binary) {
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("Binary file changed; no text diff.")}` });
+			body.push({ text: `     ${theme.dim("Binary file changed; no text diff.")}`, kind: "detail" });
 			return;
 		}
 		if (state.error) {
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.error(state.error)}` });
+			body.push({ text: `     ${theme.error(state.error)}`, kind: "detail" });
 			return;
 		}
 		if (state.loading && !diffFile) {
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("Loading the stable diff for this prompt…")}` });
+			body.push({ text: `     ${theme.dim("Loading the stable diff for this prompt…")}`, kind: "detail" });
 			return;
 		}
 		if (!diffFile || !diffFile.text.trim()) {
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("No textual diff recorded for this file.")}` });
+			body.push({ text: `     ${theme.dim("No textual diff recorded for this file.")}`, kind: "detail" });
 			return;
 		}
 		const diffLines = diffFile.text.replace(/\r\n/g, "\n").split("\n");
 		if (diffLines.at(-1) === "") diffLines.pop();
 		const start = Math.min(this.scroll, Math.max(0, diffLines.length - 1));
 		const shown = diffLines.slice(start, start + available);
-		lines.push({ text: "" });
 		for (const line of shown) {
-			lines.push({ text: `  ${truncateToWidth(styleDiffLine(line), Math.max(8, content), "…")}` });
+			body.push({ text: `     ${truncateToWidth(styleDiffLine(line), content, "…")}`, kind: "detail" });
 		}
 		if (start + shown.length < diffLines.length || diffFile.truncated || state.truncated) {
-			lines.push({ text: `  ${theme.dim(`… ${Math.max(0, diffLines.length - start - shown.length)} more diff lines${diffFile.truncated || state.truncated ? " (truncated)" : ""} · PgDn scrolls`)}` });
+			body.push({
+				text: `     ${theme.dim(`… ${Math.max(0, diffLines.length - start - shown.length)} more diff lines${diffFile.truncated || state.truncated ? " (truncated)" : ""} · PgDn scrolls`)}`,
+				kind: "detail",
+			});
 		}
 	}
 
-	private buildReview(
+	private reviewLines(
 		turn: ChangeTurnInfo,
-		lines: PanelLine[],
-		content: number,
+		body: ScreenLine[],
+		width: number,
 		available: number,
 	): void {
+		const content = Math.max(10, width - 6);
 		const review = turn.review;
 		if (!review) {
-			lines.push({ text: `  ${theme.dim("No review run for this prompt.")}` });
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.text("Press r to run the local rules review.")}` });
-			lines.push({ text: `  ${theme.dim("It reads this prompt's stable diff only; it never edits files.")}` });
+			body.push({ text: `     ${theme.dim("No review run for this prompt.")}`, kind: "detail" });
+			body.push({ text: `     ${theme.text("Press r to run the local rules review.")}`, kind: "detail" });
+			body.push({ text: `     ${theme.dim("It reads this prompt's stable diff only; it never edits files.")}`, kind: "detail" });
 			return;
 		}
 		const tone = reviewTone(review);
-		lines.push({
-			text: `  ${tone(`● ${review.status}`)} ${theme.dim("·")} ${theme.text(review.engine)} ${theme.dim("·")} ${reviewChip(review)}`,
+		body.push({
+			text: `     ${tone(`● ${review.status}`)} ${theme.dim("·")} ${theme.text(review.engine)} ${theme.dim("·")} ${reviewChip(review)}`,
 			right: theme.dim(age(review.finishedAt || review.startedAt || review.createdAt)),
+			kind: "detail",
 		});
 		if (review.summary) {
 			for (const line of wrapDisplay(sanitizeDisplay(review.summary), content)) {
-				lines.push({ text: `  ${theme.text(line)}` });
+				body.push({ text: `     ${theme.text(line)}`, kind: "detail" });
 			}
 		}
 		if (review.error) {
-			lines.push({ text: `  ${theme.error(truncateToWidth(review.error, content, "…"))}` });
+			body.push({ text: `     ${theme.error(truncateToWidth(review.error, content, "…"))}`, kind: "detail" });
 		}
-		lines.push({ text: "" });
 		if (!review.findings.length) {
-			lines.push({ text: `  ${theme.success("No findings in this run.")}` });
-		} else {
-			this.selectedFindingIndex = Math.max(
-				0,
-				Math.min(review.findings.length - 1, this.selectedFindingIndex),
-			);
-			const start = Math.min(this.scroll, Math.max(0, review.findings.length - 1));
-			let rendered = 0;
-			let index = start;
-			for (; index < review.findings.length; index++) {
-				if (rendered >= available && index !== this.selectedFindingIndex) break;
-				rendered += this.pushFinding(
-					review.findings[index]!,
-					lines,
-					content,
-					index === this.selectedFindingIndex,
-				);
-			}
-			if (index < review.findings.length) {
-				lines.push({ text: `  ${theme.dim(`… more findings · PgDn scrolls`)}` });
-			}
+			body.push({ text: `     ${theme.success("No findings in this run.")}`, kind: "detail" });
+			return;
+		}
+		this.selectedFindingIndex = Math.max(
+			0,
+			Math.min(review.findings.length - 1, this.selectedFindingIndex),
+		);
+		const start = Math.min(this.scroll, Math.max(0, review.findings.length - 1));
+		let rendered = 0;
+		let index = start;
+		for (; index < review.findings.length; index++) {
+			if (rendered >= available && index !== this.selectedFindingIndex) break;
+			rendered += this.pushFinding(review.findings[index]!, body, content, index === this.selectedFindingIndex);
+		}
+		if (index < review.findings.length) {
+			body.push({ text: `     ${theme.dim("… more findings · PgDn scrolls")}`, kind: "detail" });
 		}
 		const total = review.findingsCount ?? review.findings.length;
 		if (total > review.findings.length) {
-			lines.push({
-				text: `  ${theme.dim(`Top ${review.findings.length} of ${total} findings shown in severity order.`)}`,
+			body.push({
+				text: `     ${theme.dim(`Top ${review.findings.length} of ${total} findings shown in severity order.`)}`,
+				kind: "detail",
 			});
 		}
-		lines.push({ text: "" });
-		if (review.findings.length) {
-			lines.push({
-				text: `  ${theme.accentBold("Enter / a")} ${theme.text("ask to implement the selected fix")} ${theme.dim("· n/p chooses · it asks before sending anything")}`,
-			});
-		}
-		lines.push({
+		body.push({
 			text: review.status === "running" || review.status === "queued"
-				? `  ${theme.dim("x cancels · the run reads only this prompt's diff")}`
-				: `  ${theme.dim("r re-runs the local rules review")}`,
+				? `     ${theme.dim("x cancels · the run reads only this prompt's diff")}`
+				: `     ${theme.dim("r re-runs the local rules review")}`,
+			kind: "detail",
 		});
 	}
 
 	private pushFinding(
 		finding: ReviewFindingInfo,
-		lines: PanelLine[],
+		body: ScreenLine[],
 		content: number,
 		selected = false,
 	): number {
@@ -827,18 +784,19 @@ export class ChangesPage implements Component {
 		const location = finding.file
 			? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
 			: "prompt";
-		lines.push({
-			text: `  ${selected ? theme.accent("▸") : " "} ${tone(finding.severity.toUpperCase().padEnd(8))} ${theme.text(truncateToWidth(finding.title, Math.max(10, content - 12), "…"))}`,
+		body.push({
+			text: `     ${selected ? theme.accent("▸") : " "} ${tone(finding.severity.toUpperCase().padEnd(8))} ${theme.text(truncateToWidth(finding.title, Math.max(10, content - 12), "…"))}`,
 			right: theme.dim(truncateToWidth(location, 30, "…")),
+			kind: "detail",
 		});
 		let used = 1;
 		if (finding.body) {
 			for (const line of wrapDisplay(sanitizeDisplay(finding.body), Math.max(10, content - 4)).slice(0, 2)) {
-				lines.push({ text: `    ${theme.dim(line)}` });
+				body.push({ text: `       ${theme.dim(line)}`, kind: "detail" });
 				used++;
 			}
 		}
-		lines.push({ text: "" });
+		body.push({ text: "", kind: "blank" });
 		return used + 1;
 	}
 

@@ -17,32 +17,33 @@ const snapshot: StatusSnapshot = {
 	updatedAt: "12:00:00",
 };
 
-test("status page renders agents, shells, MCP calls and harnesses", () => {
+function pageAt(width = 96, rows = 28, opened?: (row: { id?: string }, section: string | undefined) => boolean): StatusPage {
 	const tui = {
-		terminal: { columns: 96, rows: 28 },
+		terminal: { columns: width, rows },
 		requestRender() {},
 	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+	return new StatusPage(tui, () => snapshot, opened);
+}
+
+test("status page renders agents, shells, tools and harnesses in one grid", () => {
+	const page = pageAt();
 	const rendered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /Machina · Activity/);
-	assert.match(rendered, /▏AGENTS/);
+	assert.match(rendered, /MACHINA\s{2}ACTIVITY/);
+	assert.match(rendered, /AGENTS/);
 	assert.match(rendered, /Main · Build a calculator/);
-	assert.match(rendered, /▏SHELLS/);
+	assert.match(rendered, /SHELLS/);
 	assert.match(rendered, /foreground shell/);
 	assert.match(rendered, /MCP · mcp_call/);
-	assert.match(rendered, /▏HARNESSES/);
+	assert.match(rendered, /HARNESSES/);
 	assert.match(rendered, /Hermes/);
 	assert.match(rendered, /queued guidance/);
 	assert.ok(page.render(96).every((line) => stripTerminalSequences(line).length <= 96));
 });
 
-test("status rows expand local logs with Enter and collapse again", () => {
-	const tui = {
-		terminal: { columns: 96, rows: 28 },
-		requestRender() {},
-	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+test("the selected row expands its retained logs inline with Enter", () => {
+	const page = pageAt();
 	assert.doesNotMatch(page.render(96).map(stripTerminalSequences).join("\n"), /Fourth detail/);
+	assert.match(page.render(96).map(stripTerminalSequences).join("\n"), /Session: main/, "the first two log rows preview inline");
 	assert.equal(page.handleInput("\r"), true);
 	const expanded = page.render(96).map(stripTerminalSequences).join("\n");
 	assert.match(expanded, /Session: main/);
@@ -52,83 +53,66 @@ test("status rows expand local logs with Enter and collapse again", () => {
 });
 
 test("Enter opens agent and session rows instead of expanding their logs", () => {
-	const tui = {
-		terminal: { columns: 96, rows: 28 },
-		requestRender() {},
-	} as unknown as TUI;
 	const opened: Array<[string | undefined, string | undefined]> = [];
-	const page = new StatusPage(tui, () => snapshot, (row, section) => {
+	const page = pageAt(96, 28, (row, section) => {
 		opened.push([row.id, section]);
 		return section === "Agents" || section === "Sessions";
 	});
 	page.render(96);
 	assert.equal(page.handleInput("\r"), true);
 	assert.deepEqual(opened, [["agent:main", "Agents"]]);
-	// Opening navigates; it must not also expand the inspector logs.
+	// Opening navigates; it must not also expand the inline logs.
 	assert.doesNotMatch(page.render(96).map(stripTerminalSequences).join("\n"), /Fourth detail/);
 });
 
 test("status rows and filter tabs are clickable", () => {
-	const tui = {
-		terminal: { columns: 96, rows: 28 },
-		requestRender() {},
-	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+	const page = pageAt();
 	page.render(96);
 	const click = (x: number, y: number) => ({
 		type: "click", button: "left", x, y, screenX: x, screenY: y,
 		width: 96, height: 28, shift: false, alt: false, ctrl: false,
 	}) as never;
 	const before = page.render(96).map(stripTerminalSequences);
-	const rowY = before.findIndex(line => line.includes("● Main · Build a calculator"));
-	assert.ok(rowY > 0);
-	assert.equal(page.handleMouse(click(5, rowY))?.handled, true);
-	assert.match(page.render(96).map(stripTerminalSequences).join("\n"), /Session: main/);
-	// Click the Tools filter pill at its rendered position.
-	const tabs = page.render(96).map(stripTerminalSequences)[1]!;
-	const toolsX = tabs.indexOf("Tools") + 2;
-	page.handleMouse(click(toolsX, 1));
+	const reviewerY = before.findIndex(line => line.includes("Reviewer"));
+	assert.ok(reviewerY > 0);
+	assert.equal(page.handleMouse(click(5, reviewerY))?.handled, true);
+	const selected = page.render(96).map(stripTerminalSequences).join("\n");
+	assert.match(selected, /❯ Reviewer/, "the clicked row becomes current");
+
+	// Click the Tools filter at its rendered position.
+	const tabs = page.render(96).map(stripTerminalSequences);
+	const tabsY = tabs.findIndex(line => line.includes("TOOLS"));
+	const toolsX = tabs[tabsY]!.indexOf("TOOLS") + 2;
+	page.handleMouse(click(toolsX, tabsY));
 	const filtered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(filtered, /▏TOOLS \/ MCP/);
-	assert.doesNotMatch(filtered, /▏AGENTS/);
+	assert.match(filtered, /^ TOOLS\s+1\s*$/m);
+	assert.doesNotMatch(filtered, /^ AGENTS\s/m);
 });
 
 test("status page swaps instantly without a transition frame", () => {
-	const tui = {
-		terminal: { columns: 80, rows: 24 },
-		requestRender() {},
-	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+	const page = pageAt(80, 24);
 	page.enter(1);
 	const rendered = page.render(80).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /Machina · Activity/);
+	assert.match(rendered, /MACHINA\s{2}ACTIVITY/);
 	page.dispose();
 });
 
 test("number keys jump between filters", () => {
-	const tui = {
-		terminal: { columns: 96, rows: 28 },
-		requestRender() {},
-	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+	const page = pageAt();
 	page.render(96);
 	assert.equal(page.handleInput("5"), true);
 	const filtered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(filtered, /▏TOOLS \/ MCP/);
-	assert.doesNotMatch(filtered, /▏SHELLS/);
+	assert.match(filtered, /^ TOOLS\s+1\s*$/m);
+	assert.doesNotMatch(filtered, /^ SHELLS\s/m);
 	assert.equal(page.handleInput("9"), false);
 });
 
-test("narrow terminals keep list and inspector on one screen", () => {
-	const tui = {
-		terminal: { columns: 64, rows: 22 },
-		requestRender() {},
-	} as unknown as TUI;
-	const page = new StatusPage(tui, () => snapshot);
+test("narrow terminals keep the selected detail inline and inside the width", () => {
+	const page = pageAt(64, 22);
 	const rendered = page.render(64).map(stripTerminalSequences);
 	const screen = rendered.join("\n");
-	assert.match(screen, /Inspector/);
 	assert.match(screen, /Main · Build a calculator/);
-	assert.match(screen, /Project|longcat/);
+	assert.match(screen, /Session: main/);
+	assert.doesNotMatch(screen, /Inspector/);
 	assert.ok(rendered.every((line) => line.length <= 64));
 });

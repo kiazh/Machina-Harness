@@ -11,6 +11,7 @@ import {
 	type EditorOptions,
 	type EditorTheme,
 	type SelectItem,
+	stripTerminalSequences,
 	truncateToWidth,
 	type TuiMouseEvent,
 	visibleWidth,
@@ -275,31 +276,46 @@ export class ComposerInput extends Editor {
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		const { renderedAutocompleteHeight: popupHeight } = this as unknown as EditorPopupLayout;
-		const textEnd = lines.length - popupHeight - 1;
+		// The base Editor always emits a top and a bottom border row. The
+		// composer paints its own full-width rules, so drop those empty rows:
+		// otherwise the prompt marker lands on the blank border and the draft
+		// appears one row below it, indented. Non-empty scroll markers
+		// (`↑/↓ N more`) are real information and stay.
+		const popup = popupHeight > 0 ? lines.slice(lines.length - popupHeight) : [];
+		const body = popupHeight > 0 ? lines.slice(0, lines.length - popupHeight) : lines.slice();
+		const top = body.shift();
+		const bottom = body.pop();
+		if (top !== undefined && visibleWidth(top) > 0) body.unshift(top);
+		if (bottom !== undefined && visibleWidth(bottom) > 0) body.push(bottom);
 		const blockVisible = this.cursorBlockVisible();
-		const colored = lines.map((line, index) => {
-			const styled = index > 0 && index < textEnd ? styleComposerText(line) : line;
-			return blockVisible ? styled : stripFakeComposerCursor(styled);
+		const styled = body.map((line) => {
+			const colored = styleComposerText(line);
+			return blockVisible ? colored : stripFakeComposerCursor(colored);
 		});
-		return popAbove(colored, popupHeight);
+		return [...popup, ...styled];
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Editor["handleMouse"]> {
 		const { renderedAutocompleteHeight: popupHeight } = this as unknown as EditorPopupLayout;
 		const window = composerWindow(this.render(event.width), this.windowRows, popupHeight);
 		const clipped = window.start > 0 || window.contentRows !== window.bodyRows;
-		if (!(popupHeight > 0) && !clipped) return super.handleMouse(event);
+		if (!(popupHeight > 0) && !clipped) {
+			// The composer drops the editor's empty top border row; the
+			// editor's own hit-testing still counts that row.
+			return super.handleMouse({ ...event, y: event.y + 1 });
+		}
 		// The popup is drawn above the input and the outer window may have
 		// sliced body rows: map the clicked row back to the Editor-native
-		// coordinates before delegating.
+		// coordinates before delegating. Native order is
+		// [top border, content, bottom border, popup].
 		const popupCommand = event.y < popupHeight && /^\/[\w-]*$/.test(this.getText().trim());
 		let y: number;
 		if (event.y < popupHeight) {
-			y = window.bodyRows + event.y;
+			y = window.bodyRows + 2 + event.y;
 		} else {
 			const contentIndex = event.y - popupHeight - window.markerAbove;
 			if (contentIndex < 0 || contentIndex >= window.contentRows) return undefined; // `↑/↓ more` marker row
-			y = popupHeight + window.start + contentIndex;
+			y = 1 + window.start + contentIndex;
 		}
 		const result = super.handleMouse({ ...event, y });
 		// Picker-first actions open as soon as the command is selected.
@@ -330,7 +346,10 @@ export class ComposerBox extends Box {
 	constructor(tui: TUI, editorTheme: EditorTheme, options?: EditorOptions) {
 		super(0, 0, theme.userBg);
 		this.tui = tui;
-		this.editor = new ComposerInput(tui, editorTheme, options);
+		// The composer owns the left gutter (`❯ ` / two spaces); the inner
+		// Editor must not add a second one or the draft starts one cell too
+		// far right.
+		this.editor = new ComposerInput(tui, editorTheme, { ...options, paddingX: 0 });
 		this.addChild(this.editor);
 	}
 
@@ -391,6 +410,11 @@ export class ComposerBox extends Box {
 			const window = composerWindow(rendered, this.editor.windowRows, popupHeight);
 			body = window.rows;
 			inputStart = Math.min(body.length - 1, popupHeight + window.markerAbove);
+			// A retained `↑/↓ N more` marker may sit on the first content row;
+			// the prompt marker belongs on the draft line below it.
+			while (inputStart < body.length - 1 && /^[↑↓]\s/.test(stripTerminalSequences(body[inputStart] ?? "").trim())) {
+				inputStart++;
+			}
 		}
 		const rows = withRules(body.map((line, index) =>
 			truncateToWidth(`${index === inputStart ? prefix(0) : "  "}${line}`, total),

@@ -418,9 +418,9 @@ test("the status tab takes over the full viewport", async (t) => {
 	await new Promise(resolve => setTimeout(resolve, 300));
 	tui.renderNow(true);
 	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
-	assert.match(screen, /Machina · Activity/);
-	assert.match(screen, /Agents/);
-	assert.match(screen, /Harnesses/);
+	assert.match(screen, /MACHINA\s{2}ACTIVITY/);
+	assert.match(screen, /AGENTS/);
+	assert.match(screen, /HARNESSES/);
 });
 
 test("a structured question renders its options and sends the selected answer", async (t) => {

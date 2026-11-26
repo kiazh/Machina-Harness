@@ -120,8 +120,8 @@ function fakeTui(columns = 110, rows = 32): TUI {
 test("changes page renders prompts, files, stats and review state", () => {
 	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor);
 	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /Machina · Changes/);
-	assert.match(rendered, /PROMPT CHANGES/);
+	assert.match(rendered, /MACHINA\s{2}CHANGES/);
+	assert.match(rendered, /01 ❯/);
 	assert.match(rendered, /Fix the parser and explain the failure/);
 	assert.match(rendered, /src\/parser\.py/);
 	assert.match(rendered, /\+12/);
@@ -196,12 +196,13 @@ test("up/down selects the next prompt and reports it, and w toggles scope", () =
 	assert.equal(scopes, 1);
 });
 
-test("narrow terminals keep the list and inspector on screen without overflow", () => {
+test("narrow terminals keep the selected prompt and its evidence without overflow", () => {
 	const page = new ChangesPage(fakeTui(64, 22), () => snapshot, diffFor);
 	const lines = page.render(64).map(stripTerminalSequences);
 	const rendered = lines.join("\n");
-	assert.match(rendered, /Inspector/);
 	assert.match(rendered, /Fix the parser/);
+	assert.match(rendered, /src\/parser\.py/);
+	assert.doesNotMatch(rendered, /Inspector/);
 	assert.ok(lines.every(line => line.length <= 64));
 });
 

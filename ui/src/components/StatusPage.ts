@@ -1,8 +1,8 @@
-// Full-screen live command center. A compact grouped activity list on the
-// left and a selected-item inspector on the right (stacked on narrow
-// terminals). Every row is selectable; Enter/click expands its retained local
-// logs. The page reads only bounded local stores and status RPCs and never
-// launches or re-runs work.
+// Full-screen live command center. One unscrolled column: a live header, a
+// text filter strip, then grouped activity rows. Selecting a row opens its
+// retained detail inline beneath it, so there is no second panel and no
+// nested chrome. The page reads only bounded local stores and status RPCs and
+// never launches or re-runs work.
 import {
 	Key,
 	matchesKey,
@@ -13,7 +13,7 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { sanitizeDisplay } from "../design/text.ts";
-import { selectionBar, theme } from "../theme.ts";
+import { isOpaqueBackground, theme } from "../theme.ts";
 
 export interface StatusRow {
 	/** Stable identity so refresh does not lose selection/expansion. */
@@ -22,10 +22,10 @@ export interface StatusRow {
 	detail?: string;
 	state?: string;
 	running?: boolean;
-	/** ISO timestamp used for the Updated column. */
+	/** ISO timestamp used for the updated column. */
 	updatedAt?: string;
 	project?: string;
-	/** Bounded local evidence shown in the inspector after expansion. */
+	/** Bounded local evidence shown under the selected row. */
 	logs?: string[];
 }
 
@@ -49,27 +49,23 @@ type StatusFilter = "all" | "sessions" | "agents" | "shells" | "tools" | "mcp" |
 
 const FILTERS: ReadonlyArray<{ id: StatusFilter; label: string }> = [
 	{ id: "all", label: "ALL" },
-	{ id: "sessions", label: "Sessions" },
-	{ id: "agents", label: "Agents" },
-	{ id: "shells", label: "Shells" },
-	{ id: "tools", label: "Tools" },
+	{ id: "sessions", label: "SESSIONS" },
+	{ id: "agents", label: "AGENTS" },
+	{ id: "shells", label: "SHELLS" },
+	{ id: "tools", label: "TOOLS" },
 	{ id: "mcp", label: "MCP" },
-	{ id: "harnesses", label: "Harnesses" },
+	{ id: "harnesses", label: "HARNESSES" },
 ];
 
-interface PanelLine {
+type LineKind = "section" | "empty" | "row" | "detail" | "blank";
+
+interface ScreenLine {
 	text: string;
-	/** Right-aligned state/count column. */
-	right?: string;
 	/** Present only for selectable rows. */
 	key?: string;
 	row?: StatusRow;
 	section?: string;
-}
-
-interface PanelModel {
-	lines: PanelLine[];
-	keys: string[];
+	kind: LineKind;
 }
 
 interface Hitbox {
@@ -102,6 +98,11 @@ function between(left: string, right: string, width: number): string {
 	return `${first}${" ".repeat(gap)} ${truncateToWidth(right, width, "…")}`;
 }
 
+function centered(text: string, width: number): string {
+	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
+	return `${" ".repeat(pad)}${text}`;
+}
+
 function age(iso: string | undefined): string {
 	if (!iso) return "";
 	const then = new Date(iso).getTime();
@@ -111,6 +112,13 @@ function age(iso: string | undefined): string {
 	if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
 	if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
 	return `${Math.floor(seconds / 86_400)}d ago`;
+}
+
+/** The chat header is a filled wordmark; pages keep the same anchor. */
+function wordmark(): string {
+	return isOpaqueBackground()
+		? theme.accentBg(theme.onAccent(" MACHINA "))
+		: theme.accentBold("MACHINA");
 }
 
 export class StatusPage implements Component {
@@ -174,8 +182,7 @@ export class StatusPage implements Component {
 		}
 		if (matchesKey(data, Key.enter)) {
 			if (!this.selectedKey) this.selectFirst();
-			const selected = this.buildPanels(this.snapshot())
-				.left.lines.find(line => line.key === this.selectedKey);
+			const selected = this.rows().find(line => line.key === this.selectedKey);
 			if (selected?.row && this.onOpen?.(selected.row, selected.section)) {
 				this.tui.requestRender();
 				return true;
@@ -228,7 +235,7 @@ export class StatusPage implements Component {
 			lines = this.build(columns, rows);
 		} catch (error) {
 			lines = [
-				theme.error("Status is unavailable."),
+				theme.error("Activity is unavailable."),
 				theme.dim(` ${error instanceof Error ? error.message : String(error)}`),
 			];
 		}
@@ -245,100 +252,103 @@ export class StatusPage implements Component {
 			: `${theme.dim("○")} ${theme.dim("idle")}`;
 		const project = sanitizeDisplay(snap.project || "global");
 		push(between(
-			` ${theme.accentBold("Machina")} ${theme.dim("·")} ${theme.text("Activity")}  ${theme.dim(`· ${project}`)}`,
+			`${wordmark()} ${theme.muted("ACTIVITY")}  ${theme.dim(`· ${project}`)}`,
 			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
 			width,
 		));
-		// One pill per filter: the active one carries a filled background so the
-		// eye lands on it immediately; counts stay muted so labels lead.
-		const tabPieces = FILTERS.map((entry) => {
+
+		// Text filters, not pills: the active category carries the only
+		// accent mark in this row. The strip wraps before it truncates, so a
+		// narrow terminal still names every category.
+		const filters = FILTERS.map((entry) => {
 			const count = this.filterCount(snap, entry.id);
-			const base = `${entry.label}${entry.id === "all" ? "" : ` ${count}`}`;
 			const active = entry.id === this.filter;
+			const plain = `${active ? "● " : "  "}${entry.label} ${count}`;
 			return {
 				entry,
-				width: visibleWidth(` ${base} `),
-				label: active
-					? theme.accentBold(` ${base} `)
-					: theme.muted(` ${base} `),
+				plain,
+				text: active
+					? `${theme.accent("●")} ${theme.accentBold(entry.label)} ${theme.dim(String(count))}`
+					: `  ${theme.muted(entry.label)} ${theme.dim(String(count))}`,
 			};
 		});
-		push(truncateToWidth(` ${tabPieces.map(piece => piece.label).join(" ")}`, width, "…", true));
+		const filterRows: Array<{
+			text: string;
+			pieces: Array<{ entry: StatusFilter; x: number; width: number }>;
+			plainWidth: number;
+		}> = [];
+		for (const piece of filters) {
+			const pieceWidth = visibleWidth(piece.plain);
+			let row = filterRows.at(-1);
+			const nextWidth = row ? row.plainWidth + 3 + pieceWidth : pieceWidth;
+			if (!row || nextWidth > Math.max(1, width - 1)) {
+				row = { text: "", pieces: [], plainWidth: 0 };
+				filterRows.push(row);
+			}
+			const x = 1 + (row.pieces.length ? row.plainWidth + 3 : 0);
+			row.text += `${row.pieces.length ? "   " : ""}${piece.text}`;
+			row.plainWidth += (row.pieces.length ? 3 : 0) + pieceWidth;
+			row.pieces.push({ entry: piece.entry.id, x, width: pieceWidth });
+		}
+		this.hitboxes = [];
+		const filterTop = out.length;
+		for (const [rowIndex, row] of filterRows.entries()) {
+			push(truncateToWidth(` ${row.text}`, width, "…", true));
+			for (const piece of row.pieces) {
+				this.hitboxes.push({
+					x: piece.x,
+					width: piece.width,
+					y: filterTop + rowIndex,
+					filter: piece.entry,
+				});
+			}
+		}
 		if (snap.error) {
 			push(truncateToWidth(` ${theme.warning("!")} ${theme.warning(sanitizeDisplay(snap.error))}`, width, "…", true));
 		}
-		push(theme.border("─".repeat(width)));
+		push("");
+
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		const panels = this.buildPanels(snap);
-		this.ensureSelection(panels);
-		const selected = panels.left.lines.find(line => line.key === this.selectedKey);
-		const detail = this.buildDetail(selected, snap);
-		const leftSelected = panels.left.lines.findIndex(line => line.key === this.selectedKey);
-		const hasDataRows = panels.left.lines.some(line => line.key && !line.key.startsWith("queue:"));
-		const leftOffset = hasDataRows
-			? windowStart(leftSelected, bodyHeight, panels.left.lines.length)
-			: 0;
-		const detailOffset = windowStart(
-			detail.lines.findIndex(line => line.key === this.selectedKey),
-			bodyHeight,
-			detail.lines.length,
-		);
-		const wide = width >= 84 && bodyHeight >= 10;
-		const formatPanelLine = (line: PanelLine | undefined, panelWidth: number): string => {
-			if (!line) return " ".repeat(panelWidth);
-			const isSelected = Boolean(line.key && line.key === this.selectedKey);
-			const text = isSelected && line.text.startsWith("  ")
-				? `${theme.accentBold("❯")} ${line.text.slice(2)}`
-				: line.text;
-			const content = line.right ? between(text, line.right, panelWidth) : fit(text, panelWidth);
-			return isSelected ? selectionBar(content, panelWidth) : content;
-		};
-		this.hitboxes = [];
-		if (wide) {
-			const leftWidth = Math.max(38, Math.floor((width - 3) * 0.62));
-			const rightWidth = Math.max(24, width - leftWidth - 3);
+		let body = this.bodyLines(snap, width);
+		let rowLines = body.filter(line => line.kind === "row" && line.key);
+		const previousSelection = this.selectedKey;
+		this.ensureSelection(rowLines);
+		// The selected row expands inline. If ensureSelection chose a row for
+		// the first time, rebuild so its detail is part of this frame.
+		if (this.selectedKey !== previousSelection) {
+			body = this.bodyLines(snap, width);
+			rowLines = body.filter(line => line.kind === "row" && line.key);
+		}
+		const selectedLine = body.findIndex(line => line.kind === "row" && line.key === this.selectedKey);
+		const offset = rowLines.length ? windowStart(selectedLine, bodyHeight, body.length) : 0;
+
+		if (!rowLines.length) {
+			const guidance = [
+				theme.text("Nothing to show here."),
+				"",
+				theme.dim("Choose another filter, or send a prompt to start activity."),
+			];
+			const top = Math.max(0, Math.floor((bodyHeight - guidance.length) / 2));
 			for (let index = 0; index < bodyHeight; index++) {
-				const left = panels.left.lines[leftOffset + index];
-				const right = detail.lines[detailOffset + index];
-				const leftText = formatPanelLine(left, leftWidth);
-				const rightText = formatPanelLine(right, rightWidth);
-				push(`${leftText}${theme.border(" │ ")}${rightText}`);
-				if (left?.key) this.hitboxes.push({ x: 0, width: leftWidth, y: headerRows + index, key: left.key });
+				const line = guidance[index - top];
+				push(line ? centered(line, width) : "");
 			}
 		} else {
-			// Narrow terminals: keep the list and the inspector both on screen
-			// instead of stacking one long column where the detail can scroll
-			// away from the selected row.
-			const listHeight = Math.max(6, Math.floor(bodyHeight * 0.55));
-			const detailHeight = Math.max(3, bodyHeight - listHeight - 1);
-			const listOffset = windowStart(leftSelected, listHeight, panels.left.lines.length);
-			for (let index = 0; index < listHeight; index++) {
-				const line = panels.left.lines[listOffset + index];
-				push(formatPanelLine(line, width));
-				if (line?.key) this.hitboxes.push({ x: 0, width, y: headerRows + index, key: line.key });
-			}
-			const label = " Inspector ";
-			push(truncateToWidth(
-				`${theme.border("─".repeat(Math.max(1, Math.floor((width - label.length) / 2))))}${theme.accentBold(label)}${theme.border("─".repeat(Math.max(1, width - label.length - Math.floor((width - label.length) / 2))))}`,
-				width,
-			));
-			// The divider already names the inspector, so skip its duplicate
-			// panel title and give the metadata/logs the extra row.
-			const detailLines = detail.lines.slice(1);
-			for (let index = 0; index < detailHeight; index++) {
-				push(formatPanelLine(detailLines[index], width));
+			for (let index = 0; index < bodyHeight; index++) {
+				const line = body[offset + index];
+				if (!line) {
+					push("");
+					continue;
+				}
+				push(fit(line.text, width));
+				if (line.kind === "row" && line.key) {
+					this.hitboxes.push({ x: 0, width, y: headerRows + index, key: line.key });
+				}
 			}
 		}
-		// Filter pills are clickable at their rendered positions.
-		let tabX = 1;
-		for (const piece of tabPieces) {
-			this.hitboxes.push({ x: tabX, width: piece.width, y: 1, filter: piece.entry.id });
-			tabX += piece.width + 1;
-		}
-		while (out.length < rows - 1) push(" ".repeat(width));
 		push(truncateToWidth(
-			` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space logs · Esc chat")}`,
+			` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · Esc chat")}`,
 			width,
 			"…",
 			true,
@@ -346,7 +356,8 @@ export class StatusPage implements Component {
 		return out.slice(0, rows);
 	}
 
-	private buildPanels(snap: StatusSnapshot): { left: PanelModel } {
+	/** Flat body lines in reading order; the selected row expands inline. */
+	private bodyLines(snap: StatusSnapshot, width: number): ScreenLine[] {
 		const all = this.filter === "all";
 		const sections: Array<{ title: string; entries: StatusRow[]; empty: string; category: StatusFilter }> = [];
 		if (all || this.filter === "sessions") {
@@ -364,17 +375,17 @@ export class StatusPage implements Component {
 			sections.push({ title: "Shells", entries: snap.shells, empty: "No foreground or background shells.", category: "shells" });
 		}
 		if (all || this.filter === "tools") {
-			sections.push({ title: "Tools / MCP", entries: snap.tools, empty: "No recent tool calls.", category: "tools" });
+			sections.push({ title: "Tools", entries: snap.tools, empty: "No recent tool calls.", category: "tools" });
+		}
+		if (all || this.filter === "mcp") {
+			sections.push({ title: "MCP", entries: snap.mcp, empty: "No MCP servers configured.", category: "mcp" });
 		}
 		if (all || this.filter === "harnesses") {
 			sections.push({ title: "Harnesses", entries: snap.harnesses, empty: "No external harnesses detected.", category: "harnesses" });
 		}
-		if (all || this.filter === "mcp") {
-			sections.push({ title: "MCP servers", entries: snap.mcp, empty: "No MCP servers configured.", category: "mcp" });
-		}
 		if (all) {
 			sections.push({
-				title: "Queues",
+				title: "Queue",
 				entries: [{
 					id: "queue:summary",
 					label: "queued guidance",
@@ -389,125 +400,75 @@ export class StatusPage implements Component {
 				category: "all",
 			});
 		}
-		return { left: this.panel("Activity", sections) };
-	}
 
-	private panel(title: string, sections: Array<{ title: string; entries: StatusRow[]; empty: string; category: StatusFilter }>): PanelModel {
-		const stateColumn = 10;
-		const ageColumn = 7;
-		const columns = (state: string, updated: string): string =>
-			`${state.padEnd(stateColumn)} ${updated.padStart(ageColumn)}`.trimEnd();
-		const lines: PanelLine[] = [{
-			text: ` ${theme.accentBold(title.toUpperCase())}`,
-			right: theme.dim(columns("STATUS", "UPDATED")),
-		}];
-		const keys: string[] = [];
-		for (const section of sections) {
-			// One clear row between groups; the first group sits under the
-			// panel header without an extra gap.
-			if (lines.length > 1) lines.push({ text: "" });
+		const lines: ScreenLine[] = [];
+		for (const [sectionIndex, section] of sections.entries()) {
+			if (sectionIndex > 0) lines.push({ text: "", kind: "blank" });
 			lines.push({
-				text: `  ${theme.accent("▏")}${theme.accentBold(section.title.toUpperCase())}`,
-				right: theme.dim(String(section.entries.length)),
+				text: ` ${theme.muted(section.title.toUpperCase())}  ${theme.dim(String(section.entries.length))}`,
+				kind: "section",
 			});
 			if (!section.entries.length) {
-				lines.push({ text: `    ${theme.dim(`— ${section.empty}`)}` });
+				lines.push({ text: `   ${theme.dim(section.empty)}`, kind: "empty" });
 				continue;
 			}
 			for (const [index, entry] of section.entries.entries()) {
 				const key = entry.id ?? `${section.category}:${index}:${entry.label}`;
+				const selected = key === this.selectedKey;
+				const expanded = this.expanded.has(key);
 				const marker = entry.running ? theme.success("●") : theme.dim("○");
 				const detail = entry.detail ? theme.muted(`  ${sanitizeDisplay(entry.detail)}`) : "";
 				const state = sanitizeDisplay(entry.state || "—");
 				const updated = age(entry.updatedAt);
-				const right = updated
-					? `${stateStyle(entry.state)(state.padEnd(stateColumn))} ${theme.dim(updated.padStart(ageColumn))}`
-					: stateStyle(entry.state)(state);
+				const stateText = `${stateStyle(entry.state)(state)}${updated ? ` ${theme.dim(`· ${updated}`)}` : ""}`;
 				const arrow = entry.logs?.length
-					? (this.expanded.has(key) ? theme.accent("▾") : theme.dim("▸"))
+					? (expanded ? theme.accent(" ▾") : theme.dim(" ▸"))
 					: "";
 				lines.push({
-					text: `  ${marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}${arrow ? ` ${arrow}` : ""}`,
-					right,
+					text: ` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}  ${theme.dim("·")} ${stateText}${arrow}`,
 					key,
 					row: entry,
 					section: section.title,
+					kind: "row",
 				});
-				keys.push(key);
-			}
-		}
-		return { lines, keys };
-	}
-
-	private buildDetail(selected: PanelLine | undefined, snap: StatusSnapshot): PanelModel {
-		const row = selected?.row;
-		const lines: PanelLine[] = [{ text: ` ${theme.accentBold("INSPECTOR")}` }];
-		if (!row) {
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("Select an activity row to inspect it.")}` });
-			lines.push({ text: "" });
-			lines.push({ text: `  ${theme.dim("↑↓ move between rows · 1–7 switch category")}` });
-			return { lines, keys: [] };
-		}
-		lines.push({ text: "" });
-		lines.push({ text: `  ${theme.accentBold(sanitizeDisplay(row.label))}` });
-		const chips = [
-			stateStyle(row.state)(sanitizeDisplay(row.state || "unknown")),
-			theme.dim(selected.section || "activity"),
-			theme.dim(age(row.updatedAt) || "unknown"),
-		];
-		lines.push({ text: `  ${chips.join(theme.dim("  ·  "))}` });
-		lines.push({ text: "" });
-		const meta: Array<[string, string]> = [
-			["Project", row.project || snap.project || "global"],
-			["Detail", row.detail || "—"],
-		];
-		for (const [label, value] of meta) {
-			lines.push({ text: `  ${theme.dim(label.padEnd(9))} ${theme.text(sanitizeDisplay(value))}` });
-		}
-		lines.push({ text: "" });
-		const onlineMcp = snap.mcp.filter(entry => entry.running).length;
-		const liveHarnesses = snap.harnesses.filter(entry => entry.running).length;
-		lines.push({
-			text: `  ${theme.dim("Runtime".padEnd(9))} ${theme.text(`MCP ${onlineMcp}/${snap.mcp.length}`)} ${theme.dim("·")} ${theme.text(`harnesses ${liveHarnesses}/${snap.harnesses.length}`)}`,
-		});
-		lines.push({
-			text: `  ${theme.dim("Queue".padEnd(9))} ${theme.text(String(snap.queued))} ${theme.dim("queued")} ${theme.dim("·")} ${theme.text(String(snap.approvals))} ${theme.dim(snap.approvals === 1 ? "approval" : "approvals")}`,
-		});
-		lines.push({ text: "" });
-		lines.push({ text: `  ${theme.border("─".repeat(34))}` });
-		const expanded = this.expanded.has(selected.key ?? "");
-		const logCount = row.logs?.length ?? 0;
-		lines.push({
-			text: `  ${theme.accentBold("LOGS")}`,
-			right: theme.dim(logCount ? `${logCount} ${expanded ? "shown" : "retained"}` : ""),
-		});
-		if (row.logs?.length) {
-			const shown = expanded ? row.logs.slice(0, 40) : row.logs.slice(0, 3);
-			for (const log of shown) {
-				for (const part of sanitizeDisplay(log).split("\n")) {
-					lines.push({ text: `  ${theme.border("│")} ${theme.dim(truncateToWidth(part, 92, "…"))}` });
+				if (!selected) continue;
+				const logs = entry.logs ?? [];
+				// One evidence row while collapsed keeps the page dense; Space
+				// expands to the retained tail. Never reserve rows for an empty
+				// log list.
+				const shown = expanded ? logs.slice(0, 40) : logs.slice(0, 1);
+				for (const log of shown) {
+					for (const part of sanitizeDisplay(log).split("\n")) {
+						lines.push({
+							text: `    ${theme.dim(truncateToWidth(part, Math.max(8, width - 6), "…"))}`,
+							kind: "detail",
+						});
+					}
+				}
+				const remaining = logs.length - shown.length;
+				if (remaining > 0) {
+					if (expanded) {
+						lines.push({
+							text: `    ${theme.dim(`… ${remaining} more retained`)}`,
+							kind: "detail",
+						});
+					} else {
+						const last = lines.at(-1);
+						if (last) last.text += `  ${theme.dim(`· +${remaining} more`)}`;
+					}
 				}
 			}
-			if (!expanded && row.logs.length > 3) {
-				lines.push({ text: `  ${theme.dim(`… ${row.logs.length - 3} more · Space to expand`)}` });
-			}
-		} else {
-			lines.push({ text: `  ${theme.dim("No retained logs for this row.")}` });
 		}
-		lines.push({ text: "" });
-		const section = selected.section ?? "";
-		const openable = section === "Agents"
-			|| section === "Sessions"
-			|| (section === "Harnesses" && (selected.key ?? "").startsWith("harness-job:"));
-		lines.push({
-			text: `  ${theme.dim(openable ? "Enter opens this conversation" : "Enter toggles the log preview")}`,
-		});
-		return { lines, keys: [] };
+		return lines;
 	}
 
-	private ensureSelection(panels: { left: PanelModel }): void {
-		const keys = panels.left.keys;
+	/** Selectable rows in reading order (shared by keys and windowing). */
+	private rows(): ScreenLine[] {
+		return this.bodyLines(this.snapshot(), 0);
+	}
+
+	private ensureSelection(rows: ScreenLine[]): void {
+		const keys = rows.flatMap(line => line.key ? [line.key] : []);
 		if (!keys.length) {
 			this.selectedKey = undefined;
 			return;
@@ -517,19 +478,19 @@ export class StatusPage implements Component {
 
 	/** Choose the first real activity row, falling back to the queue summary. */
 	selectDefault(): void {
-		const panels = this.buildPanels(this.snapshot());
-		this.selectedKey = panels.left.keys.find(key => !key.startsWith("queue:")) ?? panels.left.keys[0];
+		const rows = this.rows();
+		this.selectedKey = rows.find(line => line.key && !line.key.startsWith("queue:"))?.key
+			?? rows.find(line => line.key)?.key;
 		this.tui.requestRender();
 	}
 
 	private selectFirst(): void {
-		const panels = this.buildPanels(this.snapshot());
-		this.selectedKey = panels.left.keys[0];
+		const rows = this.rows();
+		this.selectedKey = rows.find(line => line.key)?.key;
 	}
 
 	private moveSelection(data: string): void {
-		const panels = this.buildPanels(this.snapshot());
-		const keys = panels.left.keys;
+		const keys = this.rows().flatMap(line => line.key ? [line.key] : []);
 		if (!keys.length) return;
 		const current = this.selectedKey ? keys.indexOf(this.selectedKey) : -1;
 		let next = current;
