@@ -1,6 +1,9 @@
 # TUI Design Contract
 
-Updated for the user’s screenshot reference (2026-10-11). This describes the implemented
+The governing philosophy is [Signal Grid](PHILOSOPHY.md): content is the
+interface, one grid, one signal, type before boxes, and a numbered turn rhythm.
+
+Updated for the user's screenshot reference (2026-10-11). This describes the implemented
 terminal interface: tokens, density, interaction states and the theme
 contract. Normative test coverage lives in `ui/test/` (design, motion,
 state, approval, output, ui, dialogs, layout, features, app).

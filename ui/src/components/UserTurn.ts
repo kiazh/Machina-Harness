@@ -8,10 +8,12 @@ import { isOpaqueBackground, repairFill, theme } from "../theme.ts";
 
 export class UserTurn implements Component {
 	private readonly raw: string;
+	private readonly index?: number;
 	private readonly cached = new Map<number, string[]>();
 
-	constructor(text: string) {
+	constructor(text: string, index?: number) {
 		this.raw = text;
+		this.index = index;
 	}
 
 	/** Re-resolve theme colors (render is lazy; text was never baked). */
@@ -23,7 +25,9 @@ export class UserTurn implements Component {
 		const cached = this.cached.get(width);
 		if (cached) return cached;
 		const total = Math.max(0, width);
-		const inner = Math.max(1, total - 3);
+		const number = this.index === undefined ? "" : `${String(this.index).padStart(2, "0")} `;
+		const head = `${number}❯ `;
+		const inner = Math.max(1, total - visibleWidth(head) - 1);
 		const lines = sanitizeDisplay(this.raw)
 			.split("\n")
 			.flatMap((line) => wrapDisplay(line, inner));
@@ -31,7 +35,7 @@ export class UserTurn implements Component {
 		const opaque = isOpaqueBackground();
 		const ink = opaque ? theme.promptInk : theme.text;
 		const rows = body.map((line, index) => {
-			const prefix = index === 0 ? ink("❯ ") : "  ";
+			const prefix = index === 0 ? ink(head) : " ".repeat(visibleWidth(head));
 			const content = `${prefix}${ink(truncateToWidth(line, inner))}`;
 			const padded = `${content}${" ".repeat(Math.max(0, total - visibleWidth(content)))}`;
 			return opaque ? repairFill("promptBg", theme.promptBg(padded)) : padded;

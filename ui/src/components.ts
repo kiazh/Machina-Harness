@@ -80,6 +80,8 @@ export { OutputStore, OutputViewer } from "./components/OutputViewer.ts";
 export type { OutputRecord, OutputViewerOptions } from "./components/OutputViewer.ts";
 export { formatToolArgs, ToolTurn } from "./components/ToolTurn.ts";
 export type { ToolOutcome, ToolResultView } from "./components/ToolTurn.ts";
+export { TurnSummary } from "./components/TurnSummary.ts";
+export type { TurnSummaryInfo } from "./components/TurnSummary.ts";
 export { UserTurn } from "./components/UserTurn.ts";
 
 

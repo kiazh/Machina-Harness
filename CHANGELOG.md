@@ -14,7 +14,7 @@
 
 ### Changed
 
-- Full visual overhaul: `moonstone` is now **Nocturne** (obsidian canvas, bone ink, acid-lime signal), with full-width bone `❯` prompt bands, a solid accent `MACHINA` block, `⏺` assistant prose, `⏺`/`⎿` tool activity with colored diff previews, an accent-ruled `❯` composer, a quiet context header, a one-row footer, unframed Activity/Changes tabs, bracketless editor tabs, and calmer diagnostics. Assistant prose caps at a readable 96 columns; tool activity at 108. Approval evidence remains the one intentional framed surface.
+- Full visual overhaul: `moonstone` is now **Nocturne** (obsidian canvas, bone ink, acid-lime signal), with full-width bone `❯` prompt bands, a solid accent `MACHINA` block, `⏺` assistant prose, `⏺`/`⎿` tool activity with colored diff previews, an accent-ruled `❯` composer, a quiet context header, a one-row footer, unframed Activity/Changes tabs, bracketless editor tabs, numbered prompt bands, per-turn `✻` colophons, and calmer diagnostics. Assistant prose caps at a readable 96 columns; tool activity at 108. Approval evidence remains the one intentional framed surface.
 - Snapshot manifests now record the prompt, route, per-file change kind, additions/deletions, and an end-of-turn copy. No-op writes are dropped; ignored paths remain as an honest disclosure.
 - Command and remote RPC registries expose 53 slash commands and 176 JSON-RPC methods.
 

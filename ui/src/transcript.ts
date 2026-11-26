@@ -7,6 +7,7 @@ import type { Component, Container } from "@earendil-works/pi-tui";
 import { AssistantTurn } from "./components/AssistantTurn.ts";
 import { Notice } from "./components/Notice.ts";
 import { ToolTurn, type ToolOutcome } from "./components/ToolTurn.ts";
+import { TurnSummary as TurnSummaryLine } from "./components/TurnSummary.ts";
 import { UserTurn } from "./components/UserTurn.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
 import type { NoticeKind } from "./features/index.ts";
@@ -67,6 +68,10 @@ export class Transcript {
 	private spinnerVisible = false;
 	private readonly tools = new Map<string, ToolTurn>();
 	private readonly toolSubs = new Map<string, AnimationSubscription>();
+	/** Editorial turn number shown in the prompt band. */
+	private turnNumber = 0;
+	private turnStartedAt = 0;
+	private turnTools = 0;
 	private assistantSub: AnimationSubscription | undefined;
 	/** Terminal delivery guard: a repeated completion for this turn is inert. */
 	private lastCompletedTurn: string | undefined;
@@ -114,7 +119,8 @@ export class Transcript {
 	}
 
 	addUser(text: string): void {
-		this.retain(new UserTurn(text));
+		this.turnNumber += 1;
+		this.retain(new UserTurn(text, this.turnNumber));
 	}
 
 	addNotice(text: string, kind: NoticeKind = "info"): void {
@@ -166,6 +172,9 @@ export class Transcript {
 		this.spinnerVisible = false;
 		this.tools.clear();
 		this.lastCompletedTurn = undefined;
+		this.turnNumber = 0;
+		this.turnStartedAt = 0;
+		this.turnTools = 0;
 	}
 
 	/** Stop live tool subscriptions without clearing content. */
@@ -215,6 +224,8 @@ export class Transcript {
 			this.wroteText = false;
 			this.resetDisplayed();
 			this.lastCompletedTurn = undefined;
+			this.turnStartedAt = Date.now();
+			this.turnTools = 0;
 			this.showSpinner();
 			return undefined;
 		case "message.delta":
@@ -238,6 +249,7 @@ export class Transcript {
 			this.stopAssistant();
 			this.current = undefined; // text after the tool starts a new block
 			const card = new ToolTurn(event.name, event.args, this.activity);
+			this.turnTools += 1;
 			this.tools.set(event.id, card);
 			this.retain(card);
 			if (this.coordinator) {
@@ -344,6 +356,17 @@ export class Transcript {
 			this.stopTools();
 			this.tools.clear();
 			this.current = undefined;
+			const elapsed = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
+			this.turnStartedAt = 0;
+			this.retain(
+				new TurnSummaryLine({
+					elapsedMs: elapsed,
+					tools: this.turnTools,
+					tokens: event.tokens,
+					cancelled: event.cancelled,
+				}),
+			);
+			this.turnTools = 0;
 			return { tokens: event.tokens, cancelled: event.cancelled };
 		}
 	}
