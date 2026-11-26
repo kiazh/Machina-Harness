@@ -15,6 +15,10 @@ async def _owner_agent() -> str:
     return agent_id
 
 
+async def _owner_scope() -> tuple[str, uuid.UUID]:
+    return await active_agent_scope()
+
+
 @registry.register(
     name="session_recall",
     description="Find evidence in your own past conversation transcripts. Use session_recall_window to read surrounding messages.",
@@ -27,9 +31,18 @@ async def _owner_agent() -> str:
     },
 )
 async def session_recall(query: str) -> str:
-    """Return matching live and archived transcript chunks."""
+    """Return matching live and archived transcript chunks from other chats."""
+    agent_id, current_session_id = await _owner_scope()
     try:
-        hits = await SessionRecall().discover(await _owner_agent(), query, limit=10)
+        hits = await SessionRecall().discover(
+            agent_id,
+            query,
+            limit=10,
+            # The current chat is already in context. Including it echoes this
+            # tool's own calls back into the next model step and can trap the
+            # turn in a recall loop.
+            exclude_session_id=current_session_id,
+        )
     except ValueError as exc:
         raise ToolError(str(exc)) from None
     if not hits:

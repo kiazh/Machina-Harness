@@ -14,6 +14,9 @@ The controller tracks:
 - whether a verification command was run
 - whether verification succeeded
 - repeated failed actions by tool, arguments, exit code, and result preview
+- repeated successful actions by tool and exact arguments
+- a directory-exploration budget for terminal listing calls and `list_files`
+- a session-recall budget for `session_recall` / `session_recall_window`
 - a one-shot no-edit nudge
 - a lean repair tool schema: file, terminal, code-intelligence, and artifact
   tools only; web research, memory management, delegation, and skill
@@ -30,14 +33,25 @@ Phase is derived from evidence, not from model prose:
 
 ## Budgets and stop conditions
 
-| Control | Default | Effect |
-|---|---:|---|
-| `MACHINA_TASK_RUN_MAX_TURNS` | `60` | Stop before another model request |
-| `MACHINA_TASK_RUN_MAX_TOOL_CALLS` | `150` | Stop before another model request |
-| Repeated failed action | 3 times | Stop and require a changed approach |
+| Control | Default | Applies to | Effect |
+|---|---:|---|---|
+| `MACHINA_TASK_RUN_MAX_TURNS` | `60` | repair turns | Stop before another model request |
+| `MACHINA_TASK_RUN_MAX_TOOL_CALLS` | `150` | repair turns | Stop before another model request |
+| Repeated failed action | 3 times | repair turns | Stop and require a changed approach |
+| Repeated successful action | 3 times | every turn | Stop when the same tool + exact args repeat without an edit |
+| Directory exploration | 10 calls | every turn | Stop repeated terminal listing / `list_files` without reading or editing |
+| Session recall | 12 calls | every turn | Stop a past-conversation recall chain |
 
-`0` disables the corresponding turn/tool limit. The controller only applies to
-prompts with explicit repair intent; ordinary chat is untouched.
+`0` disables the corresponding turn/tool limit. Repair-only controls still
+apply only to prompts with explicit repair intent. The repeated-success,
+exploration and recall guards apply to ordinary chat too, because a successful
+listing or recall loop can burn a full turn without a repair prompt. Reopening
+the same `read_file` target and status polling are exempt from the exact-action
+guard; `list_files` is exempt from exact repeats but counted by the exploration
+budget. Identical `search_files` calls are guarded.
+
+An observed edit resets the exact-action counter, so edit/verify retries remain
+allowed. A loop stop returns a typed failure response and never claims success.
 
 The controller stops with a typed response and preserves the working tree for
 the verifier. It never edits tests or fabricates success.
@@ -89,7 +103,8 @@ grading an incomplete repair.
 ## Tests
 
 `tests/test_task_run.py` covers inactive chat turns, phase transitions, repeated
-failures, independent caps, the no-edit/artifact/job/finalize nudges, the lean
-repair tool schema, environment configuration, and the integrated agent stop
-path. `tests/test_repair_gate.py` covers direct behavior-check evidence, and
+failures, repeated successful terminal actions, cycling directory listings,
+the recall budget, unbounded read-only file exploration, edit resets,
+independent caps, the no-edit/artifact/job/finalize nudges, the lean repair
+tool schema, environment configuration, and the integrated agent stop path. `tests/test_repair_gate.py` covers direct behavior-check evidence, and
 `tests/test_swe_repair_protocol.py` covers the Git Bash child path.

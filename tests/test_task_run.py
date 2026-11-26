@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -11,10 +12,13 @@ import pytest
 from machina.core.task_run import (
     TASK_RUN_ARTIFACT_NUDGE,
     TASK_RUN_EDIT_NUDGE,
+    TASK_RUN_EXPLORATION_LIMIT_TEXT,
     TASK_RUN_FINALIZE_NUDGE,
     TASK_RUN_FORCE_EDIT_NUDGE,
     TASK_RUN_JOB_NUDGE,
     TASK_RUN_NETWORK_NUDGE,
+    TASK_RUN_RECALL_LIMIT_TEXT,
+    TASK_RUN_REPEAT_ACTION_TEXT,
     TASK_RUN_REPEAT_TEXT,
     TASK_RUN_TOOL_LIMIT_TEXT,
     TASK_RUN_TURN_LIMIT_TEXT,
@@ -89,6 +93,116 @@ def test_repeated_identical_failure_stops_the_run() -> None:
 
     assert policy.repeated_failure is True
     assert policy.stop_reason() == TASK_RUN_REPEAT_TEXT
+
+
+def _successful_terminal(command: str, workdir: str = "C:/work") -> dict:
+    return {
+        "tool": "terminal",
+        "args": {"command": command, "workdir": workdir},
+        "outcome": "completed",
+        "returncode": 0,
+        "result_preview": "listed",
+    }
+
+
+def test_repeated_successful_terminal_action_stops_even_for_chat() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for _ in range(3):
+        policy.observe([
+            _successful_terminal(
+                "python -c \"import os; print(os.listdir('C:/work/src'))\""
+            )
+        ])
+
+    assert policy.repeated_action is True
+    assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
+
+
+def test_cycling_terminal_listings_still_hit_the_repeat_guard() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for _ in range(3):
+        for path in ("src", "gui", "tests"):
+            policy.observe([
+                _successful_terminal(
+                    f"python -c \"import os; print(os.listdir('C:/work/{path}'))\""
+                )
+            ])
+
+    assert policy.repeated_action is True
+    assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
+
+
+def test_directory_exploration_budget_stops_a_listing_loop() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for index in range(10):
+        policy.observe([
+            _successful_terminal(
+                f"python -c \"import os; print(os.listdir('C:/work/d{index}'))\""
+            )
+        ])
+
+    assert policy.exploration_calls == 10
+    assert policy.exploration_loop is True
+    assert policy.stop_reason() == TASK_RUN_EXPLORATION_LIMIT_TEXT
+
+
+def test_read_only_file_exploration_remains_unbounded() -> None:
+    policy = TaskRunPolicy(CHAT)
+    read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}
+    for _ in range(12):
+        policy.observe([read])
+
+    assert policy.repeated_action is False
+    assert policy.stop_reason() is None
+
+
+def test_repeated_identical_search_is_guarded() -> None:
+    policy = TaskRunPolicy(CHAT)
+    search = {
+        "tool": "search_files",
+        "args": {"pattern": "TODO", "path": "."},
+        "outcome": "completed",
+    }
+    for _ in range(3):
+        policy.observe([search])
+
+    assert policy.repeated_action is True
+    assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
+
+
+def test_an_edit_resets_the_action_repeat_counter() -> None:
+    policy = TaskRunPolicy(CHAT)
+    command = _successful_terminal("python -c \"print('probe')\"")
+    for _ in range(2):
+        policy.observe([command])
+    policy.observe([
+        {
+            "tool": "write_file",
+            "args": {"path": "app.py", "content": "changed"},
+            "outcome": "completed",
+        }
+    ])
+    for _ in range(2):
+        policy.observe([command])
+
+    assert policy.repeated_action is False
+    assert policy.stop_reason() is None
+
+
+def test_recall_budget_stops_a_recall_loop() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for index in range(12):
+        policy.observe([
+            {
+                "tool": "session_recall",
+                "args": {"query": f"past evidence {index}"},
+                "outcome": "completed",
+            }
+        ])
+
+    assert policy.recall_calls == 12
+    assert policy.recall_loop is True
+    assert policy.stop_reason() == TASK_RUN_RECALL_LIMIT_TEXT
 
 
 def test_turn_and_tool_caps_are_independent() -> None:
@@ -361,4 +475,64 @@ async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
 
     assert response.outcome == "failed"
     assert "turn limit" in response.content.lower()
+    agent._finish_turn_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_agent_stops_a_repeated_successful_terminal_loop(monkeypatch) -> None:
+    from machina.core import agent as module
+    from machina.core.models import LLMResponse, Session
+
+    session = Session(id=uuid4(), agent_id="harness")
+    messages = [{"role": "user", "content": CHAT}]
+    command = "python -c \"import os; print(os.listdir('C:/work/src'))\""
+
+    async def gate(msgs, **kwargs):
+        return SimpleNamespace(messages=msgs, failure=None)
+
+    async def model(**kwargs):
+        return LLMResponse(
+            model="test",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "function": {
+                        "name": "terminal",
+                        "arguments": json.dumps({"command": command}),
+                    },
+                }
+            ],
+        )
+
+    async def execute(response, msgs, made, *args, **kwargs):
+        made.append(
+            {
+                "tool": "terminal",
+                "args": {"command": command, "workdir": "C:/work"},
+                "outcome": "completed",
+                "returncode": 0,
+                "result_preview": "listed",
+            }
+        )
+
+    monkeypatch.setattr(module, "evaluate_request", gate)
+    agent = SimpleNamespace(
+        agent_id="harness",
+        provider=object(),
+        _prepare_context=AsyncMock(return_value=(session, messages)),
+        _flush_pending_chunks=AsyncMock(),
+        _append_assistant_content=AsyncMock(),
+        _condense_history=lambda _: None,
+        _tool_defs=lambda: [],
+        _call_llm_with_retry=model,
+        _execute_tool_calls=execute,
+        _finish_turn_completion=AsyncMock(),
+        _schedule_memory_consolidation=lambda *args: None,
+    )
+
+    response = await module.ReActAgent.run.__wrapped__(agent, session.id, CHAT, False)
+
+    assert response.outcome == "failed"
+    assert "repeated identical tool action" in response.content.lower()
     agent._finish_turn_completion.assert_not_awaited()

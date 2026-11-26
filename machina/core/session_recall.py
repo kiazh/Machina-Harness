@@ -74,6 +74,7 @@ class SessionRecall:
         limit: int = 20,
         *,
         session_id: uuid.UUID | None = None,
+        exclude_session_id: uuid.UUID | None = None,
         chunk_types: list[str] | tuple[str, ...] | set[str] | None = None,
         since: datetime | None = None,
     ) -> list[RecallHit]:
@@ -109,6 +110,7 @@ class SessionRecall:
                 CROSS JOIN search_query q
                 WHERE s.agent_id = $1
                   AND ($4::uuid IS NULL OR s.id = $4)
+                  AND ($7::uuid IS NULL OR s.id <> $7)
                   AND ($5::text[] IS NULL OR c.chunk_type = ANY($5))
                   AND ($6::timestamptz IS NULL OR c.created_at >= $6)
                   AND to_tsvector('english', c.search_text) @@ q.terms
@@ -123,6 +125,7 @@ class SessionRecall:
                 CROSS JOIN search_query q
                 WHERE s.agent_id = $1
                   AND ($4::uuid IS NULL OR s.id = $4)
+                  AND ($7::uuid IS NULL OR s.id <> $7)
                   AND ($5::text[] IS NULL OR a.chunk_type = ANY($5))
                   AND ($6::timestamptz IS NULL OR COALESCE(a.original_created_at, a.archived_at) >= $6)
                   AND to_tsvector('english', COALESCE(a.search_text, '')) @@ q.terms
@@ -135,6 +138,7 @@ class SessionRecall:
                 CROSS JOIN search_query q
                 WHERE s.agent_id = $1
                   AND ($4::uuid IS NULL OR s.id = $4)
+                  AND ($7::uuid IS NULL OR s.id <> $7)
                   AND ($5::text[] IS NULL)
                   AND ($6::timestamptz IS NULL OR s.last_activity >= $6)
                   AND to_tsvector('english', COALESCE(s.title, '')) @@ q.terms
@@ -156,6 +160,7 @@ class SessionRecall:
             session_id,
             list(wanted_types) if wanted_types is not None else None,
             since,
+            exclude_session_id,
         )
 
         def _ctype(row: Any) -> str | None:
@@ -173,6 +178,8 @@ class SessionRecall:
         filtered: list[Any] = []
         for row in rows:
             if session_id is not None and row["session_id"] != session_id:
+                continue
+            if exclude_session_id is not None and row["session_id"] == exclude_session_id:
                 continue
             if wanted_types is not None and _ctype(row) not in wanted_types:
                 continue

@@ -17,6 +17,10 @@
 - Snapshot manifests now record the prompt, route, per-file change kind, additions/deletions, and an end-of-turn copy. No-op writes are dropped; ignored paths remain as an honest disclosure.
 - Command and remote RPC registries expose 53 slash commands and 176 JSON-RPC methods.
 
+### Fixed
+
+- Runaway tool loops now stop with a typed failure instead of burning the turn. The controller detects the same successful tool + exact args repeating three times, more than ten terminal/`list_files` directory listings without a read or edit, and more than twelve `session_recall` / `session_recall_window` calls. The exact-action counter resets after an edit; ordinary `read_file` / `search_files` exploration remains unbounded. These guards apply to chat turns too; repair-only turn and tool-call caps are unchanged.
+
 ## 2.4.2 - 2026-11-24
 
 **Delegation survives a broken provider key.**

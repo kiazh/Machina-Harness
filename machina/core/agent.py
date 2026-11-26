@@ -2627,6 +2627,7 @@ async def _react_loop(
                         phase=task_run.phase,
                         turns=iteration,
                         tool_calls=len(tool_calls_made),
+                        reason=str(task_stop)[:240],
                     )
                     await agent._flush_pending_chunks(pending_chunks)
                     agent._schedule_memory_consolidation(session_id)

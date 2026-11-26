@@ -40,6 +40,9 @@ def repair_network_blocked() -> bool:
 DEFAULT_MAX_TURNS = 60
 DEFAULT_MAX_TOOL_CALLS = 150
 DEFAULT_MAX_REPEATS = 3
+DEFAULT_MAX_ACTION_REPEATS = 3
+DEFAULT_MAX_RECALL_CALLS = 12
+DEFAULT_MAX_EXPLORATION_CALLS = 10
 DEFAULT_EDIT_NUDGE_TURNS = 10
 DEFAULT_FORCE_EDIT_TURNS = 0
 DEFAULT_ARTIFACT_NUDGE_READS = 3
@@ -97,6 +100,22 @@ TASK_RUN_REPEAT_TEXT = (
     "Repeated identical failed action detected. The turn stopped after the same "
     "failure repeated; change approach before any further run."
 )
+TASK_RUN_REPEAT_ACTION_TEXT = (
+    "Repeated identical tool action detected. The same action ran repeatedly without "
+    "a source edit or new coverage; the turn stopped to prevent a loop. Change approach "
+    "before retrying."
+)
+TASK_RUN_RECALL_LIMIT_TEXT = (
+    "Session-recall budget reached. The turn made many past-conversation lookups "
+    "without acting on the evidence; it stopped to prevent a recall loop. Use the "
+    "evidence already returned or start a new prompt."
+)
+TASK_RUN_EXPLORATION_LIMIT_TEXT = (
+    "Directory-exploration budget reached. The turn spent too many terminal calls "
+    "listing directories without reading or changing a file; it stopped to prevent "
+    "an orientation loop. Read the specific files the task names, or ask for the "
+    "missing path, before retrying."
+)
 TASK_RUN_EDIT_NUDGE = (
     "No source edit has been made after a substantial investigation. Stop widening "
     "the search: use the failure evidence you already have, make the smallest "
@@ -146,6 +165,12 @@ _EDIT_COMMAND_RE = re.compile(
 _VERIFY_COMMAND_RE = re.compile(
     r"\b(?:pytest|py\.test|unittest|nox|tox|npm\s+(?:run\s+)?test|"
     r"pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|ruff|mypy|tsc|eslint)\b",
+    re.IGNORECASE,
+)
+_EXPLORATION_COMMAND_RE = re.compile(
+    r"(?:os\.(?:listdir|scandir|walk)\s*\(|"
+    r"\b(?:ls|dir|tree|find|get-childitem)\b|"
+    r"git\s+ls-files|rg\s+--files)",
     re.IGNORECASE,
 )
 
@@ -239,6 +264,15 @@ def _is_verification(entry: dict[str, Any]) -> bool:
     return bool(_VERIFY_COMMAND_RE.search(_command(entry)))
 
 
+def _is_exploration(entry: dict[str, Any]) -> bool:
+    """Directory-listing calls (the orientation-loop shape)."""
+    if entry.get("tool") == "list_files":
+        return True
+    return entry.get("tool") == "terminal" and bool(
+        _EXPLORATION_COMMAND_RE.search(_command(entry))
+    )
+
+
 def _failed(entry: dict[str, Any]) -> bool:
     returncode = entry.get("returncode")
     return entry.get("outcome") in {"failed", "denied"} or (
@@ -257,6 +291,36 @@ def _fingerprint(entry: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _action_fingerprint(entry: dict[str, Any]) -> str:
+    """Tool + exact args, deliberately ignoring success or result text.
+
+    Success is the dangerous case for a loop: the old guard only noticed
+    repeated *failures*, so repeated successful directory listings or recalls
+    could run until the provider or the human gave up.
+    """
+    payload = {"tool": entry.get("tool"), "args": entry.get("args")}
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+# Reopening the same file is allowed: a model may legitimately do that after
+# context condensation. Repeated searches, expensive terminal actions and
+# recall are guarded instead.
+_ACTION_REPEAT_EXEMPT = frozenset(
+    {
+        "read_file",
+        "list_files",
+        "artifact_read",
+        "artifact_search",
+        "artifact_describe",
+        "terminal_job",
+        "delegate_status",
+        "tool_load",
+    }
+)
+_RECALL_TOOLS = frozenset({"session_recall", "session_recall_window"})
+
+
 class TaskRunPolicy:
     """Phase and budget state for one repair turn."""
 
@@ -267,6 +331,9 @@ class TaskRunPolicy:
         max_turns: int | None = None,
         max_tool_calls: int | None = None,
         max_repeats: int = DEFAULT_MAX_REPEATS,
+        max_action_repeats: int = DEFAULT_MAX_ACTION_REPEATS,
+        max_recall_calls: int = DEFAULT_MAX_RECALL_CALLS,
+        max_exploration_calls: int = DEFAULT_MAX_EXPLORATION_CALLS,
         edit_nudge_turns: int = DEFAULT_EDIT_NUDGE_TURNS,
         force_edit_turns: int = DEFAULT_FORCE_EDIT_TURNS,
     ) -> None:
@@ -278,6 +345,9 @@ class TaskRunPolicy:
             configured_max_tool_calls() if max_tool_calls is None else max(0, max_tool_calls)
         )
         self.max_repeats = max(1, max_repeats)
+        self.max_action_repeats = max(1, max_action_repeats)
+        self.max_recall_calls = max(1, max_recall_calls)
+        self.max_exploration_calls = max(1, max_exploration_calls)
         self.edit_nudge_turns = max(1, edit_nudge_turns)
         self.force_edit_turns = max(0, force_edit_turns)
         self.turns = 0
@@ -289,11 +359,17 @@ class TaskRunPolicy:
         self.turns_without_edit = 0
         self.turns_without_source_edit = 0
         self.repeated_failure = False
+        self.repeated_action = False
+        self.recall_loop = False
+        self.recall_calls = 0
+        self.exploration_loop = False
+        self.exploration_calls = 0
         self.artifact_reads = 0
         self.job_polls = 0
         self.network_attempts = 0
         self._artifact_counts: dict[str, int] = {}
         self._failure_counts: dict[str, int] = {}
+        self._action_counts: dict[str, int] = {}
         self._edit_nudged = False
         self._artifact_nudged = False
         self._job_nudged = False
@@ -353,14 +429,35 @@ class TaskRunPolicy:
         for entry in batch or []:
             if not isinstance(entry, dict):
                 continue
+            tool = str(entry.get("tool") or "")
             if self.active:
                 self.tool_calls += 1
-            if entry.get("tool") in {"artifact_read", "artifact_search"}:
+            if tool in {"artifact_read", "artifact_search"}:
                 self.artifact_reads += 1
                 args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
                 handle = str(args.get("artifact_id") or "") or str(args.get("query") or "")
                 if handle:
                     self._artifact_counts[handle] = self._artifact_counts.get(handle, 0) + 1
+
+            is_edit = _is_edit(entry) and not _failed(entry)
+            if is_edit:
+                # A real change is progress; retries after it are a new phase.
+                self._action_counts.clear()
+            if tool in _RECALL_TOOLS:
+                self.recall_calls += 1
+                if self.recall_calls >= self.max_recall_calls:
+                    self.recall_loop = True
+            if _is_exploration(entry) and not is_edit:
+                self.exploration_calls += 1
+                if self.exploration_calls >= self.max_exploration_calls:
+                    self.exploration_loop = True
+            if tool not in _ACTION_REPEAT_EXEMPT and not is_edit:
+                key = _action_fingerprint(entry)
+                count = self._action_counts.get(key, 0) + 1
+                self._action_counts[key] = count
+                if count >= self.max_action_repeats:
+                    self.repeated_action = True
+
             if not self.active:
                 continue
             if _is_edit(entry) and not _failed(entry):
@@ -409,12 +506,18 @@ class TaskRunPolicy:
         tool_calls: int | None = None,
     ) -> str | None:
         """Return a terminal reason, or ``None`` when the run may continue."""
-        if not self.active:
-            return None
         current_turns = self.turns if turns is None else max(0, turns)
         current_tools = self.tool_calls if tool_calls is None else max(0, tool_calls)
-        if self.repeated_failure:
+        if self.active and self.repeated_failure:
             return TASK_RUN_REPEAT_TEXT
+        if self.exploration_loop:
+            return TASK_RUN_EXPLORATION_LIMIT_TEXT
+        if self.recall_loop:
+            return TASK_RUN_RECALL_LIMIT_TEXT
+        if self.repeated_action:
+            return TASK_RUN_REPEAT_ACTION_TEXT
+        if not self.active:
+            return None
         if self.max_turns > 0 and current_turns >= self.max_turns:
             return TASK_RUN_TURN_LIMIT_TEXT
         if self.max_tool_calls > 0 and current_tools >= self.max_tool_calls:
@@ -464,6 +567,11 @@ class TaskRunPolicy:
             "turns_without_edit": self.turns_without_edit,
             "turns_without_source_edit": self.turns_without_source_edit,
             "repeated_failure": self.repeated_failure,
+            "repeated_action": self.repeated_action,
+            "recall_calls": self.recall_calls,
+            "recall_loop": self.recall_loop,
+            "exploration_calls": self.exploration_calls,
+            "exploration_loop": self.exploration_loop,
             "artifact_reads": self.artifact_reads,
             "job_polls": self.job_polls,
             "network_attempts": self.network_attempts,
