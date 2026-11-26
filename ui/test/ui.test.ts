@@ -446,7 +446,7 @@ test("codex skin ships with the clones", async () => {
 	assert.match(skinDescription("codex"), /codex/i);
 });
 
-test("composer is a ruled input block with one accent marker", async () => {
+test("composer is a framed input card with one accent marker", async () => {
 	const { ComposerBox } = await import("../src/components.ts");
 	const { editorTheme } = await import("../src/theme.ts");
 	const composer = new ComposerBox({ terminal: { rows: 40 } } as never, editorTheme);
@@ -459,16 +459,16 @@ test("composer is a ruled input block with one accent marker", async () => {
 		}
 	}
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^━+$/, "the composer opens with an accent rule");
-	assert.match(rows[1] ?? "", /^❯ Ask anything/, "the input row carries the accent marker");
-	assert.match(rows.at(-1) ?? "", /^─+$/, "the composer closes with a hairline rule");
+	assert.match(rows[0] ?? "", /^╭─+╮$/, "the composer opens with a rounded frame");
+	assert.match(rows[1] ?? "", /^│ ❯ Ask anything/, "the input row carries the accent marker inside the frame");
+	assert.match(rows.at(-1) ?? "", /^╰─+╯$/, "the composer closes with a rounded frame");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
 	composer.editor.setText("hello");
 	const typed = composer.render(80).map((line) => stripTerminalSequences(line));
 	assert.doesNotMatch(typed.join("\n"), /Ask anything/, "placeholder hides once typing starts");
-	assert.match(typed[1] ?? "", /^❯ hello/, "the prompt marker and draft share one row");
+	assert.match(typed[1] ?? "", /^│ ❯ hello/, "the prompt marker and draft share one row");
 	assert.equal(typed.length, 3, "typed composer stays one ruled input row plus two rules");
-	assert.match(typed.at(-1) ?? "", /^─+$/, "the closing rule stays below the draft");
+	assert.match(typed.at(-1) ?? "", /^╰─+╯$/, "the closing frame stays below the draft");
 });
 
 test("composer draft uses theme ink before and after the editor cursor", async () => {

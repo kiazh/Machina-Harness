@@ -100,9 +100,17 @@ function stateStyle(state: string | undefined): (text: string) => string {
 
 function between(left: string, right: string, width: number): string {
 	const room = Math.max(0, width - visibleWidth(right) - 1);
-	const first = truncateToWidth(left, room, "…", true);
+	const first = truncateToWidth(left, room, "…");
 	const gap = Math.max(0, room - visibleWidth(first));
 	return `${first}${" ".repeat(gap)} ${truncateToWidth(right, width, "…")}`;
+}
+
+/** Keep a state chip beside the content, truncating the content first. */
+function withState(left: string, state: string, width: number): string {
+	const separator = `  ${theme.dim("·")} `;
+	const room = Math.max(0, width - visibleWidth(separator) - visibleWidth(state));
+	const first = truncateToWidth(left, room, "…");
+	return `${first}${separator}${state}`;
 }
 
 function centered(text: string, width: number): string {
@@ -136,6 +144,7 @@ export class StatusPage implements Component {
 	private filter: StatusFilter = "all";
 	private viewportRows: number | undefined;
 	private selectedKey: string | undefined;
+	private logScroll = 0;
 	private readonly expanded = new Set<string>();
 	private hitboxes: Hitbox[] = [];
 
@@ -181,6 +190,12 @@ export class StatusPage implements Component {
 			this.cycleFilter(data === "\x1b[Z" ? -1 : 1);
 			return true;
 		}
+		if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
+			if (this.scrollSelectedLogs(matchesKey(data, Key.pageUp) ? -1 : 1)) {
+				this.tui.requestRender();
+				return true;
+			}
+		}
 		if (matchesKey(data, Key.up) || matchesKey(data, Key.down)
 			|| matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)
 			|| matchesKey(data, Key.home) || matchesKey(data, Key.end)) {
@@ -197,6 +212,7 @@ export class StatusPage implements Component {
 			if (this.selectedKey) {
 				if (this.expanded.has(this.selectedKey)) this.expanded.delete(this.selectedKey);
 				else this.expanded.add(this.selectedKey);
+				this.logScroll = 0;
 			}
 			this.tui.requestRender();
 			return true;
@@ -205,6 +221,7 @@ export class StatusPage implements Component {
 			if (!this.selectedKey) this.selectFirst();
 			else if (this.expanded.has(this.selectedKey)) this.expanded.delete(this.selectedKey);
 			else this.expanded.add(this.selectedKey);
+			this.logScroll = 0;
 			this.tui.requestRender();
 			return true;
 		}
@@ -314,11 +331,11 @@ export class StatusPage implements Component {
 
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		let cards = this.buildCards(snap, width);
+		let cards = this.buildCards(snap, width, bodyHeight);
 		const rowsInCards = cards.flatMap(card => card.content.filter(line => line.kind === "row" && line.key));
 		const before = this.selectedKey;
 		this.ensureSelection(rowsInCards);
-		if (this.selectedKey !== before) cards = this.buildCards(snap, width);
+		if (this.selectedKey !== before) cards = this.buildCards(snap, width, bodyHeight);
 
 		if (!cards.length || !rowsInCards.length) {
 			const card = this.emptyCard(width, rowsInCards.length === 0 && cards.length > 0);
@@ -328,7 +345,7 @@ export class StatusPage implements Component {
 				push(line ?? "");
 			}
 			push(truncateToWidth(
-				` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · Esc chat")}`,
+				` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · PgUp/PgDn logs · Esc chat")}`,
 				width,
 				"…",
 				true,
@@ -382,7 +399,7 @@ export class StatusPage implements Component {
 			}
 		}
 		push(truncateToWidth(
-			` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · Esc chat")}`,
+			` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · PgUp/PgDn logs · Esc chat")}`,
 			width,
 			"…",
 			true,
@@ -390,7 +407,7 @@ export class StatusPage implements Component {
 		return out.slice(0, rows);
 	}
 
-	private buildCards(snap: StatusSnapshot, width: number): StatusCard[] {
+	private buildCards(snap: StatusSnapshot, width: number, bodyHeight?: number): StatusCard[] {
 		const all = this.filter === "all";
 		const sections: Array<{ title: string; entries: StatusRow[]; empty: string; category: StatusFilter }> = [];
 		if (all || this.filter === "sessions") {
@@ -426,8 +443,8 @@ export class StatusPage implements Component {
 			});
 		}
 
-		const cardWidth = Math.max(24, Math.min(112, width - 4));
-		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const cardWidth = Math.max(24, width - 4);
+		const left = 2;
 		const inner = Math.max(12, cardWidth - 6);
 		const cards: StatusCard[] = [];
 		for (const section of sections) {
@@ -449,8 +466,11 @@ export class StatusPage implements Component {
 					? (expanded ? theme.accent(" ▾") : theme.dim(" ▸"))
 					: "";
 				content.push({
-					text: ` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}${arrow}`,
-					right: stateText,
+					text: withState(
+						` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}${arrow}`,
+						stateText,
+						inner,
+					),
 					key,
 					row: entry,
 					section: section.title,
@@ -458,19 +478,41 @@ export class StatusPage implements Component {
 				});
 				if (!selected) continue;
 				const logs = entry.logs ?? [];
-				const shown = expanded ? logs.slice(0, 40) : logs.slice(0, 1);
-				for (const log of shown) {
-					for (const part of sanitizeDisplay(log).split("\n")) {
-						content.push({
-							text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
-							kind: "detail",
-						});
+				if (expanded) {
+					const budget = bodyHeight === undefined
+						? 40
+						: Math.max(1, Math.min(40, bodyHeight - 8 - (section.entries.length - 1)));
+					const maxStart = Math.max(0, logs.length - budget);
+					this.logScroll = Math.min(this.logScroll, maxStart);
+					const start = this.logScroll;
+					const shown = logs.slice(start, start + budget);
+					if (start > 0) {
+						content.push({ text: `  ${theme.dim(`↑ ${start} earlier · PgUp`)}`, kind: "detail" });
 					}
-				}
-				const remaining = logs.length - shown.length;
-				if (remaining > 0) {
-					if (expanded) content.push({ text: `  ${theme.dim(`… ${remaining} more retained`)}`, kind: "detail" });
-					else {
+					for (const log of shown) {
+						for (const part of sanitizeDisplay(log).split("\n")) {
+							content.push({
+								text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
+								kind: "detail",
+							});
+						}
+					}
+					const later = logs.length - start - shown.length;
+					if (later > 0) {
+						content.push({ text: `  ${theme.dim(`↓ ${later} later · PgDn`)}`, kind: "detail" });
+					}
+				} else {
+					const shown = logs.slice(0, 1);
+					for (const log of shown) {
+						for (const part of sanitizeDisplay(log).split("\n")) {
+							content.push({
+								text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
+								kind: "detail",
+							});
+						}
+					}
+					const remaining = logs.length - shown.length;
+					if (remaining > 0) {
 						const last = content.at(-1);
 						if (last) last.text += `  ${theme.dim(`· +${remaining} more`)}`;
 					}
@@ -544,6 +586,20 @@ export class StatusPage implements Component {
 
 	private selectFirst(): void {
 		this.selectedKey = this.rows().find(line => line.key)?.key;
+		this.logScroll = 0;
+	}
+
+	private logBudget(): number {
+		return Math.max(1, Math.min(40, (this.viewportRows ?? this.tui.terminal.rows ?? 24) - 12));
+	}
+
+	private scrollSelectedLogs(direction: 1 | -1): boolean {
+		const selected = this.rows().find(line => line.key === this.selectedKey);
+		const logs = selected?.row?.logs ?? [];
+		if (!selected?.key || !this.expanded.has(selected.key) || logs.length <= this.logBudget()) return false;
+		const max = Math.max(0, logs.length - this.logBudget());
+		this.logScroll = Math.max(0, Math.min(max, this.logScroll + direction * this.logBudget()));
+		return true;
 	}
 
 	private moveSelection(data: string): void {
@@ -558,6 +614,7 @@ export class StatusPage implements Component {
 		else if (matchesKey(data, Key.home)) next = 0;
 		else if (matchesKey(data, Key.end)) next = keys.length - 1;
 		this.selectedKey = keys[Math.max(0, Math.min(keys.length - 1, next))];
+		this.logScroll = 0;
 		this.tui.requestRender();
 	}
 
@@ -566,6 +623,7 @@ export class StatusPage implements Component {
 		const next = (current + direction + FILTERS.length) % FILTERS.length;
 		this.filter = FILTERS[next]!.id;
 		this.selectedKey = undefined;
+		this.logScroll = 0;
 		this.selectFirst();
 		this.tui.requestRender();
 	}

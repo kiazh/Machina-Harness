@@ -24,10 +24,10 @@ state, approval, output, ui, dialogs, layout, features, app).
 - Tool activity is one unframed `⏺ name args` line with a right-aligned
   status, capped at 108 columns. Results appear beneath it as `⎿` plus at
   most two preview rows; diff lines keep add/remove colors.
-- The composer is a ruled input block: one acid accent rule above, one quiet
-  hairline below, and `❯` sitting on the same row as the draft. The inner
-  editor contributes no second gutter. Rules disappear below 12 rows to
-  protect the status/footer line.
+- The composer is a framed input card: a rounded border, `❯` and the draft on
+  the same row, and the border lifts to the accent while the composer owns
+  focus. The inner editor contributes no second gutter. The frame disappears
+  below 12 rows to protect the status/footer line.
 - Notices and thinking use the same gutter. Thinking reads
   `✻ Thinking (3s · esc to interrupt)`. Below 40 columns, extra gutters
   disappear.
@@ -146,12 +146,12 @@ state, approval, output, ui, dialogs, layout, features, app).
   `/changes` opens Changes directly and `/changes all` includes every chat in
   the workspace. The two pages replace the transcript and composer inside the
   command strip; the strip itself never disappears.
-- Activity is a centered stack of bounded cards. Each category owns a rounded
+- Activity is a full-width stack of bounded cards with a two-cell margin. Each category owns a rounded
   card with its title and count in the top rule; rows carry their status and
   age inline, and the selected row opens its retained logs inside the same
   card. Empty categories are omitted from `ALL`. There is no second inspector
   column at any width.
-- Changes is a centered stack of prompt cards. Each card title is
+- Changes is a full-width stack of prompt cards with a two-cell margin. Each card title is
   `NN ❯ prompt`; the card body carries the touched files, line counts, route
   and review state. The selected card expands in place into three views:
   `FILES` (bounded, selection-following file list), `DIFF` (stable unified diff

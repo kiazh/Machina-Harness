@@ -90,6 +90,14 @@ function centered(text: string, width: number): string {
 	return `${" ".repeat(pad)}${text}`;
 }
 
+/** Keep a state chip beside the content, truncating the content first. */
+function withState(left: string, state: string, width: number): string {
+	const separator = `  ${theme.dim("·")} `;
+	const room = Math.max(0, width - visibleWidth(separator) - visibleWidth(state));
+	const first = truncateToWidth(left, room, "…");
+	return `${first}${separator}${state}`;
+}
+
 /** Card content sits inside the card padding, so drop the page indentation. */
 function unindent(text: string): string {
 	return text.startsWith("     ") ? text.slice(5) : text;
@@ -559,8 +567,8 @@ export class ChangesPage implements Component {
 	}
 
 	private buildCards(turns: ChangeTurnInfo[], width: number, bodyHeight: number): ChangeCard[] {
-		const cardWidth = Math.max(24, Math.min(112, width - 4));
-		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const cardWidth = Math.max(24, width - 4);
+		const left = 2;
 		const inner = Math.max(12, cardWidth - 6);
 		const contentBudget = Math.max(3, Math.min(18, bodyHeight - 10));
 		const cards: ChangeCard[] = [];
@@ -570,7 +578,7 @@ export class ChangesPage implements Component {
 			const stats = `${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
 			const route = [turn.provider, turn.model].filter(Boolean).join(" / ");
 			const meta = [stats, route ? theme.dim(route) : "", theme.dim(age(turn.createdAt))].filter(Boolean).join(theme.dim("  ·  "));
-			content.push({ text: between(meta, reviewChip(turn.review), inner), kind: "turn" });
+			content.push({ text: withState(meta, reviewChip(turn.review), inner), kind: "turn" });
 			const files = turn.files.slice(0, 3).map(file => sanitizeDisplay(file.path)).join(" · ");
 			const more = turn.files.length > 3 ? `  +${turn.files.length - 3}` : "";
 			content.push({ text: theme.dim(`${files || "no files"}${more}`), kind: "turn" });

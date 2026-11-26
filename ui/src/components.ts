@@ -386,11 +386,19 @@ export class ComposerBox extends Box {
 		const inner = Math.max(1, width - 2);
 		const prefix = (index: number): string => index === 0 ? theme.accent("❯ ") : "  ";
 		const total = Math.max(0, width);
-		const topRule = theme.accent("━".repeat(total));
-		const bottomRule = theme.border("─".repeat(total));
+		const framed = total >= 8 && (this.tui.terminal.rows ?? 24) >= 12;
+		// Focus is the composer's only strong signal: the frame lifts to the
+		// accent while the keyboard belongs here, then recedes for the editor.
+		const frameTone = this.editor.focused ? theme.accent : theme.border;
+		const topRule = frameTone(`╭${"─".repeat(Math.max(0, total - 2))}╮`);
+		const bottomRule = frameTone(`╰${"─".repeat(Math.max(0, total - 2))}╯`);
 		const withRules = (rows: string[]): string[] =>
-			total > 0 && (this.tui.terminal.rows ?? 24) >= 12
-				? [topRule, ...rows, bottomRule]
+			framed
+				? [
+					topRule,
+					...rows.map(line => `${frameTone("│")} ${truncateToWidth(line, Math.max(0, total - 4), "…", true)} ${frameTone("│")}`),
+					bottomRule,
+				]
 				: rows;
 		if (this.degradedMode) {
 			const rows = withRules([truncateToWidth(
@@ -435,13 +443,15 @@ export class ComposerBox extends Box {
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Box["handleMouse"]> {
-		const topRule = (this.tui.terminal.rows ?? 24) >= 12 ? 1 : 0;
-		if (event.x < 2 || event.y < topRule) return undefined;
+		const framed = event.width >= 8 && (this.tui.terminal.rows ?? 24) >= 12;
+		const topRule = framed ? 1 : 0;
+		const xOffset = framed ? 4 : 2;
+		if (event.x < xOffset || event.y < topRule) return undefined;
 		return super.handleMouse({
 			...event,
 			y: event.y - topRule,
-			x: event.x - 2,
-			width: Math.max(1, event.width - 2),
+			x: event.x - xOffset,
+			width: Math.max(1, event.width - (framed ? 6 : 2)),
 		});
 	}
 }
