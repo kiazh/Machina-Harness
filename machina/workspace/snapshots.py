@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -314,6 +315,7 @@ def _write_manifest(snapshot: TurnSnapshot) -> None:
     temporary = _manifest_path(snapshot).with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(_manifest_path(snapshot))
+    _invalidate_manifest_paths()
 
 
 #: Manifest reads dominate the Changes screen's 3-second refresh once a
@@ -321,6 +323,39 @@ def _write_manifest(snapshot: TurnSnapshot) -> None:
 #: write is an atomic replace, so a changed file always misses.
 _MANIFEST_CACHE: dict[str, tuple[int, int, dict[str, Any] | None]] = {}
 _MANIFEST_CACHE_LIMIT = 2048
+#: Directory scans are the other half of that refresh cost. Cache the manifest
+#: paths briefly; local writes invalidate immediately, and a sub-second TTL
+#: keeps a second process's new turn from hiding for long.
+_MANIFEST_PATHS: dict[str, tuple[float, list[Path]]] = {}
+#: Local writes invalidate immediately; 5 s only bounds how long another
+#: process's new turn can stay invisible to this list.
+_MANIFEST_PATHS_TTL = 5.0
+
+
+def _scan_manifest_paths(root: Path) -> list[Path]:
+    """Fast recursive scan; pathlib's recursive glob is slow on Windows."""
+    paths: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        if "manifest.json" in filenames:
+            paths.append(Path(dirpath) / "manifest.json")
+    return paths
+
+
+def _manifest_paths(root: Path) -> list[Path]:
+    key = str(root)
+    now = time.monotonic()
+    cached = _MANIFEST_PATHS.get(key)
+    if cached is not None and now - cached[0] <= _MANIFEST_PATHS_TTL:
+        return cached[1]
+    paths = _scan_manifest_paths(root)
+    if len(_MANIFEST_PATHS) >= 64:
+        _MANIFEST_PATHS.clear()
+    _MANIFEST_PATHS[key] = (now, paths)
+    return paths
+
+
+def _invalidate_manifest_paths() -> None:
+    _MANIFEST_PATHS.clear()
 
 
 def _load_manifest(path: Path) -> dict[str, Any] | None:
@@ -770,7 +805,7 @@ def _manifests(workspace: Path, session_id: str | None = None) -> list[tuple[dic
     if not root.is_dir():
         return []
     found: list[tuple[dict[str, Any], Path]] = []
-    for path in root.glob("*/**/manifest.json"):
+    for path in _manifest_paths(root):
         payload = _load_manifest(path)
         if payload is None:
             continue
