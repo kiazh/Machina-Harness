@@ -1440,7 +1440,7 @@ export class App implements FeatureHost {
 			job.status === "running" || job.status === "stopping",
 		).length;
 		const agents = this.familyRows().filter(row => !row.main && row.running).length;
-		return runningJobs + agents + this.activity.queuedCount() + this.turnSession.approvalDialogCount();
+		return runningJobs + agents + this.activity.queuedCount();
 	}
 
 	private navSnapshot(): NavSnapshot {

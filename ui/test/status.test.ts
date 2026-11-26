@@ -108,6 +108,25 @@ test("number keys jump between filters", () => {
 	assert.equal(page.handleInput("9"), false);
 });
 
+test("expanded logs page with PgUp/PgDn instead of clipping", () => {
+	const long = Array.from({ length: 30 }, (_, index) => `log line ${index + 1}`);
+	const page = new StatusPage(
+		{ terminal: { columns: 96, rows: 24 }, requestRender() {} } as unknown as TUI,
+		() => ({ ...snapshot, agents: [{ id: "agent:main", label: "Main", state: "running", running: true, logs: long }] }),
+	);
+	page.render(96);
+	page.handleInput("\r");
+	const first = page.render(96).map(stripTerminalSequences).join("\n");
+	assert.match(first, /↓ \d+ later · PgDn/);
+	assert.match(first, /log line 1/);
+	page.handleInput("\x1b[6~");
+	const second = page.render(96).map(stripTerminalSequences).join("\n");
+	assert.notEqual(second, first, "PgDn moves the retained-log window");
+	assert.match(second, /↑ \d+ earlier · PgUp/);
+	page.handleInput("\x1b[5~");
+	assert.match(page.render(96).map(stripTerminalSequences).join("\n"), /log line 1/, "PgUp returns to the start");
+});
+
 test("narrow terminals keep the selected detail inline and inside the width", () => {
 	const page = pageAt(64, 22);
 	const rendered = page.render(64).map(stripTerminalSequences);
