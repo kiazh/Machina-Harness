@@ -937,3 +937,82 @@ export interface MarketplaceDiscovery {
  markets:MarketplaceSource[];
 }
 export interface MarketplaceSearch {skills:MarketplaceSkill[];markets:MarketplaceSource[];query:string}
+
+// ── Changes and review runs (per prompt, not per commit) ──────────────────
+export type ChangeKind = "added" | "modified" | "deleted" | "ignored" | "unchanged";
+
+export interface ChangeFileInfo {
+	path: string;
+	change: ChangeKind;
+	additions: number;
+	deletions: number;
+	binary: boolean;
+}
+
+export interface ReviewFindingInfo {
+	rule: string;
+	severity: "critical" | "high" | "medium" | "low" | "info";
+	title: string;
+	body: string;
+	file: string;
+	line: number;
+	fingerprint: string;
+}
+
+export interface ReviewRunInfo {
+	id: string;
+	snapshotId: string;
+	sessionId: string;
+	engine: "rules" | string;
+	status: "queued" | "running" | "complete" | "failed" | "cancelled" | string;
+	provider: string;
+	model: string;
+	createdAt: string;
+	startedAt: string | null;
+	finishedAt: string | null;
+	summary: string;
+	findings: ReviewFindingInfo[];
+	/** Total findings when a list response carries only a bounded preview. */
+	findingsCount?: number;
+	error: string | null;
+}
+
+export interface ChangeTurnInfo {
+	id: string;
+	sessionId: string;
+	prompt: string;
+	createdAt: string;
+	provider: string;
+	model: string;
+	status: string;
+	stats: { files: number; additions: number; deletions: number };
+	files: ChangeFileInfo[];
+	review?: ReviewRunInfo | null;
+}
+
+export interface ChangesListResult {
+	turns: ChangeTurnInfo[];
+	scope: "session" | "workspace";
+	workspace: string;
+	updatedAt: string;
+}
+
+export interface ChangeDiffFileInfo {
+	path: string;
+	change: ChangeKind;
+	text: string;
+	binary: boolean;
+	truncated: boolean;
+}
+
+export interface ChangeDiffResult {
+	snapshotId: string;
+	files: ChangeDiffFileInfo[];
+	truncated: boolean;
+	totalChars: number;
+	updatedAt: string;
+}
+
+export interface ReviewRunResult {
+	review: ReviewRunInfo;
+}

@@ -2503,6 +2503,9 @@ async def _react_loop(
                 turn_snapshot = begin_turn(
                     session_id=str(session_id),
                     workspace=context.workspace,
+                    prompt=user_message,
+                    provider=str(getattr(session, "provider", "") or ""),
+                    model=str(getattr(session, "model", "") or ""),
                 )
             except Exception as snapshot_error:
                 # Snapshot support is additive; a failed store must not fail

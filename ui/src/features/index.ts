@@ -40,6 +40,13 @@ const appCommands: Command[] = [
 		},
 	},
 	{
+		name: "changes",
+		description: "Review what each prompt changed, with review runs (/changes all for every chat)",
+		async run(args, host) {
+			host.openChanges?.(args.trim().toLowerCase() === "all" ? "workspace" : "session");
+		},
+	},
+	{
 		name: "clear",
 		description: "Clear the terminal and start a new chat",
 		async run(_args, host) {

@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 683 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 166 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~130,000 lines of Python · 683 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 176 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -119,7 +119,7 @@ flowchart TB
     subgraph EDGE["Edge protocol"]
         direction LR
         GW["Gateway<br/>JSON-RPC 2.0 over stdio"]
-        FEATURES["152 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
+        FEATURES["162 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
         REST["REST + event stream<br/>sessions, jobs<br/>approvals"]
     end
 
@@ -365,8 +365,8 @@ Both systems share the same discipline: **store the original, project a bounded 
 | Backend tests | 683 passed, 18 skipped in this checkout; 1,266 UI tests (1,260 passed, 6 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 46 built-in tools; 62 top-level CLI commands (47 one-shot + 15 groups); 52 slash commands |
-| Protocol and API | 166 RPC methods (14 core + 152 feature); 35 functional REST routes (38 with docs); 25 protocol events |
+| Tools and commands | 46 built-in tools; 62 top-level CLI commands (47 one-shot + 15 groups); 53 slash commands |
+| Protocol and API | 176 RPC methods (14 core + 162 feature); 35 functional REST routes (38 with docs); 25 protocol events |
 | Configuration | 134 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 32 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
@@ -1197,6 +1197,7 @@ The terminal UI includes a file editor, tabs, a project explorer, Quick Open, an
 | Go to definition / find references | `Ctrl+N`, then `G` / `R` |
 | Maximize chat / editor / restore split | `Ctrl+N`, then `C` / `E` / `S` |
 | Switch between agents | `Ctrl+N`, then `J` / `K` |
+| Activity / Changes screens | `Ctrl+N`, then `←` / `→` (right: Activity then Changes; left: Changes then Activity); `/changes` opens Changes directly |
 | Change keyboard shortcuts | `/settings` → Keyboard shortcuts |
 | Paste an image | `Ctrl+V` |
 | Stop a response | `Esc` after dismissing any open popup |
@@ -1673,7 +1674,7 @@ Headless chat exits `0` for completion, `1` for failure, `3` for an approval pau
 
 ### Commands
 
-Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 52 slash commands, plus the short aliases below.
+Run `/help` to print the full command reference: every registered command with its usage and a plain-language description. A bare `/` also lists the full registry, and typing filters it. The terminal UI exposes 53 slash commands, plus the short aliases below.
 
 Aliases: `/settings` → `/config`, `/model` → `/models`, `/providers` → `/provider`, `/compact` → `/compress`, `/mem` → `/memory`, `/ls` → `/sessions`.
 
@@ -1851,9 +1852,9 @@ The CLI mirrors these capabilities with 62 top-level commands (47 one-shot comma
 </details>
 
 <details>
-<summary>All 52 terminal UI slash commands</summary>
+<summary>All 53 terminal UI slash commands</summary>
 
-`/activity`, `/agents`, `/approvals`, `/attach`, `/auth`, `/clear`, `/compress`, `/config`, `/context`, `/delegate`, `/delete`, `/editor`, `/effort`, `/exit`, `/explorer`, `/export`, `/fork`, `/goal`, `/growth`, `/harnesses`, `/help`, `/init`, `/interop`, `/jobs`, `/keys`, `/lsp`, `/mcp`, `/memory`, `/mode`, `/models`, `/music`, `/new`, `/output`, `/persona`, `/problems`, `/profile`, `/profiles`, `/provider`, `/quickopen`, `/recall`, `/rename`, `/resume`, `/review`, `/routing`, `/search`, `/sessions`, `/settings`, `/skills`, `/status`, `/theme`, `/usage`, `/workspace`
+`/activity`, `/changes`, `/agents`, `/approvals`, `/attach`, `/auth`, `/clear`, `/compress`, `/config`, `/context`, `/delegate`, `/delete`, `/editor`, `/effort`, `/exit`, `/explorer`, `/export`, `/fork`, `/goal`, `/growth`, `/harnesses`, `/help`, `/init`, `/interop`, `/jobs`, `/keys`, `/lsp`, `/mcp`, `/memory`, `/mode`, `/models`, `/music`, `/new`, `/output`, `/persona`, `/problems`, `/profile`, `/profiles`, `/provider`, `/quickopen`, `/recall`, `/rename`, `/resume`, `/review`, `/routing`, `/search`, `/sessions`, `/settings`, `/skills`, `/status`, `/theme`, `/usage`, `/workspace`
 
 </details>
 
@@ -2185,7 +2186,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 
 | Appendix | Contents |
 |---|---|
-| [A](#appendix-a-rpc-method-catalog) | 166 RPC methods |
+| [A](#appendix-a-rpc-method-catalog) | 176 RPC methods |
 | [B](#appendix-b-tool-catalog) | 46 tools and their effects |
 | [C](#appendix-c-database-catalog) | 32 tables and two ER diagrams |
 | [D](#appendix-d-configuration-reference) | 134 configuration keys |
@@ -2197,11 +2198,11 @@ These appendices are reference material. Catalogs and counts were checked agains
 | [J](#appendix-j-extension-points) | How to extend each surface |
 | [K](#appendix-k-glossary) | 42 terms |
 | [L](#appendix-l-http-route-catalog) | 35 functional HTTP routes (38 with docs) |
-| [M](#appendix-m-slash-command-catalog) | 52 slash commands |
+| [M](#appendix-m-slash-command-catalog) | 53 slash commands |
 
 ### Appendix A: RPC method catalog
 
-The gateway exposes **166** JSON-RPC methods: **14 core** methods handled directly by `gateway/server.py` and **152 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
+The gateway exposes **176** JSON-RPC methods: **14 core** methods handled directly by `gateway/server.py` and **162 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
 
 **Core methods**
 
@@ -3167,11 +3168,12 @@ The HTTP API exposes **35** functional routes (38 with the OpenAPI/Swagger/ReDoc
 
 ### Appendix M: Slash command catalog
 
-The terminal UI registers **52** slash commands. A bare `/` lists the registry, typing filters it, and `/help` prints every command with its usage and description.
+The terminal UI registers **53** slash commands. A bare `/` lists the registry, typing filters it, and `/help` prints every command with its usage and description.
 
 | Command | Usage | Description |
 |---|---|---|
 | `/activity` | `/activity` | Open the live status tab; `/activity list` views queued steering, background commands, and agents |
+| `/changes` | `/changes [all]` | Review what each prompt changed: stable per-prompt diffs and attached review runs; `all` includes every chat in the workspace |
 | `/agents` | `/agents [list\|show\|save\|history\|delete\|sessions\|switch]` | Agents: list, show, save, history, delete · sessions switches subagents (↓ on empty input, or Ctrl+N then J/K) |
 | `/approvals` | `/approvals [list\|allow <id>\|deny <id>\|revoke]` | List pending approvals, or allow/deny one |
 | `/attach` | `/attach` | Attach the editor selection to the next message |

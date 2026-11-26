@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+**Changes screen: review each prompt, not each commit.**
+
+### Added
+
+- A second full-page surface at `Ctrl+N` then `→` (`←` reverses): Chat → Activity → Changes. `/changes` opens it directly; `/changes all` includes every chat in the workspace.
+- Per-prompt change history. Each completed turn that changed a file stores its prompt, provider/model, file list, `+/-` line counts, and a stable end-of-turn copy, so a later prompt editing the same file cannot rewrite an earlier row's diff.
+- Three inspector views: `FILES` (bounded, selection-following), `DIFF` (stable unified diff), and `REVIEW` (status, summary, findings with severity, file and line). Keys: `↑/↓` prompt, `[`/`]` file, `1/2/3` or Tab view, PgUp/PgDn scroll, `r` review, `x` cancel, `w` scope.
+- Review runs attached to a prompt through new `changes.list`, `changes.diff`, `review.start`, and `review.cancel` RPCs. The first engine is deterministic (`rules`): conflicts, credential-like values, debug breakpoints/prints, unfinished markers, broad exception handlers, `shell=True`, disabled TLS verification, world-writable permissions, dynamic execution, URL credentials, and truncated-diff disclosure.
+
+### Changed
+
+- Snapshot manifests now record the prompt, route, per-file change kind, additions/deletions, and an end-of-turn copy. No-op writes are dropped; ignored paths remain as an honest disclosure.
+- Command and remote RPC registries expose 53 slash commands and 176 JSON-RPC methods.
+
 ## 2.4.2 - 2026-11-24
 
 **Delegation survives a broken provider key.**

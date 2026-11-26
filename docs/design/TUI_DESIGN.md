@@ -100,6 +100,27 @@ state, approval, output, ui, dialogs, layout, features, app).
 - Retained tool output (8 newest, 128 KiB each, 1 MiB total) opens in a
   scrollable viewer; evicted output reads unavailable.
 
+## Changes and review runs
+
+- `Ctrl+N` then `→` cycles Chat → Activity → Changes → Chat; `←` reverses the
+  same dial. `/changes` opens the screen directly and `/changes all` includes
+  every chat in the workspace. The two pages are full-viewport surfaces, not
+  transcript panels.
+- The unit is **one prompt**, not a commit. A prompt row keeps its captured
+  before/after content, so a later prompt editing the same file does not
+  rewrite an earlier row's diff. Rows show age, prompt excerpt, file count,
+  `+/-` line counts, and the attached review state.
+- The inspector has three views: `FILES` (bounded, selection-following file
+  list), `DIFF` (stable unified diff for the selected file), and `REVIEW`
+  (run status, summary, and findings with severity, file and line). `↑/↓`
+  selects prompts, `[`/`]` selects files, `1/2/3` or Tab switches views,
+  PgUp/PgDn scrolls the active view, `r` starts or re-runs the local rules
+  review, `x` cancels a running one, and `w` toggles this-chat/all-chats.
+- Narrow terminals keep the prompt list above an inline Inspector. Every
+  section has an honest empty state; a binary file says so instead of
+  pretending to have a text diff. The screen reads bounded local stores and
+  never edits files or re-runs the agent turn.
+
 ## Motion
 
 - One `AnimationCoordinator` per App owns at most one timer. One-cell activity

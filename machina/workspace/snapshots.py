@@ -80,6 +80,11 @@ def _store_root(workspace: Path) -> Path:
     return home / "snapshots" / digest
 
 
+def store_root(workspace: Path | None = None) -> Path:
+    """Workspace-scoped snapshot store (also hosts review-run state)."""
+    return _store_root((workspace or workspace_root()).resolve())
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -97,6 +102,55 @@ def _sha256(path: Path) -> str | None:
 
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _read_bytes(path: Path | None) -> bytes | None:
+    if path is None:
+        return None
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+            return None
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _decode(payload: bytes | None) -> tuple[str, bool]:
+    """Return text plus a binary flag; binary payloads never become diffs."""
+    if payload is None:
+        return "", False
+    if b"\0" in payload[:8192]:
+        return "", True
+    return payload.decode("utf-8", "replace"), False
+
+
+def _count_lines(text: str) -> int:
+    return len(text.splitlines())
+
+
+def _diff_counts(before: str, after: str) -> tuple[int, int]:
+    additions = deletions = 0
+    for line in difflib.unified_diff(
+        before.splitlines(), after.splitlines(), lineterm=""
+    ):
+        if line.startswith("+") and not line.startswith("+++"):
+            additions += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            deletions += 1
+    return additions, deletions
+
+
+def _stats(files: dict[str, FileSnapshot]) -> dict[str, int]:
+    changed = [
+        item
+        for item in files.values()
+        if not item.ignored and item.change in {"added", "modified", "deleted"}
+    ]
+    return {
+        "files": len(changed),
+        "additions": sum(item.additions for item in changed),
+        "deletions": sum(item.deletions for item in changed),
+    }
 
 
 def _trusted_executable(name: str) -> str | None:
@@ -259,17 +313,37 @@ def _write_manifest(snapshot: TurnSnapshot) -> None:
     temporary.replace(_manifest_path(snapshot))
 
 
+#: Manifest reads dominate the Changes screen's 3-second refresh once a
+#: workspace has hundreds of prompts. Cache by path + size + mtime; every
+#: write is an atomic replace, so a changed file always misses.
+_MANIFEST_CACHE: dict[str, tuple[int, int, dict[str, Any] | None]] = {}
+_MANIFEST_CACHE_LIMIT = 2048
+
+
 def _load_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        _MANIFEST_CACHE.pop(str(path), None)
+        return None
+    key = str(path)
+    cached = _MANIFEST_CACHE.get(key)
+    if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
-        return None
-    if not isinstance(payload, dict) or payload.get("version") != SNAPSHOT_VERSION:
-        return None
-    if not isinstance(payload.get("snapshot_id"), str):
-        return None
-    if not isinstance(payload.get("files"), list):
-        return None
+        payload = None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != SNAPSHOT_VERSION
+        or not isinstance(payload.get("snapshot_id"), str)
+        or not isinstance(payload.get("files"), list)
+    ):
+        payload = None
+    if len(_MANIFEST_CACHE) >= _MANIFEST_CACHE_LIMIT:
+        _MANIFEST_CACHE.clear()
+    _MANIFEST_CACHE[key] = (stat.st_mtime_ns, stat.st_size, payload)
     return payload
 
 
@@ -281,6 +355,16 @@ class FileSnapshot:
     before_sha: str | None
     after_sha: str | None = None
     ignored: bool = False
+    #: Stable end-of-turn content. Without it an old prompt's diff would be
+    #: computed against the file as it exists today, so later prompts would
+    #: leak into earlier rows. ``after_captured`` distinguishes "the turn
+    #: deleted this file" from an older manifest that has no after snapshot.
+    after_backup: str | None = None
+    after_captured: bool = False
+    change: str = ""
+    additions: int = 0
+    deletions: int = 0
+    binary: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -290,6 +374,12 @@ class FileSnapshot:
             "before_sha": self.before_sha,
             "after_sha": self.after_sha,
             "ignored": self.ignored,
+            "after_backup": self.after_backup,
+            "after_captured": self.after_captured,
+            "change": self.change,
+            "additions": self.additions,
+            "deletions": self.deletions,
+            "binary": self.binary,
         }
 
 
@@ -302,6 +392,11 @@ class TurnSnapshot:
     created_at: str = field(default_factory=_now)
     files: dict[str, FileSnapshot] = field(default_factory=dict)
     status: str = "open"
+    #: The prompt that opened this turn. Stored so the Changes screen can show
+    #: changes per prompt instead of per commit.
+    prompt: str = ""
+    provider: str = ""
+    model: str = ""
     #: Clean Git baseline captured lazily before the first terminal command.
     #: Terminal edits are diffed against this commit at turn end. It is never
     #: serialized; finished terminal files are ordinary manifest entries.
@@ -315,6 +410,10 @@ class TurnSnapshot:
             "workspace": str(self.workspace),
             "created_at": self.created_at,
             "status": self.status,
+            "prompt": self.prompt,
+            "provider": self.provider,
+            "model": self.model,
+            "stats": _stats(self.files),
             "files": [item.to_dict() for item in self.files.values()],
         }
 
@@ -323,6 +422,16 @@ class TurnSnapshot:
             backup_dir = self.root / "files"
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
+            backup.write_bytes(payload)
+            return str(backup)
+        except OSError:
+            return None
+
+    def _after_backup_bytes(self, resolved: Path, payload: bytes, index: int) -> str | None:
+        try:
+            backup_dir = self.root / "files"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup = backup_dir / f"{index:04d}-after-{resolved.name}"
             backup.write_bytes(payload)
             return str(backup)
         except OSError:
@@ -513,18 +622,84 @@ class TurnSnapshot:
             _write_manifest(self)
         return added
 
-    def finish(self) -> None:
-        for item in self.files.values():
-            item.after_sha = _sha256(Path(item.path)) if Path(item.path).exists() else None
+    def _finalize_file(self, item: FileSnapshot, index: int) -> None:
+        target = Path(item.path)
+        after_exists = target.is_file()
+        item.after_sha = _sha256(target) if after_exists else None
+        if item.ignored:
+            item.change = "ignored"
+            return
+
+        before_bytes = _read_bytes(_backup_path(item.backup, self.workspace))
+        after_bytes = _read_bytes(target) if after_exists else None
+        before_text, before_binary = _decode(before_bytes)
+        after_text, after_binary = _decode(after_bytes)
+        item.binary = before_binary or after_binary
+
+        if item.existed and not after_exists:
+            item.change = "deleted"
+            item.deletions = 0 if item.binary else _count_lines(before_text)
+            item.after_captured = True
+            return
+        if not item.existed and after_exists:
+            item.change = "added"
+            item.additions = 0 if item.binary else _count_lines(after_text)
+        elif item.existed and after_exists:
+            if item.before_sha and item.after_sha and item.before_sha == item.after_sha:
+                item.change = "unchanged"
+                return
+            item.change = "modified"
+            if not item.binary:
+                item.additions, item.deletions = _diff_counts(before_text, after_text)
+        else:
+            item.change = "unchanged"
+            return
+
+        if not after_exists:
+            item.after_captured = True
+        elif not item.binary and after_bytes is not None:
+            item.after_backup = self._after_backup_bytes(target, after_bytes, index)
+            # If the copy failed, fall back to the live file rather than
+            # silently presenting an empty diff; the summary still marks the
+            # turn's own before/after hashes.
+            item.after_captured = item.after_backup is not None
+
+    def finish(self) -> bool:
+        """Finalize stable per-prompt statistics and end-state content.
+
+        Returns false when every recorded path ended unchanged, allowing the
+        caller to discard the empty snapshot. The after copy is what keeps an
+        earlier prompt's diff stable when a later prompt edits the same file.
+        """
+        for index, item in enumerate(self.files.values()):
+            self._finalize_file(item, index)
+        # Keep ignored entries: they are the honest disclosure that a path was
+        # touched but could not be captured or restored. Drop only no-op
+        # writes, which would otherwise clutter every prompt row.
+        self.files = {
+            path: item
+            for path, item in self.files.items()
+            if item.change in {"added", "modified", "deleted", "ignored"}
+        }
+        if not self.files:
+            self.status = "complete"
+            shutil.rmtree(self.root, ignore_errors=True)
+            return False
         self.status = "complete"
         _write_manifest(self)
+        return True
 
     def has_changes(self) -> bool:
         return bool(self.files)
 
 
 def begin_turn(
-    *, session_id: str | None = None, workspace: Path | None = None
+    *,
+    session_id: str | None = None,
+    workspace: Path | None = None,
+    prompt: str = "",
+    provider: str = "",
+    model: str = "",
 ) -> TurnSnapshot | None:
     """Open a snapshot for the current agent turn and bind it to the context."""
     if not _enabled():
@@ -536,6 +711,9 @@ def begin_turn(
         session_id=sid,
         workspace=root_workspace,
         root=_store_root(root_workspace) / sid / uuid.uuid4().hex,
+        prompt=str(prompt or "").replace("\x00", "")[:4000],
+        provider=str(provider or "")[:200],
+        model=str(model or "")[:300],
     )
     _current.set(snapshot)
     return snapshot
@@ -640,11 +818,28 @@ def mark_undone(payload: dict[str, Any], path: Path) -> None:
     temporary.replace(path)
 
 
-def _read_text(path: Path) -> str:
+def _read_text(path: Path | None) -> str:
+    if path is None:
+        return ""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _relative(path: str | Path, workspace: Path) -> str:
+    try:
+        return Path(path).relative_to(workspace).as_posix()
+    except (OSError, ValueError):
+        return Path(path).name
+
+
+def _after_text(raw: dict[str, Any], workspace: Path) -> str:
+    """End-of-turn text, stable even when a later prompt edits the same file."""
+    if raw.get("after_captured"):
+        return _read_text(_backup_path(raw.get("after_backup"), workspace))
+    target = _safe_workspace(Path(str(raw.get("path") or "")), workspace)
+    return _read_text(target) if target is not None and target.exists() else ""
 
 
 def _backup_path(raw: Any, workspace: Path) -> Path | None:
@@ -661,29 +856,172 @@ def _backup_path(raw: Any, workspace: Path) -> Path | None:
         return None
 
 
-def diff_snapshot(payload: dict[str, Any]) -> str:
-    """Return a unified diff from the snapshot's before state to current files."""
+def _file_diff(raw: dict[str, Any], workspace: Path) -> str:
+    target = _safe_workspace(Path(str(raw.get("path") or "")), workspace)
+    if target is None:
+        return ""
+    before = _read_text(_backup_path(raw.get("backup"), workspace))
+    after = _after_text(raw, workspace)
+    relative = _relative(target, workspace)
+    diff = difflib.unified_diff(
+        before.splitlines(keepends=True),
+        after.splitlines(keepends=True),
+        fromfile=f"a/{relative}",
+        tofile=f"b/{relative}",
+    )
+    return "".join(diff)
+
+
+def diff_snapshot(
+    payload: dict[str, Any],
+    *,
+    path: str | None = None,
+    max_chars: int = 0,
+) -> str:
+    """Return a unified diff from the snapshot's before state to its end state.
+
+    ``max_chars`` is a safety bound for transport callers; the CLI leaves it
+    unbounded. When the bound is reached the diff is cut at a line boundary.
+    """
     workspace = Path(str(payload.get("workspace") or ""))
+    requested: str | None = None
+    if path:
+        requested = path.replace("\\", "/")
+        while requested.startswith("./"):
+            requested = requested[2:]
+        requested = requested.lstrip("/")
     chunks: list[str] = []
+    size = 0
+    for raw in payload.get("files") or []:
+        if not isinstance(raw, dict) or raw.get("ignored"):
+            continue
+        relative = _relative(str(raw.get("path") or ""), workspace)
+        if requested is not None and relative != requested:
+            continue
+        text = _file_diff(raw, workspace)
+        if not text:
+            continue
+        if max_chars:
+            remaining = max_chars - size
+            if remaining <= 0:
+                break
+            if len(text) > remaining:
+                text = text[:remaining].rsplit("\n", 1)[0] + "\n"
+        chunks.append(text)
+        size += len(text)
+    return "".join(chunks)
+
+
+MAX_DIFF_BYTES = 512 * 1024
+MAX_FILE_DIFF_BYTES = 120 * 1024
+
+
+def diff_files(
+    payload: dict[str, Any], *, max_chars: int = MAX_DIFF_BYTES
+) -> dict[str, Any]:
+    """Bounded per-file diffs for the Changes inspector."""
+    workspace = Path(str(payload.get("workspace") or ""))
+    files: list[dict[str, Any]] = []
+    total = 0
+    truncated = False
     for raw in payload.get("files") or []:
         if not isinstance(raw, dict) or raw.get("ignored"):
             continue
         target = _safe_workspace(Path(str(raw.get("path") or "")), workspace)
         if target is None:
             continue
-        backup = _backup_path(raw.get("backup"), workspace)
-        before = _read_text(backup) if backup is not None else ""
-        after = _read_text(target) if target.exists() else ""
-        diff = difflib.unified_diff(
-            before.splitlines(keepends=True),
-            after.splitlines(keepends=True),
-            fromfile=f"a/{target.relative_to(workspace)}",
-            tofile=f"b/{target.relative_to(workspace)}",
+        relative = _relative(target, workspace)
+        if raw.get("binary"):
+            files.append(
+                {
+                    "path": relative,
+                    "change": raw.get("change") or "modified",
+                    "text": "",
+                    "binary": True,
+                    "truncated": False,
+                }
+            )
+            continue
+        text = _file_diff(raw, workspace)
+        file_truncated = len(text) > MAX_FILE_DIFF_BYTES
+        if file_truncated:
+            text = text[:MAX_FILE_DIFF_BYTES].rsplit("\n", 1)[0] + "\n"
+        remaining = max_chars - total
+        if remaining <= 0:
+            truncated = True
+            break
+        if len(text) > remaining:
+            text = text[:remaining].rsplit("\n", 1)[0] + "\n"
+            truncated = True
+            file_truncated = True
+        files.append(
+            {
+                "path": relative,
+                "change": raw.get("change") or "modified",
+                "text": text,
+                "binary": False,
+                "truncated": file_truncated,
+            }
         )
-        text = "".join(diff)
-        if text:
-            chunks.append(text)
-    return "".join(chunks)
+        total += len(text)
+    return {
+        "files": files,
+        "truncated": truncated,
+        "totalChars": total,
+        "maxChars": max_chars,
+    }
+
+
+def summarize(payload: dict[str, Any]) -> dict[str, Any]:
+    """Bounded manifest view for the Changes screen (never includes diff text)."""
+    workspace = Path(str(payload.get("workspace") or ""))
+    files: list[dict[str, Any]] = []
+    additions = deletions = 0
+    for raw in payload.get("files") or []:
+        if not isinstance(raw, dict) or raw.get("ignored"):
+            continue
+        change = str(raw.get("change") or "")
+        if not change:
+            # Older manifests predate explicit change kinds. Hash equality is
+            # the only honest no-op signal available for them.
+            if raw.get("before_sha") and raw.get("after_sha") == raw.get("before_sha"):
+                continue
+            change = "added" if not raw.get("existed") else "modified"
+        if change == "unchanged":
+            continue
+        file_additions = int(raw.get("additions") or 0)
+        file_deletions = int(raw.get("deletions") or 0)
+        additions += file_additions
+        deletions += file_deletions
+        files.append(
+            {
+                "path": _relative(str(raw.get("path") or ""), workspace),
+                "change": change,
+                "additions": file_additions,
+                "deletions": file_deletions,
+                "binary": bool(raw.get("binary")),
+            }
+        )
+    recorded_stats = payload.get("stats")
+    if isinstance(recorded_stats, dict):
+        stats = {
+            "files": int(recorded_stats.get("files") or len(files)),
+            "additions": int(recorded_stats.get("additions") or additions),
+            "deletions": int(recorded_stats.get("deletions") or deletions),
+        }
+    else:
+        stats = {"files": len(files), "additions": additions, "deletions": deletions}
+    return {
+        "id": str(payload.get("snapshot_id") or ""),
+        "sessionId": str(payload.get("session_id") or ""),
+        "prompt": str(payload.get("prompt") or ""),
+        "createdAt": str(payload.get("created_at") or ""),
+        "provider": str(payload.get("provider") or ""),
+        "model": str(payload.get("model") or ""),
+        "status": str(payload.get("status") or "complete"),
+        "stats": stats,
+        "files": files,
+    }
 
 
 def undo_snapshot(

@@ -110,6 +110,8 @@ export interface FeatureHost {
 	inspectActivity?(): Promise<void>;
 	/** Open the full-page live status tab. */
 	openStatus?(): void;
+	/** Open the per-prompt Changes screen; `workspace` includes every chat. */
+	openChanges?(scope?: "session" | "workspace"): void;
 	/** Active user profile id (preferences bucket + new-chat agent scope). */
 	profileId(): string;
 	/** Switch the active profile (existing chats keep theirs). */

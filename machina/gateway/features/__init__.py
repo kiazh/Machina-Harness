@@ -49,6 +49,12 @@ from machina.gateway.features.auth_subscriptions import (
     auth_grok_logout,
     auth_grok_status,
 )
+from machina.gateway.features.changes import (
+    changes_diff,
+    changes_list,
+    review_cancel,
+    review_start,
+)
 from machina.gateway.features.config import (
     config_get,
     profile_get,
@@ -362,6 +368,10 @@ METHODS: dict[str, Handler] = {
     "mode.revoke": mode_revoke,
     "approvals.list": approvals_list,
     "approvals.resolve": approvals_resolve,
+    "changes.list": changes_list,
+    "changes.diff": changes_diff,
+    "review.start": review_start,
+    "review.cancel": review_cancel,
     "workspace.open": workspace_open,
     "workspace.changes": workspace_changes,
     "workspace.diff": workspace_diff,

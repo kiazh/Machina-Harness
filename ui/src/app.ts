@@ -31,6 +31,7 @@ import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { ActivityBar, ActivityStore, activityEmptyGuidance, type SteeringItem, type ShellJob } from "./activity.ts";
 import { StatusPage, type StatusRow, type StatusSnapshot } from "./components/StatusPage.ts";
+import { ChangesPage, type ChangesDiffState, type ChangesSnapshot } from "./components/ChangesPage.ts";
 import { toolCallDisplayName } from "./mcpNames.ts";
 import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
@@ -54,6 +55,9 @@ import type { GatewayClient } from "./gateway.ts";
 import { copyText as copyClipboardText } from "./clipboard.ts";
 import { clipboardImage, clipboardText, ImageDraft, imagePaths, readImageFile, type ImageAttachment } from "./images.ts";
 import type {
+	ChangeDiffResult,
+	ChangesListResult,
+	ChangeTurnInfo,
 	ConfigGetResult,
 	ConfigResult,
 	GatewayEvent,
@@ -62,6 +66,7 @@ import type {
 	KiroFallback,
 	MCPServerView,
 	ProvidersListResult,
+	ReviewRunResult,
 	InitializeResult,
 	ResumeResult,
 	SessionInfo,
@@ -316,10 +321,17 @@ export class App implements FeatureHost {
 	/** Question request IDs whose picker is already open. */
 	private readonly openQuestions = new Set<string>();
 	private readonly activity = new ActivityStore();
-	private view: "chat" | "status" = "chat";
+	private view: "chat" | "status" | "changes" = "chat";
 	private statusPage!: StatusPage;
-	private statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+	private changesPage!: ChangesPage;
+	private screenRefreshTimer: ReturnType<typeof setInterval> | undefined;
 	private statusRefreshing = false;
+	private changesTurns: ChangeTurnInfo[] = [];
+	private changesScope: "session" | "workspace" = "session";
+	private changesError = "";
+	private changesUpdatedAt = "";
+	private changesRefreshing = false;
+	private readonly changesDiff = new Map<string, ChangesDiffState>();
 	private statusHarnesses: StatusRow[] = [];
 	private readonly harnessJobs = new Map<string, HarnessJobView>();
 	private statusMcp: StatusRow[] = [];
@@ -486,14 +498,27 @@ export class App implements FeatureHost {
 						: "";
 			if (!sessionId) return false;
 			if (sessionId === this.current?.id) {
-				this.closeStatusTab();
+				this.closeScreen();
 				return true;
 			}
 			void this.family.open(sessionId).then(() => {
-				if (this.view === "status") this.closeStatusTab();
+				if (this.view !== "chat") this.closeScreen();
 			});
 			return true;
 		});
+		this.changesPage = new ChangesPage(
+			tui,
+			() => this.changesSnapshot(),
+			(turnId) => this.changesDiffState(turnId),
+			{
+				onSelectTurn: (turnId) => {
+					this.ensureChangesDiff(turnId);
+				},
+				onReview: (turnId) => { void this.startChangeReview(turnId); },
+				onCancelReview: (turnId) => { void this.cancelChangeReview(turnId); },
+				onToggleScope: () => { this.toggleChangesScope(); },
+			},
+		);
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -1389,9 +1414,16 @@ export class App implements FeatureHost {
 		}
 	}
 
-	/** Open the full-page live status tab (also `/status`). */
+	/** Open the full-page live status tab (also `/activity`). */
 	openStatus(): void {
 		this.openStatusTab(1);
+	}
+
+	/** Open the per-prompt Changes screen (also `/changes`). */
+	openChanges(scope: "session" | "workspace" = "session"): void {
+		this.changesScope = scope;
+		if (!this.current) this.changesScope = "workspace";
+		this.openScreen("changes");
 	}
 
 	private statusSnapshot(): StatusSnapshot {
@@ -1674,39 +1706,216 @@ export class App implements FeatureHost {
 	}
 
 	private openStatusTab(direction: 1 | -1): void {
-		if (this.exiting) return;
+		this.openScreen("status", direction);
+	}
+
+	/**
+	 * Screen carousel: chat -> Activity -> Changes -> chat.
+	 *
+	 * Right and left are symmetrical, so Ctrl+N then an arrow is the only
+	 * navigation needed. Activity keeps its existing Ctrl+N,A shortcut.
+	 */
+	private switchScreen(direction: 1 | -1): void {
+		if (this.view === "chat") {
+			if (direction === 1) this.openScreen("status", 1);
+			else this.openScreen("changes", -1);
+			return;
+		}
 		if (this.view === "status") {
-			this.statusPage.enter(direction);
-			void this.refreshStatusData();
+			if (direction === 1) this.openScreen("changes", 1);
+			else this.closeScreen();
+			return;
+		}
+		if (direction === 1) this.closeScreen();
+		else this.openScreen("status", -1);
+	}
+
+	private openScreen(screen: "status" | "changes", direction: 1 | -1 = 1): void {
+		if (this.exiting) return;
+		if (this.view === screen) {
+			if (screen === "status") this.statusPage.enter(direction);
+			else this.changesPage.enter(direction);
+			if (screen === "status") void this.refreshStatusData();
+			else void this.refreshChangesData();
 			this.tui.requestRender();
 			return;
 		}
-		this.view = "status";
-		this.statusDefaultPending = true;
-		this.statusPage.enter(direction);
-		this.shell.setPage(this.statusPage);
-		this.tui.setFocus(this.statusPage);
+		this.clearScreenTimer();
+		this.disposeActivePage();
+		this.view = screen;
+		const page = screen === "status" ? this.statusPage : this.changesPage;
+		page.enter(direction);
+		this.shell.setPage(page);
+		this.tui.setFocus(page);
 		this.footer.keyHint = "";
-		this.statusUpdatedAt = "";
-		this.statusError = "";
-		this.statusSlowRefreshAt = 0;
-		this.refreshFamily();
-		void this.refreshStatusData();
-		this.statusRefreshTimer = setInterval(() => { void this.refreshStatusData(); }, 3_000);
+		if (screen === "status") {
+			this.statusDefaultPending = true;
+			this.statusUpdatedAt = "";
+			this.statusError = "";
+			this.statusSlowRefreshAt = 0;
+			this.refreshFamily();
+			void this.refreshStatusData();
+		} else {
+			if (!this.current && this.changesScope === "session") this.changesScope = "workspace";
+			this.changesUpdatedAt = "";
+			this.changesError = "";
+			this.changesPage.syncSelection();
+			this.ensureChangesDiff();
+			void this.refreshChangesData();
+		}
+		this.screenRefreshTimer = setInterval(() => {
+			if (this.view === "status") void this.refreshStatusData();
+			else if (this.view === "changes") void this.refreshChangesData();
+		}, 3_000);
 		this.tui.requestRender();
 	}
 
-	private closeStatusTab(): void {
-		if (this.view !== "status") return;
+	private closeScreen(): void {
+		if (this.view === "chat") return;
+		const previous = this.view;
 		this.view = "chat";
-		if (this.statusRefreshTimer !== undefined) {
-			clearInterval(this.statusRefreshTimer);
-			this.statusRefreshTimer = undefined;
-		}
-		this.statusPage.dispose();
+		this.clearScreenTimer();
+		if (previous === "status") this.statusPage.dispose();
+		else this.changesPage.dispose();
 		this.shell.setPage(undefined);
 		this.tui.setFocus(this.editor);
 		this.footer.keyHint = "";
+		this.tui.requestRender();
+	}
+
+	private clearScreenTimer(): void {
+		if (this.screenRefreshTimer !== undefined) {
+			clearInterval(this.screenRefreshTimer);
+			this.screenRefreshTimer = undefined;
+		}
+	}
+
+	private disposeActivePage(): void {
+		if (this.view === "status") this.statusPage.dispose();
+		else if (this.view === "changes") this.changesPage.dispose();
+	}
+
+	private changesSnapshot(): ChangesSnapshot {
+		const project = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+		return {
+			turns: this.changesTurns,
+			scope: this.changesScope,
+			project: project || undefined,
+			updatedAt: this.changesUpdatedAt,
+			error: this.changesError || undefined,
+			running: this.running,
+		};
+	}
+
+	private async refreshChangesData(): Promise<void> {
+		if (this.view !== "changes" || this.changesRefreshing) return;
+		this.changesRefreshing = true;
+		try {
+			const result = await this.request<ChangesListResult>("changes.list", {
+				sessionId: this.current?.id,
+				scope: this.changesScope,
+				limit: 60,
+			});
+			if (this.view !== "changes") return;
+			this.changesTurns = Array.isArray(result.turns) ? result.turns : [];
+			this.changesUpdatedAt = new Date().toLocaleTimeString();
+			this.changesError = "";
+			const live = new Set(this.changesTurns.map(turn => turn.id));
+			for (const id of this.changesDiff.keys()) {
+				if (!live.has(id)) this.changesDiff.delete(id);
+			}
+			this.changesPage.syncSelection();
+			this.ensureChangesDiff();
+		} catch (error) {
+			if (this.view !== "changes") return;
+			this.changesError = `Could not read prompt changes: ${message(error)}`;
+			this.changesUpdatedAt = new Date().toLocaleTimeString();
+		} finally {
+			this.changesRefreshing = false;
+			this.tui.requestRender();
+		}
+	}
+
+	private changesDiffState(turnId: string | undefined): ChangesDiffState {
+		if (!turnId) return { loading: false, files: [], truncated: false };
+		return this.changesDiff.get(turnId) ?? { turnId, loading: true, files: [], truncated: false };
+	}
+
+	private ensureChangesDiff(turnId?: string): void {
+		const id = turnId ?? this.changesPage.selectedTurn;
+		if (!id) return;
+		const cached = this.changesDiff.get(id);
+		if (cached?.loading || (cached && !cached.error)) return;
+		this.changesDiff.set(id, { turnId: id, loading: true, files: [], truncated: false });
+		void this.loadChangesDiff(id);
+	}
+
+	private async loadChangesDiff(turnId: string): Promise<void> {
+		try {
+			const result = await this.request<ChangeDiffResult>("changes.diff", {
+				snapshotId: turnId,
+				sessionId: this.current?.id,
+			});
+			this.changesDiff.set(turnId, {
+				turnId,
+				loading: false,
+				files: Array.isArray(result.files) ? result.files : [],
+				truncated: Boolean(result.truncated),
+			});
+		} catch (error) {
+			this.changesDiff.set(turnId, {
+				turnId,
+				loading: false,
+				files: [],
+				truncated: false,
+				error: message(error),
+			});
+		}
+		this.tui.requestRender();
+	}
+
+	private async startChangeReview(turnId: string): Promise<void> {
+		try {
+			const result = await this.request<ReviewRunResult>("review.start", {
+				snapshotId: turnId,
+				sessionId: this.current?.id,
+				engine: "rules",
+				force: true,
+			});
+			const turn = this.changesTurns.find(item => item.id === turnId);
+			if (turn) turn.review = result.review;
+			this.tui.requestRender();
+			void this.refreshChangesData();
+		} catch (error) {
+			this.transcript.addNotice(`Could not start the review: ${message(error)}`, "warning");
+			this.tui.requestRender();
+		}
+	}
+
+	private async cancelChangeReview(turnId: string): Promise<void> {
+		try {
+			const result = await this.request<ReviewRunResult>("review.cancel", {
+				snapshotId: turnId,
+				sessionId: this.current?.id,
+			});
+			const turn = this.changesTurns.find(item => item.id === turnId);
+			if (turn) turn.review = result.review;
+			this.tui.requestRender();
+		} catch (error) {
+			this.transcript.addNotice(`Could not cancel the review: ${message(error)}`, "warning");
+			this.tui.requestRender();
+		}
+	}
+
+	private toggleChangesScope(): void {
+		this.changesScope = this.changesScope === "session" && this.current ? "workspace" : "session";
+		if (this.changesScope === "session" && !this.current) this.changesScope = "workspace";
+		this.changesTurns = [];
+		this.changesDiff.clear();
+		this.changesUpdatedAt = "";
+		this.changesError = "";
+		this.changesPage.syncSelection();
+		void this.refreshChangesData();
 		this.tui.requestRender();
 	}
 
@@ -2256,11 +2465,12 @@ export class App implements FeatureHost {
 		// the moment the app is leaving: it must publish nothing.
 		this.beginWorkspaceFence();
 		this.footer.dispose();
-		if (this.statusRefreshTimer !== undefined) {
-			clearInterval(this.statusRefreshTimer);
-			this.statusRefreshTimer = undefined;
+		if (this.screenRefreshTimer !== undefined) {
+			clearInterval(this.screenRefreshTimer);
+			this.screenRefreshTimer = undefined;
 		}
 		this.statusPage.dispose();
+		this.changesPage.dispose();
 		this.turnSession.clearInFlightTimers();
 		this.transcript.suspend();
 		this.invalidateApprovals();
@@ -2471,7 +2681,7 @@ export class App implements FeatureHost {
 		// A key may only reach a component the current geometry still composes.
 		// Layout changes normally reconcile already; this closes the window where
 		// the TUI still targets a pane removed by a resize/visibility toggle.
-		if (this.view !== "status") this.reconcileFocus();
+		if (this.view === "chat") this.reconcileFocus();
 		// The composer's autocomplete popup can change the chrome height while
 		// this key is being handled by the focused Editor. Recheck after the
 		// input dispatch so the panes (including Problems) get the remaining
@@ -2480,21 +2690,27 @@ export class App implements FeatureHost {
 		if (this.dialogs.length || this.turnSession.approvalDialogCount()) return undefined; // focused dialogs own their keys
 
 		const statusDirection = this.statusTabDirection(data);
-		if (this.view === "status") {
-			if (statusDirection !== 0 || matchesKey(data, Key.escape)) {
+		if (this.view !== "chat") {
+			if (statusDirection !== 0) {
 				this.lastStatusSwitchAt = Date.now();
-				this.closeStatusTab();
+				this.switchScreen(statusDirection);
 				return { consume: true };
 			}
-			this.statusPage.handleInput(data);
+			if (matchesKey(data, Key.escape)) {
+				this.lastStatusSwitchAt = Date.now();
+				this.closeScreen();
+				return { consume: true };
+			}
+			if (this.view === "status") this.statusPage.handleInput(data);
+			else this.changesPage.handleInput(data);
 			return { consume: true };
 		}
 		if (statusDirection !== 0) {
-			// A repeat after closing must not immediately reopen the page while
+			// A repeat after closing must not immediately reopen a page while
 			// the user is still holding the arrow key.
 			if (Date.now() - this.lastStatusSwitchAt >= 250) {
 				this.lastStatusSwitchAt = Date.now();
-				this.openStatusTab(statusDirection);
+				this.switchScreen(statusDirection);
 			}
 			return { consume: true };
 		}
@@ -4511,11 +4727,12 @@ export class App implements FeatureHost {
 		this.cursorBlinkSub = undefined;
 		this.footer.dispose();
 		this.clearPendingAbortEsc();
-		if (this.statusRefreshTimer !== undefined) {
-			clearInterval(this.statusRefreshTimer);
-			this.statusRefreshTimer = undefined;
+		if (this.screenRefreshTimer !== undefined) {
+			clearInterval(this.screenRefreshTimer);
+			this.screenRefreshTimer = undefined;
 		}
 		this.statusPage.dispose();
+		this.changesPage.dispose();
 		this.transcript.suspend();
 		// The gateway is gone: clear workspace timers/mirrors without RPC
 		// expectations (every teardown call is bounded and fails fast).
