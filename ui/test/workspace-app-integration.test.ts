@@ -1918,8 +1918,10 @@ test("a populated docked explorer paints a bounded panel, never a full-page rect
 		const frame = tui.getScreenLines().map(stripTerminalSequences);
 		assert.equal(frame.length, 48);
 		const composerRow = frame.findIndex((line) => line.includes("Ask anything"));
-		assert.ok(composerRow > panelRows, "the composer sits below the panel");
-		for (let row = panelRows; row < composerRow - 1; row++) {
+		const explorerTop = frame.findIndex((line) => line.slice(explorerX, explorerX + explorerWidth).includes("workspace"));
+		assert.ok(explorerTop >= 0, "the explorer header starts the panel");
+		assert.ok(composerRow > explorerTop + panelRows, "the composer sits below the panel");
+		for (let row = explorerTop + panelRows; row < composerRow - 1; row++) {
 			const cell = frame[row]!.slice(explorerX, explorerX + explorerWidth);
 			assert.equal(cell.trim(), "", `explorer column blank below the panel at row ${row}: <${cell}>`);
 		}

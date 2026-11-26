@@ -47,12 +47,13 @@ for (const trueColor of [true, false]) {
 		assert.doesNotMatch(assistant, /[┌┐└┘│]/, "assistant prose has no frame");
 		assert.equal(plain[topRow]!.indexOf("✔"), assistant.indexOf("I’ll"), "tool marker aligns with the assistant text column");
 		assert.equal(plain[topRow - 1]?.trim(), "", "space outside the panel");
-		const evidence = plain.findIndex(row => row.includes("needs approval"));
-		const edge = luminance(color(screen[evidence - 1]!));
-		const fill = luminance(color(screen[evidence]!, true));
+		const evidenceTop = plain.findIndex(row => /^ {4}╭─ Approval evidence/.test(row));
+		assert.ok(evidenceTop >= 0, "approval evidence has a bounded card");
+		const edge = luminance(color(screen[evidenceTop]!));
+		const fill = luminance(color(screen[evidenceTop + 2]!, true));
 		const backdrop = luminance([8, 9, 11]);
-		assert.ok((edge + 0.05) / (fill + 0.05) >= 2.5, "approval rectangle remains visible against its inset surface");
+		assert.ok((edge + 0.05) / (fill + 0.05) >= 2.5, "approval card edge remains visible against its fill");
 		assert.ok((fill + 0.05) / (backdrop + 0.05) >= 1.1, "approval fill differs visibly from the transcript background");
-		assert.match(plain[evidence - 1]!, /^ {4}[┌└].*[┐┘]\s*$/);
+		assert.match(plain[evidenceTop]!, /^ {4}╭.*╮\s*$/);
 	});
 }

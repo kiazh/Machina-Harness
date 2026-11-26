@@ -5,11 +5,16 @@
 // Allow options are refused while critical fields do not fit.
 
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
-import { ICONS } from "../design/icons.ts";
 import { sanitizeDisplay } from "../design/text.ts";
 import { selectionBar, theme } from "../theme.ts";
-import { panelContentWidth, renderToolPanel } from "./ToolPanel.ts";
+import { renderCard } from "../design/box.ts";
+import { panelInset } from "../design/spacing.ts";
 import { DiffBlock } from "./DiffBlock.ts";
+
+/** One physical row for identity fields that must never split the frame. */
+function oneLine(text: string): string {
+	return sanitizeDisplay(text).replace(/\s*\r?\n\s*/g, " ").trim();
+}
 
 export interface ApprovalDetails {
 	requestId: string;
@@ -132,25 +137,26 @@ export class ApprovalCard implements Component {
 	}
 
 	private allowBlocked(width: number, rows: number): boolean {
-		const chrome = 2 + 8 + 2 + (this.error ? 1 : 0) + 1;
-		return rows < chrome || width < 30;
+		// The full decision card needs room for the question, three choices
+		// and the hint. Below that the compact dock still denies safely.
+		return rows < 12 || width < 30;
 	}
 
 	private evidenceRows(): string[] {
 		const d = this.details;
 		const clean = (text: string): string => sanitizeDisplay(text);
 		const rows: string[] = [];
-		rows.push(`Operation: ${d.tool ?? d.operation}`);
-		rows.push(`Target: ${d.target}`);
+		rows.push(`Operation: ${oneLine(d.tool ?? d.operation)}`);
+		rows.push(`Target: ${oneLine(d.target)}`);
 		rows.push(`argv: ${d.argv.map((a) => JSON.stringify(clean(a))).join(" ") || "(none)"}`);
 		rows.push(`Session: ${d.sessionId.slice(0, 8)}  turn: ${(d.originTurnId ?? d.transportTurnId ?? "").slice(0, 8)}  request: ${d.requestId.slice(0, 8)}`);
-		rows.push(`cwd: ${d.cwd || "(unknown)"}  backend: ${d.backend || "(unknown)"}`);
+		rows.push(`cwd: ${oneLine(d.cwd || "(unknown)")}  backend: ${oneLine(d.backend || "(unknown)")}`);
 		rows.push(`Timeout: ${d.timeout === undefined ? "unspecified" : d.timeout === 0 && d.capabilities.includes("background-process") ? "none · background command (can be stopped)" : `${d.timeout}s`}`);
 		rows.push(`Capabilities: ${d.capabilities.length ? d.capabilities.join(", ") : "(none)"}`);
-		if (d.network?.length) rows.push(`Network: ${d.network.join(", ")}`);
-		if (d.shell) rows.push(`Shell: ${d.shell}`);
+		if (d.network?.length) rows.push(`Network: ${d.network.map(oneLine).join(", ")}`);
+		if (d.shell) rows.push(`Shell: ${oneLine(d.shell)}`);
 		if (d.contentDigest) {
-			rows.push(`Content: ${clean(d.contentDigest)} (${d.contentLength ?? 0} chars)`);
+			rows.push(`Content: ${oneLine(d.contentDigest)} (${d.contentLength ?? 0} chars)`);
 		}
 		if (d.contentPreview) {
 			rows.push("Preview:");
@@ -164,53 +170,50 @@ export class ApprovalCard implements Component {
 	render(width: number): string[] {
 		if (this.docked) return this.renderDock(width);
 		const total = Math.max(0, width);
-		const content = Math.max(1, width - 4);
 		this.lastWidth = width;
 		this.lastRows = this.tui?.terminal.rows ?? 24;
 		const blocked = this.allowBlocked(width, this.lastRows);
-		const wrap = (line: string): string[] => wrapTextWithAnsi(line, content);
-		const title = " Approval required ";
-		const top = `┌─${title}${"─".repeat(Math.max(0, content + 1 - visibleWidth(title)))}┐`;
-		const bottomHint = this.resolving
-			? "Resolving…"
-			: `←→/↑↓ choose · enter confirm · esc deny · pgup/pgdn evidence`;
-		const bottom = `└─${bottomHint}${"─".repeat(Math.max(0, content + 1 - visibleWidth(bottomHint)))}┘`;
-		const out = [truncateToWidth(top, total)];
-		const header = this.evidenceRows().flatMap(wrap);
+		const cardWidth = Math.max(20, Math.min(96, total - 4));
+		const content = Math.max(8, cardWidth - 6);
+		const fields = this.evidenceRows().flatMap(line => wrapTextWithAnsi(line, content));
 		const diff = this.details.fileDiff?.diff
 			? new DiffBlock(sanitizeDisplay(this.details.fileDiff.diff).split("\n"), 6).render(content)
 			: [];
 		if (this.details.fileDiff?.truncated) diff.push(theme.dim("… diff truncated"));
-		const evidence = [...header, ...diff];
-		const chromeRows = 1 + 2 + (this.error ? 1 : 0) + 1 + (blocked ? 1 : 0) + 1;
-		// Review sheets are full-screen now (see App.openDialog): budget the
-		// whole viewport, then subtract the card's own chrome rows.
-		const avail = Math.max(4, this.lastRows);
-		const budget = Math.max(1, avail - chromeRows);
+		const evidence = [...fields, ...diff];
+		const chrome = 2 + 1 + 1 + 3 + 1 + (blocked ? 1 : 0) + (this.error ? 1 : 0);
+		const budget = Math.max(1, this.lastRows - chrome);
 		const maxTop = Math.max(0, evidence.length - budget);
 		this.evidenceTop = Math.max(0, Math.min(this.evidenceTop, maxTop));
 		const windowed = evidence.slice(this.evidenceTop, this.evidenceTop + budget);
-		const row = (line: string): string => {
-			const body = `${truncateToWidth(line, content)}${" ".repeat(Math.max(0, content - visibleWidth(truncateToWidth(line, content))))}`;
-			return `│ ${body} │`;
-		};
-		for (const line of windowed) out.push(row(line));
-		if (evidence.length > budget) {
-			out.push(row(theme.dim(`… ${evidence.length - budget} more evidence rows (pgup/pgdn)`)));
-		}
-		if (blocked) {
-			out.push(row(theme.warning("! Resize to review — Allow blocked.")));
-		}
-		if (this.error) out.push(row(theme.error(`✗ ${this.error}`)));
-		const options = DECISIONS.map((option, i) => {
-			const mark = i === this.selected ? ICONS.selectedMarker : " ";
-			const label = i === this.selected ? theme.accentBold(option.label) : option.label;
-			return `${mark} ${label}`;
-		}).join(theme.dim(" · "));
-		out.push(row(this.resolving ? theme.dim("Resolving…") : options));
-		out.push(row(theme.dim("Session grants reuse authority for this operation only; changed content asks again.")));
-		out.push(truncateToWidth(bottom, total));
-		return out.map((line) => truncateToWidth(line, total));
+		const choices = DECISIONS.map((option, index) => {
+			const mark = index === this.selected ? "❯" : " ";
+			const raw = truncateToWidth(`${mark} ${option.label}`, content, "…", true);
+			return index === this.selected ? selectionBar(raw, content) : raw;
+		});
+		const lines: string[] = [
+			`${theme.warning("●")} ${theme.warning(this.recorded)}`,
+			"",
+			...windowed,
+			...(evidence.length > budget
+				? [theme.dim(`… ${evidence.length - budget} more evidence rows (pgup/pgdn)`)]
+				: []),
+			...(blocked ? [theme.warning("! Allow blocked — resize to review")] : []),
+			...(this.error ? [theme.error(`✗ ${this.error}`)] : []),
+			"",
+			...choices,
+			theme.dim("Session grants reuse authority for this operation only; changed content asks again."),
+			theme.dim(this.resolving ? "Resolving…" : "←→/↑↓ choose · enter confirm · esc deny · pgup/pgdn evidence"),
+		];
+		const card = renderCard(lines, {
+			width: cardWidth,
+			title: "Approval required",
+			paddingX: 2,
+			paddingY: true,
+			fill: "toolBg",
+		});
+		const left = Math.max(0, Math.floor((total - cardWidth) / 2));
+		return card.map(line => `${" ".repeat(left)}${line}`);
 	}
 
 	/** Evidence stays in the retained transcript; only decisions occupy the dock. */
@@ -224,52 +227,91 @@ export class ApprovalCard implements Component {
 	}
 
 	private renderEvidence(width: number): string[] {
-		const content = panelContentWidth(width);
+		const indentWidth = panelInset(width);
+		const cardWidth = Math.max(24, Math.min(104, width - indentWidth));
+		const content = Math.max(8, cardWidth - 6);
 		const d = this.details;
-		const title = `${theme.warning("●")} ${sanitizeDisplay(d.tool ?? d.operation)} ${theme.muted(sanitizeDisplay(d.target))} · ${theme.warning(this.recorded)}`;
-		const headerOverflows = visibleWidth(title) > content || /[\r\n]/.test(`${d.tool ?? d.operation}${d.target}`);
-		// Overflowed titles must remain fully reviewable, including target suffixes.
+		const title = `${theme.warning("●")} ${theme.text(oneLine(d.tool ?? d.operation))} ${theme.muted(oneLine(d.target))} ${theme.dim("·")} ${theme.warning(this.recorded)}`;
 		const fields = this.evidenceRows();
-		const evidence = (headerOverflows ? fields : fields.slice(2)).flatMap(line => wrapTextWithAnsi(line, content));
+		const all = [title, "", ...fields.flatMap(line => wrapTextWithAnsi(line, content))];
 		const diff = d.fileDiff?.diff ? new DiffBlock(sanitizeDisplay(d.fileDiff.diff).split("\n"), 8).render(content) : [];
 		if (d.fileDiff?.truncated) diff.push(theme.dim("… diff truncated"));
-		const all = [...evidence, ...diff];
-		// Reserve dock (6), composer (3), footer (1), gaps (3), panel chrome (6).
-		const budget = Math.max(2, Math.min(16, (this.tui?.terminal.rows ?? 40) - 19 - (this.error ? 1 : 0)));
+		all.push(...diff);
+		// Keep the card bounded; the latest evidence stays nearest the
+		// decision dock.
+		const budget = Math.max(4, Math.min(18, (this.tui?.terminal.rows ?? 40) - 18 - (this.error ? 1 : 0)));
 		this.evidenceTop = Math.min(this.evidenceTop, Math.max(0, all.length - budget));
 		const windowed = all.slice(this.evidenceTop, this.evidenceTop + budget);
-		const more = all.length > budget ? [theme.dim(`Evidence ${this.evidenceTop + 1}–${Math.min(all.length, this.evidenceTop + budget)}/${all.length} · PgUp/PgDn review`)] : [];
-		return ["", ...renderToolPanel([title, "", ...windowed, ...more], width)];
+		if (all.length > budget) {
+			windowed.push(theme.dim(`Evidence ${this.evidenceTop + 1}–${Math.min(all.length, this.evidenceTop + budget)}/${all.length} · PgUp/PgDn`));
+		}
+		const card = renderCard(windowed, {
+			width: cardWidth,
+			title: "Approval evidence",
+			paddingX: 1,
+			paddingY: false,
+			fill: "toolBg",
+			titleTone: theme.muted,
+		});
+		const indent = " ".repeat(indentWidth);
+		return ["", ...card.map(line => `${indent}${line}`)];
 	}
 
 	private renderDock(width: number): string[] {
 		this.lastWidth = width;
 		this.lastRows = this.tui?.terminal.rows ?? 24;
-		const clean = sanitizeDisplay;
-		const title = `Allow ${clean(this.details.tool ?? this.details.operation)} · ${clean(this.details.target)}?`;
-		const request = theme.dim(`request: ${clean(this.details.requestId).slice(0, 16)}`);
-		// Sanitize keeps newlines: a multi-line title becomes one physical row
-		// per line (request tag on the first) instead of a break inside a row.
-		const first = title.split("\n").map((line, index) => {
-			if (width < 80) return truncateToWidth(line, width);
-			const heading = truncateToWidth(line, Math.max(0, width - visibleWidth(request) - 3));
-			if (index > 0) return heading;
-			return `${heading}${" ".repeat(Math.max(1, width - visibleWidth(heading) - visibleWidth(request)))}${request}`;
-		});
-		const descriptions = ["Only this exact action", "Where supported by policy", "Do not run this action"];
-		const choices = DECISIONS.map((option, i) => {
-			const mark = i === this.selected ? "›" : " ";
-			const description = width >= 60 ? `  ${theme.dim(descriptions[i]!)}` : "";
-			const line = truncateToWidth(` ${mark}  ${option.label}${description}`, width);
-			return i === this.selected ? selectionBar(line, width) : line;
-		});
+		const compact = this.lastRows < 14 || width < 56;
+		const tight = this.lastRows <= 10;
 		const blocked = this.isAllowBlocked();
-		const hints = this.resolving ? "Resolving…" : "↑↓ choose · Enter select · Esc deny";
-		const out = [theme.border("─".repeat(Math.max(0, width))), ...first, ...choices];
-		if (this.error) out.push(theme.error(truncateToWidth(this.error, width)));
-		else if (blocked) out.push(theme.warning("Resize to review · Allow blocked"));
-		out.push(theme.dim(truncateToWidth(hints, width)));
-		return out.map(line => truncateToWidth(line, width));
+		const question = `Allow ${oneLine(this.details.tool ?? this.details.operation)} · ${oneLine(this.details.target)}?`;
+		const request = `request: ${oneLine(this.details.requestId).slice(0, 16)}`;
+		const descriptions = ["Only this exact action", "Where supported by policy", "Do not run this action"];
+		const widthForChoices = tight ? width : Math.max(20, Math.min(112, width) - (compact ? 4 : 8));
+		const choices = DECISIONS.map((option, index) => {
+			const mark = index === this.selected ? "›" : " ";
+			const description = !compact && widthForChoices >= 56 ? `  ${theme.dim(descriptions[index]!)}` : "";
+			const line = truncateToWidth(`${mark} ${option.label}${description}`, widthForChoices, "…", true);
+			return index === this.selected ? selectionBar(line, widthForChoices) : line;
+		});
+		const hint = this.resolving
+			? "Resolving…"
+			: blocked
+				? "Allow blocked · resize to review · Esc deny"
+				: "↑↓ choose · Enter select · Esc deny";
+		if (tight) {
+			const lines = [
+				theme.border("─".repeat(Math.max(0, width))),
+				truncateToWidth(question, width, "…", true),
+				...choices,
+				theme.dim(truncateToWidth(hint, width)),
+			];
+			return lines.map(line => truncateToWidth(line, width));
+		}
+		const cardWidth = Math.max(24, Math.min(width, 112));
+		const padX = compact ? 1 : 2;
+		const inner = Math.max(8, cardWidth - 2 - padX * 2);
+		const heading = truncateToWidth(question, inner, "…", true);
+		const room = Math.max(0, inner - visibleWidth(request) - 1);
+		const first = truncateToWidth(question, room, "…", true);
+		const headingLine = width >= 70
+			? `${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))} ${theme.dim(request)}`
+			: heading;
+		const lines: string[] = [
+			headingLine,
+			...choices,
+			"",
+			theme.dim(truncateToWidth(hint, inner)),
+		];
+		if (this.error) lines.splice(2, 0, theme.error(truncateToWidth(this.error, inner, "…")));
+		const card = renderCard(lines, {
+			width: cardWidth,
+			title: `Approval required · ${this.recorded}`,
+			paddingX: padX,
+			paddingY: false,
+			fill: "toolBg",
+		});
+		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		return card.map(line => `${" ".repeat(left)}${line}`);
 	}
 
 	invalidate(): void {}

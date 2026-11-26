@@ -28,7 +28,7 @@ function pageAt(width = 96, rows = 28, opened?: (row: { id?: string }, section: 
 test("status page renders agents, shells, tools and harnesses in one grid", () => {
 	const page = pageAt();
 	const rendered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /MACHINA\s{2}ACTIVITY/);
+	assert.match(rendered, / ACTIVITY/);
 	assert.match(rendered, /AGENTS/);
 	assert.match(rendered, /Main · Build a calculator/);
 	assert.match(rendered, /SHELLS/);
@@ -93,7 +93,7 @@ test("status page swaps instantly without a transition frame", () => {
 	const page = pageAt(80, 24);
 	page.enter(1);
 	const rendered = page.render(80).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /MACHINA\s{2}ACTIVITY/);
+	assert.match(rendered, / ACTIVITY/);
 	page.dispose();
 });
 

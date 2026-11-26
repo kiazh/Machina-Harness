@@ -13,7 +13,7 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { sanitizeDisplay } from "../design/text.ts";
-import { isOpaqueBackground, theme } from "../theme.ts";
+import { theme } from "../theme.ts";
 
 export interface StatusRow {
 	/** Stable identity so refresh does not lose selection/expansion. */
@@ -114,18 +114,12 @@ function age(iso: string | undefined): string {
 	return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-/** The chat header is a filled wordmark; pages keep the same anchor. */
-function wordmark(): string {
-	return isOpaqueBackground()
-		? theme.accentBg(theme.onAccent(" MACHINA "))
-		: theme.accentBold("MACHINA");
-}
-
 export class StatusPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => StatusSnapshot;
 	private readonly onOpen?: (row: StatusRow, section: string | undefined) => boolean;
 	private filter: StatusFilter = "all";
+	private viewportRows: number | undefined;
 	private selectedKey: string | undefined;
 	private readonly expanded = new Set<string>();
 	private hitboxes: Hitbox[] = [];
@@ -138,6 +132,11 @@ export class StatusPage implements Component {
 		this.tui = tui;
 		this.snapshot = snapshot;
 		this.onOpen = onOpen;
+	}
+
+	/** The shell charges the command strip against the viewport. */
+	setViewportRows(rows: number): void {
+		this.viewportRows = rows;
 	}
 
 	/** Kept as the tab-switch entry point; page swaps are intentionally
@@ -229,7 +228,7 @@ export class StatusPage implements Component {
 
 	render(width: number): string[] {
 		const columns = Math.max(1, width);
-		const rows = Math.max(8, this.tui.terminal.rows ?? 24);
+		const rows = Math.max(8, this.viewportRows ?? this.tui.terminal.rows ?? 24);
 		let lines: string[];
 		try {
 			lines = this.build(columns, rows);
@@ -252,7 +251,7 @@ export class StatusPage implements Component {
 			: `${theme.dim("○")} ${theme.dim("idle")}`;
 		const project = sanitizeDisplay(snap.project || "global");
 		push(between(
-			`${wordmark()} ${theme.muted("ACTIVITY")}  ${theme.dim(`· ${project}`)}`,
+			` ${theme.accentBold("ACTIVITY")}  ${theme.dim(`· ${project}`)}`,
 			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
 			width,
 		));
@@ -383,7 +382,7 @@ export class StatusPage implements Component {
 		if (all || this.filter === "harnesses") {
 			sections.push({ title: "Harnesses", entries: snap.harnesses, empty: "No external harnesses detected.", category: "harnesses" });
 		}
-		if (all) {
+		if (all && (snap.queued > 0 || snap.approvals > 0)) {
 			sections.push({
 				title: "Queue",
 				entries: [{
@@ -402,8 +401,11 @@ export class StatusPage implements Component {
 		}
 
 		const lines: ScreenLine[] = [];
-		for (const [sectionIndex, section] of sections.entries()) {
-			if (sectionIndex > 0) lines.push({ text: "", kind: "blank" });
+		let renderedSections = 0;
+		for (const section of sections) {
+			if (all && section.entries.length === 0) continue;
+			if (renderedSections > 0) lines.push({ text: "", kind: "blank" });
+			renderedSections++;
 			lines.push({
 				text: ` ${theme.muted(section.title.toUpperCase())}  ${theme.dim(String(section.entries.length))}`,
 				kind: "section",

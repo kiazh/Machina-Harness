@@ -21,7 +21,7 @@ import type {
 	ReviewFindingInfo,
 	ReviewRunInfo,
 } from "../protocol.ts";
-import { isOpaqueBackground, theme } from "../theme.ts";
+import { theme } from "../theme.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
 export interface ChangesDiffState {
@@ -186,13 +186,6 @@ function windowStartForBlock(start: number, end: number, height: number, length:
 	return Math.max(0, Math.min(length - height, preferred));
 }
 
-/** The chat header is a filled wordmark; pages keep the same anchor. */
-function wordmark(): string {
-	return isOpaqueBackground()
-		? theme.accentBg(theme.onAccent(" MACHINA "))
-		: theme.accentBold("MACHINA");
-}
-
 export class ChangesPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => ChangesSnapshot;
@@ -202,6 +195,7 @@ export class ChangesPage implements Component {
 	private readonly onCancelReview?: (turnId: string) => void;
 	private readonly onToggleScope?: () => void;
 	private readonly onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
+	private viewportRows: number | undefined;
 	private selectedTurnId: string | undefined;
 	private selectedFilePath: string | undefined;
 	private tab: InspectorTab = "files";
@@ -230,6 +224,11 @@ export class ChangesPage implements Component {
 		this.onCancelReview = options.onCancelReview;
 		this.onToggleScope = options.onToggleScope;
 		this.onFixFinding = options.onFixFinding;
+	}
+
+	/** The shell charges the command strip against the viewport. */
+	setViewportRows(rows: number): void {
+		this.viewportRows = rows;
 	}
 
 	enter(_direction?: 1 | -1): void {
@@ -399,7 +398,7 @@ export class ChangesPage implements Component {
 
 	render(width: number): string[] {
 		const columns = Math.max(1, width);
-		const rows = Math.max(8, this.tui.terminal.rows ?? 24);
+		const rows = Math.max(8, this.viewportRows ?? this.tui.terminal.rows ?? 24);
 		let lines: string[];
 		try {
 			lines = this.build(columns, rows);
@@ -475,7 +474,7 @@ export class ChangesPage implements Component {
 			? `${theme.success("●")} ${theme.success("live")}`
 			: `${theme.dim("○")} ${theme.dim("idle")}`;
 		push(between(
-			`${wordmark()} ${theme.muted("CHANGES")}  ${theme.dim(`· ${sanitizeDisplay(snap.project || "global")}`)}`,
+			` ${theme.accentBold("CHANGES")}  ${theme.dim(`· ${sanitizeDisplay(snap.project || "global")}`)}`,
 			`${live}   ${theme.dim(snap.updatedAt || "refreshing…")} `,
 			width,
 		));

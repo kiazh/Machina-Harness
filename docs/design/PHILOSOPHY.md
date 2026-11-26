@@ -11,8 +11,10 @@ and decorative borders are not part of the language.
 - The conversation has no outer frame.
 - Assistant prose is the primary visual object.
 - Tool calls are events, not cards.
-- Approval evidence is the exception: a human safety decision may use a bounded
-  rectangle because it must be reviewed as one object.
+- The shell is one persistent command strip: brand, the three screens, session
+  context and live state. It stays because every part carries state.
+- Approval is the exception: evidence and the decision use one shared rounded
+  card because a human must review them as one object.
 
 ## 2. One grid
 
@@ -101,6 +103,8 @@ Every turn has the same shape:
 - Prose and turn colophon: `ui/src/components/AssistantTurn.ts`,
   `ui/src/components/TurnSummary.ts`
 - Tool events: `ui/src/components/ToolTurn.ts`
+- Command strip: `ui/src/components/NavBar.ts`
+- Cards: `ui/src/design/box.ts`
 - Screens: `ui/src/components/StatusPage.ts`,
   `ui/src/components/ChangesPage.ts`
 - Workspace chrome: `ui/src/components/EditorPane.ts`

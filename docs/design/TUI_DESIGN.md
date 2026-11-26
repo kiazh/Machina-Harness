@@ -31,16 +31,35 @@ state, approval, output, ui, dialogs, layout, features, app).
 - Notices and thinking use the same gutter. Thinking reads
   `✻ Thinking (3s · esc to interrupt)`. Below 40 columns, extra gutters
   disappear.
-- Approval evidence is the one intentional framed surface: a bounded rectangle
-  with a distinct fill, because it is a safety decision rather than ambient
-  output. The rectangle keeps its contrast in truecolor and 256-color modes
-  and never turns red/green on an outcome change.
-- Brand, session title and workspace share one context row. The footer has one
-  row: actual model · branch · mode · status, observed tokens when nonzero,
-  hints when space permits, and a fixed bottom-right activity/learning square.
+- Approval is a pair of matching rounded cards, drawn by one shared
+  `renderCard` primitive: a titled evidence card in the transcript and a
+  titled decision card above the composer. Each has a thin border, a padded
+  interior, an optional raised surface, and a title embedded in the top rule.
+  The decision card uses a full-width accent bar for the current choice.
+- The shell owns a persistent command strip: `MACHINA` block, `Chat`,
+  `Activity` and `Changes` tabs with live counts, then session title,
+  project/branch, model and state. The active tab gets a bright underline.
+  The transcript no longer repeats a brand header. The footer keeps the
+  model · branch · mode · status row, tokens, hints and the bottom-right
+  activity square.
 - Bold is reserved for brand, selections, approval titles and Markdown
   emphasis. Every state keeps a text marker (`✔`/`✖`/`⊘`/`!`, `❯`/`⏺`/`⎿`)
   so meaning survives monochrome skins.
+
+## Command strip
+
+- Two rows at normal heights, one on short viewports. It is present on chat,
+  Activity and Changes, so the three screens are real tabs rather than
+  full-viewport replacements.
+- Left: solid accent `MACHINA` block, then the tabs. Counts appear only when
+  nonzero: `Activity 2`, `Changes 3`. The active tab is accent-bold and owns
+  the heavy segment of the second-row rule.
+- Right: session title, project · branch, model, and the live state. Parts
+  drop from the right as the width shrinks; status is last to go.
+- Tabs are clickable. `←`/`→` on an empty composer, `/activity`, `/changes`,
+  `Ctrl+N` and Esc keep working through the same screen entry points.
+- Pages receive the reduced viewport height from the shell; their own header
+  row is a quiet section title, never a second brand.
 
 ## Layout and density
 
@@ -125,8 +144,8 @@ state, approval, output, ui, dialogs, layout, features, app).
   screen is open, `←`, `→`, or Esc returns to chat; the screens never swap
   positions. The legacy `Ctrl+N` then `←`/`→` chord remains a fallback.
   `/changes` opens Changes directly and `/changes all` includes every chat in
-  the workspace. The two pages are full-viewport surfaces, not transcript
-  panels.
+  the workspace. The two pages replace the transcript and composer inside the
+  command strip; the strip itself never disappears.
 - Activity is a single full-width grid: a live header, wrapped text filters
   (no pills), then spaced category rows. Each row carries its status and age
   inline; the selected row opens its retained logs directly beneath it. There

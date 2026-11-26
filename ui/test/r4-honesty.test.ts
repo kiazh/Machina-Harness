@@ -262,13 +262,12 @@ test("R4-023: ApprovalCard dock title splits newline-laden tool/target fields", 
 	assertRowsClean(rows, "ApprovalCard dock");
 	assert.ok(!rows.some((row) => row.includes("\n")), "no row may embed a newline");
 	const clean = rows.map((row) => stripTerminalSequences(row).trimEnd());
-	// border + 3 title rows (two embedded newlines) + 3 choices + hint
+	// one bordered decision card; hostile newlines flatten into one row
 	assert.equal(clean.length, 8, JSON.stringify(clean));
-	assert.match(clean[0]!, /^─/);
-	assert.match(clean[1]!, /^Allow x {2}/);
-	assert.match(clean[2]!, /^Injected · y$/);
-	assert.match(clean[3]!, /^Target2\?$/);
-	assert.match(clean[6]!, /Deny/);
+	assert.match(clean[0]!, /^╭─ Approval required/);
+	assert.match(clean[1]!, /Allow x.*Injected.*y.*Target2\?/);
+	assert.match(clean[4]!, /Deny/);
+	assert.match(clean[7]!, /^╰/);
 
 	// A single-line title keeps the exact previous row shape (no width-math drift).
 	const single = new ApprovalCard(
@@ -287,8 +286,8 @@ test("R4-023: ApprovalCard dock title splits newline-laden tool/target fields", 
 	);
 	const singleRows = single.render(80);
 	assertRowsClean(singleRows, "ApprovalCard single-line");
-	assert.equal(singleRows.length, 6);
-	assert.match(stripTerminalSequences(singleRows[1]!), /^Allow git · status\?/);
+	assert.equal(singleRows.length, 8);
+	assert.match(stripTerminalSequences(singleRows[1]!), /Allow git · status\?/);
 });
 
 // ─── fake-terminal capture: the same components through the alt-screen ───────

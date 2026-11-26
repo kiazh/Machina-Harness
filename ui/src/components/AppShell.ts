@@ -64,6 +64,8 @@ export class AppShell {
 	private workspace: WorkspaceShell | undefined;
 	/** Optional full-page tab (currently the live status tab). */
 	private page: Component | undefined;
+	/** Persistent brand/tabs/state strip above every screen. */
+	private navBar: (Component & { rows?: () => number }) | undefined;
 
 	constructor(tui: TUI, transcript: Component, composer: Component & ComposerBudget, footer: Footer) {
 		this.tui = tui;
@@ -123,6 +125,14 @@ export class AppShell {
 		this.rebuild();
 	}
 
+	/** Persistent command strip. Its rows are charged against every screen. */
+	setNavBar(nav?: Component & { rows?: () => number }): void {
+		this.navBar = nav;
+		this.invalidateChrome();
+		this.syncPageRows();
+		this.rebuild();
+	}
+
 	get root(): Component {
 		return this.viewportRoot;
 	}
@@ -166,6 +176,7 @@ export class AppShell {
 		this.density = density;
 		this.applyBudgets();
 		this.syncWorkspace(cols, rows);
+		this.syncPageRows();
 		if (changed || !this.currentRoot) this.rebuild();
 		this.onViewportResize?.();
 	}
@@ -205,12 +216,14 @@ export class AppShell {
 			activityRows,
 			composerRows,
 			this.dock ? "dock" : "nodock",
+			this.navRows(),
 		].join("|");
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
 		const gap = this.gapRows();
 		let rows = composerRows + 1;
 		let sections = 3; // panes row + composer + footer (footer is one row)
+		if (this.navBar) sections += 1;
 		if (activity?.visible) {
 			rows += activityRows;
 			sections += 1;
@@ -219,7 +232,7 @@ export class AppShell {
 			rows += this.dock.render(width).length;
 			sections += 1;
 		}
-		const total = rows + gap * (sections - 1);
+		const total = this.navRows() + rows + gap * (sections - 1);
 		this.chromeCache = { key, rows: total };
 		return total;
 	}
@@ -232,6 +245,22 @@ export class AppShell {
 	/** Inter-section gap for the current density and dock state (single source). */
 	private gapRows(): number {
 		return this.density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
+	}
+
+	/** Rows the persistent command strip occupies on this viewport. */
+	private navRows(): number {
+		if (!this.navBar) return 0;
+		return Math.max(0, this.navBar.rows?.() ?? 0);
+	}
+
+	/**
+	 * Pages size themselves from the terminal. With the command strip above
+	 * them they must know the reduced viewport, or their footer row is clipped.
+	 */
+	private syncPageRows(): void {
+		const page = this.page as (Component & { setViewportRows?: (rows: number) => void }) | undefined;
+		if (!page?.setViewportRows) return;
+		page.setViewportRows(Math.max(1, this.liveRows() - this.navRows()));
 	}
 
 	private liveColumns(): number {
@@ -313,10 +342,15 @@ export class AppShell {
 	}
 
 	private build(density: Density): VStack {
+		const navEntries = this.navBar ? [{ component: this.navBar, shrink: 0 }] : [];
 		// Page tabs own the whole viewport: no composer, dock, activity bar or
 		// footer chrome underneath them.
 		if (this.page) {
-			return new VStack([{ component: this.page, basis: 0, grow: 1 }], { gap: 0 });
+			this.syncPageRows();
+			return new VStack([
+				...navEntries,
+				{ component: this.page, basis: 0, grow: 1 },
+			], { gap: 0 });
 		}
 		// Full density keeps one chrome gap row; smaller viewports spend
 		// every row on transcript, composer, or status.
@@ -330,6 +364,7 @@ export class AppShell {
 		if (!topRow) {
 			return new VStack(
 				[
+					...navEntries,
 					{ component: this.chatColumn(), basis: 0, grow: 1 },
 					...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 					...activityEntries,
@@ -344,6 +379,7 @@ export class AppShell {
 		// FULL-WIDTH rows. The chat column keeps only the transcript.
 		return new VStack(
 			[
+				...navEntries,
 				{ component: topRow, basis: 0, grow: 1 },
 				...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 				...activityEntries,

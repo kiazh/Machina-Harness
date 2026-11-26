@@ -120,7 +120,7 @@ function fakeTui(columns = 110, rows = 32): TUI {
 test("changes page renders prompts, files, stats and review state", () => {
 	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor);
 	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
-	assert.match(rendered, /MACHINA\s{2}CHANGES/);
+	assert.match(rendered, / CHANGES\s+· machina/);
 	assert.match(rendered, /01 ❯/);
 	assert.match(rendered, /Fix the parser and explain the failure/);
 	assert.match(rendered, /src\/parser\.py/);

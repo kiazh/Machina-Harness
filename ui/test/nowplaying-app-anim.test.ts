@@ -124,6 +124,10 @@ function screen(tui: TuiAltScreen): string[] {
 	return tui.getScreenLines().map((line) => stripTerminalSequences(line));
 }
 
+function musicLine(lines: string[]): string {
+	return lines.find(line => /Night Drive|Second Track|Reduced Track|source denied|Nothing playing/.test(line)) ?? lines[0] ?? "";
+}
+
 function frameIndex(line: string | undefined): number {
 	if (line === undefined) return -1;
 	return SOUND_FRAMES.findIndex((frame) => line.includes(frame));
@@ -170,20 +174,20 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 
 		// Initial playing header renders with a sound frame (fixture evidence).
 		const initial = screen(tui);
-		assert.match(initial[0] ?? "", /Night Drive/);
-		assert.equal(frameIndex(initial[0]), 0, `initial playing frame: ${initial[0]}`);
+		assert.match(musicLine(initial) ?? "", /Night Drive/);
+		assert.equal(frameIndex(musicLine(initial)), 0, `initial playing frame: ${musicLine(initial)}`);
 
 		// +250 ms while idle: the coordinator drives a new frame into the
 		// rendered output with no input.
 		await settle(t, 250);
 		const moved = screen(tui);
-		assert.equal(frameIndex(moved[0]), 1, `one 250 ms step changes the sound frame: ${moved[0]}`);
+		assert.equal(frameIndex(musicLine(moved)), 1, `one 250 ms step changes the sound frame: ${musicLine(moved)}`);
 
 		// Another full second: the interpolated clock advances (no input).
 		await settle(t, 1000);
 		const later = screen(tui);
-		assert.match(later[0] ?? "", /0:13 \/ 3:30/, `elapsed advanced without input: ${later[0]}`);
-		assert.notEqual(later[0], initial[0], "the music header changed");
+		assert.match(musicLine(later) ?? "", /0:13 \/ 3:30/, `elapsed advanced without input: ${musicLine(later)}`);
+		assert.notEqual(musicLine(later), musicLine(initial), "the music header changed");
 
 		// Track change on the provider: the next scheduled poll publishes it
 		// without a click or a /music command.
@@ -192,9 +196,9 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 		await settle(t, NOWPLAYING_POLL_MS);
 		const switched = screen(tui);
 		assert.ok(pollCount() > pollsBefore, "the scheduled poll re-read the gateway");
-		assert.match(switched[0] ?? "", /Second Track/, `the new title rendered: ${switched[0]}`);
-		assert.match(switched[0] ?? "", /0:05 \/ 3:30/);
-		assert.doesNotMatch(switched[0] ?? "", /Night Drive/);
+		assert.match(musicLine(switched) ?? "", /Second Track/, `the new title rendered: ${musicLine(switched)}`);
+		assert.match(musicLine(switched) ?? "", /0:05 \/ 3:30/);
+		assert.doesNotMatch(musicLine(switched) ?? "", /Night Drive/);
 
 		// Metadata polls never replace the live music subscription.
 		const handleWhilePlaying = musicAnimHandle(app);
@@ -207,8 +211,8 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 		current = reading({ title: "Second Track", state: "paused", elapsed: 65 });
 		await settle(t, NOWPLAYING_POLL_MS);
 		const paused = screen(tui);
-		assert.match(paused[0] ?? "", /⏸ Second Track/, `paused state rendered: ${paused[0]}`);
-		assert.equal(frameIndex(paused[0]), -1, "no playing sound frame while paused");
+		assert.match(musicLine(paused) ?? "", /⏸ Second Track/, `paused state rendered: ${musicLine(paused)}`);
+		assert.equal(frameIndex(musicLine(paused)), -1, "no playing sound frame while paused");
 		assert.equal(musicAnimHandle(app), undefined, "pause retired the music subscription");
 
 		// The pause poll just landed; a 250 ms window cannot contain another
@@ -226,7 +230,7 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 		current = reading({ title: "Second Track", elapsed: 70 });
 		await settle(t, NOWPLAYING_POLL_MS);
 		const resumed = screen(tui);
-		assert.ok(frameIndex(resumed[0]) >= 0, `motion resumed: ${resumed[0]}`);
+		assert.ok(frameIndex(musicLine(resumed)) >= 0, `motion resumed: ${musicLine(resumed)}`);
 		const resumedHandle = musicAnimHandle(app);
 		assert.ok(resumedHandle, "resume subscribes the music animation again");
 		await settle(t, NOWPLAYING_POLL_MS);
@@ -238,8 +242,8 @@ test("real App: idle frame, clock, track change, pause/resume and exit need no i
 		await settle(t, NOWPLAYING_POLL_MS);
 		const failed = screen(tui);
 		assert.equal(musicAnimHandle(app), undefined, "a failed read retired the stale music animation");
-		assert.equal(frameIndex(failed[0]), -1, "no stale sound frame after failure");
-		assert.match(failed[0] ?? "", /source denied/, `honest failure rendered: ${failed[0]}`);
+		assert.equal(frameIndex(musicLine(failed)), -1, "no stale sound frame after failure");
+		assert.match(musicLine(failed) ?? "", /source denied/, `honest failure rendered: ${musicLine(failed)}`);
 
 		// Exit: polling and render demand stop; resources are cleaned up.
 		await app.exit();
@@ -277,7 +281,7 @@ test("real App: disable stops polling and retires the music handle without dispo
 
 		await app.start();
 		await settle(t, 0);
-		assert.match(screen(tui)[0] ?? "", /Night Drive/);
+		assert.match(musicLine(screen(tui)) ?? "", /Night Drive/);
 		assert.ok(musicAnimHandle(app), "playing after boot");
 
 		// Disable through the supported MusicHost surface.
@@ -288,7 +292,7 @@ test("real App: disable stops polling and retires the music handle without dispo
 
 		assert.equal(controller.isEnabled(), false);
 		assert.doesNotMatch(
-			screen(tui)[0] ?? "",
+			musicLine(screen(tui)) ?? "",
 			/Night Drive|Nothing playing/,
 			"the bar rows are gone while disabled",
 		);
@@ -305,8 +309,8 @@ test("real App: disable stops polling and retires the music handle without dispo
 		assert.equal(saved, true);
 		assert.equal(controller.isEnabled(), true);
 		assert.ok(musicAnimHandle(app), "re-enable resubscribed one music animation");
-		assert.match(screen(tui)[0] ?? "", /Night Drive/);
-		assert.ok(frameIndex(screen(tui)[0]) >= 0, "motion is live again after re-enable");
+		assert.match(musicLine(screen(tui)) ?? "", /Night Drive/);
+		assert.ok(frameIndex(musicLine(screen(tui))) >= 0, "motion is live again after re-enable");
 
 		await app.exit();
 	} finally {
@@ -335,12 +339,12 @@ test("real App: reduced motion suppresses decorative frames but metadata still r
 	try {
 		await app.start();
 		await settle(t, 0);
-		assert.match(screen(tui)[0] ?? "", /Night Drive/);
-		assert.equal(frameIndex(screen(tui)[0]), 0, "reduced motion pins the first sound frame");
+		assert.match(musicLine(screen(tui)) ?? "", /Night Drive/);
+		assert.equal(frameIndex(musicLine(screen(tui))), 0, "reduced motion pins the first sound frame");
 
 		// No decorative recurring frames: a 250 ms step alone changes nothing.
 		await settle(t, 250);
-		assert.equal(frameIndex(screen(tui)[0]), 0, "the decorative frame did not advance");
+		assert.equal(frameIndex(musicLine(screen(tui))), 0, "the decorative frame did not advance");
 
 		// Section 12: the 2 s metadata poll must still request a render and
 		// reach the screen even when decorative animation is suppressed.
@@ -348,7 +352,7 @@ test("real App: reduced motion suppresses decorative frames but metadata still r
 		// scheduler-policy follow-up and is deliberately not promised here.
 		current = reading({ title: "Reduced Track" });
 		await settle(t, NOWPLAYING_POLL_MS);
-		assert.match(screen(tui)[0] ?? "", /Reduced Track/, "poll-driven metadata still renders");
+		assert.match(musicLine(screen(tui)) ?? "", /Reduced Track/, "poll-driven metadata still renders");
 
 		await app.exit();
 	} finally {

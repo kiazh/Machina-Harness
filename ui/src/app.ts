@@ -22,7 +22,8 @@ import {
 } from "@earendil-works/pi-tui";
 import { ArgumentAwareAutocompleteProvider } from "./autocomplete.ts";
 import { parseCommand, splitSub, type ParsedCommand } from "./commands.ts";
-import { ComposerBox, Footer, header, Picker, SecretForm, TextForm, ThinkingIndicator } from "./components.ts";
+import { ComposerBox, Footer, Picker, SecretForm, TextForm, ThinkingIndicator } from "./components.ts";
+import { NavBar, type NavSnapshot, type NavView } from "./components/NavBar.ts";
 import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
 import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsFilters, type SkillsPreviewResult, type SkillsSearchParams, type SkillsSearchResult, type SkillsSectionParams, type SkillsSectionResult } from "./components/SkillsMenu.ts";
@@ -308,7 +309,6 @@ export class App implements FeatureHost {
 	private lastEscAt = 0;
 	private pendingAbortEscAt = 0;
 	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
-	private version = "";
 	private current: SessionInfo | undefined;
 	/** Title chosen by /new while the chat is still a client-side draft. */
 	private draftSessionTitle: string | undefined;
@@ -323,6 +323,7 @@ export class App implements FeatureHost {
 	private readonly openQuestions = new Set<string>();
 	private readonly activity = new ActivityStore();
 	private view: "chat" | "status" | "changes" = "chat";
+	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
 	private screenRefreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -481,6 +482,12 @@ export class App implements FeatureHost {
         };
 		this.shell = new AppShell(tui, this.transcriptView, this.composer, this.footer);
 		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
+		this.navBar = new NavBar(
+			() => this.navSnapshot(),
+			(view) => this.selectNav(view),
+			() => this.tui.terminal.rows,
+		);
+		this.shell.setNavBar(this.navBar);
 		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
 		this.shell.setPinnedBar(this.nowPlayingBar);
 		this.shell.setAgentBar(new AgentTabBar(
@@ -576,8 +583,7 @@ export class App implements FeatureHost {
 			);
 			initializedCwd = init.cwd;
 			initializedCwdFull = typeof init.cwdFull === "string" && init.cwdFull ? init.cwdFull : undefined;
-			this.version = init.version;
-			Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
+				Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
 			try {
 				const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
 				this.keybindings.set(parseBindingOverrides(config.keybindings));
@@ -1138,17 +1144,6 @@ export class App implements FeatureHost {
 		return this.current;
 	}
 
-	private headerInfo(session: SessionInfo | undefined): Parameters<typeof header>[1] {
-		if (!session) return undefined;
-		return {
-			model: session.model || this.footer.model,
-			provider: session.provider || "",
-			cwd: this.footer.cwd,
-			branch: this.footer.branch,
-			title: session.title || undefined,
-		};
-	}
-
 	/**
 	 * Render a blank chat without writing a session. The session row is
 	 * created by the first submitted message; /new and /clear use this so an
@@ -1162,7 +1157,6 @@ export class App implements FeatureHost {
 		this.clearImages();
 		this.editor.setText("");
 		this.transcript.clear();
-		this.transcript.addComponent(header(this.version, undefined));
 		this.footer.dispose();
 		this.footer.tokens = 0;
 		this.footer.contextTokens = 0;
@@ -1196,7 +1190,6 @@ export class App implements FeatureHost {
 					this.rememberSession(session.id);
 					this.turnSession.resetSessionTokens();
 					this.transcript.clear();
-					this.transcript.addComponent(header(this.version, this.headerInfo(session)));
 					this.footer.tokens = 0;
 					this.footer.contextTokens = 0;
 					this.footer.contextPercent = null;
@@ -1236,7 +1229,6 @@ export class App implements FeatureHost {
 		this.updateSession(session);
 		this.rememberSession(session.id);
 		this.transcript.clear();
-		this.transcript.addComponent(header(this.version, this.headerInfo(session)));
 		this.transcript.replay(trimSupersededHistory(history, tail));
 		this.replayTail(session, tail);
 		this.turnSession.restoreSessionTokens(session.id);
@@ -1428,6 +1420,48 @@ export class App implements FeatureHost {
 		this.changesScope = scope;
 		if (!this.current) this.changesScope = "workspace";
 		this.openScreen("changes");
+	}
+
+	/** Command-strip click: switch screens without changing the app's key map. */
+	private selectNav(view: NavView): void {
+		if (view === "chat") {
+			if (this.view !== "chat") this.closeScreen();
+			return;
+		}
+		if (view === "activity") {
+			this.openStatus();
+			return;
+		}
+		this.openChanges(this.changesScope);
+	}
+
+	private navActivityCount(): number {
+		const runningJobs = this.activity.allJobs().filter(({ job }) =>
+			job.status === "running" || job.status === "stopping",
+		).length;
+		const agents = this.familyRows().filter(row => !row.main && row.running).length;
+		return runningJobs + agents + this.activity.queuedCount() + this.turnSession.approvalDialogCount();
+	}
+
+	private navSnapshot(): NavSnapshot {
+		const project = (this.footer.cwd || "")
+			.replace(/[\\/]+$/, "")
+			.split(/[\\/]/)
+			.pop() ?? "";
+		return {
+			view: this.view === "status" ? "activity" : this.view,
+			title: this.current?.title ?? "",
+			project,
+			branch: this.footer.branch,
+			model: this.footer.model,
+			provider: this.current?.provider,
+			status: this.footer.status,
+			running: this.running,
+			activityCount: this.navActivityCount(),
+			changeCount: this.changesTurns.length,
+			approvals: this.turnSession.approvalDialogCount(),
+			queued: this.activity.queuedCount(),
+		};
 	}
 
 	private statusSnapshot(): StatusSnapshot {

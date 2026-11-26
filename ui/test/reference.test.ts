@@ -85,6 +85,30 @@ test("native approval frame docks controls above composer at 140x52, 80x24, and 
  t.diagnostic("Native pi-tui frames: reference layout plus clipped-terminal approval safety");
 });
 
+test("command strip tabs switch screens without leaving the shell", async () => {
+	const { referenceFixture } = await import("./support/reference.ts");
+	const fixture = await referenceFixture(120, 40);
+	try {
+		const clickTab = (label: string): void => {
+			const x = fixture.plain()[0]!.indexOf(label) + 1;
+			fixture.type(`\x1b[<0;${x};1M`);
+			fixture.type(`\x1b[<0;${x};1m`);
+		};
+		clickTab("Activity");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
+		assert.equal((fixture.app as unknown as { view: string }).view, "status");
+		assert.match(fixture.plain().join("\n"), /ACTIVITY/);
+		clickTab("Chat");
+		await new Promise(resolve => setImmediate(resolve));
+		fixture.tui.renderNow(true);
+		assert.equal((fixture.app as unknown as { view: string }).view, "chat");
+		assert.match(fixture.plain().join("\n"), /Queue a message/);
+	} finally {
+		await fixture.app.exit();
+	}
+});
+
 test("approval queue and externally resolved requests advance the dock without issuing decisions", async () => {
  const {referenceFixture} = await import("./support/reference.ts");
  const fixture = await referenceFixture();
@@ -121,14 +145,14 @@ test("queued approvals keep the active action's evidence visible at 80x24", asyn
   fixture.emit({...fixture.approval("queued-r"), target:"danger.sh", argv:["erase", "danger"]});
   fixture.tui.renderNow(true);
   let screen = fixture.plain().join("\n");
-  assert.match(screen, /write_file install.sh · needs approval/);
+  assert.match(screen, /Approval required · needs approval/);
+  assert.match(screen, /Allow write_file · install.sh\?/);
   assert.doesNotMatch(screen, /danger.sh|erase/);
   fixture.emit({type:"approval.resolved", requestId:"demo-7f2a", status:"denied"});
   fixture.tui.renderNow(true);
   screen = fixture.plain().join("\n");
-  assert.match(screen, /write_file danger.sh · needs approval/);
+  assert.match(screen, /Allow write_file · danger.sh\?/);
   assert.match(screen, /argv: "erase" "danger"/);
-  assert.match(screen, /Allow write_file · danger.sh/);
  } finally {await fixture.app.exit();}
 });
 

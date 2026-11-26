@@ -83,7 +83,7 @@ async function boot(
 	return { app, screen };
 }
 
-test("base launch shows what is playing at row 0", async () => {
+test("base launch shows what is playing in the header strip", async () => {
 	const { app, screen } = await boot(
 		{ theme: "codex", nowplaying_enabled: true },
 		{
@@ -99,11 +99,10 @@ test("base launch shows what is playing at row 0", async () => {
 		},
 	);
 	try {
-		assert.match(screen[0] ?? "", /Boot Track/, "the one-line bar is visible on the first frame");
-		assert.match(screen[0] ?? "", /Example Artist/, "the artist stays on the one-line bar");
-
-		const transcriptRow = screen.findIndex((line) => line.includes("MACHINA"));
-		assert.ok(transcriptRow > 0, "the transcript starts below the bar");
+		const barRow = screen.findIndex((line) => line.includes("Boot Track"));
+		assert.ok(barRow > 0, "the one-line bar is visible on the first frame below the command strip");
+		assert.match(screen[barRow] ?? "", /Example Artist/, "the artist stays on the one-line bar");
+		assert.ok(screen.findIndex((line) => line.includes("MACHINA")) < barRow, "the strip is the first row");
 	} finally {
 		await app.exit();
 	}
@@ -115,7 +114,7 @@ test("base launch with nothing playing shows the honest line", async () => {
 		{ available: true, state: null, title: null, artist: null, error: null },
 	);
 	try {
-		assert.match(screen[0] ?? "", /Nothing playing/);
+		assert.ok(screen.some((line) => /Nothing playing/.test(line)), "the honest line renders in the strip");
 	} finally {
 		await app.exit();
 	}
@@ -127,7 +126,7 @@ test("base launch with the bar disabled shows no bar rows", async () => {
 		{ available: true, state: "playing", title: "Boot Track", error: null },
 	);
 	try {
-		assert.doesNotMatch(screen[0] ?? "", /Boot Track|Nothing playing/);
+		assert.doesNotMatch(screen.join("\n"), /Boot Track|Nothing playing/);
 	} finally {
 		await app.exit();
 	}
@@ -144,7 +143,7 @@ test("a permission error is shown honestly, never as fake playback", async () =>
 		},
 	);
 	try {
-		assert.match(screen[0] ?? "", /blocked automation for Spotify/);
+		assert.ok(screen.some((line) => /blocked automation for Spotify/.test(line)), "the permission error renders honestly");
 	} finally {
 		await app.exit();
 	}
