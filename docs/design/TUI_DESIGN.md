@@ -146,16 +146,17 @@ state, approval, output, ui, dialogs, layout, features, app).
   `/changes` opens Changes directly and `/changes all` includes every chat in
   the workspace. The two pages replace the transcript and composer inside the
   command strip; the strip itself never disappears.
-- Activity is a single full-width grid: a live header, wrapped text filters
-  (no pills), then spaced category rows. Each row carries its status and age
-  inline; the selected row opens its retained logs directly beneath it. There
-  is no second inspector column at any width.
-- Changes is a numbered prompt timeline. Each block starts with `NN ❯` and the
-  prompt, followed by the touched files and review state on one quiet line.
-  The selected block expands in place into three views: `FILES` (bounded,
-  selection-following file list), `DIFF` (stable unified diff for the selected
-  file), and `REVIEW` (run status, summary, and findings with severity, file
-  and line). `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
+- Activity is a centered stack of bounded cards. Each category owns a rounded
+  card with its title and count in the top rule; rows carry their status and
+  age inline, and the selected row opens its retained logs inside the same
+  card. Empty categories are omitted from `ALL`. There is no second inspector
+  column at any width.
+- Changes is a centered stack of prompt cards. Each card title is
+  `NN ❯ prompt`; the card body carries the touched files, line counts, route
+  and review state. The selected card expands in place into three views:
+  `FILES` (bounded, selection-following file list), `DIFF` (stable unified diff
+  for the selected file), and `REVIEW` (run status, summary, and findings with
+  severity, file and line). `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
   finding, `1/2/3` or Tab switches views, PgUp/PgDn scrolls the active view,
   `r` starts or re-runs the local rules review, `x` cancels a running one, and
   `w` toggles this-chat/all-chats. The viewport never opens on the second line
@@ -170,7 +171,7 @@ state, approval, output, ui, dialogs, layout, features, app).
   screen and sends a focused repair prompt to the chat; dismissing it changes
   nothing. The action request also appears when a review the user just started
   finds its first issue.
-- Every width uses the same timeline; the selected block expands in place
+- Every width uses the same card stack; the selected card expands in place
   rather than stacking a second panel. Every section has an honest empty
   state; a binary file says so instead of pretending to have a text diff. The
   screen reads bounded local stores and never edits files or re-runs the agent

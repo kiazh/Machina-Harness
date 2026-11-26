@@ -13,6 +13,7 @@ import {
 	type TUI,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
+import { renderCard } from "../design/box.ts";
 import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
 import type {
 	ChangeDiffFileInfo,
@@ -53,17 +54,28 @@ interface ScreenLine {
 	filePath?: string;
 }
 
+interface ChangeCard {
+	id: string;
+	content: ScreenLine[];
+	rendered: string[];
+	meta: Array<{
+		line?: ScreenLine;
+		cardId?: string;
+		kind?: "turn" | "file";
+		key?: string;
+		left: number;
+		width: number;
+	}>;
+	left: number;
+	width: number;
+}
+
 interface Hitbox {
 	x: number;
 	width: number;
 	y: number;
 	kind: HitKind;
 	value: string;
-}
-
-function fit(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, ".", true);
-	return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 }
 
 function between(left: string, right: string, width: number): string {
@@ -76,6 +88,11 @@ function between(left: string, right: string, width: number): string {
 function centered(text: string, width: number): string {
 	const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
 	return `${" ".repeat(pad)}${text}`;
+}
+
+/** Card content sits inside the card padding, so drop the page indentation. */
+function unindent(text: string): string {
+	return text.startsWith("     ") ? text.slice(5) : text;
 }
 
 function age(iso: string | undefined): string {
@@ -163,15 +180,6 @@ function windowStart(selected: number, height: number, length: number): number {
 	if (length <= height) return 0;
 	if (selected < 0) return 0;
 	return Math.max(0, Math.min(length - height, selected - Math.floor(height / 2)));
-}
-
-/** First line after the selected prompt's block, or the end of the page. */
-function nextTurnStart(body: ScreenLine[], selectedStart: number, selectedId: string | undefined): number {
-	for (let index = selectedStart + 1; index < body.length; index++) {
-		const line = body[index];
-		if (line?.kind === "prompt" && line.key !== selectedId) return index;
-	}
-	return body.length;
 }
 
 /**
@@ -492,19 +500,9 @@ export class ChangesPage implements Component {
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
 		if (!turns.length) {
-			const guidance = [
-				theme.accentBold("No prompt changes recorded yet."),
-				"",
-				theme.dim("Each completed agent turn that changes a workspace file appears here."),
-				theme.dim("The block keeps the prompt, the files, the stable diff, and its review."),
-				"",
-				theme.dim("Send a prompt that edits a file, then reopen this screen."),
-			];
-			const top = Math.max(0, Math.floor((bodyHeight - guidance.length) / 2));
-			for (let index = 0; index < bodyHeight; index++) {
-				const line = guidance[index - top];
-				push(line ? centered(line, width) : "");
-			}
+			const card = this.emptyCard(width);
+			const top = Math.max(0, Math.floor((bodyHeight - card.length) / 2));
+			for (let index = 0; index < bodyHeight; index++) push(card[index - top] ?? "");
 			push(truncateToWidth(
 				` ${theme.dim("← Activity · Ctrl+N → · Esc chat")}`,
 				width,
@@ -512,64 +510,42 @@ export class ChangesPage implements Component {
 				true,
 			));
 			this.hitboxes = [];
-			return out;
+			return out.slice(0, rows);
 		}
 
-		const body: ScreenLine[] = [];
-		const contentBudget = Math.max(3, Math.min(20, bodyHeight - 10));
-		let selectedStart = 0;
-		for (const [index, turn] of turns.entries()) {
-			if (index > 0) body.push({ text: "", kind: "blank" });
-			const selected = turn.id === this.selectedTurnId;
-			if (selected) selectedStart = body.length;
-			const number = String(index + 1).padStart(2, "0");
-			const stats = `${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
-			body.push({
-				text: ` ${selected ? theme.accentBold(number) : theme.dim(number)} ${selected ? theme.accent("❯") : theme.muted("❯")} ${theme.text(oneLine(turn.prompt, Math.max(16, width - 34)))}  ${theme.dim("·")} ${stats}`,
-				key: turn.id,
-				kind: "prompt",
-				turnId: turn.id,
-			});
-			const files = turn.files.slice(0, 3).map(file => sanitizeDisplay(file.path)).join(" · ");
-			const more = turn.files.length > 3 ? `  +${turn.files.length - 3}` : "";
-			body.push({
-				text: `     ${theme.dim(`${files || "no files"}${more}`)}  ${theme.dim("·")} ${reviewChip(turn.review)}`,
-				key: turn.id,
-				kind: "turn",
-				turnId: turn.id,
-			});
-			if (selected) this.detailLines(turn, body, width, contentBudget);
+		const cards = this.buildCards(turns, width, bodyHeight);
+		const flat: string[] = [];
+		const meta: Array<ChangeCard["meta"][number]> = [];
+		const ranges: Array<{ start: number; end: number; id: string }> = [];
+		for (const [index, card] of cards.entries()) {
+			if (index > 0) {
+				flat.push("");
+				meta.push({ left: 0, width });
+			}
+			const start = flat.length;
+			flat.push(...card.rendered);
+			meta.push(...card.meta);
+			ranges.push({ start, end: flat.length, id: card.id });
 		}
-
-		const selectedEnd = nextTurnStart(body, selectedStart, this.selectedTurnId);
-		let offset = windowStartForBlock(selectedStart, selectedEnd, bodyHeight, body.length);
-		// Never open the viewport on the second line of an unselected prompt.
-		// Prefer the next prompt boundary when the selected block still fits;
-		// otherwise move back to the previous boundary.
-		if (offset > 0 && body[offset]?.kind !== "prompt") {
-			let forward = offset;
-			while (forward < selectedStart && body[forward]?.kind !== "prompt") forward++;
-			let backward = offset;
-			while (backward > 0 && body[backward]?.kind !== "prompt") backward--;
-			if (forward < selectedStart && selectedEnd - forward <= bodyHeight) offset = forward;
-			else if (selectedEnd - backward <= bodyHeight) offset = backward;
-		}
+		const selectedCard = ranges.find(range => range.id === this.selectedTurnId) ?? ranges[0]!;
+		const offset = windowStartForBlock(selectedCard.start, selectedCard.end, bodyHeight, flat.length);
 		this.hitboxes = [];
 		for (let index = 0; index < bodyHeight; index++) {
-			const line = body[offset + index];
-			if (!line) {
+			const flatIndex = offset + index;
+			const line = flat[flatIndex];
+			if (line === undefined) {
 				push("");
 				continue;
 			}
-			const content = line.right ? between(line.text, line.right, width) : fit(line.text, width);
-			push(content);
-			if (line.key && (line.kind === "prompt" || line.kind === "turn" || line.kind === "file")) {
+			push(truncateToWidth(line, width));
+			const info = meta[flatIndex];
+			if (info?.cardId) {
 				this.hitboxes.push({
-					x: 0,
-					width,
+					x: info.left,
+					width: info.width,
 					y: headerRows + index,
-					kind: line.kind === "file" ? "file" : "turn",
-					value: line.key,
+					kind: info.kind === "file" ? "file" : "turn",
+					value: info.kind === "file" ? info.key ?? info.cardId : info.cardId,
 				});
 			}
 		}
@@ -582,16 +558,86 @@ export class ChangesPage implements Component {
 		return out.slice(0, rows);
 	}
 
+	private buildCards(turns: ChangeTurnInfo[], width: number, bodyHeight: number): ChangeCard[] {
+		const cardWidth = Math.max(24, Math.min(112, width - 4));
+		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const inner = Math.max(12, cardWidth - 6);
+		const contentBudget = Math.max(3, Math.min(18, bodyHeight - 10));
+		const cards: ChangeCard[] = [];
+		for (const [index, turn] of turns.entries()) {
+			const selected = turn.id === this.selectedTurnId;
+			const content: ScreenLine[] = [];
+			const stats = `${theme.text(`${turn.stats.files} file${turn.stats.files === 1 ? "" : "s"}`)} ${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
+			const route = [turn.provider, turn.model].filter(Boolean).join(" / ");
+			const meta = [stats, route ? theme.dim(route) : "", theme.dim(age(turn.createdAt))].filter(Boolean).join(theme.dim("  ·  "));
+			content.push({ text: between(meta, reviewChip(turn.review), inner), kind: "turn" });
+			const files = turn.files.slice(0, 3).map(file => sanitizeDisplay(file.path)).join(" · ");
+			const more = turn.files.length > 3 ? `  +${turn.files.length - 3}` : "";
+			content.push({ text: theme.dim(`${files || "no files"}${more}`), kind: "turn" });
+			if (selected) this.detailLines(turn, content, inner, contentBudget);
+			const title = `${String(index + 1).padStart(2, "0")} ❯ ${oneLine(turn.prompt, Math.max(16, cardWidth - 16))}`;
+			const rendered = renderCard(
+				content.map(line => line.right ? between(unindent(line.text), line.right, inner) : unindent(line.text)),
+				{
+					width: cardWidth,
+					title,
+					paddingX: 2,
+					paddingY: false,
+					fill: selected ? "toolBg" : "assistantBg",
+					titleTone: selected ? theme.accentBold : theme.muted,
+				},
+			).map(line => `${" ".repeat(left)}${line}`);
+			const lineMeta = content.map<ChangeCard["meta"][number]>(line => ({
+				line,
+				cardId: turn.id,
+				kind: line.kind === "file" ? "file" : "turn",
+				key: line.kind === "file" ? line.key : undefined,
+				left,
+				width: cardWidth,
+			}));
+			cards.push({
+				id: turn.id,
+				content,
+				rendered,
+				meta: [
+					{ cardId: turn.id, kind: "turn", left, width: cardWidth },
+					...lineMeta,
+					{ cardId: turn.id, kind: "turn", left, width: cardWidth },
+				],
+				left,
+				width: cardWidth,
+			});
+		}
+		return cards;
+	}
+
+	private emptyCard(width: number): string[] {
+		const cardWidth = Math.max(24, Math.min(76, width - 4));
+		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const guidance = [
+			theme.accentBold("No prompt changes recorded yet."),
+			"",
+			theme.dim("Each completed agent turn that changes a file appears here."),
+			theme.dim("The card keeps the prompt, files, diff, and review."),
+			"",
+			theme.dim("Send a prompt that edits a file, then reopen this screen."),
+		];
+		return renderCard(guidance.map(line => centered(line, cardWidth - 6)), {
+			width: cardWidth,
+			title: "Changes",
+			paddingX: 2,
+			paddingY: true,
+			fill: "assistantBg",
+		}).map(line => `${" ".repeat(left)}${line}`);
+	}
+
 	private detailLines(
 		turn: ChangeTurnInfo,
 		body: ScreenLine[],
 		width: number,
 		available: number,
 	): void {
-		const content = Math.max(8, width - 6);
-		const route = [turn.provider, turn.model].filter(Boolean).join(" / ");
-		const meta = [route, age(turn.createdAt)].filter(Boolean).join("  ·  ");
-		if (meta) body.push({ text: `     ${theme.dim(meta)}`, kind: "detail" });
+		const content = Math.max(8, width - 4);
 		if (this.promptExpanded) {
 			for (const line of wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), content).slice(0, 8)) {
 				body.push({ text: `     ${theme.text(line)}`, kind: "detail" });

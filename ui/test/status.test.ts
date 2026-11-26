@@ -25,16 +25,17 @@ function pageAt(width = 96, rows = 28, opened?: (row: { id?: string }, section: 
 	return new StatusPage(tui, () => snapshot, opened);
 }
 
-test("status page renders agents, shells, tools and harnesses in one grid", () => {
+test("status page renders agents, shells, tools and harnesses as bounded cards", () => {
 	const page = pageAt();
 	const rendered = page.render(96).map(stripTerminalSequences).join("\n");
 	assert.match(rendered, / ACTIVITY/);
-	assert.match(rendered, /AGENTS/);
+	assert.match(rendered, /╭─ Agents · 2/);
+	assert.match(rendered, /╰─+╯/);
 	assert.match(rendered, /Main · Build a calculator/);
-	assert.match(rendered, /SHELLS/);
+	assert.match(rendered, /Shells · 1/);
 	assert.match(rendered, /foreground shell/);
 	assert.match(rendered, /MCP · mcp_call/);
-	assert.match(rendered, /HARNESSES/);
+	assert.match(rendered, /Harnesses · 1/);
 	assert.match(rendered, /Hermes/);
 	assert.match(rendered, /queued guidance/);
 	assert.ok(page.render(96).every((line) => stripTerminalSequences(line).length <= 96));
@@ -85,8 +86,8 @@ test("status rows and filter tabs are clickable", () => {
 	const toolsX = tabs[tabsY]!.indexOf("TOOLS") + 2;
 	page.handleMouse(click(toolsX, tabsY));
 	const filtered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(filtered, /^ TOOLS\s+1\s*$/m);
-	assert.doesNotMatch(filtered, /^ AGENTS\s/m);
+	assert.match(filtered, /Tools · 1/);
+	assert.doesNotMatch(filtered, /Agents · /);
 });
 
 test("status page swaps instantly without a transition frame", () => {
@@ -102,8 +103,8 @@ test("number keys jump between filters", () => {
 	page.render(96);
 	assert.equal(page.handleInput("5"), true);
 	const filtered = page.render(96).map(stripTerminalSequences).join("\n");
-	assert.match(filtered, /^ TOOLS\s+1\s*$/m);
-	assert.doesNotMatch(filtered, /^ SHELLS\s/m);
+	assert.match(filtered, /Tools · 1/);
+	assert.doesNotMatch(filtered, /Shells · /);
 	assert.equal(page.handleInput("9"), false);
 });
 

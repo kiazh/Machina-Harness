@@ -121,7 +121,8 @@ test("changes page renders prompts, files, stats and review state", () => {
 	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor);
 	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
 	assert.match(rendered, / CHANGES\s+· machina/);
-	assert.match(rendered, /01 ❯/);
+	assert.match(rendered, /╭─ 01 ❯/);
+	assert.match(rendered, /╰─+╯/);
 	assert.match(rendered, /Fix the parser and explain the failure/);
 	assert.match(rendered, /src\/parser\.py/);
 	assert.match(rendered, /\+12/);

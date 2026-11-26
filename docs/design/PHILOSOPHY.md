@@ -13,8 +13,9 @@ and decorative borders are not part of the language.
 - Tool calls are events, not cards.
 - The shell is one persistent command strip: brand, the three screens, session
   context and live state. It stays because every part carries state.
-- Approval is the exception: evidence and the decision use one shared rounded
-  card because a human must review them as one object.
+- Bounded cards are reserved for grouped evidence: approvals, Activity
+  categories, and prompt change blocks. The conversation itself stays
+  unframed; cards never wrap prose.
 
 ## 2. One grid
 

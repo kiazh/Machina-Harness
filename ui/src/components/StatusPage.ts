@@ -1,8 +1,8 @@
-// Full-screen live command center. One unscrolled column: a live header, a
-// text filter strip, then grouped activity rows. Selecting a row opens its
-// retained detail inline beneath it, so there is no second panel and no
-// nested chrome. The page reads only bounded local stores and status RPCs and
-// never launches or re-runs work.
+// Full-screen live command center. Categories are real cards, not table
+// sections: each card owns its border, title and rows, and the selected row
+// expands its retained logs inside the same card. One column, centered on wide
+// terminals, so the page reads like a stack of bounded evidence panels instead
+// of a spreadsheet.
 import {
 	Key,
 	matchesKey,
@@ -12,6 +12,7 @@ import {
 	type TUI,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
+import { renderCard } from "../design/box.ts";
 import { sanitizeDisplay } from "../design/text.ts";
 import { theme } from "../theme.ts";
 
@@ -57,15 +58,28 @@ const FILTERS: ReadonlyArray<{ id: StatusFilter; label: string }> = [
 	{ id: "harnesses", label: "HARNESSES" },
 ];
 
-type LineKind = "section" | "empty" | "row" | "detail" | "blank";
-
 interface ScreenLine {
 	text: string;
-	/** Present only for selectable rows. */
+	right?: string;
 	key?: string;
 	row?: StatusRow;
 	section?: string;
-	kind: LineKind;
+	kind: "row" | "detail" | "empty";
+}
+
+interface StatusCard {
+	title: string;
+	/** Content lines as authored (before right-alignment). */
+	content: ScreenLine[];
+	/** Rendered card rows, already indented. */
+	rendered: string[];
+	/** Parallel to rendered: the content line for content rows. */
+	meta: Array<ScreenLine | undefined>;
+	/** First selectable key in the card (for border clicks). */
+	firstKey?: string;
+	hasSelection: boolean;
+	left: number;
+	width: number;
 }
 
 interface Hitbox {
@@ -84,14 +98,7 @@ function stateStyle(state: string | undefined): (text: string) => string {
 	return theme.dim;
 }
 
-function fit(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "…", true);
-	return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
-}
-
 function between(left: string, right: string, width: number): string {
-	// Always keep one clear column between content and the right-aligned
-	// status/time columns, so a long label never runs into its own state.
 	const room = Math.max(0, width - visibleWidth(right) - 1);
 	const first = truncateToWidth(left, room, "…", true);
 	const gap = Math.max(0, room - visibleWidth(first));
@@ -114,6 +121,14 @@ function age(iso: string | undefined): string {
 	return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
+function windowStartForBlock(start: number, end: number, height: number, length: number): number {
+	if (length <= height) return 0;
+	const blockHeight = Math.max(1, end - start);
+	if (blockHeight >= height) return Math.max(0, Math.min(start, length - height));
+	const preferred = start - Math.floor((height - blockHeight) / 2);
+	return Math.max(0, Math.min(length - height, preferred));
+}
+
 export class StatusPage implements Component {
 	private readonly tui: TUI;
 	private readonly snapshot: () => StatusSnapshot;
@@ -134,13 +149,10 @@ export class StatusPage implements Component {
 		this.onOpen = onOpen;
 	}
 
-	/** The shell charges the command strip against the viewport. */
 	setViewportRows(rows: number): void {
 		this.viewportRows = rows;
 	}
 
-	/** Kept as the tab-switch entry point; page swaps are intentionally
-	 *  instant now, with no transition timer or intermediate frame. */
 	enter(_direction?: 1 | -1): void {
 		this.tui.requestRender();
 	}
@@ -153,10 +165,6 @@ export class StatusPage implements Component {
 		this.hitboxes = [];
 	}
 
-	/**
-	 * Keyboard interaction for the focused page. Returns true when the key
-	 * belongs to the page; App still owns Esc and the left/right tab switch.
-	 */
 	handleInput(data: string): boolean {
 		const digit = /^[1-7]$/.test(data) ? Number(data) - 1 : -1;
 		if (digit >= 0) {
@@ -256,9 +264,6 @@ export class StatusPage implements Component {
 			width,
 		));
 
-		// Text filters, not pills: the active category carries the only
-		// accent mark in this row. The strip wraps before it truncates, so a
-		// narrow terminal still names every category.
 		const filters = FILTERS.map((entry) => {
 			const count = this.filterCount(snap, entry.id);
 			const active = entry.id === this.filter;
@@ -309,41 +314,71 @@ export class StatusPage implements Component {
 
 		const headerRows = out.length;
 		const bodyHeight = Math.max(1, rows - headerRows - 1);
-		let body = this.bodyLines(snap, width);
-		let rowLines = body.filter(line => line.kind === "row" && line.key);
-		const previousSelection = this.selectedKey;
-		this.ensureSelection(rowLines);
-		// The selected row expands inline. If ensureSelection chose a row for
-		// the first time, rebuild so its detail is part of this frame.
-		if (this.selectedKey !== previousSelection) {
-			body = this.bodyLines(snap, width);
-			rowLines = body.filter(line => line.kind === "row" && line.key);
-		}
-		const selectedLine = body.findIndex(line => line.kind === "row" && line.key === this.selectedKey);
-		const offset = rowLines.length ? windowStart(selectedLine, bodyHeight, body.length) : 0;
+		let cards = this.buildCards(snap, width);
+		const rowsInCards = cards.flatMap(card => card.content.filter(line => line.kind === "row" && line.key));
+		const before = this.selectedKey;
+		this.ensureSelection(rowsInCards);
+		if (this.selectedKey !== before) cards = this.buildCards(snap, width);
 
-		if (!rowLines.length) {
-			const guidance = [
-				theme.text("Nothing to show here."),
-				"",
-				theme.dim("Choose another filter, or send a prompt to start activity."),
-			];
-			const top = Math.max(0, Math.floor((bodyHeight - guidance.length) / 2));
+		if (!cards.length || !rowsInCards.length) {
+			const card = this.emptyCard(width, rowsInCards.length === 0 && cards.length > 0);
+			const top = Math.max(0, Math.floor((bodyHeight - card.length) / 2));
 			for (let index = 0; index < bodyHeight; index++) {
-				const line = guidance[index - top];
-				push(line ? centered(line, width) : "");
+				const line = card[index - top];
+				push(line ?? "");
 			}
-		} else {
-			for (let index = 0; index < bodyHeight; index++) {
-				const line = body[offset + index];
-				if (!line) {
-					push("");
-					continue;
-				}
-				push(fit(line.text, width));
-				if (line.kind === "row" && line.key) {
-					this.hitboxes.push({ x: 0, width, y: headerRows + index, key: line.key });
-				}
+			push(truncateToWidth(
+				` ${theme.dim("1–7 filter · ↑↓ move · Enter open · Space detail · Esc chat")}`,
+				width,
+				"…",
+				true,
+			));
+			return out.slice(0, rows);
+		}
+
+		const flat: string[] = [];
+		const meta: Array<{ line?: ScreenLine; key?: string; left: number; width: number }> = [];
+		const ranges: Array<{ start: number; end: number; key?: string }> = [];
+		for (const [cardIndex, card] of cards.entries()) {
+			if (cardIndex > 0) {
+				flat.push("");
+				meta.push({ left: 0, width });
+			}
+			const start = flat.length;
+			for (const [lineIndex, line] of card.rendered.entries()) {
+				flat.push(line);
+				const content = card.meta[lineIndex];
+				meta.push({
+					line: content,
+					key: content?.key ?? card.firstKey,
+					left: card.left,
+					width: card.width,
+				});
+			}
+			ranges.push({ start, end: flat.length, key: card.firstKey });
+		}
+
+		const selectedFlat = meta.findIndex(entry => entry.line?.kind === "row" && entry.line.key === this.selectedKey);
+		const selectedCard = ranges.find(range => selectedFlat >= range.start && selectedFlat < range.end)
+			?? ranges.find(range => range.key === cards.find(card => card.hasSelection)?.firstKey)
+			?? ranges[0]!;
+		const offset = windowStartForBlock(selectedCard.start, selectedCard.end, bodyHeight, flat.length);
+		for (let index = 0; index < bodyHeight; index++) {
+			const lineIndex = offset + index;
+			const line = flat[lineIndex];
+			if (line === undefined) {
+				push("");
+				continue;
+			}
+			push(truncateToWidth(line, width));
+			const info = meta[lineIndex];
+			if (info?.key) {
+				this.hitboxes.push({
+					x: info.left,
+					width: info.width,
+					y: headerRows + index,
+					key: info.key,
+				});
 			}
 		}
 		push(truncateToWidth(
@@ -355,17 +390,11 @@ export class StatusPage implements Component {
 		return out.slice(0, rows);
 	}
 
-	/** Flat body lines in reading order; the selected row expands inline. */
-	private bodyLines(snap: StatusSnapshot, width: number): ScreenLine[] {
+	private buildCards(snap: StatusSnapshot, width: number): StatusCard[] {
 		const all = this.filter === "all";
 		const sections: Array<{ title: string; entries: StatusRow[]; empty: string; category: StatusFilter }> = [];
 		if (all || this.filter === "sessions") {
-			sections.push({
-				title: "Sessions",
-				entries: snap.sessions ?? [],
-				empty: "No persisted sessions yet.",
-				category: "sessions",
-			});
+			sections.push({ title: "Sessions", entries: snap.sessions ?? [], empty: "No persisted sessions yet.", category: "sessions" });
 		}
 		if (all || this.filter === "agents") {
 			sections.push({ title: "Agents", entries: snap.agents, empty: "No active agents.", category: "agents" });
@@ -390,29 +419,22 @@ export class StatusPage implements Component {
 					label: "queued guidance",
 					detail: `${snap.queued} · pending approvals ${snap.approvals}`,
 					state: snap.queued ? "queued" : "idle",
-					logs: [
-						`Queued guidance: ${snap.queued}`,
-						`Pending approvals: ${snap.approvals}`,
-					],
+					logs: [`Queued guidance: ${snap.queued}`, `Pending approvals: ${snap.approvals}`],
 				}],
 				empty: "No queued guidance.",
 				category: "all",
 			});
 		}
 
-		const lines: ScreenLine[] = [];
-		let renderedSections = 0;
+		const cardWidth = Math.max(24, Math.min(112, width - 4));
+		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const inner = Math.max(12, cardWidth - 6);
+		const cards: StatusCard[] = [];
 		for (const section of sections) {
 			if (all && section.entries.length === 0) continue;
-			if (renderedSections > 0) lines.push({ text: "", kind: "blank" });
-			renderedSections++;
-			lines.push({
-				text: ` ${theme.muted(section.title.toUpperCase())}  ${theme.dim(String(section.entries.length))}`,
-				kind: "section",
-			});
+			const content: ScreenLine[] = [];
 			if (!section.entries.length) {
-				lines.push({ text: `   ${theme.dim(section.empty)}`, kind: "empty" });
-				continue;
+				content.push({ text: `${theme.dim(section.empty)}`, kind: "empty" });
 			}
 			for (const [index, entry] of section.entries.entries()) {
 				const key = entry.id ?? `${section.category}:${index}:${entry.label}`;
@@ -426,8 +448,9 @@ export class StatusPage implements Component {
 				const arrow = entry.logs?.length
 					? (expanded ? theme.accent(" ▾") : theme.dim(" ▸"))
 					: "";
-				lines.push({
-					text: ` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}  ${theme.dim("·")} ${stateText}${arrow}`,
+				content.push({
+					text: ` ${selected ? theme.accent("❯") : marker} ${theme.text(sanitizeDisplay(entry.label))}${detail}${arrow}`,
+					right: stateText,
 					key,
 					row: entry,
 					section: section.title,
@@ -435,38 +458,72 @@ export class StatusPage implements Component {
 				});
 				if (!selected) continue;
 				const logs = entry.logs ?? [];
-				// One evidence row while collapsed keeps the page dense; Space
-				// expands to the retained tail. Never reserve rows for an empty
-				// log list.
 				const shown = expanded ? logs.slice(0, 40) : logs.slice(0, 1);
 				for (const log of shown) {
 					for (const part of sanitizeDisplay(log).split("\n")) {
-						lines.push({
-							text: `    ${theme.dim(truncateToWidth(part, Math.max(8, width - 6), "…"))}`,
+						content.push({
+							text: `  ${theme.dim(truncateToWidth(part, Math.max(8, inner - 2), "…"))}`,
 							kind: "detail",
 						});
 					}
 				}
 				const remaining = logs.length - shown.length;
 				if (remaining > 0) {
-					if (expanded) {
-						lines.push({
-							text: `    ${theme.dim(`… ${remaining} more retained`)}`,
-							kind: "detail",
-						});
-					} else {
-						const last = lines.at(-1);
+					if (expanded) content.push({ text: `  ${theme.dim(`… ${remaining} more retained`)}`, kind: "detail" });
+					else {
+						const last = content.at(-1);
 						if (last) last.text += `  ${theme.dim(`· +${remaining} more`)}`;
 					}
 				}
 			}
+			const hasSelection = content.some(line => line.kind === "row" && line.key === this.selectedKey);
+			const renderedCard = renderCard(
+				content.map(line => line.right ? between(line.text, line.right, inner) : line.text),
+				{
+					width: cardWidth,
+					title: `${section.title} · ${section.entries.length}`,
+					paddingX: 2,
+					paddingY: false,
+					fill: hasSelection ? "toolBg" : "assistantBg",
+					titleTone: hasSelection ? theme.accentBold : theme.muted,
+				},
+			);
+			const rendered = renderedCard.map(line => `${" ".repeat(left)}${line}`);
+			const meta: Array<ScreenLine | undefined> = [undefined, ...content, undefined];
+			cards.push({
+				title: section.title,
+				content,
+				rendered,
+				meta,
+				firstKey: content.find(line => line.key)?.key,
+				hasSelection,
+				left,
+				width: cardWidth,
+			});
 		}
-		return lines;
+		return cards;
 	}
 
-	/** Selectable rows in reading order (shared by keys and windowing). */
+	private emptyCard(width: number, filtered: boolean): string[] {
+		const cardWidth = Math.max(24, Math.min(76, width - 4));
+		const left = Math.max(0, Math.floor((width - cardWidth) / 2));
+		const lines = filtered
+			? [theme.dim("No activity matches this filter."), "", theme.dim("Choose another category, or press 1 for everything.")]
+			: [theme.text("Nothing running."), "", theme.dim("Send a prompt, start a shell, or connect an MCP server.")];
+		return renderCard(lines.map(line => centered(line, cardWidth - 6)), {
+			width: cardWidth,
+			title: "Activity",
+			paddingX: 2,
+			paddingY: true,
+			fill: "assistantBg",
+		}).map(line => `${" ".repeat(left)}${line}`);
+	}
+
+	/** Selectable rows in reading order (shared by keys and the viewport). */
 	private rows(): ScreenLine[] {
-		return this.bodyLines(this.snapshot(), 0);
+		return this.buildCards(this.snapshot(), this.tui.terminal.columns ?? 80)
+			.flatMap(card => card.content)
+			.filter(line => line.kind === "row" && line.key);
 	}
 
 	private ensureSelection(rows: ScreenLine[]): void {
@@ -478,7 +535,6 @@ export class StatusPage implements Component {
 		if (!this.selectedKey || !keys.includes(this.selectedKey)) this.selectedKey = keys[0];
 	}
 
-	/** Choose the first real activity row, falling back to the queue summary. */
 	selectDefault(): void {
 		const rows = this.rows();
 		this.selectedKey = rows.find(line => line.key && !line.key.startsWith("queue:"))?.key
@@ -487,8 +543,7 @@ export class StatusPage implements Component {
 	}
 
 	private selectFirst(): void {
-		const rows = this.rows();
-		this.selectedKey = rows.find(line => line.key)?.key;
+		this.selectedKey = this.rows().find(line => line.key)?.key;
 	}
 
 	private moveSelection(data: string): void {
@@ -526,10 +581,4 @@ export class StatusPage implements Component {
 			case "all": return (snap.sessions?.length ?? 0) + snap.agents.length + snap.shells.length + snap.tools.length + snap.mcp.length + snap.harnesses.length;
 		}
 	}
-}
-
-function windowStart(selected: number, height: number, length: number): number {
-	if (length <= height) return 0;
-	if (selected < 0) return 0;
-	return Math.max(0, Math.min(length - height, selected - Math.floor(height / 2)));
 }
