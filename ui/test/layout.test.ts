@@ -123,7 +123,7 @@ test("long transcript follows the end above the docked composer", () => {
 		const composerRow = screen.findIndex((line) => line.includes("Chat input"));
 		assert.ok(composerRow > 0, "composer visible");
 		assert.match(screen.slice(0, composerRow).join("\n"), /line 99/);
-		assert.match(screen[0] ?? "", /line 8[01]/);
+		assert.match(screen[0] ?? "", /line 8[0-2]/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 	} finally {

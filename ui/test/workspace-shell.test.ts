@@ -189,7 +189,7 @@ test("160x48 split composes chat | divider | editor | grip, composer docked in c
 		assert.equal(screen.length, 48);
 		const topRow = paneAreaRows(h) - h.shell.chromeRows();
 		assert.ok(topRow > 0, "the panes area keeps rows");
-		for (const row of [0, 11, topRow - 1]) {
+		for (const row of [0, 11, Math.max(0, topRow - 2)]) {
 			assert.equal(screen[row]!.charAt(dividerX), "│", `divider rule on row ${row}`);
 		}
 		assert.ok(screen[0]!.startsWith("chat transcript row"), "chat pane starts at column 0");

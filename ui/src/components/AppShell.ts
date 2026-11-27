@@ -66,6 +66,11 @@ export class AppShell {
 		render: (): string[] => Array.from({ length: this.bottomGapRows() }, () => ""),
 		invalidate: (): void => {},
 	};
+	/** A clean row between the final answer and the input dock. */
+	private readonly composerGap: Component = {
+		render: (): string[] => this.composerGapRows() > 0 ? [""] : [],
+		invalidate: (): void => {},
+	};
 	private agentBar: (Component & { visible: boolean }) | undefined;
 	private activityBar: (Component & { visible: boolean }) | undefined;
 	/** Cached chrome row budget; invalidated by composer/dock changes. */
@@ -232,6 +237,7 @@ export class AppShell {
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
 		let rows = this.navRows() + composerRows + activityRows + 1 + this.bottomGapRows();
+		if (!split) rows += this.composerGapRows();
 		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;
 		}
@@ -254,6 +260,11 @@ export class AppShell {
 	private bottomGapRows(): number {
 		if (this.page) return 0;
 		return this.lastRows >= 40 ? 2 : this.lastRows >= 16 ? 1 : 0;
+	}
+
+	private composerGapRows(): number {
+		if (this.page) return 0;
+		return this.lastRows >= 16 ? 1 : 0;
 	}
 
 	/**
@@ -372,6 +383,7 @@ export class AppShell {
 			{ component: topRow, basis: 0, grow: 1 },
 			...(this.dock && !this.dockInChatColumn() ? [{ component: this.dock, shrink: 0 }] : []),
 			...(!split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
+			{ component: this.composerGap, shrink: 0 },
 			...(!split ? [{ component: this.composer, shrink: 0 }] : []),
 			{ component: this.bottomSpacer, shrink: 0 },
 			{ component: this.footer, shrink: 0 },
@@ -437,7 +449,7 @@ export class AppShell {
 				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: dock && this.lastRows < 12 ? 0 : 1 },
 				...(split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
 				...(dock ? [{ component: dock, shrink: 0 }] : []),
-				...(split ? [{ component: this.composer, shrink: 0 }] : []),
+				...(split ? [{ component: this.composerGap, shrink: 0 }, { component: this.composer, shrink: 0 }] : []),
 			],
 			{ gap: 0 },
 		);
