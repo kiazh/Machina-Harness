@@ -264,7 +264,7 @@ export class AppShell {
 
 	private composerGapRows(): number {
 		if (this.page) return 0;
-		return this.lastRows >= 16 ? 1 : 0;
+		return this.lastRows >= 6 ? 1 : 0;
 	}
 
 	/**

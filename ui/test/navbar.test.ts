@@ -30,7 +30,7 @@ test("command strip carries brand, tabs, session context and state", () => {
 	assert.match(rows[0] ?? "", /machina · main/);
 	assert.match(rows[0] ?? "", /ready/);
 	assert.match(rows[0] ?? "", /\[Chat\]/);
-	assert.match(rows[1] ?? "", /^─+$/);
+	assert.equal(rows.length, 1, "the surface separates the strip");
 });
 
 test("command strip follows the active view and collapses to one row", () => {
@@ -41,7 +41,7 @@ test("command strip follows the active view and collapses to one row", () => {
 
 	const changes = bar(snapshot({ view: "changes" })).render(80).map(stripTerminalSequences);
 	assert.match(changes[0] ?? "", /\[Changes 3\]/);
-	assert.match(changes[1] ?? "", /^─+$/);
+	assert.equal(changes.length, 1);
 });
 
 test("clicking a tab selects that screen", () => {

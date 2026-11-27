@@ -260,22 +260,17 @@ export class Transcript {
 						break;
 					}
 				}
-				if (finalIndex === -1) {
-					for (const item of segment) {
-						if (item.role === "assistant") this.retain(new AssistantTurn(item.content));
-						else if (item.role === "tool") this.retain(addTool(item));
-						else this.addNotice(item.content);
-					}
-					continue;
-				}
 				const group = new WorkGroup();
-				for (const item of segment.slice(0, finalIndex)) {
+				const notices: HistoryEntry[] = [];
+				for (let cursor = 0; cursor < segment.length; cursor++) {
+					if (cursor === finalIndex) continue;
+					const item = segment[cursor]!;
 					if (item.role === "assistant") {
-						group.add(new ThoughtTurn(new AssistantTurn(item.content), 0), "thought");
+						group.add(new ThoughtTurn(new AssistantTurn(item.content), 0, true), "thought");
 					} else if (item.role === "tool") {
 						group.add(addTool(item), "tool", item.tool ?? "tool");
 					} else {
-						this.addNotice(item.content);
+						notices.push(item);
 					}
 				}
 				if (group.toolCount >= 3) {
@@ -285,13 +280,11 @@ export class Transcript {
 				} else {
 					for (const child of group.dissolve()) this.retain(child);
 				}
-				const final = segment[finalIndex]!;
-				if (final.role === "assistant") this.retain(new AssistantTurn(final.content));
-				for (const item of segment.slice(finalIndex + 1)) {
-					if (item.role === "assistant") this.retain(new AssistantTurn(item.content));
-					else if (item.role === "tool") this.retain(addTool(item));
-					else this.addNotice(item.content);
+				if (finalIndex >= 0) {
+					const final = segment[finalIndex]!;
+					if (final.role === "assistant") this.retain(new AssistantTurn(final.content));
 				}
+				for (const item of notices) this.addNotice(item.content);
 				continue;
 			}
 			if (entry.role === "assistant") this.retain(new AssistantTurn(entry.content));

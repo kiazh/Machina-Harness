@@ -44,25 +44,25 @@ function statusText(snapshot: NavSnapshot): { text: string; tone: (text: string)
 export class NavBar implements Component {
 	private readonly snapshot: () => NavSnapshot;
 	private readonly onSelect: (view: NavView) => void;
-	private readonly terminalRows: () => number;
+
 	private readonly onKeys?: () => void;
 	private hitboxes: Hitbox[] = [];
 
 	constructor(
 		snapshot: () => NavSnapshot,
 		onSelect: (view: NavView) => void,
-		terminalRows: () => number,
+		_terminalRows: () => number,
 		onKeys?: () => void,
 	) {
 		this.snapshot = snapshot;
 		this.onSelect = onSelect;
-		this.terminalRows = terminalRows;
+
 		this.onKeys = onKeys;
 	}
 
-	/** Two rows on normal viewports, one on short ones. */
+	/** One row: the surface separates the strip; a rule would spend a second row. */
 	rows(): number {
-		return this.terminalRows() >= 16 ? 2 : 1;
+		return 1;
 	}
 
 	render(width: number): string[] {

@@ -12,11 +12,12 @@ function duration(ms: number): string {
 export class ThoughtTurn implements Component {
 	private readonly turn: AssistantTurn;
 	private readonly elapsedMs: number;
-	private collapsed = false;
+	private collapsed: boolean;
 
-	constructor(turn: AssistantTurn, elapsedMs: number) {
+	constructor(turn: AssistantTurn, elapsedMs: number, collapsed = false) {
 		this.turn = turn;
 		this.elapsedMs = elapsedMs;
+		this.collapsed = collapsed;
 	}
 
 	render(width: number): string[] {

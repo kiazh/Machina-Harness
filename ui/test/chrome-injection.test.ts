@@ -35,7 +35,7 @@ test("chrome labels never add rows, leak controls, or split escapes", () => {
 	);
 	for (const width of [1, 20, 80, 160]) {
 		const rows = nav.render(width);
-		assert.equal(rows.length, 2);
+		assert.equal(rows.length, 1);
 		for (const row of rows) assertOneLine(row, width);
 	}
 
