@@ -37,11 +37,12 @@ export class UserTurn implements Component {
 			return `${roomy ? "  " : ""}${prefix}${ink(line)}`;
 		});
 		const bodyRows = roomy ? ["", ...rows, ""] : rows;
-		const out = [...BLOCK_GAP, ...bodyRows.map((line) => {
+		const paintedRows = bodyRows.map((line) => {
 			const padded = truncateToWidth(line, column, "", opaque);
 			const painted = opaque ? repairFill("promptBg", padded) : padded;
 			return truncateToWidth(`${margin}${painted}`, total, "");
-		})];
+		});
+		const out = [...BLOCK_GAP, ...paintedRows, ""];
 		if (this.cached.size >= 4) this.cached.clear();
 		this.cached.set(width, out);
 		return out;
