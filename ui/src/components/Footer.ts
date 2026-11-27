@@ -17,6 +17,16 @@ const GROWTH_DURATION_MS = 800;
 /** Growth frame cadence (ms). */
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
+const WORK_FRAMES = [
+	"⠁ ⠃ ⠇ ⠧ ⠆ ⠄ ⠄",
+	"⠁ ⠁ ⠃ ⠇ ⠧ ⠆ ⠄",
+	"⠄ ⠁ ⠁ ⠃ ⠇ ⠧ ⠆",
+	"⠆ ⠄ ⠁ ⠁ ⠃ ⠇ ⠧",
+	"⠧ ⠆ ⠄ ⠁ ⠁ ⠃ ⠇",
+	"⠇ ⠧ ⠆ ⠄ ⠁ ⠁ ⠃",
+	"⠃ ⠇ ⠧ ⠆ ⠄ ⠁ ⠁",
+];
+
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
 export class Footer implements Component {
@@ -87,7 +97,7 @@ export class Footer implements Component {
 
 	chatStatusRows(): number {
 		if (this.compact && this.status === "awaiting_approval") return 0;
-		return this.status === "working" && !this.compact ? 2 : 1;
+		return 1;
 	}
 
 	/**
@@ -148,34 +158,22 @@ export class Footer implements Component {
 		const inset = width >= 20 ? bodyIndent(width) : 0;
 		const fit = width - 2 * inset;
 		const pad = " ".repeat(inset);
-		const row = (left: string, right = "") => {
-			const rightWidth = visibleWidth(right);
-			const clipped = truncateToWidth(left, Math.max(0, fit - rightWidth - (right ? 1 : 0)), "");
-			const gap = " ".repeat(fit - rightWidth - visibleWidth(clipped));
-			return repairFill("background", `${pad}${clipped}${gap}${right}${pad}`);
-		};
 		const count = this.compactTokens(this.contextTokens);
 		const percent = this.contextPercent === null ? "—" : `${Math.round(this.contextPercent)}%`;
 		const unit = this.contextTokens === 1 ? " token" : " tokens";
-		const usage = theme.muted(`${count}${fit >= 31 ? unit : ""} (${percent})`);
-		if (this.status !== "working") return [row(usage)];
-
-		const frame = this.activity.frame(["3", "2", "1", "0", "1", "2", "3", "4", "5", "6", "5", "4"],
-			ACTIVITY_INTERVAL_MS, this.workingStart);
-		const pulse = Array.from({ length: 7 }, (_, i) => {
-			const distance = Math.abs(i - Number(frame));
-			if (distance === 0) return theme.accent("◆");
-			return theme.dim(distance === 1 ? "◇" : "·");
-		}).join(" ");
-		const hint = theme.muted("esc×2 interrupt");
-		const shortHint = fit >= 5 ? theme.muted("esc×2") : "";
-		if (!this.compact) {
-			return [row(usage, fit >= visibleWidth(usage) + 14 ? pulse : ""), row("", fit >= 15 ? hint : shortHint)];
-		}
-		const withPulse = `${pulse}  ${hint}`;
+		const usage = truncateToWidth(`${count}${fit >= 31 ? unit : ""} (${percent})`, fit, "");
 		const room = fit - visibleWidth(usage) - 1;
-		const right = room >= visibleWidth(withPulse) ? withPulse : room >= 15 ? hint : shortHint;
-		return [row(usage, right)];
+		let activity = "";
+		if (this.status === "working" && room >= 5) {
+			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
+			activity = theme.muted(hint);
+			if (room >= visibleWidth(WORK_FRAMES[0]) + 2 + visibleWidth(hint)) {
+				const frame = this.activity.frame(WORK_FRAMES, ACTIVITY_INTERVAL_MS, this.workingStart);
+				activity = `${theme.accent(frame)}  ${activity}`;
+			}
+		}
+		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
+		return [repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`)];
 	}
 
 	render(width: number): string[] {

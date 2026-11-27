@@ -54,6 +54,6 @@ test("the chat counter shows context occupancy independently of cumulative usage
 	footer.contextTokens = 3_115;
 	footer.contextPercent = 3.3;
 	const row = stripTerminalSequences(footer.chatStatus.render(160)[0]!);
-	assert.match(row, /^ {4}3\.1K tokens \(3%\)/);
+	assert.match(row, /3\.1K tokens \(3%\) {4}$/);
 	assert.doesNotMatch(plain(footer, 160), /tokens/);
 });

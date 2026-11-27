@@ -212,9 +212,8 @@ test("160x48 split composes chat | divider | editor | grip, composer docked in c
 		assert.equal(usageRow, composerRow + 2, "dark status row directly follows the input block");
 		const canvasFill = repairFill("background", " ").split(" ", 1)[0]!;
 		assert.ok(h.tui.getScreenLines()[usageRow]!.includes(canvasFill), "usage is painted on the chat canvas");
-		assert.match(screen[usageRow]!.slice(0, dividerX), /^ {4}0 tokens \(0%\).*◆/);
-		assert.match(screen[usageRow + 1]!.slice(0, dividerX), /esc×2 interrupt {4}$/);
-		assert.doesNotMatch(screen.slice(usageRow, usageRow + 2).map((line) => line.slice(dividerX)).join("\n"), /◆|interrupt/);
+		assert.match(screen[usageRow]!.slice(0, dividerX), /^ {4}[\u2801-\u28ff].*esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+		assert.doesNotMatch(screen[usageRow]!.slice(dividerX), /interrupt|tokens/);
 		const footer = screen[47]!;
 		assert.equal(footer.length, 160, "footer still spans the full width");
 		assert.match(footer, /test-model/);
