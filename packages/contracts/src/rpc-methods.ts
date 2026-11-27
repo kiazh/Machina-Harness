@@ -165,6 +165,7 @@ export const RPC_METHODS = [
   "skills.show",
   "status",
   "usage.get",
+  "usage.report",
   "workspace.changes",
   "workspace.close",
   "workspace.diff",
