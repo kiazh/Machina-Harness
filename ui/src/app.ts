@@ -24,7 +24,7 @@ import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
 import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
-import { ActivityBar, ActivityStore, type SteeringItem, type ShellJob } from "./activity.ts";
+import { ActivityBar, ActivityStore } from "./activity.ts";
 import { StatusPage } from "./components/StatusPage.ts";
 import { ChangesPage } from "./components/ChangesPage.ts";
 import { uriDisplayPath } from "./components/EditorPane.ts";
@@ -73,13 +73,15 @@ import {
 } from "./editor/intelligence.ts";
 import { offsetToPosition, positionToOffset } from "./editor/positions.ts";
 import { TurnSessionStore } from "./turnSessionStore.ts";
-import { StatusController, type HarnessJobView } from "./app/status.ts";
+import { StatusController } from "./app/status.ts";
 import { ChangesController } from "./app/changes.ts";
 import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
 import { KeyboardRouter, type KeyboardHost } from "./app/keyboard.ts";
 import { CommandController, type CommandHost } from "./app/commands.ts";
 import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
+import { EventRouter, type EventHost } from "./app/events.ts";
+export { isKiroQuotaError } from "./app/events.ts";
 export { commandCarriesSecret } from "./app/commands.ts";
 
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
@@ -265,6 +267,7 @@ export class App implements FeatureHost {
 	private readonly changes: ChangesController;
 	private readonly keyboard: KeyboardRouter;
 	private readonly commands: CommandController;
+	private readonly events: EventRouter;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
@@ -440,6 +443,7 @@ export class App implements FeatureHost {
 		// App remains the state owner; this adapter exposes only the keyboard seam.
 		this.keyboard = new KeyboardRouter(this.keyboardHost());
 		this.commands = new CommandController(this.commandHost());
+		this.events = new EventRouter(this.eventHost());
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -670,6 +674,38 @@ export class App implements FeatureHost {
 		};
 	}
 
+	private eventHost(): EventHost {
+		return {
+			tui: this.tui,
+			log: this.log,
+			activity: this.activity,
+			turnSession: this.turnSession,
+			footer: this.footer,
+			shell: this.shell,
+			transcript: this.transcript,
+			outputStore: this.outputStore,
+			isExiting: () => this.exiting,
+			current: () => this.current,
+			featureEventHandlers: () => this.featureEventHandlers,
+			workspaceEvent: (event) => this.workspaceSurface?.onEvent(event),
+			setHarnessJob: (job) => this.status.setHarnessJob(job),
+			refreshFamily: () => this.refreshFamily(),
+			isFamilyMember: (sessionId) => this.isFamilyMember(sessionId),
+			noteUnknownSession: (sessionId) => this.noteUnknownSession(sessionId),
+			queueQuestion: (event) => this.approvals.park(event),
+			promptQuestion: (event) => this.promptQuestion(event),
+			promptApproval: (event) => this.promptApproval(event),
+			clearApprovals: (sessionId) => this.clearApprovals(sessionId),
+			switchKiroFallback: (sessionId) => { void this.switchKiroFallback(sessionId); },
+			invalidateContextUsage: () => { this.contextReadVersion++; },
+			refreshContextUsage: (sessionId) => { void this.refreshContextUsage(sessionId); },
+			setRunning: (running) => this.setRunning(running),
+			flushSteering: (sessionId) => { void this.flushSteering(sessionId); },
+			refreshChangesBadge: (sessionId) => { void this.changes.refreshBadge(sessionId); },
+			onChildEvent: (event) => this.onChildEvent(event),
+		};
+	}
+
 	async start(): Promise<void> {
 		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
 		this.log.info("start", {
@@ -708,7 +744,7 @@ export class App implements FeatureHost {
 		setOpaqueBackground(!transparentEnv);
 		this.tui.start();
 
-		this.client.onEvent = (event) => this.onEvent(event);
+		this.client.onEvent = (event) => this.events.route(event);
 		this.client.onExit = (code, stderr) => this.onGatewayExit(code, stderr);
 		this.client.start();
 
@@ -2961,311 +2997,6 @@ export class App implements FeatureHost {
 		this.tui.requestRender();
 	}
 
-	private onEvent(event: GatewayEvent): void {
-		if (this.exiting) return;
-		// Every frame is routed by session; a frame without a usable session id
-		// cannot be bound to a chat and must not reach turn or approval state.
-		if (typeof event.sessionId !== "string" || !event.sessionId) {
-			if (this.log.enabled) this.log.warn("event.invalid_session", { type: event.type });
-			return;
-		}
-		if (event.type !== "message.delta" && this.log.enabled) {
-			this.log.trace("event", { type: event.type, session: event.sessionId, turn: event.turnId });
-		}
-		for (const handler of [...this.featureEventHandlers]) handler(event);
-		if (event.type === "shell.job") {
-			this.activity.setJob(event.sessionId, event.job as unknown as ShellJob);
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "harness.job") {
-			const job = event.job as unknown as HarnessJobView;
-			this.status.setHarnessJob(job);
-			// The child chat exists as soon as the job starts; refresh the
-			// family so Activity/agent tabs can open it.
-			if (job.session_id) this.refreshFamily();
-			if (
-				job.status !== "running"
-				&& (job.owner_session_id === this.current?.id || job.session_id === this.current?.id)
-			) {
-				const selfChat = job.owner_session_id === job.session_id && job.session_id === this.current?.id;
-				const detail = (job.stdout || job.stderr || job.error || "").trim().split(/\r?\n/)[0] ?? "";
-				if (job.needs_input) {
-					this.transcript.addNotice(
-						`Harness ${job.platform} is asking${detail ? `: ${detail.slice(0, 160)}` : " for direction"} — reply here or open it from Activity.`,
-						"warning",
-					);
-				} else if (!selfChat) {
-					this.transcript.addNotice(
-						`Harness ${job.platform} ${job.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
-						job.status === "complete" ? "success" : job.status === "stopped" ? "warning" : "error",
-					);
-				}
-			}
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "agent.child") {
-			const binding = this.turnSession.turnBinding(event.sessionId);
-			const deleted = event.phase === "settled" && event.value === "deleted";
-			if (!deleted && binding && (binding.retired.includes(event.turnId) || binding.turnId !== undefined && binding.turnId !== event.turnId)) return;
-			this.onChildEvent(event);
-			return;
-		}
-		// Feature-level frames carry no session/turn: they settle command
-		// flows above and must not enter turn bookkeeping or hidden tails.
-		if (
-			event.type === "auth.chatgpt.completed" ||
-			event.type === "auth.chatgpt.failed" ||
-			event.type === "auth.grok.completed" ||
-			event.type === "auth.grok.failed" ||
-			event.type === "auth.copilot.completed" ||
-			event.type === "auth.copilot.failed"
-		) return;
-		if (event.type === "growth.status") {
-			// Background training lands after the turn retires (and the
-			// in-flight entry clears), so it bypasses turn tracking. Shown
-			// only for the current session; never steals focus.
-			if (event.sessionId !== this.current?.id) return;
-			if (this.footer.pulseGrowth()) this.tui.requestRender();
-			return;
-		}
-		if (event.type === "context.compacted") {
-			void this.refreshContextUsage(event.sessionId);
-			return;
-		}
-		const hidden = event.sessionId !== this.current?.id;
-		// Family bookkeeping runs before the turn-state gate. Observed child
-		// events are handled above; delegate completion also refreshes the
-		// family for transports that do not stream child progress.
-		// A turn-start frame from an unfamiliar session is the only other
-		// trigger worth a scan: later frames never rescan a foreign id
-		// (negative cache in family.ts).
-		if (event.type === "tool.complete" && event.name === "delegate") {
-			this.refreshFamily();
-		} else if (hidden && !this.isFamilyMember(event.sessionId) && isTurnStart(event)) {
-			this.noteUnknownSession(event.sessionId);
-		}
-		if (event.type === "question.asked") {
-			if (event.sessionId === this.current?.id) void this.promptQuestion(event);
-			else this.approvals.park(event);
-			this.tui.requestRender();
-			return;
-		}
-		const approvalFrame = event.type === "needs_approval"
-			|| event.type === "permission.required"
-			|| event.type === "approval.resolved"
-			|| event.type === "permission.resolved"
-			|| event.type === "approval.resumed";
-		if (!this.turnSession.isInFlight(event.sessionId) && !approvalFrame) {
-			// A session without a local turn binding (e.g. an in-flight turn
-			// from the server side): preview it in the hidden session's tail;
-			// terminal dedupe lives in the tail itself. Approval frames pass:
-			// a delegated child has no local prompt turn, and its pause or
-			// resolution must still reach the owning card.
-			if (hidden) this.turnSession.bufferHiddenEvent(event);
-			return;
-		}
-		// A turn's events may arrive after the user switched sessions, so match
-		// against in-flight turns, not just the current session. Non-visible
-		// completion still retires and accounts; it never renders, opens
-		// dialogs, or disturbs the visible session.
-		const record = event.type === "message.start"
-			? this.turnSession.bindStart(event.sessionId, event.turnId)
-			: this.turnSession.bindEvent(event.sessionId, event);
-		if (!record && !approvalFrame) return;
-		// Activity updates obey the same turn binding as transcript frames.
-		if (event.type === "steering.update") {
-			this.activity.setQueue(event.sessionId, event.items as unknown as SteeringItem[]);
-			if (this.current?.id === event.sessionId && event.delivered.length) {
-				for (const item of event.delivered as unknown as SteeringItem[]) this.transcript.addUser(item.text);
-				this.transcript.apply({ ...event, type: "message.start" });
-			}
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "tool.start") {
-			this.turnSession.noteToolStart(event.sessionId, event.id, event.name);
-			this.activity.noteToolStart(event.sessionId, event.id, event.name, event.args);
-		} else if (event.type === "tool.complete") {
-			this.turnSession.noteToolComplete(event.sessionId, event.id);
-			const status = event.isError || event.outcome === "denied"
-				? "error"
-				: event.outcome === "paused" || event.outcome === "awaiting_approval"
-					? "paused"
-					: event.outcome === "unknown" || event.outcome === "outcome_unknown"
-						? "unknown"
-						: "ok";
-			this.activity.noteToolComplete(event.sessionId, event.id, status, event.result, event.outcome);
-		}
-		else if (event.type === "message.complete") this.turnSession.clearActiveTools(event.sessionId);
-		// A hidden session keeps a live tail so switching back shows the work
-		// done while it was invisible (switchTo merges it
-		// with the fetched history — buffered tail wins, no duplicates).
-		if (hidden) this.turnSession.bufferHiddenEvent(event);
-		// Retain reported output for local inspection (visible or not, but
-		// only for the bound turn). Never refetched, never re-executed.
-		if (event.type === "tool.complete") {
-			if (typeof event.id === "string" && event.id) {
-				this.outputStore.put(
-					event.sessionId,
-					event.id,
-					typeof event.name === "string" && event.name ? event.name : "unknown tool",
-					typeof event.result === "string" ? event.result : "",
-					event.truncated ?? false,
-				);
-			}
-		}
-		if ((event.type === "needs_approval" || event.type === "permission.required")) {
-			// A malformed frame has no resolvable identity; dropping it is safer
-			// than opening a card whose request id cannot be a string.
-			if (typeof event.requestId !== "string" || !event.requestId
-				|| typeof event.sessionId !== "string" || !event.sessionId) {
-				if (this.log.enabled) this.log.warn("approval.invalid", { type: event.type });
-				return;
-			}
-			// R4-065: a pause frame can carry a terminal status — the broker's
-			// deadline (or another transport) already resolved the request.
-			// That is a resolution, not a card: retire any open card and
-			// retained evidence without issuing a decision the record refuses.
-			if (event.status !== undefined && event.status !== "pending") {
-				this.turnSession.deletePendingApproval(event.requestId);
-				const stale = this.turnSession.approvalDialog(event.requestId);
-				stale?.card.setRecorded(`approval ${event.status}`);
-				stale?.close();
-				if (event.sessionId === this.current?.id) {
-					this.transcript.addNotice(
-						`Approval ${event.requestId.slice(0, 8)} ${event.status}.`,
-						event.status === "approved" ? "success" : event.status === "denied" ? "error" : "warning",
-					);
-				}
-				this.tui.requestRender();
-				return;
-			}
-			// Retain the review evidence even while its session is hidden
-			// (R15); the card itself opens only in the bound visible session
-			// and never carries a dialog into another session (T7 owns the
-			// review card/queue). A later return rebuilds it via
-			// restoreApprovals.
-			this.turnSession.rememberPendingApproval(event);
-			if (event.sessionId !== this.current?.id) return;
-			// Approval card bound to this exact session/turn — switching
-			// sessions never approves the wrong session (Phase 5.6).
-			void this.promptApproval(event);
-			this.tui.requestRender();
-			return;
-		}
-		if ((event.type === "approval.resolved" || event.type === "permission.resolved")) {
-			if (typeof event.requestId !== "string" || !event.requestId) {
-				if (this.log.enabled) this.log.warn("approval.resolved.invalid", { type: event.type });
-				return;
-			}
-			// The decision is durable regardless of which session is visible.
-			this.turnSession.deletePendingApproval(event.requestId);
-			if (event.sessionId !== this.current?.id) return;
-			const pending = this.turnSession.approvalDialog(event.requestId);
-			pending?.card.setRecorded(`approval ${event.status}`);
-			pending?.close();
-			this.transcript.addNotice(
-				`Approval ${event.requestId.slice(0, 8)} ${event.status}.`,
-				event.status === "approved" ? "success" : event.status === "denied" ? "error" : "warning",
-			);
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "approval.resumed") {
-			// The review is no longer pending; the approved action continues
-			// under a fresh bound turn.
-			this.turnSession.deletePendingApproval(event.requestId);
-			if (this.turnSession.applyApprovalResume(event.sessionId, event.originTurnId, event.turnId)
-				&& event.sessionId === this.current?.id) {
-				this.transcript.apply({ ...event, type: "message.start" });
-			}
-			if (event.sessionId !== this.current?.id) return;
-			this.transcript.addNotice(`Approval ${event.requestId.slice(0, 8)} resumed.`);
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "turn.started") {
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "turn.cleanup_pending" || event.type === "turn.ownership_lost") {
-			if (event.sessionId !== this.current?.id) return;
-			this.transcript.suspend("cleanup_pending");
-			this.footer.status = "cleanup_pending";
-			this.shell.invalidateChrome();
-			this.transcript.addNotice(event.type === "turn.cleanup_pending"
-				? "Stopping: waiting for the running action to finish cleanup."
-				: "Turn ownership was lost; stopping the running action.", "warning");
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "usage") {
-			this.turnSession.setUsageLatest(event.sessionId, event.tokens);
-			if (event.sessionId === this.current?.id) {
-				this.footer.tokens = this.turnSession.sessionTokens + event.tokens;
-				if (event.contextTokens !== undefined) {
-					this.contextReadVersion++;
-					this.footer.contextTokens = event.contextTokens;
-					this.footer.contextPercent = event.contextPercent ?? null;
-				}
-			}
-			this.tui.requestRender();
-			return;
-		}
-		if (event.sessionId !== this.current?.id) {
-			if (event.type === "message.complete") {
-				this.turnSession.accountCompletion(event.sessionId, event.tokens);
-				this.turnSession.retireTurn(event.sessionId, event.turnId);
-				this.clearApprovals(event.sessionId);
-			}
-			// AH-032: never clear in-flight on "error" — the terminal
-			// message.complete still follows with final accounting and
-			// tool-card cleanup. Clearing early drops that completion.
-			this.setRunning(this.turnSession.visibleInFlight());
-			this.tui.requestRender();
-			return;
-		}
-		if (event.type === "message.stopping") {
-			this.footer.status = "stopping";
-			this.shell.invalidateChrome();
-		}
-		if (event.type === "message.complete") this.clearApprovals(event.sessionId);
-		const summary = this.transcript.apply(event);
-		if (event.type === "error") {
-			// Keep turn state until terminal completion (AH-032). The error
-			// notice is already rendered by transcript.apply(); final
-			// accounting arrives with message.complete.
-			this.log.warn("gateway.error", { session: event.sessionId, message: event.message });
-			this.setRunning(true);
-			if (this.current?.id === event.sessionId
-				&& typeof event.message === "string"
-				&& isKiroQuotaError(event.message)) {
-				void this.switchKiroFallback(event.sessionId);
-			}
-		} else if (summary) {
-			if (event.type === "message.complete" && event.cancelled) this.turnSession.setInterrupted(event.sessionId, true);
-			if (event.type === "message.complete") {
-				this.log.info("turn.complete", {
-					session: event.sessionId,
-					turnId: event.turnId,
-					cancelled: event.cancelled,
-					tokens: summary.tokens,
-				});
-			}
-			this.turnSession.accountCompletion(event.sessionId, summary.tokens);
-			this.turnSession.retireTurn(event.sessionId, event.turnId);
-			this.footer.tokens = this.turnSession.sessionTokens;
-			this.setRunning(this.turnSession.isInFlight(event.sessionId));
-			if (event.type === "message.complete" && !event.cancelled) {
-				setTimeout(() => { void this.flushSteering(event.sessionId); }, 0);
-				void this.changes.refreshBadge(event.sessionId);
-			}
-		}
-		this.tui.requestRender();
-	}
-
 	private flushPendingQuestions(sessionId: string): void {
 		this.approvals.flushQuestions(sessionId);
 	}
@@ -3334,26 +3065,4 @@ export class App implements FeatureHost {
 
 function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-export function isKiroQuotaError(value: string): boolean {
-	const text = value.toLowerCase();
-	const kiro = text.includes("kiro");
-	const quota =
-		text.includes("usage limit") ||
-		text.includes("monthly request limit") ||
-		text.includes("monthly quota") ||
-		text.includes("quota exhausted") ||
-		text.includes("credits are exhausted") ||
-		text.includes("http 402") ||
-		(text.includes("http 429") && kiro);
-	return (
-		quota &&
-		(kiro || text.includes("monthly request limit") || text.includes("monthly quota"))
-	);
-}
-
-/** Turn-start frames: the first event of a turn in a session's stream. */
-function isTurnStart(event: GatewayEvent): boolean {
-	return event.type === "message.start" || event.type === "turn.started";
 }
