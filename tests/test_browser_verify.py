@@ -51,6 +51,40 @@ def test_verification_and_artifact_results_are_not_preview_capped() -> None:
     assert tool_message_limit("artifact_search") >= 9000
 
 
+class _Locator:
+    async def count(self) -> int:
+        return 4
+
+
+class _Page:
+    async def inner_text(self, selector: str) -> str:
+        return "Designing calm tools" if selector == "#hero" else "unrelated body copy"
+
+    def locator(self, _selector: str) -> _Locator:
+        return _Locator()
+
+
+@pytest.mark.asyncio
+async def test_assert_text_is_scoped_to_its_selector() -> None:
+    checks = [
+        {"action": "assert_text", "selector": "#hero", "expected": "Designing calm"},
+        {"action": "assert_text", "selector": "#hero", "expected": "unrelated body copy"},
+    ]
+    results = await browser._run_checks(_Page(), checks, 1000)
+    assert results[0]["ok"] is True
+    assert results[1]["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_assert_selector_supports_count_and_unknown_actions_fail_fast() -> None:
+    results = await browser._run_checks(
+        _Page(), [{"action": "assert_selector", "selector": ".card", "count": 4}], 1000
+    )
+    assert results[0]["ok"] is True
+    with pytest.raises(ValueError, match="unknown action 'assert'"):
+        await browser._run_checks(_Page(), [{"action": "assert", "selector": "h1"}], 1000)
+
+
 @pytest.mark.asyncio
 async def test_browser_verify_returns_structured_report(monkeypatch) -> None:
     seen = {}

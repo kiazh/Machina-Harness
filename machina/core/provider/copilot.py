@@ -277,6 +277,8 @@ class CopilotProvider(LLMProvider, RateLimitBinding):
                     yield event
             if not state.saw_terminal:
                 raise _truncated_stream_error(_PROVIDER_NAME, resolved_model)
+            if state.truncated:
+                raise _truncated_stream_error(_PROVIDER_NAME, resolved_model)
         except BaseException as exc:
             await fail_stream(
                 settlement,

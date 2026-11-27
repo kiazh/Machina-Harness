@@ -8,6 +8,7 @@ make an invalid action valid.
 
 from __future__ import annotations
 
+import difflib
 import json
 
 from machina.connectors.execution import call_spec
@@ -55,6 +56,29 @@ def action_for_tool(name: str, args: dict) -> dict:
             # its `…(+N chars)` marker) is display-only, applied by the
             # preview/card builders, never before the digest is computed.
             "content": str(content),
+        }
+    if name == "edit_file":
+        try:
+            count = max(1, int(args.get("count", 1) or 1))
+        except (TypeError, ValueError):
+            count = 1
+        old = str(args.get("old_text", ""))
+        new = str(args.get("new_text", ""))
+        diff = "\n".join(
+            difflib.unified_diff(
+                old.splitlines(),
+                new.splitlines(),
+                fromfile="before",
+                tofile="after",
+                lineterm="",
+            )
+        )
+        return {
+            "operation": "file.write",
+            "targets": [str(args.get("path", ""))],
+            "content": diff or f"{old}\n---\n{new}",
+            "old_text": old,
+            "count": count,
         }
     if name in ("list_files", "search_files"):
         return {"operation": "file.read", "targets": [str(args.get("path", "."))]}

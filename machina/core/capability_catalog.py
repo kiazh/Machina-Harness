@@ -63,6 +63,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "files and repo": (
         "read_file",
         "write_file",
+        "edit_file",
         "list_files",
         "search_files",
         "repo_stage",

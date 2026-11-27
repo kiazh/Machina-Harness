@@ -39,6 +39,11 @@ class OpenAIStreamState:
     tool_calls_by_index: dict[int, dict[str, str]] = field(default_factory=dict)
     stream_usage: dict[str, Any] = field(default_factory=dict)
     saw_terminal: bool = False
+    finish_reason: str = ""
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason in {"length", "max_tokens"}
 
     def add_tool_call_delta(self, index: int, delta: dict[str, Any]) -> None:
         """Fold one incremental tool-call delta into its indexed entry."""
@@ -127,6 +132,7 @@ async def openai_stream_events(
             continue
         if choice.get("finish_reason"):
             state.saw_terminal = True
+            state.finish_reason = str(choice.get("finish_reason") or "")
         delta = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
         text = delta.get("content")
         if isinstance(text, str) and text:

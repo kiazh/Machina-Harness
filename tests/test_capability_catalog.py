@@ -81,7 +81,7 @@ def test_catalog_sections_are_present_and_bounded() -> None:
         "surfaces",
         "all",
     }
-    assert len(json.dumps(catalog_module.catalog("all"))) <= 16_000
+    assert len(json.dumps(catalog_module.catalog("all"))) <= 17_000
     assert len(catalog_module.capability_index()) <= 3_000
 
 

@@ -672,7 +672,7 @@ async def _match_files_bounded(pattern: str, files: list[dict[str, object]]) -> 
             "path": {
                 "type": "string",
                 "default": ".",
-                "description": "Directory to search, relative to the workspace (default '.')",
+                "description": "File or directory to search, relative to the workspace (default '.')",
             },
             "file_glob": {
                 "type": "string",
@@ -722,42 +722,46 @@ async def search_files(pattern: str, path: str = ".", file_glob: str | None = No
         # search; each candidate used to re-import and re-resolve both stores.
         sensitive_root = workspace_root()
         sensitive_stores = credential_store_paths()
-        for root, dirs, names in os.walk(dir_path):
-            dirs[:] = sorted(name for name in dirs if name not in _SEARCH_SKIP_DIRS)
-            for name in sorted(names):
-                if not fnmatch.fnmatch(name, glob_pattern):
-                    continue
-                if len(files) >= _SEARCH_MAX_FILES:
-                    return files
-                f = Path(root) / name
-                try:
-                    # _open_secure_read below repeats the descriptor identity and
-                    # regular-file checks; skip the duplicate probe open.
-                    resolved = resolve_path(str(f), probe=False)
-                except ValueError:
-                    continue
-                # R01: every file a search opens is checked against the shared
-                # sensitive-path definition — the tool's narrower private list
-                # alone let `credentials`/`production.env` leak into results.
-                if sensitive_path(str(resolved), sensitive_root, stores=sensitive_stores):
-                    continue
-                # H18: capture the validated file's identity through the same
-                # protected descriptor traversal the ordinary file tools use
-                # (no-follow open + dev/ino + realpath containment). The isolated
-                # matcher re-opens the pathname later and verifies the opened
-                # descriptor still matches this identity, so a concurrent
-                # symlink swap cannot redirect the read outside the workspace.
-                try:
-                    fd = _open_secure_read(resolved)
-                except (OSError, ValueError):
-                    continue
-                try:
-                    info = os.fstat(fd)
-                finally:
-                    os.close(fd)
-                if info.st_size > _SEARCH_MAX_FILE_BYTES:
-                    continue
-                files.append({"path": str(f), "dev": info.st_dev, "ino": info.st_ino})
+        candidates: list[Path] = []
+        if dir_path.is_file():
+            candidates = [dir_path]
+        else:
+            for root, dirs, names in os.walk(dir_path):
+                dirs[:] = sorted(name for name in dirs if name not in _SEARCH_SKIP_DIRS)
+                candidates.extend(Path(root) / name for name in sorted(names))
+        for f in candidates:
+            if not fnmatch.fnmatch(f.name, glob_pattern):
+                continue
+            if len(files) >= _SEARCH_MAX_FILES:
+                return files
+            try:
+                # _open_secure_read below repeats the descriptor identity and
+                # regular-file checks; skip the duplicate probe open.
+                resolved = resolve_path(str(f), probe=False)
+            except ValueError:
+                continue
+            # R01: every file a search opens is checked against the shared
+            # sensitive-path definition — the tool's narrower private list
+            # alone let `credentials`/`production.env` leak into results.
+            if sensitive_path(str(resolved), sensitive_root, stores=sensitive_stores):
+                continue
+            # H18: capture the validated file's identity through the same
+            # protected descriptor traversal the ordinary file tools use
+            # (no-follow open + dev/ino + realpath containment). The isolated
+            # matcher re-opens the pathname later and verifies the opened
+            # descriptor still matches this identity, so a concurrent
+            # symlink swap cannot redirect the read outside the workspace.
+            try:
+                fd = _open_secure_read(resolved)
+            except (OSError, ValueError):
+                continue
+            try:
+                info = os.fstat(fd)
+            finally:
+                os.close(fd)
+            if info.st_size > _SEARCH_MAX_FILE_BYTES:
+                continue
+            files.append({"path": str(f), "dev": info.st_dev, "ino": info.st_ino})
         return files
 
     try:

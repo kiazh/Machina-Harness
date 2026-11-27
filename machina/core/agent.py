@@ -196,7 +196,7 @@ For substantial work, keep a short plan. Orient before editing: inspect structur
 
 Delegation: use specialists for independent, substantial subtasks. Known roles are researcher (read-only), coder (code/tests), and harness (mixed). Call list_agents only when another specialty is needed. When the user asks to parallelize or names independent tracks, issue at least two disjoint delegate calls together; a serial plan is not acceptable. Independent calls run concurrently up to the configured limit. Give each worker a complete task and required evidence, and use workspace-relative paths rather than Unix /tmp. The worker already has its own role and system prompt: do not restate its persona; describe the objective, constraints, files, acceptance criteria, and expected output. A worker reports to you: after it returns running, call delegate_status once with wait_seconds (up to 120) instead of polling in a loop; do not send a follow-up while it is still running. Keep working until the full objective is complete or user input is required. Workers inherit restrictions and cannot approve actions; never delegate to evade an approval. share_memory is persistent memory, not peer chat.
 
-For slow commands, use terminal(background=true), continue independent work, and check terminal_job for output and exit status; stop jobs you no longer need. User steering at a safe boundary takes priority: integrate it into the current objective and continue unless the user cancels.
+For slow commands, use terminal(background=true), continue independent work, and check terminal_job for output and exit status; stop jobs you no longer need. Use workdir rather than chaining cd, and use read_file/search_files/edit_file rather than cat/sed/find. User steering at a safe boundary takes priority: integrate it into the current objective and continue unless the user cancels.
 
 When a decision materially changes the work and cannot be inferred safely, call ask_user with 2-5 concrete options and mark a recommendation. Do not ask for facts you can inspect yourself or questions already answered.
 
@@ -276,6 +276,10 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "web_extract": 45.0,
     "web_research": 120.0,
     "web_crawl": 120.0,
+    "browser_verify": 140.0,
+    "web_verify": 140.0,
+    "search_files": 120.0,
+    "delegate_status": 320.0,
     "index_document": 120.0,
     "terminal": 60.0,
     # N6 (final pass): a cold scan of a large repo can exceed the 30s default;

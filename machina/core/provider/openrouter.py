@@ -386,6 +386,8 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
                         yield event
                     if not state.saw_terminal:
                         raise _truncated_stream_error("openrouter", state.resolved_model)
+                    if state.truncated:
+                        raise _truncated_stream_error("openrouter", state.resolved_model)
                 # Success — stop trying fallbacks.
                 break
             except Exception as e:
@@ -451,6 +453,8 @@ class OpenRouterProvider(LLMProvider, RateLimitBinding):
                             async for event in openai_stream_events(resp2, state):
                                 yield event
                             if not state.saw_terminal:
+                                raise _truncated_stream_error("openrouter", state.resolved_model)
+                            if state.truncated:
                                 raise _truncated_stream_error("openrouter", state.resolved_model)
                         break
                     except Exception as e2:

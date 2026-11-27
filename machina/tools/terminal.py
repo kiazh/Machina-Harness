@@ -373,7 +373,14 @@ async def terminal_job(action: str = "list", job_id: str = "", wait_seconds: int
 
 @registry.register(
     name="terminal",
-    description="Execute a shell command for git, builds, tests, etc. Run tests directly without output pipes. Set background=true for slow work: it returns a job ID immediately; use terminal_job to check output, verify exit status, or stop it.",
+    description=(
+        "Execute a shell command for git, builds, tests, etc. Set the working "
+        "directory with workdir instead of chaining cd. Use read_file, "
+        "search_files, list_files, and edit_file for file inspection and edits; "
+        "do not use cat/sed/find/shell pipes for them. Run tests directly. Set "
+        "background=true for slow work: it returns a job ID immediately; use "
+        "terminal_job to check output, verify exit status, or stop it."
+    ),
     parameters={
         "type": "object",
         "properties": {

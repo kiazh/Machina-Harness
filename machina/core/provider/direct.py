@@ -275,6 +275,8 @@ class DirectProvider(LLMProvider, RateLimitBinding):
                     yield event
             if not state.saw_terminal:
                 raise _truncated_stream_error(self.spec.name, state.resolved_model)
+            if state.truncated:
+                raise _truncated_stream_error(self.spec.name, state.resolved_model)
         except BaseException as exc:
             # GeneratorExit/CancelledError are BaseException: settle before
             # re-raising so an early close cannot strand the reservation.

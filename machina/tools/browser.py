@@ -21,6 +21,28 @@ from machina.observability.diagnostics import record_failure
 from machina.tools.base import registry
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_CHECK_ACTIONS = frozenset(
+    {
+        "click",
+        "fill",
+        "press",
+        "wait",
+        "wait_for_selector",
+        "reload",
+        "set_viewport",
+        "assert_selector",
+        "expect_selector",
+        "assert_text",
+        "expect_text",
+        "assert_attribute",
+        "expect_attribute",
+        "assert_local_storage",
+        "expect_local_storage",
+        "assert_url",
+        "expect_url",
+        "screenshot",
+    }
+)
 
 
 def _validate_url(url: str) -> str:
@@ -110,6 +132,14 @@ async def _run_checks(page, checks: list[dict[str, Any]], timeout_ms: int) -> li
             continue
         action = str(raw.get("action") or raw.get("type") or "").strip()
         name = str(raw.get("name") or action or f"check[{index}]")
+        if action not in _CHECK_ACTIONS:
+            hint = (
+                "use assert_selector, assert_text, assert_attribute, "
+                "assert_local_storage, or assert_url"
+                if action in {"assert", "expect", ""}
+                else f"allowed: {', '.join(sorted(_CHECK_ACTIONS))}"
+            )
+            raise ValueError(f"unknown action {action!r}; {hint}")
         timeout = max(1, min(int(raw.get("timeout_ms") or timeout_ms), 120_000))
         try:
             if action == "click":
@@ -155,13 +185,25 @@ async def _run_checks(page, checks: list[dict[str, Any]], timeout_ms: int) -> li
                 selector = str(raw.get("selector") or "")
                 if not selector:
                     raise ValueError("assert_selector requires selector")
-                await page.wait_for_selector(selector, timeout=timeout)
-                results.append(_check_result(name, True, f"found {selector}"))
+                expected_count = raw.get("count")
+                if expected_count is not None:
+                    actual_count = await page.locator(selector).count()
+                    results.append(
+                        _check_result(
+                            name,
+                            actual_count == int(expected_count),
+                            f"{actual_count} node(s), expected {expected_count}",
+                        )
+                    )
+                else:
+                    await page.wait_for_selector(selector, timeout=timeout)
+                    results.append(_check_result(name, True, f"found {selector}"))
             elif action in {"assert_text", "expect_text"}:
                 text = str(raw.get("text") or raw.get("expected") or raw.get("value") or "")
                 if not text:
                     raise ValueError("assert_text requires text")
-                body = await page.inner_text("body")
+                selector = str(raw.get("selector") or "")
+                body = await page.inner_text(selector or "body")
                 results.append(_check_result(name, text in body, f"text {text!r}"))
             elif action in {"assert_attribute", "expect_attribute"}:
                 selector = str(raw.get("selector") or "")

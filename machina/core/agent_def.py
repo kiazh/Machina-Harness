@@ -124,6 +124,7 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
         tools=[
             "read_file",
             "write_file",
+            "edit_file",
             "list_files",
             "search_files",
             "learn_directory",
@@ -146,7 +147,7 @@ def _ecc_agents() -> dict[str, AgentDef]:
         "Grep": "search_files",
         "Glob": "list_files",
         "Write": "write_file",
-        "Edit": "write_file",
+        "Edit": "edit_file",
         "Bash": "terminal",
         "WebSearch": "web_search",
         "WebFetch": "web_extract",
@@ -169,8 +170,8 @@ def _ecc_agents() -> dict[str, AgentDef]:
         adaptation = (
             "Machina integration: handle only the delegated task. Use the registered "
             f"harness tool names: {', '.join(tools)}. "
-            "Read=read_file; Grep=search_files; Glob=list_files; Write/Edit=write_file; "
-            "Bash=terminal; WebSearch=web_search; WebFetch=web_extract. "
+            "Read=read_file; Grep=search_files; Glob=list_files; Write=write_file; "
+            "Edit=edit_file; Bash=terminal; WebSearch=web_search; WebFetch=web_extract. "
             "Permission approval and inherited parent restrictions still apply. "
             "Use the selected session model/provider. Referenced ECC skills, commands, "
             "or platform-specific paths may not be installed; inspect before relying on them. "

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import os
 import secrets
@@ -604,6 +605,7 @@ async def _run_worker_joined(operation: Callable[[], str], *, capture_result: bo
 # buffered whole.
 _READ_LINE_CHUNK = 1 << 16
 _READ_MAX_PAGE_BYTES = 5_242_880
+_EDIT_MAX_BYTES = 2_097_152
 # Code-review P2 #4: stop counting the total after this many lines past the
 # selected window. Reaching EOF within the budget yields an exact total (small
 # files, unchanged); otherwise the marker reports a lower bound instead of
@@ -1004,6 +1006,131 @@ async def write_file(path: str, content: str) -> str:
         raise ToolError(f"Error writing file: {e}") from e
 
 
+@registry.register(
+    name="edit_file",
+    description=(
+        "Replace an exact block of text in a UTF-8 file. Use this for focused "
+        "edits instead of rewriting the whole file. The block must occur exactly "
+        "count times. Returns the changed region as a unified diff."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path to the file to edit"},
+            "old_text": {
+                "type": "string",
+                "description": "Exact text to replace",
+            },
+            "new_text": {
+                "type": "string",
+                "description": "Replacement text (empty deletes the block)",
+            },
+            "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "Expected number of exact occurrences (default 1)",
+            },
+        },
+        "required": ["path", "old_text", "new_text"],
+    },
+)
+async def edit_file(
+    path: str, old_text: str, new_text: str, count: int = 1
+) -> str:
+    """Replace an exact text block in a UTF-8 file."""
+    if not isinstance(old_text, str) or not old_text:
+        raise ToolError("old_text must not be empty")
+    if not isinstance(new_text, str):
+        raise ToolError("new_text must be a string")
+    if len(old_text) > 200_000 or len(new_text) > 200_000:
+        raise ToolError("edit block exceeds the 200,000 character limit")
+    try:
+        expected = int(count)
+    except (TypeError, ValueError):
+        raise ToolError("count must be an integer") from None
+    if not 1 <= expected <= 100:
+        raise ToolError("count must be between 1 and 100")
+    try:
+        file_path = resolve_path(path, allow_outside=True)
+    except ValueError as e:
+        raise ToolError(f"{e}") from e
+
+    try:
+        from machina.workspace.snapshots import record_before_write
+
+        record_before_write(file_path)
+    except Exception:
+        pass
+
+    def _edit() -> str:
+        inside = file_path.is_relative_to(_base_dir())
+        fd = _open_secure_read(file_path, check_base=inside)
+        try:
+            info = os.fstat(fd)
+            if info.st_size > _EDIT_MAX_BYTES:
+                raise ValueError(
+                    f"file is larger than the {_EDIT_MAX_BYTES // 1_048_576} MiB edit limit"
+                )
+            chunks: list[bytes] = []
+            remaining = _EDIT_MAX_BYTES + 1
+            while remaining > 0:
+                chunk = os.read(fd, min(65_536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+            if len(data) > _EDIT_MAX_BYTES:
+                raise ValueError(
+                    f"file is larger than the {_EDIT_MAX_BYTES // 1_048_576} MiB edit limit"
+                )
+            mode = stat.S_IMODE(info.st_mode)
+        finally:
+            os.close(fd)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"file is not valid UTF-8: {e}") from e
+        found = text.count(old_text)
+        if found != expected:
+            raise ValueError(
+                f"expected {expected} exact match(es), found {found}; "
+                "read the current file and retry with the exact block"
+            )
+        updated = text.replace(old_text, new_text, expected)
+        if updated == text:
+            raise ValueError("replacement did not change the file")
+        inside = file_path.is_relative_to(_base_dir())
+        if inside and _dir_fd_supported():
+            _write_anchored_inside(file_path, updated, path)
+        else:
+            if inside:
+                _reject_symlink_components(file_path)
+                _secure_mkdir_parents(file_path, inside_base=True)
+                _reject_symlink_components(file_path)
+            _atomic_write_file(file_path, updated, mode=mode)
+        diff = "\n".join(
+            difflib.unified_diff(
+                text.splitlines(),
+                updated.splitlines(),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="",
+            )
+        )
+        if len(diff) > 8_000:
+            diff = diff[:8_000] + "\n... diff truncated"
+        return f"Edited {path} ({expected} replacement(s)).\n{diff}"
+
+    try:
+        return await _run_worker_joined(_edit, capture_result=True)
+    except ToolError:
+        raise
+    except Exception as e:
+        raise ToolError(f"Error editing file: {e}") from e
+
+
 def _bounded_glob(directory: Path, pattern: str):
     """Match glob components while bounding entries inspected across the tree."""
     if not pattern:
@@ -1134,6 +1261,7 @@ registry.declare_effects(
     {
         "read_file": ("fs.read",),
         "write_file": ("fs.write",),
+        "edit_file": ("fs.read", "fs.write"),
         "list_files": ("fs.read",),
     }
 )

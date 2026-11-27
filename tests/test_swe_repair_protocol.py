@@ -172,3 +172,16 @@ def test_search_files_is_recursive(monkeypatch, tmp_path) -> None:
 
     assert "Found 1 matches:" in result
     assert "src" in result and "pkg" in result and "module.py:1" in result
+
+
+def test_search_files_accepts_a_file_path(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "plan.md").write_text("accent color\nspacing\n", encoding="utf-8")
+    monkeypatch.setattr(config, "workspace_root", str(root))
+
+    result = asyncio.run(
+        builtins.search_files("accent|color", "plan.md", file_glob="plan.md")
+    )
+
+    assert "plan.md:1" in result

@@ -332,7 +332,7 @@ class Orchestrator:
 
         handoff = (
             await self._parent_context(parent_session_id)
-            if parent_session_id and resume_session_id is None
+            if parent_session_id
             else ""
         )
 
