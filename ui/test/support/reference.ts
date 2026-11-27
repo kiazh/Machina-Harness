@@ -3,18 +3,41 @@ import { TuiAltScreen, stripTerminalSequences, type Terminal } from "@earendil-w
 import { App } from "../../src/app.ts";
 import type { GatewayClient } from "../../src/gateway.ts";
 import type { GatewayEvent } from "../../src/protocol.ts";
-export async function referenceFixture(columns = 140, rows = 52) {
+
+/** A deterministic request response, optionally derived from the request params. */
+export type ReferenceResponse = unknown | ((params: Record<string, unknown>) => unknown);
+
+export interface ReferenceOptions {
+	/**
+	 * Gateway methods the fixture answers with a fixed value. Values are
+	 * cloned per call so a UI mutation can never leak into the next response.
+	 */
+	responses?: Record<string, ReferenceResponse>;
+	/** Emit the reference write_file approval after the transcript (default true). */
+	approval?: boolean;
+}
+
+export async function referenceFixture(columns = 140, rows = 52, options: ReferenceOptions = {}) {
  let input: (data: string) => void = () => {};
  const term: Terminal & {columns:number; rows:number} = {
   columns, rows, kittyProtocolActive:false, start(onInput) {input=onInput;}, stop(){}, async drainInput(){},
   write(){}, moveBy(){}, hideCursor(){}, showCursor(){}, clearLine(){}, clearFromCursor(){}, clearScreen(){}, setTitle(){}, setProgress(){},
  };
  const requests: Array<{method:string; params:Record<string, unknown>}> = [];
+ const responses = options.responses ?? {};
+ const respond = (method: string, params: Record<string, unknown>): unknown => {
+  if (!Object.prototype.hasOwnProperty.call(responses, method)) return undefined;
+  const value = responses[method];
+  const resolved = typeof value === "function" ? value(params) : value;
+  return resolved === undefined ? undefined : structuredClone(resolved);
+ };
  const client = {
   onEvent:undefined as ((e:GatewayEvent) => void) | undefined,
   start(){}, async stop(){}, stderr:() => [],
   async request(method:string, params:Record<string, unknown> = {}) {
    requests.push({method,params});
+   const configured = respond(method, params);
+   if (configured !== undefined) return configured;
    if (method === "initialize") return {version:"fixture", model:"preview", cwd:"~/machina", branch:"main", provider:"fixture"};
    if (method === "config.get") return {config:{theme:"codex",nowplaying_enabled:false}};
    if (method === "mode.get") return {mode:"ask"};
@@ -34,7 +57,17 @@ export async function referenceFixture(columns = 140, rows = 52) {
  emit({type:"tool.complete", id:"read-1", name:"read_file", result:"Example inspection · Homebrew fallback configuration", isError:false});
  emit({type:"message.delta", text:"The proposed change preserves the existing URL. Review the file-write evidence below; approval options are docked above the composer."});
  const approval = (requestId:string) => ({type:"needs_approval", requestId, operation:"write_file", tool:"write_file", target:"install.sh", argv:[], cwd:"~/machina", backend:"local", timeout:30, capabilities:["file.write"], fileDiff:{diff:"@@ proposed installer guard · illustrative preview @@\n- write_generated_database_url()\n+ if custom_database_url_is_set; then\n+   log \"Preserving custom DATABASE_URL\"\n+ else\n+   write_generated_database_url()\n+ fi"}});
- emit(approval("demo-7f2a"));
+ if (options.approval !== false) emit(approval("demo-7f2a"));
  tui.renderNow(true);
- return {app, tui, term, emit, approval, requests, type:(data:string) => input(data), plain:() => tui.getScreenLines().map(stripTerminalSequences)};
+ const settle = async () => {
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+ };
+ const resize = (nextColumns: number, nextRows: number) => {
+  term.columns = nextColumns;
+  term.rows = nextRows;
+  tui.renderNow(true);
+  return tui.getScreenLines().map(stripTerminalSequences);
+ };
+ return {app, tui, term, emit, approval, requests, client, settle, resize, type:(data:string) => input(data), plain:() => tui.getScreenLines().map(stripTerminalSequences)};
 }

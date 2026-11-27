@@ -1,0 +1,72 @@
+{
+	"activity": [
+		{
+			"step": "activity",
+			"view": "status",
+			"selection": "❯ Main · Preview               running │ running",
+			"evidence": "Recent work                                                                                     Updated <time>"
+		},
+		{
+			"step": "shells",
+			"view": "status",
+			"selection": "❯ npm run check                 exited │ exited",
+			"evidence": "Shells                                │ npm run check"
+		},
+		{
+			"step": "expanded",
+			"view": "status",
+			"selection": "❯ npm run check                 exited │ exited",
+			"evidence": "│ Return code: 0"
+		},
+		{
+			"step": "down",
+			"view": "status",
+			"selection": "❯ npm run check                 exited │ exited",
+			"evidence": "Shells                                │ npm run check"
+		},
+		{
+			"step": "chat",
+			"view": "chat",
+			"selection": "❯ Fix the installer so it preserves my custom database URL.",
+			"evidence": "❯ unsent draft"
+		}
+	],
+	"changes": [
+		{
+			"step": "changes",
+			"view": "changes",
+			"selection": "❯ 01  Fix the parser and explain the … │",
+			"evidence": "Changes in this chat                                                                                       2 prompts"
+		},
+		{
+			"step": "diff",
+			"view": "changes",
+			"selection": "❯ 01  Fix the parser and explain the … │",
+			"evidence": "│ +extra"
+		},
+		{
+			"step": "next-file",
+			"view": "changes",
+			"selection": "❯ 01  Fix the parser and explain the … │",
+			"evidence": "│ +new docs"
+		},
+		{
+			"step": "review",
+			"view": "changes",
+			"selection": "❯ 01  Fix the parser and explain the … │",
+			"evidence": "│ Possible API secret key added"
+		},
+		{
+			"step": "next-finding",
+			"view": "changes",
+			"selection": "❯ 01  Fix the parser and explain the … │",
+			"evidence": "│ Check the boundary"
+		},
+		{
+			"step": "chat",
+			"view": "chat",
+			"selection": "❯ Fix the installer so it preserves my custom database URL.",
+			"evidence": "❯ unsent draft"
+		}
+	]
+}

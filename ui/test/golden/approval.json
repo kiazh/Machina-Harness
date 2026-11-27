@@ -1,0 +1,30 @@
+[
+	{
+		"step": "waiting",
+		"view": "chat",
+		"selection": "› Allow once  Only this exact action",
+		"evidence": "Approval required · needs approval                                                                 request: demo-7f2a",
+		"decisions": []
+	},
+	{
+		"step": "session",
+		"view": "chat",
+		"selection": "› Allow for this session  Where supported by policy",
+		"evidence": "› Allow for this session  Where supported by policy",
+		"decisions": []
+	},
+	{
+		"step": "decided",
+		"view": "chat",
+		"selection": "❯ Fix the installer so it preserves my custom database URL.",
+		"evidence": "❯ Queue a message · applies at next tool boundary",
+		"decisions": [
+			{
+				"requestId": "demo-7f2a",
+				"sessionId": "reference-session",
+				"verdict": "approved",
+				"grant": "session"
+			}
+		]
+	}
+]
