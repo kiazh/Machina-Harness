@@ -149,6 +149,20 @@ test("a streamed turn renders text, a tool card and a final summary", () => {
 	assert.doesNotMatch(out, /\(spinner\)/);
 });
 
+test("toggleLastTool expands and collapses the newest tool card", () => {
+	const view = new Container();
+	const transcript = new Transcript(view, new FakeSpinner());
+	assert.equal(transcript.toggleLastTool(), false);
+	transcript.apply(ev({ type: "message.start" }));
+	transcript.apply(ev({ type: "tool.start", id: "1", name: "terminal", args: { command: "pytest" } }));
+	transcript.apply(ev({ type: "tool.complete", id: "1", name: "terminal", result: "one\ntwo\nthree", isError: false }));
+	assert.doesNotMatch(plain(view), /three/);
+	assert.equal(transcript.toggleLastTool(), true);
+	assert.match(plain(view), /three/);
+	assert.equal(transcript.toggleLastTool(), true);
+	assert.doesNotMatch(plain(view), /three/);
+});
+
 test("a withheld redaction tail reconciles exactly once (AH-AUDIT-027)", () => {
 	const view = new Container();
 	const transcript = new Transcript(view, new FakeSpinner());

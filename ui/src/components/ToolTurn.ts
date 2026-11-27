@@ -2,7 +2,7 @@
 // result/diff preview, explicit outcome text. Neutral frame; critical outcome
 // stays visible at narrow widths. Arguments are display-only.
 
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
 import { uiLog } from "../debug.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
@@ -87,6 +87,12 @@ function duration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function looksLikeDiff(text: string): boolean {
+	return /^@@ /m.test(text) && /^(?:diff --git |--- |\+\+\+ )/m.test(text);
+}
+
+const CONTENT_KEYS = ["content", "diff", "patch"] as const;
+
 export class ToolTurn implements Component {
 	private readonly name: string;
 	private readonly args: string;
@@ -97,6 +103,9 @@ export class ToolTurn implements Component {
 	private result: ToolResultView = { text: "", backendTruncated: false, locallyTruncated: false };
 	private outcome: ToolOutcome = "running";
 	private paused: "stopping" | "cleanup_pending" | undefined;
+	private expanded = false;
+	private readonly content?: string;
+	private readonly contentTruncated: boolean;
 	private readonly cached = new Map<number, string[]>();
 
 	constructor(name: string, args: Record<string, unknown>, activity: ActivitySource) {
@@ -111,12 +120,28 @@ export class ToolTurn implements Component {
 		}
 		this.name = sanitizeDisplay(toolLabel(safeName, safeArgs));
 		this.externalHarness = safeName === "harness_delegate";
+		const contentKeys: readonly string[] = safeName === "write_file" || safeName.includes("edit") || safeName.includes("patch")
+			? CONTENT_KEYS
+			: [];
+		const rawContent = contentKeys
+			.map((key) => safeArgs[key])
+			.find((value) => typeof value === "string" && value.length > 0);
+		if (typeof rawContent === "string") {
+			const clipped = truncateUtf8ByBytes(rawContent, 8_000);
+			this.content = clipped.text;
+			this.contentTruncated = clipped.truncated;
+		} else {
+			this.contentTruncated = false;
+		}
 		// The `mcp_call` label already names the connector and tool; showing the
 		// raw namespaced `name` in the argument line would duplicate the ugly
 		// wire form (`vercel__list_projects`). Keep only the call arguments.
-		const displayArgs = safeName === "mcp_call"
+		const baseArgs = safeName === "mcp_call"
 			? (safeArgs.arguments && typeof safeArgs.arguments === "object" && !Array.isArray(safeArgs.arguments) ? { arguments: safeArgs.arguments } : {})
 			: safeArgs;
+		const displayArgs = contentKeys.length
+			? Object.fromEntries(Object.entries(baseArgs).filter(([key]) => !contentKeys.includes(key)))
+			: baseArgs;
 		const argsText = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
@@ -164,24 +189,35 @@ export class ToolTurn implements Component {
 			: styleMarker(this.outcome, markerFor(this.outcome));
 		const elapsed = this.completedAt === undefined ? "" : duration(this.completedAt - this.startedAt);
 		const status = this.statusText();
-		const header = `${marker} ${theme.text(this.name)}${this.args ? ` ${theme.dim(this.args)}` : ""}`
+		const chevron = theme.dim(this.expanded ? "▾" : "▸");
+		const header = `${marker} ${theme.text(this.name)}${this.args ? ` ${theme.dim(this.args)}` : ""} ${chevron}`
 			.replace(/\r?\n/g, " ");
 		const lines = [between(header, status, room)];
-		const previewBudget = this.outcome === "running" ? 1 : 2;
-		if (this.result.text.trim()) {
-			const shaped = shapePreview(this.result.text, Math.max(1, room - 2), previewBudget);
+		const showContent = Boolean(this.content)
+			&& !["error", "denied", "interrupted", "outcome_unknown"].includes(this.outcome);
+		const source = showContent ? this.content! : this.result.text;
+		const previewBudget = this.expanded ? 200 : this.outcome === "running" ? 1 : 2;
+		if (source.trim()) {
+			const shaped = shapePreview(source, Math.max(1, room - 2), previewBudget);
+			const diff = !showContent && looksLikeDiff(source);
 			shaped.shown.forEach((line, index) => {
 				const prefix = index === 0 ? theme.dim("⎿ ") : "  ";
-				lines.push(`${prefix}${truncateToWidth(styleDiffLine(line), Math.max(1, room - 2))}`);
+				const styled = diff ? styleDiffLine(line) : theme.text(line);
+				lines.push(`${prefix}${truncateToWidth(styled, Math.max(1, room - 2))}`);
 			});
 			if (shaped.omitted > 0) {
 				lines.push(theme.dim(`  … ${shaped.omitted} more line${shaped.omitted === 1 ? "" : "s"}`));
 			}
+			if (showContent && this.contentTruncated) {
+				lines.push(theme.dim("  content preview truncated"));
+			}
+		} else if (this.expanded) {
+			lines.push(theme.dim(this.outcome === "running" ? "  waiting for output" : "  no output recorded"));
 		}
 		if (this.result.backendTruncated && this.outcome !== "running") {
 			lines.push(theme.dim("  server output truncated"));
 		}
-		if (elapsed && (this.outcome === "success" || this.outcome === "error")) {
+		if (elapsed && this.outcome !== "queued" && this.outcome !== "running" && this.outcome !== "historical") {
 			lines[0] = between(header, `${status} ${theme.dim(elapsed)}`, room);
 		}
 		const rows = ["", ...lines.map((line) => truncateToWidth(`${indent}${line}`, total))];
@@ -190,6 +226,19 @@ export class ToolTurn implements Component {
 			this.cached.set(width, rows);
 		}
 		return rows;
+	}
+
+	toggle(): void {
+		this.expanded = !this.expanded;
+		this.cached.clear();
+	}
+
+	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
+		if (event.type !== "click" || event.button !== "left") return undefined;
+		const target = this.expanded ? 1 : 2;
+		if (event.y < 0 || event.y > target) return undefined;
+		this.toggle();
+		return { handled: true, render: true };
 	}
 
 	private statusText(): string {

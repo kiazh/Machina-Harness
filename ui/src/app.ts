@@ -3130,6 +3130,9 @@ export class App implements FeatureHost {
 			}
 			return undefined;
 		}
+		if (this.view === "chat" && matchesKey(data, Key.ctrl("o"))) {
+			if (this.transcript.toggleLastTool()) return { consume: true };
+		}
 		const integration = this.integration;
 		const explorerKey = this.matchesExplorerKey(data);
 		if (explorerKey) {

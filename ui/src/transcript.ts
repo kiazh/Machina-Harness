@@ -71,6 +71,7 @@ export class Transcript {
 	private spinnerVisible = false;
 	private readonly tools = new Map<string, ToolTurn>();
 	private readonly toolSubs = new Map<string, AnimationSubscription>();
+	private lastTool: ToolTurn | undefined;
 	/** Editorial turn number shown in the prompt band. */
 	private turnNumber = 0;
 	private turnStartedAt = 0;
@@ -117,6 +118,12 @@ export class Transcript {
 		this.retain(component);
 	}
 
+	toggleLastTool(): boolean {
+		if (!this.lastTool) return false;
+		this.lastTool.toggle();
+		return true;
+	}
+
 	pauseForApproval(): void {
 		this.hideSpinner();
 	}
@@ -161,6 +168,7 @@ export class Transcript {
 			if (index === -1) break;
 			children.splice(index, 1);
 		}
+		if (this.lastTool && !children.includes(this.lastTool)) this.lastTool = undefined;
 	}
 
 	clear(): void {
@@ -174,6 +182,7 @@ export class Transcript {
 		this.trimNotice = undefined;
 		this.spinnerVisible = false;
 		this.tools.clear();
+		this.lastTool = undefined;
 		this.lastCompletedTurn = undefined;
 		this.turnNumber = 0;
 		this.turnStartedAt = 0;
@@ -214,6 +223,7 @@ export class Transcript {
 				const card = new ToolTurn(entry.tool ?? "tool", {}, this.activity);
 				card.settle({ text: entry.content, backendTruncated: false, locallyTruncated: false }, "historical");
 				this.retain(card);
+				this.lastTool = card;
 			} else this.addNotice(entry.content);
 		}
 	}
@@ -262,6 +272,7 @@ export class Transcript {
 			const card = new ToolTurn(event.name, event.args, this.activity);
 			this.turnTools += 1;
 			this.tools.set(event.id, card);
+			this.lastTool = card;
 			this.retain(card);
 			if (this.coordinator) {
 				this.toolSubs.get(event.id)?.stop();
