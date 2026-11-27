@@ -27,6 +27,8 @@ export type CanonicalEvent = { protocolVersion: 2; sessionId: string; turnId: st
 	| { type: "auth.grok.failed"; reason: string }
 	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
 	| { type: "auth.copilot.failed"; reason: string }
+	| { type: "auth.opencode.completed"; account_id: string|null; expiry: number|null; org_id: string|null }
+	| { type: "auth.opencode.failed"; reason: string }
 );
 export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnId: string } & (
 	{ type: "message.start" }
@@ -56,5 +58,7 @@ export type LegacyGatewayEvent = { protocolVersion?: 1; sessionId: string; turnI
 	| { type: "auth.grok.failed"; reason: string }
 	| { type: "auth.copilot.completed"; account_id: string|null; token_family: string|null }
 	| { type: "auth.copilot.failed"; reason: string }
+	| { type: "auth.opencode.completed"; account_id: string|null; expiry: number|null; org_id: string|null }
+	| { type: "auth.opencode.failed"; reason: string }
 );
 export type GatewayEvent = CanonicalEvent | LegacyGatewayEvent;

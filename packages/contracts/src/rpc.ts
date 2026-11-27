@@ -815,12 +815,16 @@ export interface ChatGPTImportResult {
 
 export interface SubscriptionStatus {
  signedIn: boolean;
- source: string | null;
+ source?: string | null;
  expired?: boolean | null;
  expiresAt?: number | null;
  accountId?: string | null;
  lastRefresh?: string | null;
  tokenFamily?: string | null;
+ email?: string | null;
+ orgId?: string | null;
+ orgName?: string | null;
+ storagePath?: string | null;
 }
 
 export interface SubscriptionStatusResult {

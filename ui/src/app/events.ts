@@ -165,7 +165,9 @@ export class EventRouter {
 			event.type === "auth.grok.completed" ||
 			event.type === "auth.grok.failed" ||
 			event.type === "auth.copilot.completed" ||
-			event.type === "auth.copilot.failed"
+			event.type === "auth.copilot.failed" ||
+			event.type === "auth.opencode.completed" ||
+			event.type === "auth.opencode.failed"
 		) return;
 		if (event.type === "growth.status") {
 			// Background training lands after the turn retires (and the

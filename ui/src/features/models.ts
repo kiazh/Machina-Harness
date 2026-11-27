@@ -61,6 +61,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 	kiro: "Kiro local proxy",
 	chatgpt: "ChatGPT subscription",
 	copilot: "GitHub Copilot",
+	"opencode-go": "OpenCode Go",
 	ollama: "Ollama (local)",
 	custom: "Custom endpoint",
 };
@@ -114,6 +115,7 @@ export const CURATED_MODELS: ModelEntry[] = [
 	{ model: "grok-4.5", provider: "grok", description: "Grok subscription, stable fallback" },
 	{ model: "grok-4.3", provider: "grok", description: "Grok subscription, 1M-context option" },
 	{ model: "grok-build-0.1", provider: "grok", description: "Grok subscription, agentic coding" },
+	{ model: "deepseek-v4.1-flash", provider: "opencode-go", description: "OpenCode Go subscription — /auth opencode sign-in first" },
 	{ model: "big-pickle", provider: "opencode", description: "OpenCode Zen gateway (set OPENCODE_API_KEY)" },
 	{ model: "kimi-for-coding", provider: "kimi", description: "Kimi Code membership (set KIMI_API_KEY)" },
 	...KIRO_CURATED_MODELS,

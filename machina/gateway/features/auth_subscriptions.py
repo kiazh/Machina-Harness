@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from machina.gateway.errors import OPERATION_FAILED, RpcError
 from machina.gateway.features._common import _bool
-from machina.security import copilot_auth, grok_auth
+from machina.security import copilot_auth, grok_auth, opencode_go_auth
 
 if TYPE_CHECKING:
     from machina.gateway.server import Gateway
@@ -60,12 +60,30 @@ def _copilot_status() -> dict[str, Any]:
     }
 
 
+def _opencode_status() -> dict[str, Any]:
+    report = opencode_go_auth.status()
+    return {
+        "signedIn": bool(report.get("signed_in")),
+        "expired": bool(report.get("expired")),
+        "expiresAt": report.get("expires_at"),
+        "email": report.get("email"),
+        "orgId": report.get("org_id"),
+        "orgName": report.get("org_name"),
+        "accountId": report.get("account_id"),
+        "storagePath": report.get("storage_path"),
+    }
+
+
 async def auth_grok_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     return {"status": await asyncio.to_thread(_grok_status)}
 
 
 async def auth_copilot_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     return {"status": await asyncio.to_thread(_copilot_status)}
+
+
+async def auth_opencode_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    return {"status": await asyncio.to_thread(_opencode_status)}
 
 
 async def _run_grok_login(gw: Gateway, device: dict[str, Any], no_browser: bool) -> None:
@@ -202,3 +220,76 @@ async def auth_copilot_logout(gw: Gateway, params: dict[str, Any]) -> dict[str, 
         pending.cancel()
     removed = await asyncio.to_thread(copilot_auth.logout)
     return {"removed": removed, "status": await asyncio.to_thread(_copilot_status)}
+
+
+async def _run_opencode_login(
+    gw: Gateway, device: dict[str, Any], generation: int, no_browser: bool
+) -> None:
+    url = str(device.get("verification_uri_complete") or device.get("verification_uri") or "")
+    task = asyncio.current_task()
+    try:
+        if url and not no_browser:
+            with suppress(Exception):
+                await asyncio.to_thread(webbrowser.open, url)
+        tokens = await asyncio.to_thread(
+            opencode_go_auth.complete_device_login,
+            device,
+            timeout=DEVICE_TIMEOUT_SECONDS,
+            _generation=generation,
+        )
+        expiry = tokens.get("expires_at")
+        _emit(
+            gw,
+            "auth.opencode.completed",
+            account_id=tokens.get("account_id"),
+            expiry=(
+                float(expiry)
+                if isinstance(expiry, (int, float)) and not isinstance(expiry, bool)
+                else None
+            ),
+            org_id=tokens.get("org_id"),
+        )
+    except asyncio.CancelledError:
+        _emit(gw, "auth.opencode.failed", reason="cancelled")
+        raise
+    except opencode_go_auth.OpenCodeGoAuthError as error:
+        _emit(gw, "auth.opencode.failed", reason=str(error.code or "opencode_go_auth_failed"))
+    except Exception as error:  # bounded and sanitized
+        _emit(gw, "auth.opencode.failed", reason=type(error).__name__)
+    finally:
+        if _PENDING.get("opencode") is task:
+            _PENDING.pop("opencode", None)
+
+
+async def auth_opencode_login(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    pending = _PENDING.get("opencode")
+    if pending is not None and not pending.done():
+        return {"pending": True}
+    generation = await asyncio.to_thread(opencode_go_auth.credential_generation)
+    try:
+        device = await asyncio.to_thread(opencode_go_auth.start_device_login)
+    except opencode_go_auth.OpenCodeGoAuthError as error:
+        raise RpcError(OPERATION_FAILED, str(error)) from None
+    except Exception as error:
+        raise RpcError(
+            OPERATION_FAILED, f"OpenCode Go sign-in failed ({type(error).__name__})"
+        ) from None
+    no_browser = _bool(params, "no_browser")
+    url = str(device.get("verification_uri_complete") or device.get("verification_uri") or "")
+    _PENDING["opencode"] = asyncio.create_task(
+        _run_opencode_login(gw, device, generation, no_browser), name="opencode-login-flow"
+    )
+    return {
+        "url": url,
+        "userCode": str(device.get("user_code") or ""),
+        "verificationUri": str(device.get("verification_uri") or ""),
+        "expiresIn": float(device.get("expires_in") or DEVICE_TIMEOUT_SECONDS),
+    }
+
+
+async def auth_opencode_logout(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    pending = _PENDING.pop("opencode", None)
+    if pending is not None:
+        pending.cancel()
+    removed = await asyncio.to_thread(opencode_go_auth.logout)
+    return {"removed": removed, "status": await asyncio.to_thread(_opencode_status)}

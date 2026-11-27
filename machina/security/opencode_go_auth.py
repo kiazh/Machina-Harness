@@ -348,6 +348,37 @@ def login(
         if open_browser:
             with suppress(Exception):
                 webbrowser.open(str(device["verification_uri_complete"]))
+        return complete_device_login(
+            device,
+            path=target,
+            timeout=timeout,
+            sleep=sleep,
+            output=output,
+            select_org=select_org,
+            client=http,
+            _generation=generation,
+        )
+    finally:
+        if owns_client:
+            http.close()
+
+
+def complete_device_login(
+    device: dict[str, Any],
+    *,
+    path: str | Path | None = None,
+    timeout: float = DEFAULT_DEVICE_TIMEOUT,
+    sleep: Callable[[float], None] = time.sleep,
+    output: Callable[[str], None] = print,
+    select_org: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+    client: httpx.Client | None = None,
+    _generation: int | None = None,
+) -> dict[str, Any]:
+    """Poll an existing device authorization and publish its account identity."""
+    target = Path(path) if path is not None else auth_path()
+    generation = credential_generation(target) if _generation is None else _generation
+    http, owns_client = _client_or_new(client, DEFAULT_TIMEOUT)
+    try:
         deadline = time.monotonic() + min(float(timeout), float(device["expires_in"]))
         interval = max(1.0, float(device["interval"]))
         token_payload: dict[str, Any] | None = None
@@ -524,6 +555,7 @@ __all__ = [
     "access_token",
     "auth_path",
     "credential_generation",
+    "complete_device_login",
     "login",
     "login_async",
     "logout",
