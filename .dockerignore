@@ -41,12 +41,19 @@ ENV/
 .env
 .env.local
 
+# Machine-local config and exported transcripts
+opencode.json
+session-*.md
+.worktrees/
+
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
 .hypothesis/
+.mypy_cache/
 
 # OS
 .DS_Store

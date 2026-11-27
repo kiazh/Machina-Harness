@@ -300,7 +300,7 @@ backup-environment artifacts and duplicate PR workflow, and excludes installed
 Node dependencies from source archives. The version remains **0.2.0**, a local
 candidate. Nothing was committed, pushed, published or deployed.
 
-Next owner: read [MCP setup](../../docs/MCP.md) and
+Next owner: read [MCP setup](../../../docs/MCP.md) and
 [release evidence](RELEASE_READINESS.md) before publishing.
 OAuth/HTTP credential profiles, MCP resources/prompts and server callbacks stay
 deferred. Saved configuration is installation-local; live connections are

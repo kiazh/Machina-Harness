@@ -1,7 +1,7 @@
 """RepoMap: bounded single-pass stdlib inventory (Stream D).
 
 Uses only ``os.walk`` / ``ast`` / ``hashlib`` / ``json``. No LLM, no network,
-no production DB. Safe to run on /Users/shadow/machina itself in seconds:
+no production DB. Safe to run on a repository checkout itself in seconds:
 ``.venv``, ``.git`` and other heavy dirs are excluded by default.
 """
 
