@@ -46,6 +46,20 @@ Counts below are from this checkout’s registries and checked-in files; they de
 | Jobs | Durable scheduled jobs, including interval/cron/heartbeat and reviewed script jobs; job execution is at-least-once. |
 | Observability | Sanitized audit events, diagnostics, operation metrics, traces, and durable usage accounting. |
 
+## Resident buddy
+
+Machina has a resident session with a stable persona, always-injected core
+memory, and scoped autonomy grants. The terminal surface is `/agent`; the
+native macOS notch client lives in [`notch/`](notch/) and talks to the same
+gateway. Resident methods are local-terminal capabilities; the notch uses a
+0600 token and never receives host credentials.
+
+- `machina init` creates `~/.machina/notch.token`.
+- `machina serve` exposes the gateway the notch connects to.
+- `./notch/bundle.sh` builds `notch/build/MachinaNotch.app`.
+- See [`docs/RESIDENT.md`](docs/RESIDENT.md) for the authority model, memory,
+  grants, and current limits.
+
 ## Get started
 
 The installer bootstraps the checkout and runtime. First-launch Setup collects

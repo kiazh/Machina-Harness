@@ -131,3 +131,7 @@ opencode.json
 
 # Exported conversation transcripts are local artifacts, not source.
 /session-*.md
+
+# SwiftPM and local notch bundle artifacts
+notch/.build/
+notch/build/

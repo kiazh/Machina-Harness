@@ -367,6 +367,22 @@ class ContextPreparer:
                 project_instructions=project_instructions,
                 include_repair=False,
             )
+        if not self.host.delegated:
+            try:
+                from machina.resident.store import core_memory_block
+
+                resident_memory = await core_memory_block(str(session.id))
+                if resident_memory:
+                    system_prompt = f"{system_prompt}\n\n{resident_memory}"
+                from machina.resident.store import resident_context_block
+
+                recent_context = await resident_context_block(str(session.id))
+                if recent_context:
+                    system_prompt = f"{system_prompt}\n\n{recent_context}"
+            except Exception as _boundary_error:
+                # Resident memory is additive; a database hiccup must not
+                # prevent the turn from running.
+                record_failure("agent.resident.memory", _boundary_error)
         # Keep the task-critical repair protocol outside the truncatable system
         # prefix. A long persona/skill section must not silently remove it.
         required_tail = "" if self.host.delegated else swe_repair_protocol(user_message)

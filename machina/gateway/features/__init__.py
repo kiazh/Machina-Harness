@@ -168,6 +168,22 @@ from machina.gateway.features.providers_feature import (
     providers_list,
     providers_remove,
 )
+from machina.gateway.features.resident import (
+    resident_approval_list,
+    resident_context,
+    resident_events,
+    resident_approval_resolve,
+    resident_grant_create,
+    resident_grant_list,
+    resident_grant_revoke,
+    resident_kill,
+    resident_memory_forget,
+    resident_memory_get,
+    resident_memory_set,
+    resident_profile_set,
+    resident_prompt,
+    resident_status,
+)
 from machina.gateway.features.routing import model_inventory, model_route
 from machina.gateway.features.runtime import runtime_capabilities
 from machina.gateway.features.secrets import secrets_clear, secrets_list, secrets_set
@@ -347,6 +363,20 @@ METHODS: dict[str, Handler] = {
     "learning.reject": learning_reject,
     "learning.revert": learning_revert,
     "usage.report": usage_report,
+    "resident.status": resident_status,
+    "resident.prompt": resident_prompt,
+    "resident.context": resident_context,
+    "resident.events": resident_events,
+    "resident.profile.set": resident_profile_set,
+    "resident.memory.get": resident_memory_get,
+    "resident.memory.set": resident_memory_set,
+    "resident.memory.forget": resident_memory_forget,
+    "resident.grant.create": resident_grant_create,
+    "resident.grant.list": resident_grant_list,
+    "resident.grant.revoke": resident_grant_revoke,
+    "resident.approval.list": resident_approval_list,
+    "resident.approval.resolve": resident_approval_resolve,
+    "resident.kill": resident_kill,
     "config.get": config_get,
     "nowplaying.get": nowplaying_get,
     "nowplaying.command": nowplaying_command,

@@ -439,6 +439,69 @@ export interface UsageSkillsReport {
 	items: UsageSkillRow[];
 }
 
+export interface ResidentProfileView {
+	key: string;
+	name: string;
+	persona: string;
+	autonomyMode: "ask" | "auto-safe" | "full";
+	sharedMemory: boolean;
+	paused: boolean;
+}
+
+export interface ResidentGrantView {
+	id: string;
+	scope: { operations?: string[]; sessions?: string[]; targets?: string[] };
+	maxActions: number | null;
+	actionsUsed: number;
+	expiresAt: string | null;
+	revokedAt: string | null;
+	createdBy: string;
+	reason: string;
+	createdAt: string | null;
+}
+
+export interface ResidentApprovalView {
+	request_id: string;
+	session_id: string;
+	turn_id: string | null;
+	agent_id: string;
+	operation: string;
+	target: string;
+	digest: string;
+	status: string;
+	created_at: string | null;
+}
+
+export interface ResidentStatusResult {
+	profile: ResidentProfileView;
+	sessionId: string;
+	pendingApprovals: number;
+	grants: ResidentGrantView[];
+	coreMemoryCount: number;
+}
+
+export interface ResidentMemoryEntry {
+	key: string;
+	value: string;
+	category: string;
+	confidence: number;
+	source: string;
+	pinned: boolean;
+	updated_at: string | null;
+}
+
+export interface ResidentMemoryResult {
+	memory: ResidentMemoryEntry[];
+}
+
+export interface ResidentApprovalListResult {
+	approvals: ResidentApprovalView[];
+}
+
+export interface ResidentGrantListResult {
+	grants: ResidentGrantView[];
+}
+
 /** Aggregated dashboard for `/usage` (usage.report). */
 export interface UsageReportResult {
 	generatedAt: string;

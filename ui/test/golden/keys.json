@@ -4,7 +4,7 @@
 			"step": "activity",
 			"view": "status",
 			"selection": "❯ Main · Preview               running │ running",
-			"evidence": "Recent work                                                                                     Updated <time>"
+			"evidence": "Recent work                                                                                         Updated <time>"
 		},
 		{
 			"step": "shells",

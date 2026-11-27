@@ -13,17 +13,19 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from machina.api.auth import require_api_key
+from machina.api.auth import require_rpc_auth
 from machina.api.routes.models import RpcRequest
 from machina.api.routes.shared import _redact_value, _rpc_http_status
 from machina.gateway.errors import RpcError
+from machina.gateway.local_transport import allow_notch_local
+from machina.resident.token import is_notch_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/rpc", dependencies=[Depends(require_api_key)])
+@router.post("/rpc", dependencies=[Depends(require_rpc_auth)])
 async def rpc_dispatch(req: RpcRequest, request: Request) -> dict[str, Any]:
     """Generic JSON-RPC dispatch to any gateway feature method.
 
@@ -43,7 +45,12 @@ async def rpc_dispatch(req: RpcRequest, request: Request) -> dict[str, Any]:
     if gw is None:
         raise HTTPException(503, "RPC gateway not initialized")
     try:
-        result = await gw.call(req.method, req.params)
+        notch = is_notch_token(request.headers.get("x-machina-notch"))
+        if notch and req.method.startswith("resident."):
+            with allow_notch_local():
+                result = await gw.call(req.method, req.params)
+        else:
+            result = await gw.call(req.method, req.params)
         # AH-002: REST context previews are redacted, so the generic RPC
         # bridge must apply the same policy — otherwise context.get
         # previews and session.export markdown leak raw transcript

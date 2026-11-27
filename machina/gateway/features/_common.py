@@ -7,6 +7,7 @@ from typing import Any
 
 from machina.core.config import DEFAULTS, SECRET_KEYS, config
 from machina.gateway.errors import INVALID_PARAMS, UNAUTHORIZED, RpcError
+from machina.gateway.local_transport import notch_local
 
 MEMORY_CATEGORIES = ("preference", "decision", "fact", "event", "transient")
 
@@ -19,7 +20,7 @@ def _require_local_transport(gw: Any, method: str) -> None:
     must not be reachable through ``POST /rpc``. The stdio transport (the
     TUI's own channel) remains allowed.
     """
-    if not bool(getattr(gw, "_local_only", True)):
+    if not bool(getattr(gw, "_local_only", True)) and not notch_local():
         raise RpcError(
             UNAUTHORIZED,
             f"{method} is available only on the local terminal channel",

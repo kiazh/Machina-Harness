@@ -99,6 +99,11 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "harness_features",
         "harness_catalog",
     ),
+    "resident": (
+        "resident_remember",
+        "resident_pending_approvals",
+        "resident_proxy_resolve",
+    ),
     "routing": ("route_explain", "model_inventory"),
     "artifacts": ("artifact_describe", "artifact_read", "artifact_search"),
     "MCP": ("mcp_call", "mcp_connect", "mcp_describe", "mcp_disconnect", "mcp_list"),

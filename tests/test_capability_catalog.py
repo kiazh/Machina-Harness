@@ -81,7 +81,8 @@ def test_catalog_sections_are_present_and_bounded() -> None:
         "surfaces",
         "all",
     }
-    assert len(json.dumps(catalog_module.catalog("all"))) <= 17_000
+    # Resident tools add three names; keep the generated catalog bounded.
+    assert len(json.dumps(catalog_module.catalog("all"))) <= 18_000
     assert len(catalog_module.capability_index()) <= 3_000
 
 

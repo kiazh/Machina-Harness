@@ -27,6 +27,7 @@ _TOOL_MODULES = (
     "questions",  # ask_user (interactive multiple-choice pause)
     "meta_harness",  # approval-gated external harness execution
     "rag",  # index_document, search_documents
+    "resident",  # resident memory and grant-scoped approval proxy
     "repo",  # repo_stage, repo_activate
     "repomap",  # learn_directory
     "routing",  # route_explain, model_inventory

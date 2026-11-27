@@ -396,7 +396,12 @@ export class StatusController {
 				mcp: this.mcp.length,
 				failures,
 			});
-			this.updatedAt = new Date().toLocaleTimeString();
+			this.updatedAt = new Date().toLocaleTimeString("en-US", {
+				hour12: false,
+				hour: "2-digit",
+				minute: "2-digit",
+				second: "2-digit",
+			});
 		} finally {
 			this.refreshing = false;
 			this.host.tui.requestRender();

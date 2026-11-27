@@ -20,6 +20,7 @@ from machina.security.secrets import get_secret
 logger = logging.getLogger(__name__)
 
 API_KEY_ENV = "MACHINA_API_KEY"
+NOTCH_HEADER = "X-Machina-Notch"
 
 
 def configured_key() -> str | None:
@@ -84,3 +85,16 @@ async def require_api_key(
 ) -> None:
     """FastAPI dependency: accept the request with an API key or OIDC token."""
     await require_principal(authorization, x_api_key)
+
+
+async def require_rpc_auth(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_machina_notch: str | None = Header(default=None, alias="X-Machina-Notch"),
+) -> None:
+    """Authenticate /rpc with the API key or the local 0600 notch token."""
+    from machina.resident.token import is_notch_token
+
+    if is_notch_token(x_machina_notch):
+        return
+    await require_api_key(authorization, x_api_key)

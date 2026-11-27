@@ -484,7 +484,7 @@
 	],
 	"activity-80x8": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?       machina · main   ● working",
-		"  Recent work                                             Updated <time>",
+		"  Recent work                                                 Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1",
 		"  7 Harnesses 1",
 		"  ❯ Main · Preview                                                     running",
@@ -494,7 +494,7 @@
 	],
 	"activity-80x15": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?       machina · main   ● working",
-		"  Recent work                                             Updated <time>",
+		"  Recent work                                                 Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1",
 		"  7 Harnesses 1",
 		"",
@@ -511,7 +511,7 @@
 	],
 	"activity-80x40": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?       machina · main   ● working",
-		"  Recent work                                             Updated <time>",
+		"  Recent work                                                 Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1",
 		"  7 Harnesses 1",
 		"",
@@ -553,7 +553,7 @@
 	],
 	"activity-120x8": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?                                     Preview   machina · main   ● working",
-		"  Recent work                                                                                     Updated <time>",
+		"  Recent work                                                                                         Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1   7 Harnesses 1",
 		"  ❯ Main · Preview                                                                                             running",
 		"  Main · Preview",
@@ -563,7 +563,7 @@
 	],
 	"activity-120x15": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?                                     Preview   machina · main   ● working",
-		"  Recent work                                                                                     Updated <time>",
+		"  Recent work                                                                                         Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1   7 Harnesses 1",
 		"",
 		"   Agents                                │ Main · Preview",
@@ -580,7 +580,7 @@
 	],
 	"activity-120x40": [
 		" MACHINA  │ [Activity]  Chat   Changes   Keys ?                                     Preview   machina · main   ● working",
-		"  Recent work                                                                                     Updated <time>",
+		"  Recent work                                                                                         Updated <time>",
 		" [1 All 5]  2 Sessions   3 Agents 1   4 Shells 1   5 Tools 1   6 MCP 1   7 Harnesses 1",
 		"",
 		"   Agents                                │ Main · Preview",

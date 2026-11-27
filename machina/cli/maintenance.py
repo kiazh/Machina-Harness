@@ -290,6 +290,10 @@ def init(
             raise typer.Exit(1) from None
         finally:
             await db.close()
+        from machina.resident.token import ensure_notch_token, notch_token_path
+
+        ensure_notch_token()
+        console.print(f"  Notch token: [green]✓[/green] {notch_token_path()}")
         console.print()
         output.success("Machina initialized!")
         output.muted("Run `machina` to open the interactive UI.")

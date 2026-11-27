@@ -8,6 +8,7 @@ import { sessionCommands } from "./sessions.ts";
 import { memoryCommand } from "./memory.ts";
 import { growthCommand } from "./growth.ts";
 import { skillsCommand } from "./skills.ts";
+import { agentCommand } from "./agent.ts";
 import { agentsCommand, delegateCommand } from "./agents.ts";
 import { authCommand } from "./auth.ts";
 import { jobsCommand } from "./jobs.ts";
@@ -88,6 +89,7 @@ const COMMANDS: Command[] = [
 	memoryCommand,
 	growthCommand,
 	skillsCommand,
+	agentCommand,
 	agentsCommand,
 	delegateCommand,
 	authCommand,

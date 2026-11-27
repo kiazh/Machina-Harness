@@ -118,6 +118,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     each stage independently guarded, so one failing (or cancelled) cleanup
     cannot skip the rest or replace the primary exception.
     """
+    from machina.resident.token import ensure_notch_token
+
+    ensure_notch_token()
     from machina.core.runtime import runtime_services
     from machina.plugins.loader import load_plugins
 
