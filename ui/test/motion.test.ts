@@ -78,7 +78,7 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	footer.status = "working";
 	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(rows.length, 1);
-	assert.match(rows[0]!, /^ {4}[·•✧✦]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+	assert.match(rows[0]!, /^ {4}[·░▒▓█]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
 	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
 	assert.equal(footer.chatStatusRows(), 1);
 	footer.contextTokens = 12_400;
@@ -98,7 +98,7 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	t.mock.timers.tick(132);
 	const [next] = footer.chatStatus.render(80);
 	assert.equal(renders(), 4, "working motion redraws every 33ms");
-	assert.notEqual(next, lit, "the fireflies drift and change color");
+	assert.notEqual(next, lit, "the scanner moves and changes color");
 	assert.equal(
 		stripTerminalSequences(next!).indexOf("esc×2"),
 		stripTerminalSequences(lit!).indexOf("esc×2"),

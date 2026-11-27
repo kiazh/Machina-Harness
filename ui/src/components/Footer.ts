@@ -18,9 +18,9 @@ const GROWTH_DURATION_MS = 800;
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
 const WORK_INTERVAL_MS = 33;
-const WORK_CYCLE_MS = 2400;
+const WORK_CYCLE_MS = 1800;
 const WORK_TRACK = 13;
-const FIREFLY_GLYPHS = ["·", "•", "✧", "✦"];
+const SCAN_GLYPHS = ["·", "░", "▒", "▓", "█"];
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -165,16 +165,13 @@ export class Footer implements Component {
 			if (room >= WORK_TRACK + 2 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
 				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
-				const heads = [0, 0.37, 0.73].map((offset) => ((phase + offset) % 1) * (WORK_TRACK - 1));
-				const fireflies = Array.from({ length: WORK_TRACK }, (_, cell) => {
-					const glow = heads.reduce(
-						(best, head) => Math.max(best, Math.exp(-0.9 * (cell - head) ** 2)),
-						0.12,
-					);
-					const glyph = FIREFLY_GLYPHS[Math.min(3, Math.floor(glow * 4))]!;
-					return theme.activity(glyph, 0.24 + 0.76 * glow, cell / (WORK_TRACK - 1));
+				const head = (1 - Math.cos(phase * 2 * Math.PI)) / 2 * (WORK_TRACK - 1);
+				const scan = Array.from({ length: WORK_TRACK }, (_, cell) => {
+					const glow = Math.exp(-0.55 * (cell - head) ** 2);
+					const glyph = SCAN_GLYPHS[Math.min(4, Math.floor(glow * 5))]!;
+					return theme.activity(glyph, 0.2 + 0.8 * glow, cell / (WORK_TRACK - 1));
 				}).join("");
-				activity = `${fireflies}  ${activity}`;
+				activity = `${scan}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
