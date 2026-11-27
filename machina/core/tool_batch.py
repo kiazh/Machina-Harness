@@ -4,7 +4,7 @@ One assistant message may emit several tool calls. This module owns the batch
 contract: request-order starts, bounded concurrency, per-tool timeouts, broker
 authorization, result recording in provider order, and cancellation cleanup.
 The agent facade delegates here; the executor sees only the agent surface it
-needs through ``self.agent`` until the dependency interface is narrowed.
+needs, documented as :class:`ToolBatchHost`.
 
 ``execute_stream`` is a four-phase orchestrator; each phase is a private method:
 
@@ -25,7 +25,7 @@ import uuid
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from rich.console import Console
 
@@ -47,7 +47,7 @@ from machina.tools.base import registry
 logger = logging.getLogger(__name__)
 console = Console()
 
-__all__ = ["ToolBatchExecutor"]
+__all__ = ["ToolBatchExecutor", "ToolBatchHost"]
 
 
 _TOOL_TIMEOUTS: dict[str, float] = {
@@ -98,10 +98,66 @@ class _ToolRun:
     result: Any = None
 
 
-class ToolBatchExecutor:
-    """Execute one assistant tool batch for a bound agent."""
+class ToolBatchHost(Protocol):
+    """The agent surface a tool batch needs, and nothing else.
 
-    def __init__(self, agent: Any) -> None:
+    The executor reads four descriptive attributes once per batch and calls
+    five persistence/approval seams. Turn state, providers, the loop, and the
+    execution mode live outside this interface: the executor obtains authority
+    and mode from their own services, so a host can be a small test double
+    without a database or a provider.
+
+    Ordering invariants the host must honor:
+
+    - ``_record_tool_action`` is called once per finished item in provider
+      order and must be idempotent (``item['_recorded']``).
+    - ``_ensure_artifact_view`` runs before ``_record_tool_action`` so a
+      durable chunk never publishes a payload without its artifact handle
+      (MCH-010).
+    - ``_finalize_completed_tools`` is safe to call again after a normal batch
+      and is the only cleanup path on cancellation (F02).
+    """
+
+    agent_id: str
+    delegated: bool
+    dynamic_tools: bool
+
+    @property
+    def allowed_tools(self) -> list[str] | None: ...
+
+    def _append_tool_messages(
+        self,
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
+        tc: dict[str, Any],
+        content: str,
+    ) -> None: ...
+
+    async def _ensure_artifact_view(self, item: dict[str, Any], session_id: uuid.UUID) -> str: ...
+
+    async def _record_tool_action(
+        self,
+        item: dict[str, Any],
+        session_id: uuid.UUID,
+        pending_chunks: list[dict[str, Any]] | None,
+        tool_calls_made: list[dict[str, Any]],
+    ) -> None: ...
+
+    async def _retire_tool_approval(self, item: dict[str, Any], outcome: str) -> None: ...
+
+    async def _finalize_completed_tools(
+        self,
+        pending: list[dict[str, Any]],
+        session_id: uuid.UUID,
+        pending_chunks: list[dict[str, Any]] | None = None,
+        tool_calls_made: list[dict[str, Any]] | None = None,
+    ) -> None: ...
+
+
+class ToolBatchExecutor:
+    """Execute one assistant tool batch for a bound host."""
+
+    def __init__(self, agent: ToolBatchHost) -> None:
         self.agent = agent
 
     def definitions(self) -> list[ToolDefinition]:
@@ -153,7 +209,7 @@ class ToolBatchExecutor:
         that prints progress when *verbose* is set.
         """
         async with joined_teardown(
-            stream=self.agent._execute_tool_calls_stream(
+            stream=self.execute_stream(
                 response,
                 messages,
                 tool_calls_made,
