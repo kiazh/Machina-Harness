@@ -17,11 +17,10 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 import { ArgumentAwareAutocompleteProvider } from "./autocomplete.ts";
-import { parseCommand, splitSub, type ParsedCommand } from "./commands.ts";
+import { parseCommand } from "./commands.ts";
 import { ComposerBox, Footer, Picker, SecretForm, TextForm, ThinkingIndicator } from "./components.ts";
 import { NavBar, type NavSnapshot, type NavView } from "./components/NavBar.ts";
 import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
-import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsFilters, type SkillsPreviewResult, type SkillsSearchParams, type SkillsSearchResult, type SkillsSectionParams, type SkillsSectionResult } from "./components/SkillsMenu.ts";
 import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
@@ -43,7 +42,6 @@ import { describeError, redactParamsForLog, uiLog } from "./debug.ts";
 import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
-import { guardSubmit } from "./commandDispatch.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type PickOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
 import type { GatewayClient } from "./gateway.ts";
 import { copyText as copyClipboardText } from "./clipboard.ts";
@@ -80,7 +78,9 @@ import { ChangesController } from "./app/changes.ts";
 import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
 import { KeyboardRouter, type KeyboardHost } from "./app/keyboard.ts";
+import { CommandController, type CommandHost } from "./app/commands.ts";
 import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
+export { commandCarriesSecret } from "./app/commands.ts";
 
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
@@ -264,6 +264,7 @@ export class App implements FeatureHost {
 	private readonly status: StatusController;
 	private readonly changes: ChangesController;
 	private readonly keyboard: KeyboardRouter;
+	private readonly commands: CommandController;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
@@ -329,8 +330,6 @@ export class App implements FeatureHost {
 	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
 	private quickOpenPane: QuickOpenPane | undefined;
 	private quickOpenHandle: OverlayHandle | undefined;
-	/** `/skills` Menu dialog (A5, spec §12.3): the mounted component (dedup + tests). */
-	private skillsMenu: SkillsMenu | undefined;
 	/** Re-entrancy guard for the dirty-exit review. */
 	private dirtyExitInProgress = false;
 	/** Global editor preferences (ui_preferences); defaults until loaded. */
@@ -440,6 +439,7 @@ export class App implements FeatureHost {
 		);
 		// App remains the state owner; this adapter exposes only the keyboard seam.
 		this.keyboard = new KeyboardRouter(this.keyboardHost());
+		this.commands = new CommandController(this.commandHost());
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -624,6 +624,49 @@ export class App implements FeatureHost {
 			runRenamePreview: () => this.runRenamePreview(),
 			saveActiveDocument: () => this.saveActiveDocument(),
 			print: (text, kind) => this.print(text, kind),
+		};
+	}
+
+	private commandHost(): CommandHost {
+		return {
+			tui: this.tui,
+			editor: this.editor,
+			activity: this.activity,
+			current: () => this.current,
+			request: (method, params) => this.request(method, params),
+			print: (text, kind) => this.print(text, kind),
+			transcriptNotice: (text, kind) => this.transcript.addNotice(text, kind),
+			isExiting: () => this.exiting,
+			isTurnRunning: (sessionId) => this.turnSession.isRunning(sessionId),
+			isInFlight: (sessionId) => this.turnSession.isInFlight(sessionId),
+			visibleInFlight: () => this.turnSession.visibleInFlight(),
+			ensureSession: (text) => this.ensureSession(text),
+			submitTurn: (text, images) => this.submitTurn(text, images),
+			queueSteering: (text, fromDraft) => this.queueSteering(text, fromDraft),
+			setRunning: (running) => this.setRunning(running),
+			setCommandRunning: (active) => this.setCommandRunning(active),
+			inspectShellJob: (sessionId, jobId) => this.inspectShellJob(sessionId, jobId),
+			syncWorkspaceShell: () => this.syncWorkspaceShell(),
+			openDialog: (create) => this.openDialog(create),
+			runCommand: (command) => runCommand(command, this),
+			imageState: () => ({
+				pending: this.pendingImageLoads,
+				epoch: this.imageEpoch,
+				settled: this.imageLoads,
+			}),
+			imageDraft: () => this.imageDraft,
+			setImageDraft: (draft) => { this.imageDraft = draft; },
+			bumpImageEpoch: () => ++this.imageEpoch,
+			lastPrompt: () => ({
+				text: this.lastPrompt,
+				sessionId: this.lastPromptSessionId,
+				images: this.lastPromptImages,
+			}),
+			rememberPrompt: (text, images, sessionId) => {
+				this.lastPrompt = text;
+				this.lastPromptImages = images;
+				this.lastPromptSessionId = sessionId;
+			},
 		};
 	}
 
@@ -1323,28 +1366,10 @@ export class App implements FeatureHost {
 		return [currentTool ?? "", queued ? `${queued} queued` : "", shell, agents ? `${agents} agents working` : ""].filter(Boolean).join("  ·  ");
 	}
 
-	private commandActions(): { label: string; run: () => void }[] {
-		const sessionId = this.current?.id;
-		if (!sessionId) return [];
-		const jobs = this.activity.listJobs(sessionId);
-		const job = jobs.find(job => job.status === "running" && job.foreground) ?? jobs.find(job => job.status === "running") ?? jobs.at(-1);
-		if (!job) return [];
-		const run = (action: "background" | "stop" | "output") => { void this.commandAction(sessionId, job.id, action); };
-		return [
-			...(job.status === "running" && job.foreground ? [{ label: "Background", run: () => run("background") }] : []),
-			{ label: "Output", run: () => run("output") },
-			...(job.status === "running" ? [{ label: "Stop", run: () => run("stop") }] : []),
-		];
-	}
+	private commandActions(): { label: string; run: () => void }[] { return this.commands.commandActions(); }
 
-	private async commandAction(sessionId: string, jobId: string, action: "background" | "stop" | "output"): Promise<void> {
-		try {
-			if (action === "output") { await this.inspectShellJob(sessionId, jobId); return; }
-			const { job } = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId, [action]: true });
-			this.activity.setJob(sessionId, job);
-			if (action === "background" && job.deadline) this.print("Command moved to background; its original execution deadline still applies.", "info");
-		} catch (error) { this.print(`Command control failed: ${message(error)}`, "error"); }
-		finally { this.syncWorkspaceShell(); this.tui.requestRender(); }
+	private commandAction(sessionId: string, jobId: string, action: "background" | "stop" | "output"): Promise<void> {
+		return this.commands.commandAction(sessionId, jobId, action);
 	}
 
 	private queueSteering(text: string, fromDraft = true): Promise<boolean> {
@@ -1628,7 +1653,7 @@ export class App implements FeatureHost {
 		return `harness-${this.currentProfile}`;
 	}
 
-	private openDialog<T>(create: (close: (value?: T) => void) => Component, overlayOptions?: OverlayOptions): Promise<T | undefined> {
+	openDialog<T>(create: (close: (value?: T) => void) => Component, overlayOptions?: OverlayOptions): Promise<T | undefined> {
 		if (this.exiting) return Promise.resolve(undefined);
 		return new Promise((done) => {
 			let settled = false;
@@ -2751,243 +2776,9 @@ export class App implements FeatureHost {
 
 	// ─── skills directory (A5, spec §12.3) ──────────────────────────────────
 
-	/**
-	 * `/skills`: a bounded, bottom-anchored Menu dialog over `skills.search`,
-	 * with `skills.show` details and a call-free `skills.preview_route` view
-	 * (the same `openDialog` + `Menu` pattern as the theme menu). The menu
-	 * holds no authority: delete is routed back through the legacy
-	 * `/skills delete` command (same confirmation/authorization), and preview
-	 * cannot start a turn, call a provider, run tools, install skills or
-	 * change approvals.
-	 */
-	private openSkillsPicker(initialQuery = ""): void {
-		if (this.skillsMenu) return;
-		void this.openDialog<{ delete: string }>((close) => {
-			const menu = new SkillsMenu(
-				{
-					search: (params) => this.skillsSearch(params),
-					catalog: (filters) => this.skillsCatalog(filters),
-					details: (skillId) => this.skillsDetails(skillId),
-					preview: (request) => this.skillsPreview(request),
-					section: (params) => this.skillsSection(params),
-				},
-				{
-					initialQuery,
-					title: "Skills",
-					tui: this.tui,
-					visibleRows: DEFAULT_MENU_VISIBLE_ROWS,
-					onChange: () => this.tui.requestRender(),
-					onClose: () => close(),
-					onDelete: (skillName) => close({ delete: skillName }),
-				},
-			);
-			this.skillsMenu = menu;
-			menu.activate();
-			return menu;
-		}).then((result) => {
-			this.skillsMenu = undefined;
-			// Keep the legacy command as the only delete path: same
-			// confirmation, same authorization, same RPC as `/skills delete`.
-			if (result?.delete === undefined) return;
-			const command = parseCommand(`/skills delete ${result.delete}`);
-			if (command) void runCommand(command, this);
-		});
-	}
+	private openSkillsPicker(initialQuery = ""): void { this.commands.openSkillsPicker(initialQuery); }
 
-	/** `skills.search` binding: the pane's closed filter object goes as-is. */
-	private skillsSearch(params: SkillsSearchParams): Promise<SkillsSearchResult> {
-		return this.request<SkillsSearchResult>("skills.search", {
-			query: params.query,
-			filters: params.filters,
-			limit: params.limit,
-			...(params.cursor ? { cursor: params.cursor } : {}),
-		});
-	}
-
-	/**
-	 * Empty-query browse for the skills menu: the full catalog (`skills.list`,
-	 * the legacy authorization-guarded handler) shaped like a search result so
-	 * opening `/skills` lists every skill immediately. Disabled skills are
-	 * shown honestly (applicability `excluded`, reason `disabled`) — browsing
-	 * intentionally surfaces them; the automatic selector never does.
-	 */
-	private async skillsCatalog(filters: SkillsFilters = {
-		task_family: "",
-		capability: "",
-		source: [],
-		enabled: null,
-		include_excluded: true,
-	}): Promise<SkillsSearchResult> {
-		const { skills } = await this.request<{
-			skills: Array<{ name: string; description: string; sourceType?: string; enabled?: boolean }>;
-		}>("skills.list", { filters: { ...filters, source: [...filters.source] } });
-		const candidates: SkillsCandidate[] = (Array.isArray(skills) ? skills : []).map((skill) => {
-			const enabled = skill.enabled !== false;
-			return {
-				skillId: skill.name,
-				name: skill.name,
-				contentRevision: "",
-				score: 0,
-				scoreComponents: {},
-				matchedPhrases: [],
-				matchedCapabilities: [],
-				applicability: enabled ? "applicable" : "excluded",
-				reasons: enabled ? [] : ["disabled"],
-				workflowStages: [],
-				explanation: "catalog browse",
-				sourceType: skill.sourceType ?? "",
-				trust: skill.sourceType === "builtin-ecc" ? "bundled" : "local",
-				enabled,
-			};
-		});
-		return {
-			query: "",
-			filters: { ...filters, source: [...filters.source] },
-			limit: candidates.length,
-			browse: true,
-			candidates,
-			catalogRevision: "",
-			queryDescriptorRevision: "",
-			policyRevision: "",
-			nextCursor: null,
-			diagnostics: {},
-		};
-	}
-
-	/** Details read: the legacy `skills.show` contract (case-insensitive id). */
-	private async skillsDetails(skillId: string): Promise<SkillsDetailsSkill> {
-		const { skill } = await this.request<{ skill: SkillsDetailsSkill }>("skills.show", { name: skillId });
-		return skill;
-	}
-
-	/** Call-free route preview: no turn, provider, tool, install or approval. */
-	private skillsPreview(request: string): Promise<SkillsPreviewResult> {
-		return this.request<SkillsPreviewResult>("skills.preview_route", { request, context: {} });
-	}
-
-	/** Version-bound section read: exact passage for the shown revision (§12.2). */
-	private skillsSection(params: SkillsSectionParams): Promise<SkillsSectionResult> {
-		return this.request<SkillsSectionResult>("skills.section", {
-			skillId: params.skillId,
-			...(params.contentRevision ? { contentRevision: params.contentRevision } : {}),
-			...(params.section ? { section: params.section } : {}),
-			...(params.offset !== undefined ? { offset: params.offset } : {}),
-			budget: params.budget ?? 800,
-		});
-	}
-
-	private async submit(raw: string): Promise<void> {
-        const waitingForImages = this.pendingImageLoads > 0;
-        const epoch = this.imageEpoch;
-        await this.imageLoads;
-        if (epoch !== this.imageEpoch || this.exiting) return;
-        const text = (waitingForImages ? this.editor.getExpandedText() : raw).trim();
-		if (!text) return;
-		// AH-031: parse FIRST, then guard only conflicting operations.
-		// Read-only / navigation commands must work during a turn; only
-		// new prompts and session-mutating commands on the in-flight
-		// session are rejected.
-		const command = parseCommand(text);
-        if (command && /\[image \d+\]/.test(text)) {
-            this.print("Send image attachments with a message, rather than a slash command.", "warning");
-            return;
-        }
-		const visible = this.current;
-		const inFlight = visible !== undefined && this.turnSession.isRunning(visible.id);
-		if (!command && visible?.parentSessionId && !visible.isFork && !visible.harnessPlatform) {
-			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
-			this.tui.requestRender();
-			return;
-		}
-		if (!command && inFlight && visible) {
-			if (this.pendingImageLoads || /\[image \d+\]/.test(text)) {
-				this.print("Queued steering currently accepts text. Keep the image for the next turn.", "info");
-				return;
-			}
-			await this.queueSteering(text);
-			return;
-		}
-		switch (guardSubmit(command, Boolean(inFlight))) {
-			case "turn-busy":
-				this.transcript.addNotice("The previous turn is still finishing. Try again shortly.", "warning");
-				this.tui.requestRender();
-				return;
-			case "stop-first":
-				this.transcript.addNotice("Stop the running reply before changing this session.", "warning");
-				this.tui.requestRender();
-				return;
-			case "allow":
-				break;
-		}
-        let draft: ReturnType<ImageDraft["prepare"]>;
-        try {
-            if (text === this.lastPrompt && this.current?.id === this.lastPromptSessionId && this.lastPromptImages.length) {
-                // Editor history contains markers only. Re-edit the original
-                // inline bytes instead of reading a possibly changed file.
-                this.imageDraft = new ImageDraft();
-                this.imageDraft.addMany(this.lastPromptImages);
-            }
-            draft = this.imageDraft.prepare(text);
-        }
-        catch (error) { this.print(message(error), "error"); return; }
-        if (!command && !this.current) {
-            try {
-                // The chat is still a client-side draft. Materialize it only
-                // now that there is an actual message to save.
-                await this.ensureSession(draft.text);
-            } catch (error) {
-                this.print(message(error), "error");
-                return;
-            }
-        }
-        const submittedImages = this.imageDraft;
-        this.imageDraft = new ImageDraft();
-        this.imageEpoch++;
-        const submittedEpoch = this.imageEpoch;
-        const submittedSessionId = this.current?.id;
-
-		this.editor.setText("");
-
-		// Never keep secrets in input history: `/keys set KEY VALUE` carries a
-		// raw value, and the unsupported `/provider add <name> <url> <key>`
-		// form carries one in its ignored third token (see commandCarriesSecret).
-        if (!commandCarriesSecret(command)) this.editor.addToHistory(draft.text);
-		if (command) {
-			this.commandRunning = true;
-			this.commandRunningAt = Date.now();
-			try {
-				await runCommand(command, this);
-			} finally {
-				this.commandRunning = false;
-				this.commandRunningAt = 0;
-			}
-		} else {
-			this.lastPrompt = draft.text;
-            this.lastPromptImages = draft.images;
-            this.lastPromptSessionId = submittedSessionId;
-			try {
-				await this.submitTurn(draft.text, draft.images);
-			} catch (error) {
-				// Restore the draft on failure. When the guard was released
-				// the failure preceded acceptance and retry is meaningful;
-				// when it is retained the dispatch outcome is unknown, so say
-				// so instead of implying a retry is safe.
-                const unknownDispatch = submittedSessionId ? this.turnSession.isInFlight(submittedSessionId) : false;
-                if (!this.editor.getText() && !unknownDispatch && this.current?.id === submittedSessionId && this.imageEpoch === submittedEpoch) {
-                    this.imageDraft = submittedImages;
-                    this.editor.setText(text);
-                }
-				this.setRunning(this.turnSession.visibleInFlight());
-				this.transcript.addNotice(
-					unknownDispatch
-						? `${message(error)} (dispatch state unknown; retry may duplicate work)`
-						: message(error),
-					unknownDispatch ? "warning" : "error",
-				);
-			}
-		}
-		this.tui.requestRender();
-	}
+	private submit(raw: string): Promise<void> { return this.commands.submit(raw); }
 
     async submitTurn(text: string, images: ImageAttachment[] = [], steeringId?: string): Promise<void> {
 		if (!this.current) {
@@ -3102,6 +2893,11 @@ export class App implements FeatureHost {
 			else if (!["awaiting_approval", "stopping", "cleanup_pending"].includes(this.footer.status)) this.footer.status = "working";
 		}
 		this.shell.invalidateChrome();
+	}
+
+	private setCommandRunning(active: boolean): void {
+		this.commandRunning = active;
+		this.commandRunningAt = active ? Date.now() : 0;
 	}
 
 	private async refreshContextUsage(sessionId: string): Promise<void> {
@@ -3555,24 +3351,6 @@ export function isKiroQuotaError(value: string): boolean {
 		quota &&
 		(kiro || text.includes("monthly request limit") || text.includes("monthly quota"))
 	);
-}
-
-/**
- * True when a slash command embeds a raw secret that must never reach the
- * editor's input history.
- *
- * `/keys set KEY VALUE` is the documented secret form. `/provider add <name>
- * <url> <key>` is NOT: `addProvider` (features/settings.ts) reads only the
- * name and URL and always prompts for the key through a masked editor, so a
- * third token is ignored — but a user may still type it, and it would
- * otherwise be stashed in the session's recalled history. Both subcommands are
- * matched case-insensitively (splitSub lowercases the head).
- */
-export function commandCarriesSecret(command: ParsedCommand | undefined): boolean {
-	if (!command) return false;
-	const [sub, rest] = splitSub(command.args);
-	if (command.name === "keys") return sub === "set";
-	return command.name === "provider" && sub === "add" && rest.split(/\s+/).filter(Boolean).length > 2;
 }
 
 /** Turn-start frames: the first event of a turn in a session's stream. */
