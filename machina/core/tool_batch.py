@@ -5,6 +5,14 @@ contract: request-order starts, bounded concurrency, per-tool timeouts, broker
 authorization, result recording in provider order, and cancellation cleanup.
 The agent facade delegates here; the executor sees only the agent surface it
 needs through ``self.agent`` until the dependency interface is narrowed.
+
+``execute_stream`` is a four-phase orchestrator; each phase is a private method:
+
+A. :meth:`_plan_batch` parses and validates the whole batch (no side effects).
+B. :meth:`_start_events` emits one start per runnable call, in request order.
+C. :meth:`_completion_events` runs calls concurrently and yields completions
+   as each finishes, cancelling and finalizing on an exceptional exit.
+D. :meth:`_record_batch` records in provider order and appends the replies.
 """
 
 from __future__ import annotations
@@ -14,8 +22,9 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import nullcontext
+from dataclasses import dataclass, field
 from typing import Any
 
 from rich.console import Console
@@ -69,6 +78,26 @@ _TERMINAL_CAP = 300.0  # R4-019: terminal's schema max (1..300); tools/terminal.
 _MAX_PARALLEL_TOOLS = 8
 
 
+@dataclass
+class _ToolRun:
+    """Mutable per-call state shared by the Phase C helpers.
+
+    The timeout is adjusted after the broker spec is resolved, and the raw
+    result object (not its string form) is needed for outcome/accounting
+    checks; both travel through the helpers here instead of hidden closures.
+    """
+
+    item: dict[str, Any]
+    session_id: uuid.UUID
+    tool_name: str
+    tool_args: dict[str, Any]
+    start: float
+    timeout: float
+    merged: dict[str, Any] = field(default_factory=dict)
+    authority_token: Any = None
+    result: Any = None
+
+
 class ToolBatchExecutor:
     """Execute one assistant tool batch for a bound agent."""
 
@@ -120,8 +149,8 @@ class ToolBatchExecutor:
     ) -> None:
         """Execute tool calls for the non-streaming loop.
 
-        Thin wrapper over :meth:`_execute_tool_calls_stream` (the single
-        implementation) that prints progress when *verbose* is set.
+        Thin wrapper over :meth:`execute_stream` (the single implementation)
+        that prints progress when *verbose* is set.
         """
         async with joined_teardown(
             stream=self.agent._execute_tool_calls_stream(
@@ -163,21 +192,70 @@ class ToolBatchExecutor:
         (bounded by ``_MAX_PARALLEL_TOOLS``, or the configured delegate limit
         for delegation) instead of one after another, so a
         batch of N reads costs roughly max(latency) rather than sum(latency).
-        Every ``tool_call`` event is emitted up front, then results are
-        replayed in the original order so the transcript stays deterministic.
+        Starts are emitted up front in request order; completions are yielded
+        as each call finishes; persistence and provider replies follow the
+        original order so the transcript stays deterministic.
 
         If *pending_chunks* is provided, tool_call chunks are accumulated there
         instead of being inserted immediately. The caller is responsible for
         flushing them via ``context_manager.add_chunks_batch``.
         """
-        # S3.3 BEGIN tool-trace hook (revert: delete 4-line block; observe-only)
-        _s3trace: Any = None
-        try:
-            from machina.controller import wiring as _s3trace
-        except Exception:
-            _s3trace = None
-        # S3.3 END tool-trace hook
+        s3trace = self._trace_hook()
+
         # ── Phase A: parse and validate the whole batch ─────────────────────
+        planned = self._plan_batch(response, session_id, allowed_tool_names)
+
+        # ── Phase B: emit starts BEFORE execution (AH-020) ────────────────
+        for event in self._start_events(planned):
+            yield event
+
+        # ── Phase C: execute concurrently, yielding completions as they finish
+        completions = self._completion_events(
+            planned,
+            session_id,
+            pending_chunks,
+            tool_calls_made,
+            s3trace,
+        )
+        try:
+            async for event in completions:
+                yield event
+        finally:
+            # Close explicitly: an async generator is otherwise finalized
+            # later by the event loop, and this phase's cleanup (task cancel +
+            # finalize) must run before the caller observes cancellation.
+            await completions.aclose()
+
+        # ── Phase D: metrics for denied + persistence in provider order ───
+        recording = self._record_batch(
+            planned,
+            messages,
+            response,
+            tool_calls_made,
+            session_id,
+            pending_chunks,
+        )
+        try:
+            async for event in recording:
+                yield event
+        finally:
+            await recording.aclose()
+
+    # ── Phase A ─────────────────────────────────────────────────────────────
+
+    def _plan_batch(
+        self,
+        response: LLMResponse,
+        session_id: uuid.UUID,
+        allowed_tool_names: set[str] | None,
+    ) -> list[dict[str, Any]]:
+        """Parse and validate every call before any tool can run.
+
+        Missing names and invalid JSON become typed error replies; a call
+        absent from the agent or step allow-list becomes a denied reply. The
+        returned items carry ``tc``/``name``/``args``/``result``/``call_id``
+        and are mutated by later phases.
+        """
         planned: list[dict[str, Any]] = []
         for tc in response.tool_calls:
             function_data = tc.get("function", {})
@@ -238,49 +316,14 @@ class ToolBatchExecutor:
                 )
                 continue
 
-            if self.agent.allowed_tools is not None and tool_name not in self.agent.allowed_tools:
-                result_str = (
-                    f"Error: tool '{tool_name}' is not allowed for agent '{self.agent.agent_id}'"
-                )
-                audit_log(
-                    "tool_call_denied",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    agent_id=self.agent.agent_id,
-                )
+            denied = self._denial_result(tool_name, session_id, allowed_tool_names)
+            if denied is not None:
                 planned.append(
                     {
                         "tc": tc,
                         "name": tool_name,
                         "args": tool_args,
-                        "result": result_str,
-                        "call_id": call_id,
-                    }
-                )
-                continue
-
-            # A model can retain a schema loaded earlier in the turn (for
-            # example via tool_load) after the current step has narrowed the
-            # surface. Enforce the schema actually advertised for this step,
-            # not just the agent's static allow-list.
-            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
-                result_str = (
-                    f"Error: tool '{tool_name}' is not in the current tool surface. "
-                    "Use only tools advertised for this step."
-                )
-                audit_log(
-                    "tool_call_denied",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    agent_id=self.agent.agent_id,
-                    reason="not_in_tool_surface",
-                )
-                planned.append(
-                    {
-                        "tc": tc,
-                        "name": tool_name,
-                        "args": tool_args,
-                        "result": result_str,
+                        "result": denied,
                         "call_id": call_id,
                     }
                 )
@@ -289,16 +332,55 @@ class ToolBatchExecutor:
             planned.append(
                 {"tc": tc, "name": tool_name, "args": tool_args, "result": None, "call_id": call_id}
             )
+        return planned
 
-        # ── Phase B: emit starts BEFORE execution (AH-020) ────────────────
-        # Long-running tools must appear as running while executing, not only
-        # after gather() finishes. Starts are emitted in request order with
-        # stable call IDs; completions follow as each finishes.
+    def _denial_result(
+        self,
+        tool_name: str,
+        session_id: uuid.UUID,
+        allowed_tool_names: set[str] | None,
+    ) -> str | None:
+        """Return a typed denial reply, or ``None`` when the tool may run."""
+        if self.agent.allowed_tools is not None and tool_name not in self.agent.allowed_tools:
+            audit_log(
+                "tool_call_denied",
+                session_id=str(session_id),
+                tool_name=tool_name,
+                agent_id=self.agent.agent_id,
+            )
+            return f"Error: tool '{tool_name}' is not allowed for agent '{self.agent.agent_id}'"
+
+        # A model can retain a schema loaded earlier in the turn (for example
+        # via tool_load) after the current step has narrowed the surface.
+        # Enforce the schema actually advertised for this step, not just the
+        # agent's static allow-list.
+        if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+            audit_log(
+                "tool_call_denied",
+                session_id=str(session_id),
+                tool_name=tool_name,
+                agent_id=self.agent.agent_id,
+                reason="not_in_tool_surface",
+            )
+            return (
+                f"Error: tool '{tool_name}' is not in the current tool surface. "
+                "Use only tools advertised for this step."
+            )
+        return None
+
+    # ── Phase B ─────────────────────────────────────────────────────────────
+
+    def _start_events(self, planned: list[dict[str, Any]]) -> Iterator[StreamEvent]:
+        """Emit starts in request order with stable call IDs.
+
+        Long-running tools must appear as running while executing, not only
+        after all calls finish. Denied tools (result already set) still get a
+        start+complete pair for UI consistency; they complete immediately in
+        Phase D.
+        """
         for item in planned:
             if item["name"] is None:
                 continue
-            # Denied tools (result already set) still get start+complete for
-            # UI consistency — they complete immediately below.
             yield StreamEvent(
                 type="tool_call",
                 tool_name=item["name"],
@@ -306,266 +388,24 @@ class ToolBatchExecutor:
                 tool_call_id=item["call_id"],
             )
 
-        # ── Phase C: execute concurrently, yielding completions as they finish
-        async def _run_one(item: dict[str, Any]) -> None:
-            tool_name = item["name"]
-            tool_args = item["args"]
-            audit_log("tool_call_start", session_id=str(session_id), tool_name=tool_name)
-            start = time.monotonic()
-            tool_timeout = _TOOL_TIMEOUTS.get(tool_name, _TOOL_TIMEOUT_DEFAULT)
-            try:
-                with span("agent.tool", tool_name=tool_name, session_id=str(session_id)):
-                    await plugin_registry.dispatch("on_tool_call", tool_name, tool_args)
-                    # AH-018: bind caller scope around EVERY tool (not just a
-                    # subset) so RAG tools and future tools see the active
-                    # session/agent. Tokens always reset in finally.
-                    from machina.tools.agents import current_agent_id, current_session_id
+    # ── Phase C ─────────────────────────────────────────────────────────────
 
-                    token = current_session_id.set(session_id)
-                    agent_token = current_agent_id.set(self.agent.agent_id)
-                    # LP-08: publish this agent's authority for delegation
-                    # children (restored afterwards like all caller scope).
-                    try:
-                        from machina.core.agent_factory import check_mode_cap, merge_authority
-                        from machina.core.agent_factory import parent_authority_var as _pav
+    async def _completion_events(
+        self,
+        planned: list[dict[str, Any]],
+        session_id: uuid.UUID,
+        pending_chunks: list[dict[str, Any]] | None,
+        tool_calls_made: list[dict[str, Any]],
+        s3trace: Any,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Run runnable calls concurrently and yield results as each finishes.
 
-                        # R-02: Preserve inherited authority (max_mode, etc.)
-                        # and intersect its tools with this agent's definition.
-                        _inherited = dict(getattr(self, "_authority", {}) or {})
-                        _ambient = _pav.get() or {}
-                        if _ambient.get("max_mode") is not None:
-                            check_mode_cap(_inherited, _ambient["max_mode"])
-                        _merged = merge_authority(_inherited, _ambient)
-                        _parent_tools = _merged.get("tools")
-                        # Terminal authority includes observing/stopping its
-                        # own session jobs; this adds no launch capability.
-                        if (
-                            _parent_tools is not None
-                            and "terminal" in _parent_tools
-                            and "terminal_job" not in _parent_tools
-                        ):
-                            _parent_tools = [*_parent_tools, "terminal_job"]
-                        if _parent_tools is None:
-                            _merged["tools"] = self.agent.allowed_tools
-                        elif self.agent.allowed_tools is None:
-                            _merged["tools"] = list(_parent_tools)
-                        else:
-                            _merged["tools"] = [
-                                t for t in self.agent.allowed_tools if t in _parent_tools
-                            ]
-                        authority_token = _pav.set(_merged)
-                    except Exception:
-                        current_agent_id.reset(agent_token)
-                        current_session_id.reset(token)
-                        raise
-                    try:
-                        # Permission broker gates every tool path.
-                        # Validation errors stay distinct from authorization:
-                        # malformed actions fail here before any approval.
-                        from machina.permissions import tools as _perm_tools
-                        from machina.permissions.broker import (
-                            ApprovalDenied as _Denied,
-                        )
-                        from machina.permissions.broker import NeedsApproval as _Needs
-                        from machina.permissions.broker import permission_broker as _broker
-                        from machina.permissions.policy import build_request as _build_req
-
-                        if tool_name in {"mcp_call", "mcp_list", "mcp_describe"}:
-                            from machina.core.runtime import runtime_services
-
-                            await runtime_services.get_connector_service().refresh()
-                        _spec = _perm_tools.action_for_tool(tool_name, tool_args)
-                        if tool_name in {"mcp_call", "mcp_connect", "mcp_disconnect"}:
-                            tool_timeout = int(_spec.get("timeout", 60)) + 1
-                        elif tool_name == "terminal":
-                            # Background authorization has no execution deadline;
-                            # admission still gets a normal startup window.
-                            tool_timeout = (
-                                60
-                                if tool_args.get("background") is True
-                                else min(max(int(_spec.get("timeout", 60)), 1), _TERMINAL_CAP)
-                            )
-                        from machina.core.execution_context import resolve_execution_context
-
-                        _context = await resolve_execution_context(str(session_id), tool_name)
-                        _mode, _backend = _context.mode, _context.backend
-                        # Children inherit the parent's current execution mode,
-                        # including sandbox isolation, rather than a global default.
-                        check_mode_cap(_merged, _mode)
-                        _merged["max_mode"] = _mode
-                        if tool_name == "terminal" and _merged.get("terminal_backend") == "sandbox":
-                            _backend = "sandbox"
-                        if _mode == "sandbox" or _backend == "sandbox":
-                            _merged["terminal_backend"] = "sandbox"
-                        _pav.set(_merged)
-                        _req = _build_req(
-                            operation=_spec.get("operation", f"tool.{tool_name}"),
-                            targets=_spec.get("targets"),
-                            argv=_spec.get("argv"),
-                            shell_payload=_spec.get("shell_payload", ""),
-                            cwd=_spec.get("cwd", "."),
-                            content=_spec.get("content", ""),
-                            mode=_mode,
-                            backend=_backend,
-                            workspace=str(_context.workspace),
-                            agent_id=self.agent.agent_id,
-                            session_id=str(session_id),
-                            capabilities=_spec.get("capabilities"),
-                            network=_spec.get("network"),
-                            tool=tool_name,
-                            # AH-AUDIT-005/008: timeout is authorization-
-                            # relevant and bound into the approved digest.
-                            timeout=int(_spec.get("timeout", 60)),
-                        )
-                        try:
-                            await _broker.guard(_req)
-                            item["_approval_id"] = _req.approval_id or ""
-                        except _Needs as _need:
-                            _ap = _need.approval
-                            result = (
-                                f"Needs approval ({_ap.get('request_id')}:{_ap.get('operation')} "
-                                f"{_ap.get('target')}). The action was NOT executed. "
-                                "Ask the user to approve it (approvals list/resolve), "
-                                "or choose another path."
-                            )
-                            item["result"] = str(result)
-                            # AH-AUDIT-022: typed pause outcome travels with
-                            # the tool item into AgentResponse.needs_approval.
-                            # Schedulers/transports read this — never prose.
-                            item["_needs_approval"] = {
-                                "request_id": _ap.get("request_id", ""),
-                                "session_id": _ap.get("session_id", ""),
-                                "agent_id": _ap.get("agent_id", self.agent.agent_id),
-                                "turn_id": _ap.get("turn_id", ""),
-                                "operation": _ap.get("operation", ""),
-                                "target": _ap.get("target", ""),
-                                "status": _ap.get("status", "pending"),
-                                # Epoch creation time: lets the trace layer
-                                # measure the real human wait at re-pause and
-                                # at approval resume.
-                                "created_at": _ap.get("created_at"),
-                            }
-                            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                            return
-                        except _Denied as _den:
-                            result = (
-                                f"Permission denied: {_den.reason}. The action was NOT executed."
-                            )
-                            item["result"] = str(result)
-                            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                            return
-                        try:
-                            from machina.core.background_tasks import (
-                                CompletedOnCancellation,
-                                await_joined,
-                            )
-
-                            def save_result(completed):
-                                item["result"] = str(completed)
-                                item["_failed"] = bool(
-                                    getattr(completed, "is_error", False)
-                                ) or str(completed).startswith("Error:")
-                                item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                                item["_delegation_status"] = getattr(
-                                    completed, "delegation_status", ""
-                                )
-                                if getattr(completed, "outcome_unknown", False):
-                                    item["_outcome_unknown"] = True
-                                from machina.tools.agents import DelegationToolResult
-
-                                if isinstance(completed, DelegationToolResult):
-                                    item["_needs_approvals"] = completed.needs_approval
-                                    item["_delegated_tokens"] = completed.tokens_used
-
-                            async def execute():
-                                try:
-                                    completed = await registry.execute(tool_name, **tool_args)
-                                except CompletedOnCancellation as cancellation:
-                                    save_result(cancellation.result)
-                                    raise
-                                save_result(completed)
-                                return completed
-
-                            execution = asyncio.create_task(execute())
-                            result = (
-                                await execution
-                                if tool_name == "delegate"
-                                else await asyncio.wait_for(execution, timeout=tool_timeout)
-                            )
-                        except asyncio.CancelledError:
-
-                            async def finish_execution():
-                                outcomes = await asyncio.gather(execution, return_exceptions=True)
-                                for error in outcomes:
-                                    if isinstance(error, Exception):
-                                        record_failure("agent.cancelled_execution", error)
-                                if "elapsed_ms" not in item:
-                                    _aid = item.get("_approval_id", "")
-                                    if _aid:
-                                        item["_cancelled"] = True
-                                        await self.agent._retire_tool_approval(item, "cancelled")
-
-                            await await_joined(finish_execution())
-                            raise
-                    finally:
-                        try:
-                            # AH-AUDIT-002: end the guard+execute window so a
-                            # later tool call cannot inherit this approval's
-                            # snapshot.
-                            from machina.permissions.broker import (
-                                clear_execution_context as _clear_ctx,
-                            )
-
-                            _clear_ctx()
-                        except Exception as _boundary_error:
-                            # Optional fallback preserves the primary outcome; report no payload.
-                            record_failure("agent._execute_tool_calls_stream", _boundary_error)
-                        try:
-                            if authority_token is not None:
-                                from machina.core.agent_factory import parent_authority_var as _pav2
-
-                                _pav2.reset(authority_token)
-                        except Exception as _boundary_error:
-                            # Optional fallback preserves the primary outcome; report no payload.
-                            record_failure("agent._execute_tool_calls_stream", _boundary_error)
-                        current_agent_id.reset(agent_token)
-                        current_session_id.reset(token)
-            except DelegationAccountingError:
-                # Unknown child spend is fatal for this turn, not a recoverable
-                # tool failure that permits another provider call.
-                raise
-            except Exception as e:
-                if isinstance(e, asyncio.TimeoutError) and "elapsed_ms" in item:
-                    return
-                if isinstance(e, asyncio.TimeoutError):
-                    # R4-019: wait_for raises a message-less TimeoutError; type it.
-                    error_text = f"tool '{tool_name}' timed out after {tool_timeout:g}s"
-                else:
-                    error_text = str(e)
-                logger.exception("Tool execution failed for '%s'", tool_name)
-                audit_log(
-                    "tool_call_error",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    error=error_text,
-                    duration_ms=int((time.monotonic() - start) * 1000),
-                )
-                result = f"Error: {error_text}"
-            item["_failed"] = bool(getattr(result, "is_error", False)) or str(result).startswith(
-                "Error:"
-            )
-            skills = _rsi_skills.get()
-            if (
-                tool_name == "skill_read"
-                and not item["_failed"]
-                and str(result).startswith("Skill ")
-                and skills is not None
-                and len(skills) < 200
-            ):
-                skills.append(tool_args.get("skill_name", ""))
-            item["result"] = str(result)
-            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-
+        Completions are intentionally out of request order — the call ID pairs
+        each result with its start. Metrics are recorded here at completion
+        time; persistence happens in Phase D in provider-required order. An
+        exceptional exit cancels the remaining tasks and finalizes completed
+        actions exactly once (MCH-010: not on the normal path).
+        """
         # Mark denied items so _run_one skips execution but Phase D still emits.
         for item in planned:
             if item["name"] is not None and item["result"] is not None:
@@ -586,8 +426,8 @@ class ToolBatchExecutor:
             async def _bounded(item: dict[str, Any]) -> dict[str, Any]:
                 slots = delegate_semaphore if item["name"] == "delegate" else semaphore
                 async with slots:
-                    with _s3trace.trace_tool_call(item) if _s3trace else nullcontext() as _trace:
-                        await _run_one(item)
+                    with s3trace.trace_tool_call(item) if s3trace else nullcontext() as _trace:
+                        await self._run_one(item, session_id)
                         if _trace is not None:
                             _trace.finish(_tool_outcome(item))
                 return item
@@ -632,8 +472,8 @@ class ToolBatchExecutor:
                     for _pause_c in _pauses_c:
                         if not isinstance(_pause_c, dict) or not _pause_c.get("request_id"):
                             continue
-                        if _s3trace is not None:
-                            _s3trace.record_approval_pause(_pause_c)
+                        if s3trace is not None:
+                            s3trace.record_approval_pause(_pause_c)
                         yield StreamEvent(
                             type="needs_approval",
                             content=str(_pause_c.get("request_id", "")),
@@ -667,11 +507,24 @@ class ToolBatchExecutor:
 
                     await await_joined(finish_batch())
 
-        # ── Phase D: metrics for denied + persistence in provider order ───
-        # Provider message order must follow the original tool_calls order
-        # (OpenAI requires tool replies in order), even though UI completions
-        # above may have arrived out of order. A cancellation here still
-        # finalizes any completed-but-unrecorded action (F02).
+    # ── Phase D ─────────────────────────────────────────────────────────────
+
+    async def _record_batch(
+        self,
+        planned: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
+        tool_calls_made: list[dict[str, Any]],
+        session_id: uuid.UUID,
+        pending_chunks: list[dict[str, Any]] | None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Record every item in provider order and append its tool reply.
+
+        Provider message order must follow the original tool_calls order
+        (OpenAI requires tool replies in order), even though Phase C yielded
+        completions out of order. A cancellation here still finalizes any
+        completed-but-unrecorded action (F02).
+        """
         try:
             for item in planned:
                 tool_name = item["name"]
@@ -749,3 +602,316 @@ class ToolBatchExecutor:
             await self.agent._finalize_completed_tools(
                 planned, session_id, pending_chunks, tool_calls_made
             )
+
+    # ── Phase C helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _trace_hook() -> Any:
+        """S3.3 tool-trace hook (revert: delete this method; observe-only)."""
+        try:
+            from machina.controller import wiring as trace
+        except Exception:
+            return None
+        return trace
+
+    async def _run_one(self, item: dict[str, Any], session_id: uuid.UUID) -> None:
+        """Execute one runnable item and normalize failures into its result."""
+        tool_name = item["name"]
+        tool_args = item["args"]
+        audit_log("tool_call_start", session_id=str(session_id), tool_name=tool_name)
+        run = _ToolRun(
+            item=item,
+            session_id=session_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            start=time.monotonic(),
+            timeout=_TOOL_TIMEOUTS.get(tool_name, _TOOL_TIMEOUT_DEFAULT),
+        )
+        try:
+            with span("agent.tool", tool_name=tool_name, session_id=str(session_id)):
+                await plugin_registry.dispatch("on_tool_call", tool_name, tool_args)
+                # AH-018: bind caller scope around EVERY tool (not just a
+                # subset) so RAG tools and future tools see the active
+                # session/agent. Tokens always reset in finally.
+                if not await self._invoke_tool(run):
+                    return
+                result = run.result
+        except DelegationAccountingError:
+            # Unknown child spend is fatal for this turn, not a recoverable
+            # tool failure that permits another provider call.
+            raise
+        except Exception as e:
+            if isinstance(e, asyncio.TimeoutError) and "elapsed_ms" in item:
+                return
+            if isinstance(e, asyncio.TimeoutError):
+                # R4-019: wait_for raises a message-less TimeoutError; type it.
+                error_text = f"tool '{tool_name}' timed out after {run.timeout:g}s"
+            else:
+                error_text = str(e)
+            logger.exception("Tool execution failed for '%s'", tool_name)
+            audit_log(
+                "tool_call_error",
+                session_id=str(session_id),
+                tool_name=tool_name,
+                error=error_text,
+                duration_ms=int((time.monotonic() - run.start) * 1000),
+            )
+            result = f"Error: {error_text}"
+        item["_failed"] = bool(getattr(result, "is_error", False)) or str(result).startswith(
+            "Error:"
+        )
+        skills = _rsi_skills.get()
+        if (
+            tool_name == "skill_read"
+            and not item["_failed"]
+            and str(result).startswith("Skill ")
+            and skills is not None
+            and len(skills) < 200
+        ):
+            skills.append(tool_args.get("skill_name", ""))
+        item["result"] = str(result)
+        item["elapsed_ms"] = (time.monotonic() - run.start) * 1000
+
+    async def _invoke_tool(self, run: _ToolRun) -> bool:
+        """Bind caller scope, publish authority, and run the authorized call.
+
+        Returns ``False`` when the call ended in a pause or denial (its result
+        is already set); ``True`` means the normal result tail must run.
+        """
+        from machina.tools.agents import current_agent_id, current_session_id
+
+        token = current_session_id.set(run.session_id)
+        agent_token = current_agent_id.set(self.agent.agent_id)
+        try:
+            self._publish_authority(run)
+        except Exception:
+            current_agent_id.reset(agent_token)
+            current_session_id.reset(token)
+            raise
+        try:
+            return await self._authorize_and_execute(run)
+        finally:
+            try:
+                # AH-AUDIT-002: end the guard+execute window so a later tool
+                # call cannot inherit this approval's snapshot.
+                from machina.permissions.broker import (
+                    clear_execution_context as _clear_ctx,
+                )
+
+                _clear_ctx()
+            except Exception as _boundary_error:
+                # Optional fallback preserves the primary outcome; report no payload.
+                record_failure("agent._execute_tool_calls_stream", _boundary_error)
+            try:
+                if run.authority_token is not None:
+                    from machina.core.agent_factory import parent_authority_var as _pav2
+
+                    _pav2.reset(run.authority_token)
+            except Exception as _boundary_error:
+                # Optional fallback preserves the primary outcome; report no payload.
+                record_failure("agent._execute_tool_calls_stream", _boundary_error)
+            current_agent_id.reset(agent_token)
+            current_session_id.reset(token)
+
+    def _publish_authority(self, run: _ToolRun) -> None:
+        """Compose this agent's authority overlay and publish it for children.
+
+        LP-08/R-02: preserve inherited authority (max_mode, etc.) and intersect
+        its tools with this agent's definition. Note the executor-local
+        ``_authority`` lookup is preserved verbatim from the pure move.
+        """
+        from machina.core.agent_factory import check_mode_cap, merge_authority
+        from machina.core.agent_factory import parent_authority_var as _pav
+
+        _inherited = dict(getattr(self, "_authority", {}) or {})
+        _ambient = _pav.get() or {}
+        if _ambient.get("max_mode") is not None:
+            check_mode_cap(_inherited, _ambient["max_mode"])
+        _merged = merge_authority(_inherited, _ambient)
+        _parent_tools = _merged.get("tools")
+        # Terminal authority includes observing/stopping its own session jobs;
+        # this adds no launch capability.
+        if (
+            _parent_tools is not None
+            and "terminal" in _parent_tools
+            and "terminal_job" not in _parent_tools
+        ):
+            _parent_tools = [*_parent_tools, "terminal_job"]
+        if _parent_tools is None:
+            _merged["tools"] = self.agent.allowed_tools
+        elif self.agent.allowed_tools is None:
+            _merged["tools"] = list(_parent_tools)
+        else:
+            _merged["tools"] = [t for t in self.agent.allowed_tools if t in _parent_tools]
+        run.merged = _merged
+        run.authority_token = _pav.set(_merged)
+
+    async def _authorize_and_execute(self, run: _ToolRun) -> bool:
+        """Resolve the execution context, guard the action, then execute it."""
+        spec = await self._resolve_spec(run)
+        from machina.core.execution_context import resolve_execution_context
+
+        context = await resolve_execution_context(str(run.session_id), run.tool_name)
+        mode, backend = context.mode, context.backend
+        from machina.core.agent_factory import check_mode_cap
+        from machina.core.agent_factory import parent_authority_var as _pav
+
+        # Children inherit the parent's current execution mode, including
+        # sandbox isolation, rather than a global default.
+        check_mode_cap(run.merged, mode)
+        run.merged["max_mode"] = mode
+        if run.tool_name == "terminal" and run.merged.get("terminal_backend") == "sandbox":
+            backend = "sandbox"
+        if mode == "sandbox" or backend == "sandbox":
+            run.merged["terminal_backend"] = "sandbox"
+        _pav.set(run.merged)
+        request = self._build_request(run, spec, mode, backend, context)
+        if not await self._guard_tool(run, request):
+            return False
+        await self._execute_tool(run)
+        return True
+
+    async def _resolve_spec(self, run: _ToolRun) -> dict[str, Any]:
+        """Refresh connector state when needed and resolve broker kwargs."""
+        if run.tool_name in {"mcp_call", "mcp_list", "mcp_describe"}:
+            from machina.core.runtime import runtime_services
+
+            await runtime_services.get_connector_service().refresh()
+        from machina.permissions import tools as _perm_tools
+
+        spec = _perm_tools.action_for_tool(run.tool_name, run.tool_args)
+        if run.tool_name in {"mcp_call", "mcp_connect", "mcp_disconnect"}:
+            run.timeout = int(spec.get("timeout", 60)) + 1
+        elif run.tool_name == "terminal":
+            # Background authorization has no execution deadline; admission
+            # still gets a normal startup window.
+            run.timeout = (
+                60
+                if run.tool_args.get("background") is True
+                else min(max(int(spec.get("timeout", 60)), 1), _TERMINAL_CAP)
+            )
+        return spec
+
+    def _build_request(
+        self, run: _ToolRun, spec: dict[str, Any], mode: str, backend: str, context
+    ) -> Any:
+        """Build the broker request the human reviews and the digest binds."""
+        from machina.permissions.policy import build_request as _build_req
+
+        return _build_req(
+            operation=spec.get("operation", f"tool.{run.tool_name}"),
+            targets=spec.get("targets"),
+            argv=spec.get("argv"),
+            shell_payload=spec.get("shell_payload", ""),
+            cwd=spec.get("cwd", "."),
+            content=spec.get("content", ""),
+            mode=mode,
+            backend=backend,
+            workspace=str(context.workspace),
+            agent_id=self.agent.agent_id,
+            session_id=str(run.session_id),
+            capabilities=spec.get("capabilities"),
+            network=spec.get("network"),
+            tool=run.tool_name,
+            # AH-AUDIT-005/008: timeout is authorization-relevant and bound
+            # into the approved digest.
+            timeout=int(spec.get("timeout", 60)),
+        )
+
+    async def _guard_tool(self, run: _ToolRun, request: Any) -> bool:
+        """Run the permission guard; a pause or denial sets the item's result.
+
+        Validation errors stay distinct from authorization: malformed actions
+        fail before any approval. Returns ``False`` for pause/denial.
+        """
+        from machina.permissions.broker import ApprovalDenied as _Denied
+        from machina.permissions.broker import NeedsApproval as _Needs
+        from machina.permissions.broker import permission_broker as _broker
+
+        try:
+            await _broker.guard(request)
+            run.item["_approval_id"] = request.approval_id or ""
+            return True
+        except _Needs as _need:
+            _ap = _need.approval
+            result = (
+                f"Needs approval ({_ap.get('request_id')}:{_ap.get('operation')} "
+                f"{_ap.get('target')}). The action was NOT executed. "
+                "Ask the user to approve it (approvals list/resolve), "
+                "or choose another path."
+            )
+            run.item["result"] = str(result)
+            # AH-AUDIT-022: typed pause outcome travels with the tool item into
+            # AgentResponse.needs_approval. Schedulers/transports read this —
+            # never prose.
+            run.item["_needs_approval"] = {
+                "request_id": _ap.get("request_id", ""),
+                "session_id": _ap.get("session_id", ""),
+                "agent_id": _ap.get("agent_id", self.agent.agent_id),
+                "turn_id": _ap.get("turn_id", ""),
+                "operation": _ap.get("operation", ""),
+                "target": _ap.get("target", ""),
+                "status": _ap.get("status", "pending"),
+                # Epoch creation time: lets the trace layer measure the real
+                # human wait at re-pause and at approval resume.
+                "created_at": _ap.get("created_at"),
+            }
+            run.item["elapsed_ms"] = (time.monotonic() - run.start) * 1000
+            return False
+        except _Denied as _den:
+            result = f"Permission denied: {_den.reason}. The action was NOT executed."
+            run.item["result"] = str(result)
+            run.item["elapsed_ms"] = (time.monotonic() - run.start) * 1000
+            return False
+
+    async def _execute_tool(self, run: _ToolRun) -> None:
+        """Execute the authorized tool with its deadline and cancellation join."""
+        from machina.core.background_tasks import CompletedOnCancellation, await_joined
+
+        def save_result(completed):
+            run.item["result"] = str(completed)
+            run.item["_failed"] = bool(getattr(completed, "is_error", False)) or str(
+                completed
+            ).startswith("Error:")
+            run.item["elapsed_ms"] = (time.monotonic() - run.start) * 1000
+            run.item["_delegation_status"] = getattr(completed, "delegation_status", "")
+            if getattr(completed, "outcome_unknown", False):
+                run.item["_outcome_unknown"] = True
+            from machina.tools.agents import DelegationToolResult
+
+            if isinstance(completed, DelegationToolResult):
+                run.item["_needs_approvals"] = completed.needs_approval
+                run.item["_delegated_tokens"] = completed.tokens_used
+
+        async def execute():
+            try:
+                completed = await registry.execute(run.tool_name, **run.tool_args)
+            except CompletedOnCancellation as cancellation:
+                save_result(cancellation.result)
+                raise
+            save_result(completed)
+            return completed
+
+        execution = asyncio.create_task(execute())
+        try:
+            result = (
+                await execution
+                if run.tool_name == "delegate"
+                else await asyncio.wait_for(execution, timeout=run.timeout)
+            )
+        except asyncio.CancelledError:
+
+            async def finish_execution():
+                outcomes = await asyncio.gather(execution, return_exceptions=True)
+                for error in outcomes:
+                    if isinstance(error, Exception):
+                        record_failure("agent.cancelled_execution", error)
+                if "elapsed_ms" not in run.item:
+                    _aid = run.item.get("_approval_id", "")
+                    if _aid:
+                        run.item["_cancelled"] = True
+                        await self.agent._retire_tool_approval(run.item, "cancelled")
+
+            await await_joined(finish_execution())
+            raise
+        run.result = result
