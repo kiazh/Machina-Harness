@@ -321,3 +321,101 @@ def test_rsi_rule_view_uses_the_wire_shape() -> None:
     assert view["approvedBy"] == "user"
     assert view["confidence"] == 0.8
     assert view["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_resident_start_unpauses_and_starts_the_daemon(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    started: dict = {}
+
+    async def fake_ensure():
+        return {"name": "Maki", "paused": True}, SimpleNamespace(id="session-1")
+
+    async def fake_update(**kwargs):
+        started["paused"] = kwargs.get("paused")
+        return {"name": "Maki"}
+
+    class FakeDaemon:
+        def __init__(self, gateway):
+            self.gateway = gateway
+
+        def start(self, *, interval=None):
+            started["interval"] = interval
+
+        def status(self):
+            return {"running": True, "intervalSeconds": started.get("interval") or 300}
+
+    monkeypatch.setattr(resident_runtime, "ensure_session", fake_ensure)
+    monkeypatch.setattr(store, "update_profile", fake_update)
+    from machina.resident import daemon as daemon_module
+
+    monkeypatch.setattr(daemon_module, "ResidentDaemon", FakeDaemon)
+    monkeypatch.setattr(feature, "_launch_notch", lambda: False)
+
+    class StartGateway(_Gateway):
+        pass
+
+    payload = await feature.resident_start(StartGateway(), {"intervalSeconds": 10})
+
+    assert started["paused"] is False
+    assert started["interval"] == 10
+    assert payload["daemon"]["running"] is True
+    assert payload["notchLaunched"] is False
+
+
+@pytest.mark.asyncio
+async def test_resident_goal_create_uses_the_store(monkeypatch) -> None:
+    async def fake_create(title, detail="", budget=None):
+        return {"id": "goal-1", "title": title, "detail": detail, "status": "active"}
+
+    monkeypatch.setattr(store, "create_goal", fake_create)
+    payload = await feature.resident_goal_create(_Gateway(), {"title": "ship it"})
+    assert payload["goal"]["title"] == "ship it"
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_ticks_only_for_durable_work(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from machina.resident import daemon as daemon_module
+
+    calls: dict = {}
+
+    async def fake_profile():
+        return {"paused": False}
+
+    async def fake_ensure():
+        return {"paused": False}, SimpleNamespace(id="session-1")
+
+    async def fake_events(**_kwargs):
+        return []
+
+    async def fake_goals(**_kwargs):
+        return []
+
+    monkeypatch.setattr(store, "get_profile", fake_profile)
+    monkeypatch.setattr(resident_runtime, "ensure_session", fake_ensure)
+    monkeypatch.setattr(store, "queued_events", fake_events)
+    monkeypatch.setattr(store, "active_goals", fake_goals)
+
+    class IdleGateway:
+        def turn_running(self, session_id):
+            return False
+
+        async def _prompt_submit(self, payload):
+            calls["prompt"] = payload
+            return {"turnId": "t"}
+
+    daemon = daemon_module.ResidentDaemon(IdleGateway(), interval=5)
+    await daemon.tick()
+    assert "prompt" not in calls
+
+    async def fake_goals_active(**_kwargs):
+        return [{"id": "goal-1", "title": "ship it", "detail": "one step"}]
+
+    monkeypatch.setattr(store, "active_goals", fake_goals_active)
+    await daemon.tick()
+    assert calls["prompt"]["sessionId"] == "session-1"
+    assert "ship it" in calls["prompt"]["text"]
+    assert daemon.last_tick is not None

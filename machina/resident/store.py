@@ -511,3 +511,91 @@ async def resolve_approval(
         detail={"operation": record.get("operation") or "", "agent_id": record.get("agent_id") or ""},
     )
     return resolved
+
+
+# ─── goals and events ───────────────────────────────────────────────────────
+
+
+async def create_goal(title: str, detail: str = "", budget: dict[str, Any] | None = None) -> dict[str, Any]:
+    name = title.strip()
+    if not name:
+        raise ResidentError("goal title is required")
+    row = await db.fetchrow(
+        "INSERT INTO resident_goals (title, detail, budget) VALUES ($1, $2, $3::jsonb) "
+        "RETURNING id::text AS id, title, detail, status, budget, created_at, updated_at",
+        name,
+        detail.strip(),
+        json.dumps(budget or {}),
+    )
+    if row is None:  # pragma: no cover
+        raise ResidentError("goal write failed")
+    return dict(row)
+
+
+async def list_goals(*, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    rows = await db.fetch(
+        "SELECT id::text AS id, title, detail, status, budget, created_at, updated_at "
+        "FROM resident_goals WHERE ($1::text IS NULL OR status = $1) "
+        "ORDER BY updated_at DESC LIMIT $2",
+        status,
+        max(1, limit),
+    )
+    return [dict(row) for row in rows]
+
+
+async def active_goals(*, limit: int = 5) -> list[dict[str, Any]]:
+    return await list_goals(status="active", limit=limit)
+
+
+async def set_goal_status(goal_id: str, status: str) -> bool:
+    if status not in ("active", "paused", "done", "cancelled"):
+        raise ResidentError("goal status must be active|paused|done|cancelled")
+    try:
+        uid = uuid.UUID(str(goal_id))
+    except ValueError:
+        return False
+    result = await db.execute(
+        "UPDATE resident_goals SET status = $2, updated_at = now() WHERE id = $1",
+        uid,
+        status,
+    )
+    return result.endswith(" 1")
+
+
+async def queued_events(*, limit: int = 20) -> list[dict[str, Any]]:
+    """Events that should wake the autonomous loop (screen context does not)."""
+    rows = await db.fetch(
+        "SELECT id::text AS id, source, kind, payload, priority, created_at "
+        "FROM resident_events WHERE status = 'queued' AND source <> 'screen' "
+        "ORDER BY priority DESC, created_at LIMIT $1",
+        max(1, limit),
+    )
+    result = []
+    for row in rows:
+        item = dict(row)
+        if isinstance(item.get("payload"), str):
+            try:
+                item["payload"] = json.loads(item["payload"])
+            except ValueError:
+                item["payload"] = {}
+        result.append(item)
+    return result
+
+
+async def mark_events(ids: list[str], status: str = "done") -> int:
+    if status not in ("done", "failed", "dropped"):
+        raise ResidentError("invalid event status")
+    count = 0
+    for value in ids:
+        try:
+            uid = uuid.UUID(str(value))
+        except ValueError:
+            continue
+        result = await db.execute(
+            "UPDATE resident_events SET status = $2, finished_at = now() WHERE id = $1",
+            uid,
+            status,
+        )
+        if result.endswith(" 1"):
+            count += 1
+    return count

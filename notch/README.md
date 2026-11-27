@@ -34,6 +34,9 @@ the menu bar, and launches at login when enabled from its menu.
 
 - Live status and approval queue via `resident.*` over loopback.
 - Chat: sends `resident.prompt` and polls `session.history` for the reply.
+- Push-to-talk: hold the microphone button, speak, release; on-device Apple
+  Speech transcribes into the composer and sends the turn. Handy-inspired
+  interaction; no wake word and no continuous microphone.
 - Frontmost app/window/selection context is sent every 10s when
   Accessibility permission is granted (`resident.context`).
 - Approval buttons resolve as the user. Grant-scoped proxy resolution is
@@ -43,8 +46,9 @@ the menu bar, and launches at login when enabled from its menu.
 
 ## Not yet wired
 
-- ScreenCaptureKit screenshots and visible capture indicator.
 - Accessibility-driven control (click/type) and Playwright browser tasks.
+- Whisper/Parakeet model option for dictation (Apple on-device Speech is the
+  current engine).
 - Composio and Apple Mail/Calendar connectors.
 - Batch dashboard and RSI review surfaces.
 - Developer ID signing/notarization; the bundle script uses an ad-hoc

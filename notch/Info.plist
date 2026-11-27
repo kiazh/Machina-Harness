@@ -29,6 +29,10 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Maki records only while you hold the microphone button.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Maki transcribes your voice on-device so you can talk to it.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Machina captures the screen only when you press the camera button.</string>
     <key>NSHumanReadableCopyright</key>

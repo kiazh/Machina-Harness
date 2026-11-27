@@ -33,6 +33,7 @@ const status = {
 	pendingApprovals: 2,
 	grants: [],
 	coreMemoryCount: 3,
+	daemon: { running: false, intervalSeconds: 300, lastTick: null, lastError: "" },
 };
 
 test("/agent status prints the resident profile", async () => {
@@ -117,6 +118,31 @@ test("/agent approve resolves with the session binding", async () => {
 		verdict: "approved",
 	});
 	assert.match(h.printed.join("\n"), /req-1 approved/);
+});
+
+test("/agent start and stop control the autonomous daemon", async () => {
+	const h = host({
+		"resident.start": () => ({ daemon: { running: true, intervalSeconds: 300 } }),
+		"resident.stop": () => ({ stopped: true }),
+	});
+
+	await agentCommand.run("start", h.host);
+	await agentCommand.run("stop", h.host);
+
+	assert.deepEqual(h.calls.map((call) => call.method), ["resident.start", "resident.stop"]);
+	assert.match(h.printed.join("\n"), /Maki is running every 300s/);
+	assert.match(h.printed.join("\n"), /Maki is paused/);
+});
+
+test("/agent goal add creates a durable goal", async () => {
+	const h = host({
+		"resident.goal.create": (params) => ({ goal: { id: "goal-1", title: params.title } }),
+	});
+
+	await agentCommand.run("goal add ship the thing", h.host);
+
+	assert.deepEqual(h.calls[0]?.params, { title: "ship the thing" });
+	assert.match(h.printed.join("\n"), /Goal goal-1: ship the thing/);
 });
 
 test("/agent rejects an unknown option", async () => {

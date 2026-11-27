@@ -13,6 +13,7 @@ final class NotchModel: ObservableObject {
     @Published var draft = ""
     @Published var busy = false
     @Published var muted = SoundPlayer.shared.muted
+    @Published var listening = false
 
     struct ChatLine: Identifiable {
         let id = UUID()
@@ -61,7 +62,7 @@ final class NotchModel: ObservableObject {
                 self.status = status
                 self.approvals = approvals
                 self.connection = "live"
-                self.mascot = approvals.isEmpty ? (busy ? .thinking : .idle) : .waiting
+                self.mascot = listening ? .listening : (approvals.isEmpty ? (busy ? .thinking : .idle) : .waiting)
                 if approvals.count > previous { SoundPlayer.shared.play(.alert) }
             } catch {
                 if self.status == nil { self.loadDemo() }
@@ -124,7 +125,7 @@ final class NotchModel: ObservableObject {
         SoundPlayer.shared.play(.happy)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self, !self.busy else { return }
-            self.mascot = self.approvals.isEmpty ? .idle : .waiting
+            self.mascot = self.listening ? .listening : (self.approvals.isEmpty ? .idle : .waiting)
         }
     }
 

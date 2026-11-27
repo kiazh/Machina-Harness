@@ -6,6 +6,10 @@ core-memory edits must never be reachable through the shared HTTP surface.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from machina.gateway.errors import INVALID_PARAMS, RpcError
@@ -37,7 +41,110 @@ def _str_list(params: dict[str, Any], key: str) -> list[str] | None:
 async def resident_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     _require_local_transport(gw, "resident.status")
     gw.require_db()
-    return await resident_runtime.profile_status()
+    payload = await resident_runtime.profile_status()
+    daemon = getattr(gw, "_maki_daemon", None)
+    payload["daemon"] = daemon.status() if daemon is not None else {
+        "running": False,
+        "intervalSeconds": 0,
+        "lastTick": None,
+        "lastError": "",
+    }
+    return payload
+
+
+async def resident_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.start")
+    gw.require_db()
+    from machina.resident.daemon import ResidentDaemon
+
+    profile, session = await resident_runtime.ensure_session()
+    await resident_store.update_profile(paused=False)
+    daemon = getattr(gw, "_maki_daemon", None)
+    if daemon is None:
+        daemon = ResidentDaemon(gw)
+        setattr(gw, "_maki_daemon", daemon)
+    interval = params.get("intervalSeconds")
+    if interval is not None:
+        try:
+            interval = int(interval)
+        except (TypeError, ValueError):
+            raise RpcError(INVALID_PARAMS, "intervalSeconds must be an integer") from None
+    daemon.start(interval=interval)
+    launched = _launch_notch()
+    return {
+        "sessionId": str(session.id),
+        "profile": profile.get("name"),
+        "daemon": daemon.status(),
+        "notchLaunched": launched,
+    }
+
+
+def _launch_notch() -> bool:
+    """Open the local notch app when /agent start is used from the terminal."""
+    if not shutil.which("open"):
+        return False
+    override = os.environ.get("MACHINA_NOTCH_APP", "").strip()
+    candidates = [
+        Path(override).expanduser() if override else None,
+        Path(__file__).resolve().parents[3] / "notch" / "build" / "MachinaNotch.app",
+        Path.home() / "Applications" / "MachinaNotch.app",
+        Path("/Applications/MachinaNotch.app"),
+    ]
+    app = next((path for path in candidates if path and path.exists()), None)
+    if app is None:
+        return False
+    try:
+        subprocess.Popen(
+            ["open", str(app)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except OSError:
+        return False
+
+
+async def resident_stop(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.stop")
+    gw.require_db()
+    daemon = getattr(gw, "_maki_daemon", None)
+    if daemon is not None:
+        daemon.stop()
+    await resident_store.update_profile(paused=True)
+    return {"stopped": True, "daemon": daemon.status() if daemon is not None else None}
+
+
+async def resident_goal_create(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.goal.create")
+    gw.require_db()
+    try:
+        goal = await resident_store.create_goal(
+            _str(params, "title", max_len=200),
+            _str(params, "detail", required=False, max_len=2_000) or "",
+        )
+    except resident_store.ResidentError as error:
+        raise RpcError(INVALID_PARAMS, str(error)) from None
+    return {"goal": goal}
+
+
+async def resident_goal_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.goal.list")
+    gw.require_db()
+    status = _str(params, "status", required=False, max_len=20) or None
+    return {"goals": await resident_store.list_goals(status=status)}
+
+
+async def resident_goal_set(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.goal.set")
+    gw.require_db()
+    try:
+        changed = await resident_store.set_goal_status(
+            _str(params, "goalId", max_len=64),
+            _str(params, "status", max_len=20),
+        )
+    except resident_store.ResidentError as error:
+        raise RpcError(INVALID_PARAMS, str(error)) from None
+    return {"changed": changed}
 
 
 async def resident_prompt(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
@@ -356,6 +463,9 @@ async def resident_batch_cancel(gw: Gateway, params: dict[str, Any]) -> dict[str
 async def resident_kill(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     _require_local_transport(gw, "resident.kill")
     gw.require_db()
+    daemon = getattr(gw, "_maki_daemon", None)
+    if daemon is not None:
+        daemon.stop()
     revoked = 0
     for grant in await resident_store.list_grants(active_only=True):
         if await resident_store.revoke_grant(str(grant.get("id") or "")):

@@ -9,6 +9,7 @@ enum MascotState: String, CaseIterable {
     case happy
     case waiting
     case sleeping
+    case listening
 }
 
 /// The notch face: a polished silver disc with a soft drop shadow, an inner
@@ -165,6 +166,10 @@ struct MascotView: View {
             Capsule()
                 .fill(Color.black.opacity(0.82))
                 .frame(width: eyeWidth, height: eyeHeight * 0.8)
+        case .listening:
+            Capsule()
+                .fill(Color.black.opacity(0.88))
+                .frame(width: eyeWidth * 1.2, height: eyeHeight * 1.25)
         default:
             Capsule()
                 .fill(Color.black.opacity(0.86))

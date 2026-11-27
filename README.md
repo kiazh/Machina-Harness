@@ -55,6 +55,7 @@ gateway. Resident methods are local-terminal capabilities; the notch uses a
 0600 token and never receives host credentials.
 
 - `machina init` creates `~/.machina/notch.token`.
+- `/agent start` starts Maki's autonomous heartbeat and opens the notch app.
 - `machina serve` exposes the gateway the notch connects to.
 - `./notch/bundle.sh` builds `notch/build/MachinaNotch.app`.
 - See [`docs/RESIDENT.md`](docs/RESIDENT.md) for the authority model, memory,

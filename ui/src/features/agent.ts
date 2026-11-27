@@ -19,6 +19,8 @@ import type { Command, FeatureHost } from "./types.ts";
 const MODES = ["ask", "auto-safe", "full"] as const;
 
 const SUBCOMMANDS: Array<[string, string]> = [
+	["start", "Unpause Maki and start the autonomous heartbeat"],
+	["stop", "Stop the heartbeat and pause Maki"],
 	["status", "Show the resident profile, session, queue, and grants"],
 	["open", "Open the resident chat"],
 	["inbox", "List pending approvals"],
@@ -31,6 +33,7 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["grant", "Create a grant: /agent grant <minutes> <ops> [--sessions ...] [--targets ...] [--max N]"],
 	["revoke", "Revoke a grant: /agent revoke <grantId>"],
 	["autonomy", "Set mode: /agent autonomy ask|auto-safe|full"],
+	["goal", "Goals: /agent goal add <title> | done <id> | list"],
 	["rsi", "Learned rules: /agent rsi [review|propose <rule>|activate <id>|retire <id>]"],
 	["batches", "List durable batch work"],
 	["batch", "Show one batch: /agent batch <batchId>"],
@@ -53,6 +56,7 @@ function statusText(status: ResidentStatusResult): string {
 		`  Core facts: ${status.coreMemoryCount}`,
 		`  Pending approvals: ${status.pendingApprovals}`,
 		`  Active grants: ${status.grants.length}`,
+		`  Autonomous: ${status.daemon?.running ? `running every ${status.daemon.intervalSeconds}s` : "stopped"}`,
 	].join("\n");
 }
 
@@ -152,6 +156,56 @@ export const agentCommand: Command = {
 	async run(args, host) {
 		const [sub, rest] = splitSub(args);
 		switch (sub) {
+			case "start": {
+				const result = await host.request<{ daemon: { running: boolean; intervalSeconds: number } }>(
+					"resident.start",
+					{},
+				);
+				host.print(
+					`Maki is running${result.daemon?.running ? ` every ${result.daemon.intervalSeconds}s` : ""}.`,
+					"success",
+				);
+				return;
+			}
+			case "stop": {
+				await host.request("resident.stop", {});
+				host.print("Maki is paused; grants are unchanged.", "warning");
+				return;
+			}
+			case "goal": {
+				const [action, ...restWords] = argWords(rest);
+				if (!action || action === "list") {
+					const result = await host.request<{ goals: Array<{ id: string; title: string; status: string }> }>(
+						"resident.goal.list",
+						{},
+					);
+					host.print(
+						result.goals.length
+							? result.goals.map((goal) => `${goal.status.padEnd(8)} ${goal.id.slice(0, 8)}  ${goal.title}`).join("\n")
+							: "No goals.",
+						"plain",
+					);
+					return;
+				}
+				if (action === "add") {
+					const title = restWords.join(" ").trim();
+					if (!title) throw new Error("Usage: /agent goal add <title>");
+					const result = await host.request<{ goal: { id: string; title: string } }>("resident.goal.create", { title });
+					host.print(`Goal ${result.goal.id.slice(0, 8)}: ${result.goal.title}`, "success");
+					return;
+				}
+				if (action === "done" || action === "cancel" || action === "pause") {
+					const goalId = restWords[0];
+					if (!goalId) throw new Error(`Usage: /agent goal ${action} <goalId>`);
+					await host.request("resident.goal.set", {
+						goalId,
+						status: action === "done" ? "done" : action === "cancel" ? "cancelled" : "paused",
+					});
+					host.print(`Goal ${goalId.slice(0, 8)} ${action}.`, "success");
+					return;
+				}
+				throw new Error("Usage: /agent goal add <title> | done|pause|cancel <id> | list");
+			}
 			case "":
 			case "status":
 				host.print(statusText(await host.request<ResidentStatusResult>("resident.status")), "plain");
@@ -301,7 +355,7 @@ export const agentCommand: Command = {
 			}
 			default:
 				throw new Error(
-					`Unknown /agent option "${sub}". Try: status, open, inbox, approve, deny, memory, remember, grants, grant, revoke, autonomy, kill.`,
+					`Unknown /agent option "${sub}". Try: start, stop, status, open, inbox, approve, deny, memory, remember, grants, grant, revoke, autonomy, goal, rsi, batches, kill.`,
 				);
 		}
 	},

@@ -7,6 +7,27 @@ always-injected core memory, autonomy grants, and a native macOS notch client.
 It is a normal turn engine with an identity and a policy layer — not a second
 agent runtime.
 
+## Autonomy
+
+`/agent start` unpauses Maki and starts a durable heartbeat. It ticks only when
+there is an active goal or a queued non-screen event, never while another turn
+is running, and marks claimed events after submitting so context observations
+do not wake it forever. `/agent stop` pauses it; `/agent kill` also revokes
+grants. Goals are durable rows:
+
+```text
+/agent goal add ship the refactor
+/agent goals
+/agent goal done <id>
+```
+
+## Voice
+
+The notch microphone button is Handy-inspired push-to-talk: press, speak,
+release. Recognition uses Apple's on-device Speech framework, so audio stays on
+the machine. A final transcript fills the composer and sends the turn. No wake
+word and no always-on microphone.
+
 ## Pieces
 
 | Piece | Location |
@@ -18,6 +39,8 @@ agent runtime.
 | Local notch token | `machina/resident/token.py` |
 | Native notch app | `notch/` |
 | TUI command | `ui/src/features/agent.ts` (`/agent`) |
+| Autonomous heartbeat | `machina/resident/daemon.py` |
+| Notch voice input | `notch/Sources/MachinaNotch/VoiceInput.swift` |
 | Schema | `machina/db/resident_schema.sql` |
 
 ## Authority model

@@ -472,12 +472,20 @@ export interface ResidentApprovalView {
 	created_at: string | null;
 }
 
+export interface ResidentDaemonView {
+	running: boolean;
+	intervalSeconds: number;
+	lastTick: string | null;
+	lastError: string;
+}
+
 export interface ResidentStatusResult {
 	profile: ResidentProfileView;
 	sessionId: string;
 	pendingApprovals: number;
 	grants: ResidentGrantView[];
 	coreMemoryCount: number;
+	daemon: ResidentDaemonView;
 }
 
 export interface ResidentMemoryEntry {

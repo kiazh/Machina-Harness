@@ -5,6 +5,7 @@ struct NotchView: View {
     let controller: NotchPanelController
     @FocusState private var composerFocused: Bool
     @State private var mascotDrag = CGSize.zero
+    @StateObject private var voice = VoiceInput()
 
     var body: some View {
         Group {
@@ -19,6 +20,12 @@ struct NotchView: View {
             }
         }
         .onExitCommand { controller.collapse() }
+        .onAppear {
+            voice.onFinal = { text in
+                model.draft = text
+                model.send()
+            }
+        }
         .onChange(of: model.expanded) { _, expanded in
             guard expanded else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
@@ -273,13 +280,40 @@ struct NotchView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            if voice.isRecording || !voice.transcript.isEmpty {
+                Text(voice.transcript.isEmpty ? "Listening…" : voice.transcript)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(2)
+            }
+            if !voice.error.isEmpty {
+                Text(voice.error)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.orange.opacity(0.9))
+                    .lineLimit(2)
+            }
+            HStack(spacing: 8) {
             TextField("Ask Maki…", text: $model.draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(.white.opacity(0.9))
                 .focused($composerFocused)
                 .onSubmit { model.send() }
+            Button {
+                if voice.isRecording { voice.stop() } else { voice.start() }
+            } label: {
+                Image(systemName: voice.isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(voice.isRecording ? Color(red: 1, green: 0.45, blue: 0.45) : .white.opacity(0.65))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(.white.opacity(voice.isRecording ? 0.16 : 0.07)))
+            }
+            .buttonStyle(.plain)
+            .onChange(of: voice.isRecording) { _, recording in
+                model.listening = recording
+                model.mascot = recording ? .listening : .idle
+            }
             Button {
                 model.sendScreenshot()
             } label: {
@@ -302,16 +336,17 @@ struct NotchView: View {
             .buttonStyle(.plain)
             .disabled(model.draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(0.07))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.white.opacity(0.07))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
     }
 
     private var footer: some View {
