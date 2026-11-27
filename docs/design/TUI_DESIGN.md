@@ -143,7 +143,8 @@ interaction states and the theme contract. Behaviour is enforced by the suite in
   or **Review** shows evidence for the selection. Click a view or press `1/2/3`
   or Tab. `↑/↓` selects prompts, `[`/`]` selects files, `n`/`p` selects a
   finding, and `PgUp`/`PgDn` pages evidence. `Space` opens the full prompt.
-  `r` reviews the diff and `x` cancels a review. `Ctrl+C` cancels a running
+  `r` reviews the diff with the deterministic rules and `m` reviews it with
+  the session's current model; `x` cancels a review. `Ctrl+C` cancels a running
   reply from either page, and `Ctrl+D` exits when idle.
 - The unit is **one prompt**, not a commit. A prompt block keeps its captured
   before/after content, so a later prompt editing the same file does not

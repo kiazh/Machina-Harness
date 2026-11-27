@@ -137,6 +137,17 @@ function reviewChip(review: ReviewRunInfo | null | undefined): string {
 	return tone(`${count} ${count === 1 ? "finding" : "findings"}`);
 }
 
+function coverageLabel(review: ReviewRunInfo): string {
+	const engine = review.engine === "model" ? "Model" : "Rules";
+	const coverage = review.coverage;
+	if (!coverage) return `${engine} review`;
+	const files = `${coverage.reviewed}/${coverage.files} ${coverage.files === 1 ? "file" : "files"}`;
+	const parts = [`${engine} reviewed ${files}`];
+	if (coverage.truncated) parts.push("partial diff");
+	if (coverage.invalid) parts.push(`${coverage.invalid} omitted`);
+	return parts.join(" · ");
+}
+
 function preferredFile(files: ChangeFileInfo[]): string | undefined {
 	const file = files.find(item => item.change === "modified")
 		?? files.find(item => item.change === "added")
@@ -151,6 +162,7 @@ export class ChangesPage implements Component {
 	private readonly diff: (turnId: string | undefined) => ChangesDiffState;
 	private readonly onOpenDiff?: () => void;
 	private readonly onReview?: (turnId: string) => void;
+	private readonly onReviewModel?: (turnId: string) => void;
 	private readonly onCancelReview?: (turnId: string) => void;
 	private readonly onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
 	private readonly onFixFailure?: (turnId: string, code: string, reason: string) => void;
@@ -174,6 +186,7 @@ export class ChangesPage implements Component {
 		options: {
 			onOpenDiff?: () => void;
 			onReview?: (turnId: string) => void;
+			onReviewModel?: (turnId: string) => void;
 			onCancelReview?: (turnId: string) => void;
 			onFixFinding?: (turnId: string, finding: ReviewFindingInfo) => void;
 			onFixFailure?: (turnId: string, code: string, reason: string) => void;
@@ -185,6 +198,7 @@ export class ChangesPage implements Component {
 		this.diff = diff;
 		this.onOpenDiff = options.onOpenDiff;
 		this.onReview = options.onReview;
+		this.onReviewModel = options.onReviewModel;
 		this.onCancelReview = options.onCancelReview;
 		this.onFixFinding = options.onFixFinding;
 		this.onFixFailure = options.onFixFailure;
@@ -326,6 +340,14 @@ export class ChangesPage implements Component {
 			if (turn) {
 				this.showTab("review");
 				this.onReview?.(turn.id);
+			}
+			return true;
+		}
+		if (data === "m") {
+			const turn = turns[index];
+			if (turn) {
+				this.showTab("review");
+				this.onReviewModel?.(turn.id);
 			}
 			return true;
 		}
@@ -603,7 +625,7 @@ export class ChangesPage implements Component {
 		}
 		while (out.length < bottom) push("");
 		const keys = this.promptExpanded ? "Space Back   PgUp/PgDn Read" : this.tab === "review"
-			? "N/P Finding   PgUp/PgDn Read   R Review"
+			? "N/P Finding   PgUp/PgDn Read   R Rules   M Model"
 			: "↑↓ Prompt   [ ] File   Space Full prompt";
 		push(truncateToWidth(`  ${theme.muted(`${keys}   ? Keys`)}`, width, "…", true));
 		return out.slice(0, rows);
@@ -793,9 +815,10 @@ export class ChangesPage implements Component {
 	): void {
 		const review = turn.review;
 		if (!review) {
-			body.push({ text: theme.text("No review yet. Press R to check this diff."), kind: "detail" });
+			body.push({ text: theme.text("No review yet. Press R for rules or M for a model review."), kind: "detail" });
 			return;
 		}
+		const coverage = coverageLabel(review);
 		const failure = this.reviewFailure(turn);
 		const findings = review.findings;
 		const handled = this.handledFindings(turn);
@@ -809,6 +832,7 @@ export class ChangesPage implements Component {
 			const text = review.status === "complete" ? theme.success("No findings in this run.")
 				: pending ? theme.warning(`Review ${review.status} · X cancels`) : theme.dim(`Review ${review.status}`);
 			body.push({ text, kind: "detail" });
+			body.push({ text: theme.muted(coverage), kind: "detail" });
 			this.handledLines(turn, handled, body, width);
 			return;
 		}
@@ -854,6 +878,7 @@ export class ChangesPage implements Component {
 			}
 			body.push({ text: "", kind: "detail" });
 		}
+		if (available >= 8) body.push({ text: theme.muted(coverage), kind: "detail" });
 		for (const line of title) body.push({ text: theme.bold(theme.text(line)), kind: "detail" });
 		body.push({
 			text: `${severityTone(finding.severity)(severity)} · ${theme.text(location)}${theme.muted(position)}`,

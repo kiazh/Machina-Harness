@@ -125,6 +125,7 @@ export const RPC_METHODS = [
   "providers.remove",
   "question.answer",
   "review.cancel",
+  "review.get",
   "review.start",
   "runtime.capabilities",
   "runtime.selectWorkspace",

@@ -39,7 +39,7 @@ export const SHORTCUT_ROWS: readonly ShortcutRow[] = [
 	{ value: "wsroot", context: "Workspace", label: "/workspace open <path> — open a folder", description: "Also /workspace split|chat|editor|ratio|side|status|close" },
 	{ value: "activity", context: "Review & activity", label: "Activity · 1–7 filter, ↑↓ move, Space details", description: "Enter opens the selection. PgUp/PgDn pages expanded logs. Alt+← also opens Activity. Ctrl+C stops a running reply." },
 	{ value: "reviewViews", context: "Review & activity", label: "Changes · ↑↓ prompts, 1/2/3 views, [ ] files", description: "Tab switches Files/Diff/Review; Space shows the prompt." },
-	{ value: "reviewActions", context: "Review & activity", label: "Review · R run, N/P finding, Enter fix", description: "PgUp/PgDn reads more detail. X cancels a review. Enter sends the fix to this chat. C clears handled findings." },
+	{ value: "reviewActions", context: "Review & activity", label: "Review · R rules, M model, N/P finding, Enter fix", description: "PgUp/PgDn reads more detail. X cancels a review. Enter sends the fix to this chat. C clears handled findings." },
 	{ value: "approval", context: "Review & activity", label: "Approval · Enter confirm, Esc deny", description: "Allow once is selected first. ↑↓ changes the choice. PgUp/PgDn pages evidence." },
 	{ value: "help", context: "Global", label: "? / Alt+H · shortcuts", description: "? on empty chat or in Activity and Changes. Alt+H also works with a draft." },
 	{ value: "commands", context: "Global", label: "/help — all commands", description: "This menu; /growth shows learning details" },

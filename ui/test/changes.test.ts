@@ -141,6 +141,32 @@ test("review tab shows findings and r starts a run for the selected prompt", () 
 	assert.deepEqual(started, [firstId]);
 });
 
+test("m starts a model review and the review footer names both engines", () => {
+	const started: string[] = [];
+	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor, {
+		onReviewModel: (id) => started.push(id),
+	});
+	page.render(110);
+	page.handleInput("3");
+	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
+	assert.match(rendered, /R Rules\s+M Model/);
+	assert.equal(page.handleInput("m"), true);
+	assert.deepEqual(started, [firstId]);
+});
+
+test("review coverage is explicit about partial diffs and omitted findings", () => {
+	const reviewed = {
+		...review,
+		engine: "model",
+		coverage: { files: 2, reviewed: 1, chars: 120, truncated: true, invalid: 1 },
+	};
+	const changes = { ...snapshot, turns: [turn(firstId, "Review the parser", { review: reviewed })] };
+	const page = new ChangesPage(fakeTui(), () => changes, diffFor);
+	page.handleInput("3");
+	const rendered = page.render(110).map(stripTerminalSequences).join("\n");
+	assert.match(rendered, /Model reviewed 1\/2 files · partial diff · 1 omitted/);
+});
+
 test("Enter on a selected finding opens the fix action for that finding", () => {
 	const fixes: Array<[string, string]> = [];
 	const page = new ChangesPage(fakeTui(), () => snapshot, diffFor, {

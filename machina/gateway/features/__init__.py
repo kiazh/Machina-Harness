@@ -53,6 +53,7 @@ from machina.gateway.features.changes import (
     changes_diff,
     changes_list,
     review_cancel,
+    review_get,
     review_start,
 )
 from machina.gateway.features.config import (
@@ -371,6 +372,7 @@ METHODS: dict[str, Handler] = {
     "changes.list": changes_list,
     "changes.diff": changes_diff,
     "review.start": review_start,
+    "review.get": review_get,
     "review.cancel": review_cancel,
     "workspace.open": workspace_open,
     "workspace.changes": workspace_changes,

@@ -8,6 +8,8 @@ together even when later prompts edit the same files.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 
 _MAX_SNAPSHOT_ID = 64
 _MAX_PATH = 4096
+_REVIEW_TASKS: dict[tuple[str, str], asyncio.Task[Any]] = {}
 
 
 def _now() -> str:
@@ -129,6 +132,59 @@ async def changes_diff(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _model_route(
+    gw: Gateway, params: dict[str, Any], payload: dict[str, Any]
+) -> tuple[str, str | None]:
+    session = None
+    session_id = params.get("sessionId")
+    if isinstance(session_id, str) and session_id.strip():
+        try:
+            session = await gw.get_session({"sessionId": session_id.strip()})
+        except Exception:
+            session = None
+    from machina.core.agent_factory import resolve_provider_model
+
+    provider, model = resolve_provider_model(
+        session,
+        default_provider=getattr(gw, "provider", None),
+        default_model=getattr(gw, "model", None),
+    )
+    if session is None and not getattr(gw, "provider", None):
+        provider = str(payload.get("provider") or provider)
+        model = str(payload.get("model") or "") or model
+    return provider, model
+
+
+async def _complete_model_review(
+    workspace: Path,
+    payload: dict[str, Any],
+    review: dict[str, Any],
+    provider: Any,
+    model: str | None,
+) -> None:
+    try:
+        await reviews.run_model(
+            workspace,
+            payload,
+            review,
+            complete=provider.complete,
+            model=model,
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            await provider.close()
+
+
+def _review_done(key: tuple[str, str], task: asyncio.Task[Any]) -> None:
+    if _REVIEW_TASKS.get(key) is task:
+        _REVIEW_TASKS.pop(key, None)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("review.task.failed snapshot=%s error=%s", key[1], error)
+
+
 async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     workspace = await _workspace(gw, params)
     payload, _snapshot_id = _snapshot(workspace, params)
@@ -141,11 +197,74 @@ async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
             f"engine must be one of: {', '.join(reviews.ENGINES)}",
         )
     force = _bool(params, "force", default=False)
-    review = reviews.run_rules(workspace, payload, force=force)
+    if engine == "rules":
+        review = reviews.run_rules(workspace, payload, force=force)
+        if review.get("engine") == "rules":
+            task = _REVIEW_TASKS.get(
+                (str(workspace), str(payload.get("snapshot_id") or ""))
+            )
+            if task is not None and not task.done():
+                task.cancel()
+    else:
+        provider_name, model = await _model_route(gw, params, payload)
+        try:
+            from machina.core.provider import get_provider
+
+            provider = await asyncio.to_thread(
+                get_provider, provider=provider_name, model=model
+            )
+        except Exception as error:
+            review = reviews.failed_model(
+                workspace,
+                payload,
+                provider=provider_name,
+                model=model or "",
+                error=f"{type(error).__name__}: {error}",
+            )
+        else:
+            resolved_model = str(getattr(provider, "model", "") or model or "")
+            review, _queued = reviews.begin_model(
+                workspace,
+                payload,
+                provider=provider_name,
+                model=resolved_model,
+                force=force,
+            )
+            key = (str(workspace), str(payload.get("snapshot_id") or ""))
+            task = _REVIEW_TASKS.get(key)
+            if review.get("status") in {"queued", "running"} and (
+                task is None or task.done()
+            ):
+                task = asyncio.create_task(
+                    _complete_model_review(workspace, payload, review, provider, model),
+                    name=f"review-model-{payload.get('snapshot_id')}",
+                )
+                _REVIEW_TASKS[key] = task
+                task.add_done_callback(lambda done, key=key: _review_done(key, done))
+            else:
+                with contextlib.suppress(Exception):
+                    await provider.close()
     logger.debug(
-        "review.start snapshot=%s engine=%s status=%s findings=%d",
+        "review.start snapshot=%s engine=%s provider=%s model=%s status=%s findings=%d",
         payload.get("snapshot_id"),
         engine,
+        review.get("provider"),
+        review.get("model"),
+        review.get("status"),
+        len(review.get("findings") or []),
+    )
+    return {"review": review}
+
+
+async def review_get(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    workspace = await _workspace(gw, params)
+    _payload, snapshot_id = _snapshot(workspace, params)
+    review = reviews.load(workspace, snapshot_id)
+    if review is None:
+        raise RpcError(NOT_FOUND, "no review run for this snapshot")
+    logger.debug(
+        "review.get snapshot=%s status=%s findings=%d",
+        snapshot_id,
         review.get("status"),
         len(review.get("findings") or []),
     )
@@ -158,5 +277,8 @@ async def review_cancel(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     review = reviews.cancel(workspace, snapshot_id)
     if review is None:
         raise RpcError(NOT_FOUND, "no review run for this snapshot")
+    task = _REVIEW_TASKS.get((str(workspace), snapshot_id))
+    if task is not None and not task.done():
+        task.cancel()
     logger.debug("review.cancel snapshot=%s status=%s", snapshot_id, review.get("status"))
     return {"review": review}

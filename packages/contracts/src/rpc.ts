@@ -959,6 +959,14 @@ export interface ReviewFindingInfo {
 	fingerprint: string;
 }
 
+export interface ReviewCoverageInfo {
+	files: number;
+	reviewed: number;
+	chars: number;
+	truncated: boolean;
+	invalid: number;
+}
+
 export interface ReviewRunInfo {
 	id: string;
 	snapshotId: string;
@@ -974,6 +982,7 @@ export interface ReviewRunInfo {
 	findings: ReviewFindingInfo[];
 	/** Total findings when a list response carries only a bounded preview. */
 	findingsCount?: number;
+	coverage?: ReviewCoverageInfo | null;
 	error: string | null;
 }
 

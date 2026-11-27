@@ -222,6 +222,11 @@ def test_gateway_lists_prompt_changes_and_starts_a_review(
         )
     )
     assert started["review"]["status"] == "complete"
+    full = asyncio.run(
+        changes.review_get(gateway, {"snapshotId": payload["snapshot_id"]})
+    )
+    assert full["review"]["id"] == started["review"]["id"]
+    assert full["review"]["status"] == "complete"
 
     listed_again = asyncio.run(
         changes.changes_list(gateway, {"scope": "workspace", "limit": 10})

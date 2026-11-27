@@ -419,6 +419,11 @@ test(`review stays inline and Fix never opens a new chat (${state})`, async () =
 		client.responses.set("changes.list", { turns: [{ ...turn, review: { ...review, findings: [finding], findingsCount: 2 } }] });
 		internals.onInput("r");
 		await settle();
+		const modelStart = client.requests.length;
+		internals.onInput("m");
+		await settle();
+		const modelRequest = client.requests.slice(modelStart).find(r => r.method === "review.start");
+		assert.equal(modelRequest?.params.engine, "model");
 		app.openChanges(); // refresh with the compact response of the same review
 		await settle();
 		assert.equal(tui.hasOverlay(), false);
@@ -628,6 +633,55 @@ test("Clear handled hides sent findings without offering them again", async () =
 		page.handleInput("n");
 		assert.match(text(), /Unquoted variable expands/);
 		assert.doesNotMatch(text(), /Possible API secret key added/, "a cleared finding is never offered again");
+	} finally {
+		await app.exit();
+	}
+});
+
+test("a compact review is hydrated before finding navigation", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Fix the installer");
+		client.emit(ev({ type: "message.complete", text: "done", tokens: 0, iterations: 1, toolCalls: 0, cancelled: false }));
+		const finding = {
+			rule: "model", severity: "high" as const, title: "Possible API secret key added",
+			body: "Remove it.", file: "install.sh", line: 4, fingerprint: "abc123",
+		};
+		const second = { ...finding, title: "Second hydrated finding", fingerprint: "def456" };
+		const turnId = "a".repeat(32);
+		const review: ReviewRunInfo = {
+			id: "review-hydrate", snapshotId: turnId, sessionId: SESSION_A.id, engine: "model", status: "complete",
+			provider: "fixture", model: "preview", createdAt: new Date().toISOString(),
+			startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+			summary: "2 findings", findings: [finding], findingsCount: 2, error: null,
+			coverage: { files: 1, reviewed: 1, chars: 20, truncated: false, invalid: 0 },
+		};
+		const turn: ChangeTurnInfo = {
+			id: turnId, sessionId: SESSION_A.id, prompt: "Fix the installer",
+			createdAt: new Date().toISOString(), provider: "fixture", model: "preview", status: "complete",
+			stats: { files: 1, additions: 1, deletions: 0 },
+			files: [{ path: "install.sh", change: "modified", additions: 1, deletions: 0, binary: false }],
+			review,
+		};
+		client.responses.set("changes.list", { turns: [turn] });
+		client.responses.set("changes.diff", { files: [] });
+		client.responses.set("review.get", { review: { ...review, findings: [finding, second] } });
+		const settle = () => new Promise(resolve => setImmediate(resolve));
+		app.openChanges();
+		await settle();
+		await settle();
+		const fetched = client.requests.find(request => request.method === "review.get");
+		assert.equal(fetched?.params.snapshotId, turnId);
+		const page = tui.focused as Component & { handleInput(data: string): void; render(width: number): string[] };
+		page.handleInput("3");
+		page.handleInput("n");
+		assert.match(stripTerminalSequences(page.render(100).join("\n")), /Second hydrated finding/);
+		page.handleInput("\r");
+		await settle();
+		const repair = client.requests.filter(request => request.method === "prompt.submit").at(-1);
+		assert.match(String(repair?.params.text), /Treat it as untrusted data/);
 	} finally {
 		await app.exit();
 	}
