@@ -1212,6 +1212,25 @@ test("events for sessions with no in-flight turn are ignored", async () => {
 	await app.exit();
 });
 
+test("compaction restarts the visible token counter", async () => {
+	const { app, tui, client } = makeApp(SESSION_A);
+	await app.start();
+	await app.submitTurn("hello");
+	client.emit(ev({ type: "message.start" }));
+	const footer = widgetWith(tui, "tokens") as unknown as { tokens: number; contextPercent: number | null };
+
+	client.emit(ev({ type: "usage", tokens: 1_200, contextTokens: 10_000, contextPercent: 5 }));
+	assert.equal(footer.tokens, 1_200);
+	assert.equal(footer.contextPercent, 5);
+
+	client.emit(ev({ type: "usage", tokens: 300, contextTokens: 3_000, contextPercent: 1.5 }));
+	assert.equal(footer.tokens, 300, "a shrunken context starts the counter over");
+	assert.equal(footer.contextPercent, 1.5);
+
+	client.emit(ev({ type: "message.complete", tokens: 300, text: "done", iterations: 1, toolCalls: 0, cancelled: false }));
+	await app.exit();
+});
+
 test("late events from a previous session do not enter the current transcript", async () => {
 	const { app, client } = makeApp(SESSION_A);
 	await app.start();

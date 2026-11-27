@@ -310,6 +310,8 @@ export class App implements FeatureHost {
 	/** Wall-clock start of the current blink phase (kept across re-subscribes). */
 	private cursorBlinkStartedAt = 0;
 	private lastPrompt = "";
+	/** Previous context size, used to notice compaction and restart the counter. */
+	private lastContextTokens = 0;
 	private lastEscAt = 0;
 	private pendingAbortEscAt = 0;
 	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1220,6 +1222,7 @@ export class App implements FeatureHost {
 		this.footer.tokens = 0;
 		this.footer.contextTokens = 0;
 		this.footer.contextPercent = null;
+		this.lastContextTokens = 0;
 		this.setRunning(false);
 		this.syncAgentCount();
 		this.tui.requestRender();
@@ -1254,6 +1257,7 @@ export class App implements FeatureHost {
 					this.footer.tokens = 0;
 					this.footer.contextTokens = 0;
 					this.footer.contextPercent = null;
+					this.lastContextTokens = 0;
 					this.family.reseed();
 					this.syncAgentCount();
 					this.refreshSessionMode(session.id);
@@ -1299,6 +1303,7 @@ export class App implements FeatureHost {
 		this.footer.tokens = this.turnSession.displayTokens(session.id);
 		this.footer.contextTokens = 0;
 		this.footer.contextPercent = null;
+		this.lastContextTokens = 0;
 		// The backend stays paused for this session's approvals; rebuild the
 		// review cards retained while it was hidden (R15). Close every other
 		// session's card first so a stale child request cannot own the dock.
@@ -4838,8 +4843,20 @@ export class App implements FeatureHost {
 		if (event.type === "usage") {
 			this.turnSession.setUsageLatest(event.sessionId, event.tokens);
 			if (event.sessionId === this.current?.id) {
+				const contextTokens = event.contextTokens ?? 0;
+				if (
+					contextTokens > 0
+					&& this.lastContextTokens > 0
+					&& contextTokens < this.lastContextTokens * 0.5
+				) {
+					// Compaction shrank the context: restart the visible counter
+					// from this turn instead of carrying the pre-compaction total.
+					this.turnSession.resetSessionTokens();
+					this.turnSession.saveSessionTokens(event.sessionId);
+				}
+				if (contextTokens > 0) this.lastContextTokens = contextTokens;
 				this.footer.tokens = this.turnSession.sessionTokens + event.tokens;
-				this.footer.contextTokens = event.contextTokens ?? 0;
+				this.footer.contextTokens = contextTokens;
 				this.footer.contextPercent = event.contextPercent ?? null;
 			}
 			this.tui.requestRender();

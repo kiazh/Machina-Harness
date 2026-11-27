@@ -263,7 +263,7 @@ test("every widget respects the render width", async () => {
 		}
 	}
 	assert.match(plain(card, 80), /more lines/, "long results are truncated");
-	assert.match(plain(footer, 120), /123,456 tokens/);
+	assert.match(plain(footer, 120), /123\.5K/);
 	assert.match(plain(picker, 80), /Sessions/);
 	assert.doesNotMatch(
 		picker.render(80).map((line) => stripTerminalSequences(line)).join("\n"),

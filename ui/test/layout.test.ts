@@ -160,7 +160,7 @@ test("docking holds at multiple viewport heights", () => {
 			const screen = plain(tui.getScreenLines());
 			assert.equal(screen.length, rows, `frame fills ${rows} rows`);
 			assert.match(screen[rows - 1] ?? "", /\? shortcuts/, `hints on last row at height ${rows}`);
-			assert.match(screen[rows - 1] ?? "", /1 token/, `usage shares hints row at height ${rows}`);
+			assert.match(screen[rows - 1] ?? "", /ready.*1/, `usage shares hints row at height ${rows}`);
 			shell.dispose();
 		} finally {
 			footer.dispose();
