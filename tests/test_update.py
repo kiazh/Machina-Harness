@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import time
@@ -266,6 +267,74 @@ def test_update_spinner_animates_and_finishes(monkeypatch) -> None:
     assert "\r" in stream.value
     assert "Machina is up to date." in stream.value
     assert spinner._thread is None
+
+
+def test_update_scene_shows_the_phase_and_version_delta(monkeypatch) -> None:
+    class TtyStream:
+        encoding = "utf-8"
+
+        def __init__(self) -> None:
+            self.value = ""
+
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+        def write(self, value: str) -> None:
+            self.value += value
+
+        @staticmethod
+        def flush() -> None:
+            pass
+
+    stream = TtyStream()
+    monkeypatch.setattr(update.sys, "stderr", stream)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    spinner = update._UpdateSpinner("Fetching origin/main", "checking for new commits")
+    spinner.set("Updating checkout", "2 new commits · v1.0.0 -> v2.0.0")
+    spinner._render()
+    spinner.finish("Updated Machina (2 new commits).", "success")
+
+    plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", stream.value)
+    assert "MACHINA" in plain
+    assert "Updating checkout" in plain
+    assert "2 new commits" in plain
+    assert "Updated Machina (2 new commits)." in plain
+
+
+def test_explicit_update_ignores_the_launch_cache_and_does_not_reexec(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    checkout = _repo_pair(tmp_path)
+    update._mark_checked(checkout, "current", "Machina is up to date (v1.0.0).")
+    _enable_tty(monkeypatch)
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+    exec_calls = _capture_exec(monkeypatch)
+    _skip_pip(monkeypatch)
+
+    update.auto_update(force=True)
+
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 2\n"
+    assert not exec_calls, "an explicit update leaves the restart to the user"
+    err = capsys.readouterr().err
+    assert "Updated Machina" in err
+    assert "Restart Machina" in err
+
+
+def test_explicit_update_ignores_the_disable_switch(monkeypatch, tmp_path: Path) -> None:
+    checkout = _repo_pair(tmp_path)
+    _enable_tty(monkeypatch)
+    monkeypatch.setenv("MACHINA_AUTO_UPDATE", "0")
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+    _capture_exec(monkeypatch)
+    _skip_pip(monkeypatch)
+
+    update.auto_update(force=True)
+
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 2\n"
 
 
 def test_update_cache_resolves_a_worktree_gitdir(tmp_path: Path) -> None:
