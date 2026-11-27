@@ -78,13 +78,13 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	footer.status = "working";
 	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(rows.length, 1);
-	assert.match(rows[0]!, /^ {4}[·∘○◉]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+	assert.match(rows[0]!, /^ {4}[·∘○◉]{13} {2}esc×2 interrupt +0 tokens \(0%\)$/u);
 	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
 	assert.equal(footer.chatStatusRows(), 1);
 	footer.contextTokens = 12_400;
 	footer.contextPercent = 6.1;
 	const [lit] = footer.chatStatus.render(80);
-	assert.match(stripTerminalSequences(lit!), /12\.4K tokens \(6%\) {4}$/);
+	assert.match(stripTerminalSequences(lit!), /12\.4K tokens \(6%\)$/);
 	for (const width of [1, 20, 40, 80, 120]) {
 		const [line] = footer.chatStatus.render(width);
 		assert.ok(visibleWidth(line!) <= width, `status row wider than ${width}`);

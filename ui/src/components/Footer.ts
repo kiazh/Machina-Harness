@@ -151,7 +151,7 @@ export class Footer implements Component {
 	private renderChatStatus(width: number): string[] {
 		if (width <= 0 || this.chatStatusRows() === 0) return [];
 		const inset = width >= 20 ? bodyIndent(width) : 0;
-		const fit = width - 2 * inset;
+		const fit = width - inset;
 		const pad = " ".repeat(inset);
 		const count = this.compactTokens(this.contextTokens);
 		const percent = this.contextPercent === null ? "—" : `${Math.round(this.contextPercent)}%`;
@@ -179,7 +179,7 @@ export class Footer implements Component {
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
-		return [repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`)];
+		return [repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}`)];
 	}
 
 	render(width: number): string[] {
