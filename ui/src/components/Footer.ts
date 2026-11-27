@@ -18,13 +18,9 @@ const GROWTH_DURATION_MS = 800;
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
 const WORK_INTERVAL_MS = 33;
-const WORK_CYCLE_MS = 1600;
-const WORK_WAVE_WIDTH = 13;
-const WORK_FLAKE = "❄";
-const WORK_FLAKE_COLUMN = 6;
-// Braille encodes the two columns of its 2×4 grid in separate dot masks.
-const BRAILLE_LEFT = [0x01, 0x02, 0x04, 0x40];
-const BRAILLE_RIGHT = [0x08, 0x10, 0x20, 0x80];
+const WORK_CYCLE_MS = 2400;
+const WORK_TRACK = 13;
+const FIREFLY_GLYPHS = ["·", "•", "✧", "✦"];
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -166,22 +162,19 @@ export class Footer implements Component {
 		if (this.status === "working" && room >= 5) {
 			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
 			activity = theme.muted(hint);
-			if (room >= WORK_WAVE_WIDTH + 2 + visibleWidth(hint)) {
+			if (room >= WORK_TRACK + 2 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
-				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS * 2 * Math.PI;
-				const wave = Array.from({ length: WORK_WAVE_WIDTH }, (_, column) => {
-					if (column === WORK_FLAKE_COLUMN) {
-						const halo = 0.62 + 0.38 * Math.cos(phase * 2);
-						return theme.activity(WORK_FLAKE, halo, 0.5 + 0.5 * Math.sin(phase));
-					}
-					const angle = column * 0.8 - phase;
-					const leftRow = Math.round(1.5 + 1.5 * Math.sin(angle));
-					const rightRow = Math.round(1.5 + 1.5 * Math.sin(angle + 0.5));
-					const glyph = String.fromCodePoint(0x2800 + BRAILLE_LEFT[leftRow]! + BRAILLE_RIGHT[rightRow]!);
-					const light = 0.68 + 0.32 * Math.cos(angle);
-					return theme.activity(glyph, light, column / (WORK_WAVE_WIDTH - 1));
+				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
+				const heads = [0, 0.37, 0.73].map((offset) => ((phase + offset) % 1) * (WORK_TRACK - 1));
+				const fireflies = Array.from({ length: WORK_TRACK }, (_, cell) => {
+					const glow = heads.reduce(
+						(best, head) => Math.max(best, Math.exp(-0.9 * (cell - head) ** 2)),
+						0.12,
+					);
+					const glyph = FIREFLY_GLYPHS[Math.min(3, Math.floor(glow * 4))]!;
+					return theme.activity(glyph, 0.24 + 0.76 * glow, cell / (WORK_TRACK - 1));
 				}).join("");
-				activity = `${wave}  ${activity}`;
+				activity = `${fireflies}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
