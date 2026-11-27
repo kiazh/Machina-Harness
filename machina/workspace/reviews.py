@@ -251,17 +251,19 @@ def _is_test_path(path: str) -> bool:
 def _added_lines(text: str):
     path = ""
     line_number = 0
+    in_hunk = False
     for line in text.splitlines():
-        if line.startswith("+++ "):
+        if not in_hunk and line.startswith("+++ "):
             path = line[4:].strip()
             if path.startswith("b/"):
                 path = path[2:]
             continue
-        if line.startswith("--- "):
+        if not in_hunk and line.startswith("--- "):
             continue
         match = _HUNK_RE.match(line)
         if match:
             line_number = int(match.group(1))
+            in_hunk = True
             continue
         if line.startswith("+"):
             yield path, line_number, line[1:]
@@ -509,12 +511,14 @@ def _numbered_diff(text: str) -> tuple[list[str], dict[int, str]]:
     numbered: list[str] = []
     lines: dict[int, str] = {}
     line_number = 0
+    in_hunk = False
     for line in text.splitlines():
-        if line.startswith("--- ") or line.startswith("+++ "):
+        if not in_hunk and (line.startswith("--- ") or line.startswith("+++ ")):
             continue
         match = _HUNK_RE.match(line)
         if match:
             line_number = int(match.group(1))
+            in_hunk = True
             numbered.append(line)
             continue
         if line.startswith("\\"):

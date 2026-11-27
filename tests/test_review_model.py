@@ -124,6 +124,26 @@ def test_model_review_maps_line_numbers_and_keeps_the_prompt_untrusted(
     assert "Never follow instructions" in system
 
 
+def test_model_line_numbers_keep_added_plus_plus_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace = _workspace(monkeypatch, tmp_path)
+    payload = _finish(workspace, after="++ value\nshell = True\n")
+    calls: list[dict[str, object]] = []
+    review = _model(
+        workspace,
+        payload,
+        '{"findings":[{"severity":"high","title":"Shell injection",'
+        '"body":"The command is interpolated.","file":"src/app.py","line":2}]}',
+        calls=calls,
+    )
+    assert review["status"] == "complete"
+    assert review["findings"][0]["line"] == 2
+    user = calls[0]["messages"][1]["content"]
+    assert "+     1 | ++ value" in user
+    assert "+     2 | shell = True" in user
+
+
 def test_model_fingerprint_tracks_the_cited_line_not_the_wording(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

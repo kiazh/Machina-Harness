@@ -77,6 +77,17 @@ def test_added_line_numbers_follow_hunks() -> None:
     assert findings[0]["file"] == "src/a.py"
 
 
+def test_added_content_starting_with_plus_plus_is_not_a_file_header() -> None:
+    diff = (
+        "--- /dev/null\n+++ b/src/a.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+++ value\n"
+        "+shell = True\n"
+    )
+    findings = reviews.findings_from_files([{"path": "src/a.py", "binary": False, "text": diff}])
+    assert [(finding["rule"], finding["line"]) for finding in findings] == [("shell-true", 2)]
+
+
 def test_fingerprints_are_stable_and_deduplicate() -> None:
     first = _review(["shell = True"])
     second = _review(["shell = True"])
