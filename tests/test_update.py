@@ -98,7 +98,6 @@ def test_update_fast_forwards_and_reexecs_the_new_entrypoint(monkeypatch, tmp_pa
     checkout = _repo_pair(tmp_path)
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     monkeypatch.setattr(update.sys, "argv", ["machina", "--mode", "full"])
     exec_calls = _capture_exec(monkeypatch)
     _skip_pip(monkeypatch)
@@ -119,7 +118,6 @@ def test_update_fast_forwards_a_shallow_installer_clone(monkeypatch, tmp_path: P
     assert update._is_shallow_repository(checkout)
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     exec_calls = _capture_exec(monkeypatch)
     _skip_pip(monkeypatch)
 
@@ -137,7 +135,6 @@ def test_update_fast_forwards_commits_without_a_version_bump(
     checkout = _repo_pair(tmp_path, bump_version=False)
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     exec_calls = _capture_exec(monkeypatch)
     _skip_pip(monkeypatch)
 
@@ -154,7 +151,6 @@ def test_update_never_pulls_a_dirty_checkout(monkeypatch, tmp_path: Path, capsys
     (checkout / "local-work.txt").write_text("uncommitted\n", encoding="utf-8")
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     exec_calls = _capture_exec(monkeypatch)
 
     update.auto_update()
@@ -170,7 +166,6 @@ def test_update_reports_when_checkout_is_current(monkeypatch, tmp_path: Path, ca
     _git(checkout, "pull", "--ff-only")
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     exec_calls = _capture_exec(monkeypatch)
 
     update.auto_update()
@@ -186,7 +181,6 @@ def test_update_never_fast_forwards_over_local_commits(monkeypatch, tmp_path: Pa
     _git(checkout, "commit", "-m", "local work")
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    monkeypatch.setattr(update, "_cached_check", lambda _root: None)
     exec_calls = _capture_exec(monkeypatch)
 
     update.auto_update()
@@ -197,35 +191,12 @@ def test_update_never_fast_forwards_over_local_commits(monkeypatch, tmp_path: Pa
     assert '"1.0.0"' in (checkout / "pyproject.toml").read_text(encoding="utf-8")
 
 
-def test_update_reports_cached_result_without_network(monkeypatch, tmp_path: Path, capsys) -> None:
-    checkout = _repo_pair(tmp_path)
+def test_update_reexec_guard_skips_the_duplicate_check(monkeypatch, capsys) -> None:
     _enable_tty(monkeypatch)
-    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    update._mark_checked(checkout, "current", "Machina is up to date (v1.2.14).")
-
-    def fail_run(args, *, cwd, timeout):
-        raise AssertionError("a cached launch must not call git")
-
-    monkeypatch.setattr(update, "_run", fail_run)
-    exec_calls = _capture_exec(monkeypatch)
-
-    update.auto_update()
-
-    err = capsys.readouterr().err
-    assert not exec_calls
-    assert "Machina is up to date (v1.2.14)." in err
-    assert "Last checked" in err
-
-
-def test_update_reexec_does_not_repeat_cached_status(monkeypatch, tmp_path: Path, capsys) -> None:
-    checkout = _repo_pair(tmp_path)
-    _enable_tty(monkeypatch)
-    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
-    update._mark_checked(checkout, "updated", "Machina was updated to v1.2.14 (1 new commit).")
     monkeypatch.setenv("MACHINA_UPDATE_REEXEC", "1")
 
     def fail_run(args, *, cwd, timeout):
-        raise AssertionError("a cached launch must not call git")
+        raise AssertionError("the re-exec child must not call git again")
 
     monkeypatch.setattr(update, "_run", fail_run)
     exec_calls = _capture_exec(monkeypatch)
@@ -309,7 +280,6 @@ def test_explicit_update_ignores_the_launch_cache_and_does_not_reexec(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     checkout = _repo_pair(tmp_path)
-    update._mark_checked(checkout, "current", "Machina is up to date (v1.0.0).")
     _enable_tty(monkeypatch)
     monkeypatch.setattr(update, "_repo_root", lambda: checkout)
     exec_calls = _capture_exec(monkeypatch)
@@ -337,28 +307,27 @@ def test_explicit_update_ignores_the_disable_switch(monkeypatch, tmp_path: Path)
     assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 2\n"
 
 
-def test_update_cache_resolves_a_worktree_gitdir(tmp_path: Path) -> None:
-    worktree = tmp_path / "worktree"
-    git_dir = tmp_path / "repo" / ".git" / "worktrees" / "worktree"
-    git_dir.mkdir(parents=True)
-    worktree.mkdir()
-    (worktree / ".git").write_text(f"gitdir: {git_dir.as_posix()}\n", encoding="utf-8")
+def test_every_launch_checks_origin_again(monkeypatch, tmp_path: Path) -> None:
+    checkout = _repo_pair(tmp_path)
+    _enable_tty(monkeypatch)
+    monkeypatch.setattr(update, "_repo_root", lambda: checkout)
+    exec_calls = _capture_exec(monkeypatch)
+    _skip_pip(monkeypatch)
 
-    update._mark_checked(worktree, "current", "Machina is up to date (v1.2.14).")
+    update.auto_update()
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 2\n"
+    monkeypatch.delenv("MACHINA_UPDATE_REEXEC", raising=False)
 
-    cached = update._cached_check(worktree)
-    assert (git_dir / update._CHECK_MARKER).is_file()
-    assert cached is not None
-    assert cached["status"] == "current"
-    assert cached["message"] == "Machina is up to date (v1.2.14)."
+    remote = tmp_path / "remote"
+    (remote / "app.py").write_text("value = 3\n", encoding="utf-8")
+    _git(remote, "add", "app.py")
+    _git(remote, "commit", "-m", "second remote update")
+    _git(remote, "push")
 
+    update.auto_update()
 
-def test_update_cache_ignores_foreign_fetches(tmp_path: Path) -> None:
-    checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
-    (checkout / ".git" / "FETCH_HEAD").write_text("", encoding="utf-8")
-
-    assert not update._check_is_fresh(checkout)
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "value = 3\n"
+    assert len(exec_calls) == 2, "each launch checks and restarts on a new commit"
 
 
 def test_rollback_restores_the_recorded_commit(monkeypatch, tmp_path: Path, capsys) -> None:

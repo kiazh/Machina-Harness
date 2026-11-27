@@ -1,5 +1,6 @@
 """Best-effort checkout update at interactive launch.
 
+Every interactive launch checks ``origin/main``; there is no check cache.
 Only a source checkout with a git remote participates. The update is skipped
 when the worktree is dirty so local work is never overwritten. Set
 ``MACHINA_AUTO_UPDATE=0`` to disable it.
@@ -18,10 +19,6 @@ import time
 from pathlib import Path
 
 _VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
-#: Network checks are best-effort and must not tax every launch. Reuse the
-#: result of a recent fetch/check for this long before asking origin again.
-_CHECK_INTERVAL_SECONDS = 15 * 60.0
-_CHECK_MARKER = "machina-auto-update-check"
 _UPDATE_STATE = "machina-update-state.json"
 
 
@@ -83,58 +80,6 @@ def _git_dir(root: Path) -> Path | None:
     except OSError:
         pass
     return None
-
-
-def _mark_checked(root: Path, status: str = "current", message: str = "") -> None:
-    """Record the check result so later launches can report it without the network."""
-    git_dir = _git_dir(root)
-    if git_dir is None:
-        return
-    try:
-        (git_dir / _CHECK_MARKER).write_text(
-            json.dumps({"status": status, "message": message}),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
-
-
-def _cached_check(root: Path) -> dict[str, object] | None:
-    """Return the recent check result, including a human-readable message.
-
-    Only Machina's own marker counts. Other tools write ``FETCH_HEAD`` too,
-    and treating any fetch as a completed check hid the launch status (and
-    delayed real updates) for 15 minutes after a manual ``git fetch``.
-    Worktrees store the marker under their resolved gitdir, not the ``.git``
-    file.
-    """
-    git_dir = _git_dir(root)
-    if git_dir is None:
-        return None
-    marker = git_dir / _CHECK_MARKER
-    try:
-        age = time.time() - marker.stat().st_mtime
-        if age >= _CHECK_INTERVAL_SECONDS:
-            return None
-        raw = marker.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError):
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    return {
-        "status": str(payload.get("status", "unknown")),
-        "message": str(payload.get("message", "")),
-        "age": age,
-    }
-
-
-def _check_is_fresh(root: Path) -> bool:
-    """True when Machina's own recent check already answered the question."""
-    return _cached_check(root) is not None
 
 
 def _state_path(root: Path) -> Path | None:
@@ -236,25 +181,6 @@ def rollback() -> bool:
         file=sys.stderr,
     )
     return True
-
-
-def _age_text(seconds: float) -> str:
-    if seconds < 90:
-        return "just now"
-    return f"{int(seconds // 60)}m ago"
-
-
-def _report_cached(cached: dict[str, object]) -> None:
-    """Print the previous check's result without touching the network."""
-    # The post-update re-exec already printed the "restarting" line; don't
-    # repeat a cached status into the fresh UI start.
-    if os.environ.pop("MACHINA_UPDATE_REEXEC", None):
-        return
-    message = str(cached.get("message") or "")
-    if not message:
-        return
-    age = float(cached.get("age") or 0.0)
-    print(f"{message} Last checked {_age_text(age)}.", file=sys.stderr)
 
 
 class _UpdateSpinner:
@@ -474,16 +400,15 @@ def auto_update(*, force: bool = False) -> None:
     """
     if not force and os.environ.get("MACHINA_AUTO_UPDATE", "1").strip().lower() in {"0", "false", "no", "off"}:
         return
+    # One-shot guard for the process that re-execs after an update. The next
+    # real launch checks again; this child must not fetch twice.
+    if os.environ.pop("MACHINA_UPDATE_REEXEC", None):
+        return
     if not force and (os.environ.get("CI") or not sys.stdout.isatty()):
         return
     root = _repo_root()
     if root is None:
         return
-    if not force:
-        cached = _cached_check(root)
-        if cached is not None:
-            _report_cached(cached)
-            return
 
     status = _UpdateSpinner("Fetching origin/main", "checking for new commits").start()
     try:
@@ -498,7 +423,6 @@ def _check_and_apply_update(
     fetched = _fetch_origin(root)
     if fetched is None or fetched.returncode != 0:
         message = "Could not check for updates; continuing on the local version."
-        _mark_checked(root, "error", message)
         status.finish(message, "error")
         return
     remote = _run(["git", "show", "origin/main:pyproject.toml"], cwd=root, timeout=5)
@@ -518,13 +442,11 @@ def _check_and_apply_update(
     )
     message = "Could not read origin/main; continuing on the local version."
     if counts is None or counts.returncode != 0:
-        _mark_checked(root, "error", message)
         status.finish(message, "error")
         return
     try:
         ahead, behind = (int(part) for part in counts.stdout.split())
     except ValueError:
-        _mark_checked(root, "error", message)
         status.finish(message, "error")
         return
 
@@ -533,7 +455,6 @@ def _check_and_apply_update(
     noun = "commit" if behind == 1 else "commits"
     if behind == 0:
         message = f"Machina is up to date (v{__version__})."
-        _mark_checked(root, "current", message)
         status.finish(message, "success")
         return
     if ahead > 0:
@@ -543,7 +464,6 @@ def _check_and_apply_update(
             f"origin/main has {behind} new {noun}, but this branch has local commits; "
             "skipping auto-update."
         )
-        _mark_checked(root, "skipped", message)
         status.finish(message, "warning")
         return
 
@@ -553,7 +473,6 @@ def _check_and_apply_update(
             f"origin/main has {behind} new {noun}, but this checkout has local changes; "
             "not pulling automatically."
         )
-        _mark_checked(root, "skipped", message)
         status.finish(message, "warning")
         return
 
@@ -570,7 +489,6 @@ def _check_and_apply_update(
     )
     if pulled is None or pulled.returncode != 0:
         message = "Could not fast-forward; continuing on the local version."
-        _mark_checked(root, "error", message)
         status.finish(message, "error")
         return
     updated = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
@@ -598,12 +516,6 @@ def _check_and_apply_update(
             )
     version_note = (
         "" if remote_version in (None, __version__) else f" {__version__} -> {remote_version}"
-    )
-    new_version = remote_version or __version__
-    _mark_checked(
-        root,
-        "updated",
-        f"Machina was updated to v{new_version} ({behind} new {noun}).",
     )
     if reexec:
         status.finish(

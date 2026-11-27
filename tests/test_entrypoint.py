@@ -1,9 +1,5 @@
 """The no-subcommand path must reach the UI without importing the full CLI."""
 
-import os
-from pathlib import Path
-
-from machina import update
 from machina.entrypoint import _interactive_mode, _version_requested
 from machina.ui_launcher import ui_dir
 
@@ -37,21 +33,3 @@ def test_version_is_handled_before_the_full_cli_import() -> None:
 def test_ui_dir_points_at_the_repository_ui_package() -> None:
     assert ui_dir().name == "ui"
     assert (ui_dir() / "src" / "main.ts").is_file()
-
-
-def test_recent_update_check_skips_the_network(tmp_path: Path) -> None:
-    marker = tmp_path / ".git" / update._CHECK_MARKER
-    marker.parent.mkdir()
-    marker.touch()
-
-    assert update._check_is_fresh(tmp_path)
-
-
-def test_stale_update_marker_does_not_skip_the_network(tmp_path: Path) -> None:
-    marker = tmp_path / ".git" / update._CHECK_MARKER
-    marker.parent.mkdir()
-    marker.write_text("old", encoding="utf-8")
-    old = marker.stat().st_mtime - update._CHECK_INTERVAL_SECONDS - 1
-    os.utime(marker, (old, old))
-
-    assert not update._check_is_fresh(tmp_path)
