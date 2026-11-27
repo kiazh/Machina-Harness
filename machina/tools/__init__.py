@@ -16,6 +16,7 @@ from machina.tools.base import Tool, ToolRegistry, registry, set_tool_loader
 
 _TOOL_MODULES = (
     "agents",  # delegate, list_agents
+    "apple",  # Apple Mail draft (macOS)
     "artifacts",  # artifact_read, artifact_search, artifact_describe
     "browser",  # browser_verify (local headless checks)
     "builtins",  # web_search, web_extract, search_files

@@ -122,3 +122,84 @@ async def resident_proxy_resolve(request_id: str, verdict: str) -> str:
     if resolved is None:
         raise ToolError("approval already consumed or not permitted")
     return f"{verdict} {request_id} under grant {matching[0]['id'][:8]}"
+
+
+@registry.register(
+    name="resident_batch_create",
+    description="Create durable batch work. Items are JSON objects; duplicates are skipped by content hash.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "goal": {"type": "string"},
+            "items": {"type": "array", "items": {"type": "object"}},
+            "key_prefix": {"type": "string", "default": ""},
+        },
+        "required": ["goal", "items"],
+    },
+)
+async def resident_batch_create(goal: str, items: list[dict], key_prefix: str = "") -> str:
+    _, _session = await _resident_session()
+    from machina.resident import batches
+
+    batch = await batches.create_batch(goal, items, key_prefix=key_prefix)
+    return f"Batch {batch['id'][:8]} created with {batch['total']} item(s)."
+
+
+@registry.register(
+    name="resident_batch_claim",
+    description="Claim up to N queued items from a batch for processing.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "batch_id": {"type": "string"},
+            "limit": {"type": "integer", "default": 10},
+        },
+        "required": ["batch_id"],
+    },
+)
+async def resident_batch_claim(batch_id: str, limit: int = 10) -> str:
+    _, _session = await _resident_session()
+    from machina.resident import batches
+
+    items = await batches.claim_items(batch_id, limit=max(1, min(50, int(limit))))
+    return "\n".join(f"{item['id']}  {item['payload']}" for item in items) or "No queued items."
+
+
+@registry.register(
+    name="resident_batch_finish",
+    description="Record the terminal status of a claimed batch item.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "item_id": {"type": "string"},
+            "status": {"type": "string", "enum": ["done", "failed", "skipped"]},
+            "error": {"type": "string", "default": ""},
+        },
+        "required": ["item_id", "status"],
+    },
+)
+async def resident_batch_finish(item_id: str, status: str, error: str = "") -> str:
+    _, _session = await _resident_session()
+    from machina.resident import batches
+
+    ok = await batches.finish_item(item_id, status=status, error=error)
+    return f"{status} {item_id}" if ok else f"unknown item {item_id}"
+
+
+@registry.register(
+    name="resident_batch_status",
+    description="Summarize one batch and its latest items.",
+    parameters={
+        "type": "object",
+        "properties": {"batch_id": {"type": "string"}},
+        "required": ["batch_id"],
+    },
+)
+async def resident_batch_status(batch_id: str) -> str:
+    _, _session = await _resident_session()
+    from machina.resident import batches
+
+    batch = await batches.batch_status(batch_id)
+    if batch is None:
+        return "unknown batch"
+    return f"{batch['id'][:8]}  {batch['status']}  {batch['done']}/{batch['total']}  {batch['goal']}"

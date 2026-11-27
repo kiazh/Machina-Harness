@@ -80,6 +80,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "web_verify",
     ),
     "documents and RAG": ("index_document", "search_documents"),
+    "apple": ("apple_mail_draft",),
     "memory and recall": (
         "remember",
         "recall",
@@ -103,6 +104,10 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "resident_remember",
         "resident_pending_approvals",
         "resident_proxy_resolve",
+        "resident_batch_create",
+        "resident_batch_claim",
+        "resident_batch_finish",
+        "resident_batch_status",
     ),
     "routing": ("route_explain", "model_inventory"),
     "artifacts": ("artifact_describe", "artifact_read", "artifact_search"),
