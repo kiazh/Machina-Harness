@@ -7,9 +7,9 @@ import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
 import { uiLog } from "../debug.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { chatColumnWidth, panelInset } from "../design/spacing.ts";
-import { sanitizeDisplay, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
+import { sanitizeLabelText, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
 import { toolCallDisplayName } from "../mcpNames.ts";
-import { theme } from "../theme.ts";
+import { isOpaqueBackground, repairFill, theme } from "../theme.ts";
 import { styleDiffLine } from "./DiffBlock.ts";
 
 export type ToolOutcome =
@@ -29,6 +29,16 @@ const HARNESS_LABELS: Record<string, string> = {
 	hermes: "Hermes",
 };
 
+const TOOL_LABELS: Record<string, string> = {
+	terminal: "Shell",
+	read_file: "Read file",
+	write_file: "Write file",
+	edit_file: "Edit file",
+	list_files: "List files",
+	search_files: "Search files",
+	artifact_read: "Read saved output",
+};
+
 /** Human label for tools whose wire name is not a useful status line. */
 function toolLabel(name: string, args: Record<string, unknown>): string {
 	if (name === "harness_delegate") {
@@ -41,7 +51,7 @@ function toolLabel(name: string, args: Record<string, unknown>): string {
 	}
 	const mcpLabel = toolCallDisplayName(name, args);
 	if (mcpLabel) return mcpLabel;
-	return name;
+	return TOOL_LABELS[name] ?? name;
 }
 
 export interface ToolResultView {
@@ -98,6 +108,7 @@ export class ToolTurn implements Component {
 	private outcome: ToolOutcome = "running";
 	private paused: "stopping" | "cleanup_pending" | undefined;
 	private expanded = false;
+	private leadingGap = true;
 	private readonly content?: string;
 	private readonly contentTruncated: boolean;
 	private readonly cached = new Map<number, string[]>();
@@ -112,7 +123,7 @@ export class ToolTurn implements Component {
 		if (safeName !== name || safeArgs !== args) {
 			uiLog.scope("tool").warn("tool.start.normalized", { name: typeof name, args: typeof args });
 		}
-		this.name = sanitizeDisplay(toolLabel(safeName, safeArgs));
+		this.name = sanitizeLabelText(toolLabel(safeName, safeArgs));
 		this.externalHarness = safeName === "harness_delegate";
 		const contentKeys: readonly string[] = safeName === "write_file" || safeName.includes("edit") || safeName.includes("patch")
 			? CONTENT_KEYS
@@ -134,9 +145,10 @@ export class ToolTurn implements Component {
 			? (safeArgs.arguments && typeof safeArgs.arguments === "object" && !Array.isArray(safeArgs.arguments) ? { arguments: safeArgs.arguments } : {})
 			: safeArgs;
 		const displayArgs = contentKeys.length
-			? Object.fromEntries(Object.entries(baseArgs).filter(([key]) => !contentKeys.includes(key)))
+			? Object.fromEntries(Object.entries(baseArgs).filter(([key]) =>
+				!contentKeys.includes(key) && !(safeName === "edit_file" && (key === "old_text" || key === "new_text"))))
 			: baseArgs;
-		const argsText = sanitizeDisplay(Object.entries(displayArgs).map(([key, value]) =>
+		const argsText = sanitizeLabelText(Object.entries(displayArgs).map(([key, value]) =>
 			["path", "command"].includes(key) && typeof value === "string" ? value : formatToolArgs({ [key]: value }),
 		).join(", "));
 		const clipped = truncateUtf8ByBytes(argsText, 4_000);
@@ -172,6 +184,11 @@ export class ToolTurn implements Component {
 		this.invalidate();
 	}
 
+	joinPreviousTool(): void {
+		this.leadingGap = false;
+		this.cached.clear();
+	}
+
 	render(width: number): string[] {
 		const cached = this.cached.get(width);
 		if (this.outcome !== "running" && cached) return cached;
@@ -182,23 +199,28 @@ export class ToolTurn implements Component {
 			? theme.accent(this.activity.frame([...ICONS.toolActiveFrames], ACTIVITY_INTERVAL_MS, this.startedAt))
 			: styleMarker(this.outcome, markerFor(this.outcome));
 		const elapsed = this.completedAt === undefined ? "" : duration(this.completedAt - this.startedAt);
-		const status = this.statusText();
 		const chevron = theme.secondary(this.expanded ? "▾" : "▸");
-		const header = `${marker} ${theme.text(this.name)}${this.args ? ` ${theme.muted(this.args)}` : ""}`
-			.replace(/\r?\n/g, " ");
-		const timing = elapsed && this.outcome !== "queued" && this.outcome !== "running" && this.outcome !== "historical"
+		const history = this.outcome === "historical";
+		const status = history && !this.expanded ? "" : this.statusText();
+		const header = history
+			? `${chevron} ${theme.text(this.name)}`
+			: `${marker} ${theme.bold(theme.text(this.name))}${this.args ? ` ${theme.muted(this.args)}` : ""}`;
+		const timing = this.expanded && elapsed && !history
 			? ` ${theme.dim(elapsed)}`
 			: "";
-		const statusPart = `${chevron}${status ? `  ${status}${timing}` : timing}`;
-		const headerRoom = Math.max(1, room - visibleWidth(statusPart) - 1);
-		const lines = [truncateToWidth(`${truncateToWidth(header, headerRoom)} ${statusPart}`, room)];
+		const statusPart = [history ? "" : chevron, status ? `${status}${timing}` : ""].filter(Boolean).join("  ");
+		const statusRoom = Math.max(0, room - Math.min(14, Math.floor(room / 2)) - 1);
+		const suffix = truncateToWidth(statusPart, statusRoom);
+		const headerRoom = room - (suffix ? visibleWidth(suffix) + 1 : 0);
+		const lines = [`${truncateToWidth(header, headerRoom)}${suffix ? ` ${suffix}` : ""}`];
 		const showContent = Boolean(this.content)
 			&& !["error", "denied", "interrupted", "outcome_unknown"].includes(this.outcome);
 		const source = showContent ? this.content! : this.result.text;
-		const previewBudget = this.expanded ? 200 : this.outcome === "running" ? 1 : 2;
-		if (source.trim()) {
-			const shaped = shapePreview(source, Math.max(1, room - 2), previewBudget);
-			const diff = !showContent && looksLikeDiff(source);
+		const previewBudget = this.expanded ? Infinity : history ? 0 : this.outcome === "running" ? 1 : 2;
+		if (previewBudget && source.trim()) {
+			const previewWidth = Math.max(1, room - 4);
+			const shaped = shapePreview(source, previewWidth, previewBudget);
+			const diff = looksLikeDiff(source);
 			shaped.shown.forEach((line, index) => {
 				const prefix = index === 0 ? theme.dim("⎿ ") : "  ";
 				const styled = diff
@@ -206,7 +228,7 @@ export class ToolTurn implements Component {
 					: this.expanded || this.outcome === "error" || this.outcome === "denied"
 						? theme.text(line)
 						: theme.muted(line);
-				lines.push(`  ${prefix}${truncateToWidth(styled, Math.max(1, room - 4))}`);
+				lines.push(`  ${prefix}${styled}`);
 			});
 			if (shaped.omitted > 0) {
 				lines.push(theme.dim(`  … ${shaped.omitted} more line${shaped.omitted === 1 ? "" : "s"}`));
@@ -220,7 +242,12 @@ export class ToolTurn implements Component {
 		if (this.result.backendTruncated && this.outcome !== "running") {
 			lines.push(theme.dim("  server output truncated"));
 		}
-		const rows = ["", ...lines.map((line) => truncateToWidth(`${indent}${line}`, total))];
+		const opaque = isOpaqueBackground();
+		const rows = lines.map((line) => {
+			const padded = truncateToWidth(line, room, "", opaque);
+			return truncateToWidth(`${indent}${opaque ? repairFill("toolBg", padded) : padded}`, total, "");
+		});
+		if (this.leadingGap) rows.unshift("");
 		if (this.outcome !== "running") {
 			if (this.cached.size >= 4) this.cached.clear();
 			this.cached.set(width, rows);
@@ -235,8 +262,8 @@ export class ToolTurn implements Component {
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		const target = this.expanded ? 1 : 2;
-		if (event.y < 0 || event.y > target) return undefined;
+		const header = this.leadingGap ? 1 : 0;
+		if (event.y < header || event.y > header + (this.expanded ? 0 : 1)) return undefined;
 		this.toggle();
 		return { handled: true, render: true };
 	}

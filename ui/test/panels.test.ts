@@ -38,7 +38,7 @@ for (const trueColor of [true, false]) {
 		const resultRow = plain.findIndex(row => row.includes("Homebrew fallback"));
 		assert.ok(resultRow >= 0);
 		const topRow = resultRow - 1;
-		assert.match(plain[topRow]!, /^ {2}[✔⊘✖] read_file/);
+		assert.match(plain[topRow]!, /^ {2}[✔⊘✖] Read file/);
 		assert.match(plain[resultRow]!, /^ {4}⎿ Example inspection/);
 		assert.doesNotMatch(plain[resultRow]!, /[┌┐└┘│]/, "routine successes remain unboxed");
 		const assistantRow = plain.findIndex(row => row.includes("I’ll inspect"));

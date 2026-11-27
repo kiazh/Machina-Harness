@@ -255,7 +255,7 @@ test("(a) events for a hidden agent session are buffered and appear when switchi
 	tui.renderNow(true);
 	const screen = screenOf(tui);
 	assert.match(screen, /child working/, "buffered tail renders on switch");
-	assert.match(screen, /recorded output/, "settled tool renders once from the tail");
+	assert.match(screen, /Shell/, "settled tool renders once from the tail");
 	assert.equal(internals(app).sessionTails.has(CHILD.id), false, "the tail is consumed by the switch");
 });
 
@@ -293,7 +293,7 @@ test("(b) buffered tail over fetched history has no duplicates", async (t) => {
 	tui.renderNow(true);
 	const screen = screenOf(tui);
 	assert.equal((screen.match(/child answer/g) ?? []).length, 1, "assistant text renders exactly once");
-	assert.equal((screen.match(/recorded output/g) ?? []).length, 1, "the settled tool renders exactly once");
+	assert.equal((screen.match(/Shell/g) ?? []).length, 1, "the settled tool renders exactly once");
 });
 
 // ─── (c) footer subagent count ─────────────────────────────────────────────

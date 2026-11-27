@@ -171,7 +171,7 @@ test("without workspace state the shell keeps today's chat-only tree", () => {
 	}
 });
 
-test("160x48 split composes chat | divider | editor | grip, docked composer full width", () => {
+test("160x48 split composes chat | divider | editor | grip, composer docked in chat", () => {
 	const h = buildHarness(160, 48);
 	try {
 		configure(h);
@@ -202,11 +202,11 @@ test("160x48 split composes chat | divider | editor | grip, docked composer full
 		// The grip: faint top notch in the far-right column, never wider.
 		assert.equal(screen[0]!.charAt(gripX), "▐");
 		for (const line of screen) assert.ok(line.length <= 160);
-		// The composer is a FULL-WIDTH row under the panes (starts at column 0).
+		// The composer is docked inside the chat column, above the footer.
 		const composerRow = screen.findIndex((line) => line.includes("Ask anything"));
-		assert.ok(composerRow > topRow, "composer sits below the panes area");
-		assert.ok(screen[composerRow]!.indexOf("Ask anything") < 10, "composer prompt starts at the left edge");
-		assert.notEqual(screen[composerRow]!.charAt(dividerX), "│", "no divider crosses the composer row");
+		assert.ok(composerRow > 0 && composerRow < 47, "composer visible above the footer");
+		assert.ok(screen[composerRow]!.indexOf("Ask anything") < dividerX, "composer prompt stays in chat");
+		assert.doesNotMatch(screen[composerRow]!.slice(dividerX), /EDITOR/, "editor content stays out of the composer row");
 		const footer = screen[47]!;
 		assert.equal(footer.length, 160, "footer still spans the full width");
 		assert.match(footer, /test-model/);

@@ -13,14 +13,14 @@ test("reference header keeps brand and workspace on one row", () => {
  assert.match(rows[0]!, /MACHINA.*repo$/);
 });
 
-test("completed tools use quiet indented log rows with bounded reading width", () => {
+test("completed tools use quiet indented log rows across the pane", () => {
  const tool = new ToolTurn("read_file", {path:"install.sh"}, {frame: f => f[0] ?? ""});
  tool.settle({text:"Homebrew fallback configuration", backendTruncated:false, locallyTruncated:false}, "success");
  const rows = tool.render(160);
  assert.match(plain(rows)[1]!, /^ {2}✔/);
  assert.doesNotMatch(plain(rows).join("\n"), /┌|└/);
- assert.ok(rows.every(row => visibleWidth(row) <= 108));
- assert.match(plain(rows).join("\n"), /read_file.*install.sh/);
+ assert.ok(rows.every(row => visibleWidth(row) <= 160));
+ assert.match(plain(rows).join("\n"), /Read file.*install.sh/);
  assert.match(plain(rows).join("\n"), /Homebrew fallback/);
 });
 

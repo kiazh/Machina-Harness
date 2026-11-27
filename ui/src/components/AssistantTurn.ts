@@ -9,8 +9,8 @@ import { Markdown, truncateToWidth, type Component } from "@earendil-works/pi-tu
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
 import { ICONS } from "../design/icons.ts";
 import type { ResponseGeometry } from "../design/responseLayout.ts";
-import { transcriptInset } from "../design/spacing.ts";
-import { sanitizeDisplay } from "../design/text.ts";
+import { chatColumnWidth, transcriptInset } from "../design/spacing.ts";
+import { sanitizeDisplay, sanitizeLabelText } from "../design/text.ts";
 import { BLOCK_GAP } from "../design/tokens.ts";
 import { markdownTheme, theme } from "../theme.ts";
 
@@ -109,7 +109,7 @@ export class AssistantTurn implements Component {
 	constructor(text = "", activity?: ActivitySource, label = "assistant") {
 		this.content = text;
 		this.activity = activity;
-		this.label = label;
+		this.label = sanitizeLabelText(label);
 		// Untrusted content path: assistant prose can echo repo files, web
 		// pages, model output. Sanitize the ASSEMBLED content (not per-delta)
 		// so a control sequence split across deltas cannot evade the filter
@@ -207,7 +207,7 @@ export class AssistantTurn implements Component {
 			return cached.geometry;
 		}
 		const indent = transcriptInset(width);
-		const contentWidth = Math.max(1, width - indent - 4);
+		const contentWidth = Math.max(1, chatColumnWidth(width) - 2);
 		const geometry: ResponseGeometry = {
 			paneWidth: width,
 			widthClass: "full",

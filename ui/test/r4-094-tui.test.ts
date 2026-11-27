@@ -162,7 +162,7 @@ test("R4-094(a) re-resuming the visible session mid-turn keeps live output and t
 	app.switchTo(MAIN, []);
 	assert.equal(app.session()?.id, MAIN.id, "same-id resume stays on the session");
 	assert.match(transcriptText(app), /UNIQUE_LIVE_TEXT/, "live streamed text survives the same-id re-resume");
-	assert.match(transcriptText(app), /terminal/, "the running tool card survives");
+	assert.match(transcriptText(app), /Shell/, "the running tool card survives");
 
 	client.emit(MAIN.id, "t-auto", { type: "tool.complete", id: "tool-live", name: "terminal", result: "UNIQUE_TOOL_OUTPUT", isError: false });
 	client.emit(MAIN.id, "t-auto", { type: "message.complete", text: "UNIQUE_LIVE_TEXT", tokens: 3, iterations: 1, toolCalls: 1, cancelled: false });

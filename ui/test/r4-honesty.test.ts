@@ -120,23 +120,23 @@ test("R4-022: a streamed denied tool renders the denied state, not the success c
 		}),
 	);
 	const out = plain(view);
-	assert.match(out, /⊘ terminal/);
+	assert.match(out, /⊘ Shell/);
 	assert.match(out, /denied; not executed/);
-	assert.doesNotMatch(out, /✔ terminal/);
-	assert.doesNotMatch(out, /✖ terminal/);
+	assert.doesNotMatch(out, /✔ Shell/);
+	assert.doesNotMatch(out, /✖ Shell/);
 	assertRowsClean(view.render(70), "denied tool card");
 });
 
 test("R4-022: typed outcomes keep a consistent mapping", () => {
 	const cases: Array<{ outcome?: string; isError: boolean; marker: string; status?: RegExp }> = [
-		{ outcome: "queued", isError: false, marker: "… terminal", status: /queued/ },
-		{ outcome: "running", isError: false, marker: "terminal", status: /running/ },
-		{ outcome: "interrupted", isError: true, marker: "○ terminal", status: /interrupted; outcome unknown/ },
-		{ outcome: "paused", isError: false, marker: "○ terminal", status: /awaiting approval/ },
-		{ outcome: "failed", isError: true, marker: "✖ terminal" },
-		{ outcome: "outcome_unknown", isError: false, marker: "? terminal", status: /completion not reported/ },
-		{ isError: false, marker: "✔ terminal" },
-		{ isError: true, marker: "✖ terminal" },
+		{ outcome: "queued", isError: false, marker: "… Shell", status: /queued/ },
+		{ outcome: "running", isError: false, marker: "Shell", status: /running/ },
+		{ outcome: "interrupted", isError: true, marker: "○ Shell", status: /interrupted; outcome unknown/ },
+		{ outcome: "paused", isError: false, marker: "○ Shell", status: /awaiting approval/ },
+		{ outcome: "failed", isError: true, marker: "✖ Shell" },
+		{ outcome: "outcome_unknown", isError: false, marker: "? Shell", status: /completion not reported/ },
+		{ isError: false, marker: "✔ Shell" },
+		{ isError: true, marker: "✖ Shell" },
 	];
 	for (const { outcome, isError, marker, status } of cases) {
 		const view = new Container();
@@ -156,7 +156,7 @@ test("R4-022: typed outcomes keep a consistent mapping", () => {
 		assert.ok(out.includes(marker), `outcome=${String(outcome)} isError=${isError}: ${out}`);
 		if (status) assert.match(out, status);
 		if (outcome !== undefined) {
-			assert.doesNotMatch(out, /✔ terminal/, `outcome=${outcome} must not render success`);
+			assert.doesNotMatch(out, /✔ Shell/, `outcome=${outcome} must not render success`);
 		}
 	}
 });

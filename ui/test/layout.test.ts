@@ -401,7 +401,7 @@ test("the pinned music bar stays at row 0 while the transcript grows", () => {
 		term.rows = 9;
 		tui.renderNow(true);
 		screen = plain(tui.getScreenLines());
-		assert.match(screen[0] ?? "", /Example track title — Example artist/, "one-row compact bar");
+		assert.match(screen[0] ?? "", /Example track title · Example artist/, "one-row compact bar");
 		assert.doesNotMatch(screen[1] ?? "", /Example track title/);
 
 		term.rows = 6;

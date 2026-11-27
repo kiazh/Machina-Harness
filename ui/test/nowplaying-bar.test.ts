@@ -84,7 +84,7 @@ test("two-row and one-row budgets stay informative", () => {
 	assert.match(two[0]!, /Example track title/);
 	const one = plainLines(bar({}, 1), 90);
 	assert.equal(one.length, 1);
-	assert.match(one[0]!, /Example track title — Example artist/);
+	assert.match(one[0]!, /Example track title · Example artist/);
 });
 
 test("a browser source without state or duration is still shown honestly", () => {

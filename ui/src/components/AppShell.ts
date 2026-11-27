@@ -57,7 +57,6 @@ export class AppShell {
 	private dock: Component | undefined;
 	/** Pinned top bar above the transcript (music); hidden rows collapse. */
 	private pinnedBar: PinnedBarSlot | undefined;
-	/** Hairline between ambient chrome and the conversation. */
 	private readonly pinnedRule: Component = {
 		render: (width: number): string[] => [theme.border("─".repeat(Math.max(0, width)))],
 		invalidate: (): void => {},
@@ -208,13 +207,14 @@ export class AppShell {
 		if (this.page) return 0;
 		const width = this.liveColumns();
 		const activity = this.activityBar;
-		const activityRows = activity?.visible
+		const split = this.hasSplitComposer();
+		const activityRows = !split && activity?.visible
 			? (activity as Component & { measureRows?(columns: number): number }).measureRows?.(width)
 				?? activity.render(width).length
 			: 0;
 		// measureRows is itself keyed by the composer's draft/window state, so
 		// this stays a cheap lookup while catching draft/popup height changes.
-		const composerRows = this.composer.measureRows?.(width) ?? this.composer.render(width).length;
+		const composerRows = split ? 0 : this.composer.measureRows?.(width) ?? this.composer.render(width).length;
 		const key = [
 			width,
 			this.lastRows,
@@ -226,31 +226,17 @@ export class AppShell {
 		].join("|");
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
-		const gap = this.gapRows();
-		let rows = composerRows + 1;
-		let sections = 3; // panes row + composer + footer (footer is one row)
-		if (this.navBar) sections += 1;
-		if (activity?.visible) {
-			rows += activityRows;
-			sections += 1;
-		}
+		let rows = this.navRows() + composerRows + activityRows + 1;
 		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;
-			sections += 1;
 		}
-		const total = this.navRows() + rows + gap * (sections - 1);
-		this.chromeCache = { key, rows: total };
-		return total;
+		this.chromeCache = { key, rows };
+		return rows;
 	}
 
 	/** Chrome content changed (composer text, dock state): re-measure once. */
 	invalidateChrome(): void {
 		this.chromeCache = undefined;
-	}
-
-	/** Inter-section gap: chrome touches directly; the transcript rules carry rhythm. */
-	private gapRows(): number {
-		return 0;
 	}
 
 	/** Rows the persistent command strip occupies on this viewport. */
@@ -349,8 +335,11 @@ export class AppShell {
 
 	private dockInChatColumn(): boolean {
 		if (!this.dock) return false;
-		const mode = this.workspace?.layout?.effectiveMode;
-		return mode === undefined || mode === "chat" || mode === "split";
+		return !this.workspace?.editor || this.workspace.layout?.effectiveMode !== "editor";
+	}
+
+	private hasSplitComposer(): boolean {
+		return Boolean(this.workspace?.editor && this.workspace.layout?.effectiveMode === "split");
 	}
 
 	private build(): VStack {
@@ -364,44 +353,17 @@ export class AppShell {
 				{ component: this.page, basis: 0, grow: 1 },
 			], { gap: 0 });
 		}
-		// Full density keeps one chrome gap row; smaller viewports spend
-		// every row on transcript, composer, or status.
-		const gap = 0;
-		const topRow = this.workspaceRow();
-		const dockOutsideChat = Boolean(this.dock) && !this.dockInChatColumn();
+		const topRow = this.workspaceRow() ?? this.chatColumn();
 		const activity = this.activityBar;
-		const activityEntries = activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : [];
-		// Viewports consume the remaining rows. A zero basis skips intrinsic
-		// measurement, which otherwise formats the entire scrollback at trial
-		// widths on every keypress and animation frame.
-		if (!topRow) {
-			return new VStack(
-				[
-					...navEntries,
-					{ component: this.chatColumn(), basis: 0, grow: 1 },
-					...(dockOutsideChat && this.dock ? [{ component: this.dock, shrink: 0 }] : []),
-					...activityEntries,
-					{ component: this.composer, shrink: 0 },
-					{ component: this.footer, shrink: 0 },
-				],
-				{ gap },
-			);
-		}
-		// Workspace composition: the panes row grows. The approval card lives
-		// inside the chat column when chat is visible, so it reads as chat
-		// evidence rather than a full-width band crossing the editor. Editor-
-		// only mode keeps the full-width dock because no chat column exists.
-		return new VStack(
-			[
-				...navEntries,
-				{ component: topRow, basis: 0, grow: 1 },
-				...(dockOutsideChat && this.dock ? [{ component: this.dock, shrink: 0 }] : []),
-				...activityEntries,
-				{ component: this.composer, shrink: 0 },
-				{ component: this.footer, shrink: 0 },
-			],
-			{ gap },
-		);
+		const split = this.hasSplitComposer();
+		return new VStack([
+			...navEntries,
+			{ component: topRow, basis: 0, grow: 1 },
+			...(this.dock && !this.dockInChatColumn() ? [{ component: this.dock, shrink: 0 }] : []),
+			...(!split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
+			...(!split ? [{ component: this.composer, shrink: 0 }] : []),
+			{ component: this.footer, shrink: 0 },
+		]);
 	}
 
 	/**
@@ -418,7 +380,7 @@ export class AppShell {
 		if (result.effectiveMode === "split" && result.chat && result.editor) {
 			return new HStack(
 				workspace.entries(result, {
-					component: this.chatColumn(),
+					component: this.chatColumn(true),
 					basis: result.chat.columns,
 					shrink: 0,
 					grow: 0,
@@ -439,28 +401,31 @@ export class AppShell {
 	 * wrapper per build is fine — the ScrollView instance inside is retained
 	 * and carries the scroll anchor.
 	 */
-	private chatColumn(): Component {
+	private chatColumn(split = false): Component {
 		const bar = this.pinnedBar;
 		const agentBar = this.agentBar;
 		const dock = this.dockInChatColumn() ? this.dock : undefined;
-		if (!bar && !agentBar && !dock) return this.transcriptScroll;
+		const activity = this.activityBar;
+		if (!bar && !agentBar && !dock && !split) return this.transcriptScroll;
 		return new VStack(
 			[
-				...(agentBar ? [{ component: agentBar, basis: "auto" as const, shrink: 0, minSize: 0, visible: () => agentBar.visible }] : []),
 				...(bar ? [{
 					component: bar,
 					basis: "auto" as const,
 					shrink: 0,
 					minSize: 0,
-					visible: () => bar.visible,
+					visible: () => bar.visible && this.pinnedBarRows() > 0,
 				}, {
 					component: this.pinnedRule,
 					basis: 1,
 					shrink: 0,
-					visible: () => bar.visible,
+					visible: () => bar.visible && this.pinnedBarRows() > 0,
 				}] : []),
+				...(agentBar ? [{ component: agentBar, shrink: 0, visible: () => agentBar.visible }] : []),
 				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: dock && this.lastRows < 12 ? 0 : 1 },
+				...(split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
 				...(dock ? [{ component: dock, shrink: 0 }] : []),
+				...(split ? [{ component: this.composer, shrink: 0 }] : []),
 			],
 			{ gap: 0 },
 		);

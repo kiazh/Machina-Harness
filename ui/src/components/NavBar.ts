@@ -104,11 +104,11 @@ export class NavBar implements Component {
 		const state = statusText(snap);
 		const candidates = [
 			`${state.tone(state.glyph)} ${state.tone(state.text)}`,
-			snap.model && snap.model.toLowerCase() !== (snap.title ?? "").toLowerCase()
+			snap.view !== "chat" && snap.model && snap.model.toLowerCase() !== (snap.title ?? "").toLowerCase()
 				? theme.dim(sanitizeLabelText(snap.model))
 				: "",
 			snap.project ? theme.dim(sanitizeLabelText(snap.project) + (snap.branch ? ` · ${sanitizeLabelText(snap.branch)}` : "")) : "",
-			snap.title ? theme.text(sanitizeLabelText(snap.title)) : "",
+			snap.title ? theme.text(truncateToWidth(sanitizeLabelText(snap.title), 42, "…")) : "",
 		].filter(Boolean);
 		// The state chip is the one part of the right side that always
 		// survives: truncate it to the remaining room, then add context only

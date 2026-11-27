@@ -72,8 +72,6 @@ export class Transcript {
 	private readonly tools = new Map<string, ToolTurn>();
 	private readonly toolSubs = new Map<string, AnimationSubscription>();
 	private lastTool: ToolTurn | undefined;
-	/** Editorial turn number shown in the prompt band. */
-	private turnNumber = 0;
 	private turnStartedAt = 0;
 	private turnTools = 0;
 	private assistantSub: AnimationSubscription | undefined;
@@ -129,8 +127,7 @@ export class Transcript {
 	}
 
 	addUser(text: string): void {
-		this.turnNumber += 1;
-		this.retain(new UserTurn(text, this.turnNumber));
+		this.retain(new UserTurn(text));
 	}
 
 	addNotice(text: string, kind: NoticeKind = "info"): void {
@@ -147,6 +144,9 @@ export class Transcript {
 	 * trim disclosure; the oldest other block is dropped first.
 	 */
 	private retain(component: Component): void {
+		if (component instanceof ToolTurn && this.container.children.at(-1) instanceof ToolTurn) {
+			component.joinPreviousTool();
+		}
 		this.container.addChild(component);
 		this.enforceScrollbackCap();
 	}
@@ -184,7 +184,6 @@ export class Transcript {
 		this.tools.clear();
 		this.lastTool = undefined;
 		this.lastCompletedTurn = undefined;
-		this.turnNumber = 0;
 		this.turnStartedAt = 0;
 		this.turnTools = 0;
 	}

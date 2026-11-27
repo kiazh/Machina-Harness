@@ -142,7 +142,7 @@ test("a streamed turn renders text, a tool card and a final summary", () => {
 	const out = plain(view);
 	assert.match(out, /read a\.py/);
 	assert.match(out, /Let me look\./);
-	assert.match(out, /✔ read_file a\.py/);
+	assert.match(out, /✔ Read file a\.py/);
 	assert.match(out, /print\('hi'\)/);
 	assert.match(out, /It prints hi\./);
 	assert.equal(out.match(/It prints hi\./g)?.length, 1, "final text is not duplicated");
@@ -207,10 +207,10 @@ test("cancelling marks unfinished tools interrupted and says so", () => {
 	);
 	assert.equal(summary?.cancelled, true);
 	const out = plain(view);
-	assert.match(out, /○ terminal pytest/);
+	assert.match(out, /○ Shell pytest/);
 	assert.match(out, /interrupted; outcome unknown/);
 	assert.match(out, /Stopped\./);
-	assert.doesNotMatch(out, /✔ terminal/, "interruption is a presentation fact, never success");
+	assert.doesNotMatch(out, /✔ Shell/, "interruption is a presentation fact, never success");
 });
 
 test("a normal completion marks unfinished tools unknown, never success or interrupted", () => {
@@ -223,9 +223,9 @@ test("a normal completion marks unfinished tools unknown, never success or inter
 	);
 	assert.equal(summary?.cancelled, false);
 	const out = plain(view);
-	assert.match(out, /\? terminal pytest/);
+	assert.match(out, /\? Shell pytest/);
 	assert.match(out, /completion not reported/, "missing completion is honestly unknown");
-	assert.doesNotMatch(out, /✔ terminal/, "missing completion is never success");
+	assert.doesNotMatch(out, /✔ Shell/, "missing completion is never success");
 	assert.doesNotMatch(out, /interrupted/, "unfinished tool is not marked interrupted on normal completion");
 	assert.doesNotMatch(out, /Stopped\./, "no cancellation notice on normal completion");
 });
@@ -474,7 +474,7 @@ test("composer is a raised input dock with one accent marker", async () => {
 		}
 	}
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^ {4}MESSAGE\s*$/, "the composer opens with its own label");
+	assert.match(rows[0] ?? "", /^ {4}Chat input\s*$/, "the composer opens with its own label");
 	assert.match(rows[1] ?? "", /^ {4}❯ Ask anything/, "the input row carries the accent marker");
 	assert.equal(rows.at(-1)!.trim(), "", "the raised surface ends with one padding row");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);
@@ -551,13 +551,13 @@ test("session header is a quiet context line", async () => {
 test("tool turns are one-line activity with honest markers", async () => {
 	const { ToolTurn } = await import("../src/components.ts");
 	const running = new ToolTurn("terminal", { command: "pytest" }, staticActivity);
-	assert.match(plain(running, 60), /terminal/);
+	assert.match(plain(running, 60), /Shell/);
 	assert.match(plain(running, 60), /running/);
 	running.settle({ text: "ok", backendTruncated: false, locallyTruncated: false }, "success");
-	assert.match(plain(running, 60), /✔ terminal/);
+	assert.match(plain(running, 60), /✔ Shell/);
 	const failed = new ToolTurn("terminal", { command: "pytest" }, staticActivity);
 	failed.settle({ text: "boom", backendTruncated: false, locallyTruncated: false }, "error");
-	assert.match(plain(failed, 60), /✖ terminal/);
+	assert.match(plain(failed, 60), /✖ Shell/);
 	for (const width of [20, 40, 80]) {
 		for (const line of failed.render(width)) assert.ok(visibleWidth(line) <= width);
 	}
@@ -676,13 +676,13 @@ test("V02 tool previews count wrapping with honest local and backend truncation"
 		"success",
 	);
 	const out = plain(turn, 80);
-	assert.match(out, /✔ terminal/);
+	assert.match(out, /✔ Shell/);
 	assert.match(out, /r2/);
 	assert.doesNotMatch(out, /r3/, "routine preview keeps two physical rows");
 	assert.match(out, /… 4 more lines/, "local count covers retained rendered rows only");
 	const singular = new ToolTurn("terminal", {}, staticActivity);
 	singular.settle({ text: ["a", "b", "c"].join("\n"), backendTruncated: false, locallyTruncated: false }, "success");
-	assert.match(plain(singular, 80), /… 1 more line$/m, "singular omitted counts read correctly");
+	assert.match(plain(singular, 80), /… 1 more line/m, "singular omitted counts read correctly");
 	// A long wrapped row counts physical rows, not logical lines.
 	const wrapped = new ToolTurn("terminal", {}, staticActivity);
 	wrapped.settle({ text: "x".repeat(100), backendTruncated: false, locallyTruncated: false }, "success");

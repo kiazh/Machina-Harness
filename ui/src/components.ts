@@ -329,7 +329,7 @@ export class ComposerInput extends Editor {
 
 /** Muted composer placeholder (the Editor cannot render its own). */
 export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
-const COMPOSER_TITLE = "  MESSAGE";
+const COMPOSER_TITLE = "  Chat input";
 
 /**
  * Docked input on a raised surface. Rendering and hit-testing share the
@@ -399,7 +399,7 @@ export class ComposerBox extends Box {
 		// the input is an object on the terminal instead of floating text.
 		const boxTop = (): string => {
 			const width = Math.max(0, outer - 4);
-			const label = " MESSAGE ";
+			const label = `${COMPOSER_TITLE.slice(1)} `;
 			const image = imageKey ? ` ${imageKey.trim()} ` : "";
 			const fill = Math.max(0, width - visibleWidth(label) - visibleWidth(image));
 			const middle = truncateToWidth(

@@ -30,7 +30,7 @@ export class AgentTabBar {
 			const dot = row.running ? " •" : "";
 			const size = visibleWidth(label) + visibleWidth(dot);
 			if (column + size > width) break;
-			const style = row.session.id === this.current() ? theme.accent : theme.dim;
+			const style = row.session.id === this.current() ? theme.accentBold : theme.muted;
 			this.hitboxes.push({ start: column, end: column + size, id: row.session.id });
 			line += style(label);
 			if (dot) line += theme.success(dot);

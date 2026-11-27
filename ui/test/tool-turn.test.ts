@@ -87,7 +87,7 @@ test("write_file shows its new content without putting content in the header", (
 		ACTIVITY,
 	);
 	const header = text(tool);
-	assert.match(header, /write_file src\/app\.py/);
+	assert.match(header, /Write file src\/app\.py/);
 	assert.doesNotMatch(header, /content=/);
 	assert.match(header, /one/);
 	assert.doesNotMatch(header, /three/);

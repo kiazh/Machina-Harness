@@ -566,7 +566,7 @@ test("S07 missing tool completion at normal retirement is unknown, never success
 	transcript.apply(tev({ type: "message.complete", text: "", tokens: 4, iterations: 1, toolCalls: 1, cancelled: false }));
 	const out = textOf(view);
 	assert.match(out, /completion not reported/);
-	assert.doesNotMatch(out, /✔ terminal/, "missing completion is never success");
+	assert.doesNotMatch(out, /✔ Shell/, "missing completion is never success");
 });
 
 test("S07 known tool results survive alongside unknown ones", () => {
@@ -578,7 +578,7 @@ test("S07 known tool results survive alongside unknown ones", () => {
 	transcript.apply(tev({ type: "tool.start", id: "2", name: "terminal", args: {} }));
 	transcript.apply(tev({ type: "message.complete", text: "", tokens: 4, iterations: 1, toolCalls: 2, cancelled: false }));
 	const out = textOf(view);
-	assert.match(out, /✔ read_file/, "completed tool keeps its reported success");
+	assert.match(out, /✔ Read file/, "completed tool keeps its reported success");
 	assert.match(out, /completion not reported/);
 });
 
@@ -591,9 +591,9 @@ test("S08 cancel keeps success and marks the unresolved interrupted", () => {
 	transcript.apply(tev({ type: "tool.start", id: "2", name: "terminal", args: {} }));
 	transcript.apply(tev({ type: "message.complete", text: "", tokens: 1, iterations: 1, toolCalls: 2, cancelled: true }));
 	const out = textOf(view);
-	assert.match(out, /✔ read_file/, "known success survives cancellation");
+	assert.match(out, /✔ Read file/, "known success survives cancellation");
 	assert.match(out, /interrupted/, "unresolved tool is honestly interrupted");
-	assert.doesNotMatch(out, /✔ terminal/, "interrupted tool is never success");
+	assert.doesNotMatch(out, /✔ Shell/, "interrupted tool is never success");
 });
 
 test("S09 incompatible canonical final replaces instead of duplicating", () => {
@@ -637,9 +637,9 @@ test("replay is neutral when typed outcomes are unavailable", () => {
 	const transcript = new Transcript(view, new FakeSpinner());
 	transcript.replay([{ role: "tool", tool: "terminal", content: "Error: boom" }]);
 	const out = textOf(view);
-	assert.match(out, /recorded output/);
-	assert.doesNotMatch(out, /✖ terminal/, "history text never manufactures failure");
-	assert.doesNotMatch(out, /✔ terminal/, "history text never manufactures success");
+	assert.match(out, /Shell/);
+	assert.doesNotMatch(out, /✖ Shell/, "history text never manufactures failure");
+	assert.doesNotMatch(out, /✔ Shell/, "history text never manufactures success");
 });
 
 test("wire truncation is preserved on tools", () => {
@@ -988,7 +988,7 @@ test("cleanup freezes tool activity without reporting success or releasing owner
  t.mock.timers.tick(3000);
  assert.equal(textOf(view), before);
  transcript.apply(tev({type:"tool.complete", id:"one", name:"terminal", result:"finished", isError:false}));
- assert.match(textOf(view), /✔ terminal/);
+ assert.match(textOf(view), /✔ Shell/);
 });
 
 test("typed unknown tool completion stays uncertain regardless of output or error flag", () => {
@@ -998,9 +998,9 @@ test("typed unknown tool completion stays uncertain regardless of output or erro
   transcript.apply(tev({ type: "tool.start", id: "unknown", name: "terminal", args: { command: "publish" } }));
   const complete = { type: "tool.complete" as const, id: "unknown", name: "terminal", result: "successfully published", isError, outcome: "outcome_unknown" };
   transcript.apply(tev(complete));
-  assert.match(textOf(view), /\? terminal/);
+  assert.match(textOf(view), /\? Shell/);
   assert.match(textOf(view), /completion not reported/);
-  assert.doesNotMatch(textOf(view), /✔ terminal|✖ terminal/);
+  assert.doesNotMatch(textOf(view), /✔ Shell|✖ Shell/);
  }
 });
 
@@ -1010,7 +1010,7 @@ test("legacy tool completion retains typed success and error flags without infer
   const transcript = new Transcript(view, new FakeSpinner());
   transcript.apply(tev({ type: "tool.start", id: "legacy", name: "terminal", args: {} }));
   transcript.apply(tev({ type: "tool.complete", id: "legacy", name: "terminal", result: "outcome unknown", isError }));
-  assert.match(textOf(view), isError ? /✖ terminal/ : /✔ terminal/);
+  assert.match(textOf(view), isError ? /✖ Shell/ : /✔ Shell/);
  }
 });
 

@@ -28,7 +28,6 @@ test("command strip carries brand, tabs, session context and state", () => {
 	assert.match(rows[0] ?? "", /Changes 3/);
 	assert.match(rows[0] ?? "", /Overhaul the terminal UI/);
 	assert.match(rows[0] ?? "", /machina · main/);
-	assert.match(rows[0] ?? "", /qwen\/qwen4-max/);
 	assert.match(rows[0] ?? "", /ready/);
 	assert.match(rows[0] ?? "", /\[Chat\]/);
 	assert.match(rows[1] ?? "", /^─+$/);
