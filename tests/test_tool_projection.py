@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import uuid
+
+import pytest
 
 from machina.core.agent import ReActAgent
 from machina.core.assembler import get_token_count
+from machina.core.models import Session
 from machina.core.tool_projection import (
     compact_tool_definitions,
     reset_dynamic_tool_state,
@@ -94,12 +98,42 @@ def test_tool_load_widens_the_next_step_across_the_tool_task_boundary() -> None:
     assert "delegate" not in {tool.name for tool in agent._tool_defs()}
 
     async def run_tool() -> str:
-        return await asyncio.create_task(registry.execute("tool_load", tools=["delegate"]))
+        # The real path nests the registry call inside the batch task and then
+        # another execution task; exercise that two-level boundary here.
+        async def nested() -> str:
+            return await asyncio.create_task(registry.execute("tool_load", tools=["delegate"]))
+
+        return await asyncio.create_task(nested())
 
     result = asyncio.run(run_tool())
 
     assert "Loaded schemas for: delegate" in result
     assert "delegate" in {tool.name for tool in agent._tool_defs()}
+    reset_dynamic_tool_state()
+
+
+def test_repeated_tool_load_reports_already_available_without_a_round_trip() -> None:
+    reset_dynamic_tool_state()
+    first = tool_load(["delegate"])
+    second = tool_load(["delegate"])
+    core = tool_load(["read_file"])
+
+    assert "Loaded schemas for: delegate" in first
+    assert "callable on this next model step" in first
+    assert "Already available in the current tool surface: delegate" in second
+    assert "No reload is needed" in second
+    assert "Loaded schemas" not in second
+    assert "Already available in the current tool surface: read_file" in core
+    reset_dynamic_tool_state()
+
+
+def test_tool_load_deduplicates_and_keeps_rejections_accurate() -> None:
+    reset_dynamic_tool_state()
+    result = tool_load(["delegate", "delegate", "not_a_tool"])
+
+    assert result.count("delegate") == 1  # requested twice, loaded once
+    assert result.startswith("Loaded schemas for: delegate.")
+    assert "Not loaded (unknown or outside this agent's allow-list): not_a_tool" in result
     reset_dynamic_tool_state()
 
 
@@ -113,3 +147,50 @@ def test_dynamic_loader_respects_an_explicit_allow_list() -> None:
     assert "mcp_call" in result
     assert "Not loaded" in result
     reset_dynamic_tool_state()
+
+
+@pytest.mark.asyncio
+async def test_factory_wires_dynamic_tool_loading_for_gateway_sessions(monkeypatch) -> None:
+    from machina.core import agent_factory
+    from machina.core import provider as provider_module
+    from machina.core.agent_def import AgentDef, AgentRegistry
+    from machina.core.config import DEFAULTS
+
+    async def fake_get(_self, _name):
+        return AgentDef(name="harness")
+
+    async def no_rag():
+        return None
+
+    monkeypatch.setattr(AgentRegistry, "get", fake_get)
+    monkeypatch.setattr(agent_factory, "_shared_rag_pipeline", no_rag)
+    monkeypatch.setattr(provider_module, "get_provider", lambda **_kwargs: object())
+
+    agent = await agent_factory.build_agent_for_session(
+        Session(id=uuid.uuid4(), agent_id="harness")
+    )
+
+    assert DEFAULTS["dynamic_tool_loading"] is True
+    assert agent.dynamic_tools is True
+
+
+def test_context_preparer_resets_dynamic_state_from_the_host_flag() -> None:
+    from types import SimpleNamespace
+
+    from machina.core.context_prep import ContextPreparer
+    from machina.core.tool_projection import (
+        currently_visible_tool_names,
+        mark_tools_loaded,
+    )
+
+    reset_dynamic_tool_state()
+    mark_tools_loaded(["delegate"], {"delegate"})
+    assert "delegate" in currently_visible_tool_names()
+
+    passive = ContextPreparer(SimpleNamespace(dynamic_tools=False))
+    assert passive._reset_dynamic_tool_state_if_needed() is False
+    assert "delegate" in currently_visible_tool_names()
+
+    active = ContextPreparer(SimpleNamespace(dynamic_tools=True))
+    assert active._reset_dynamic_tool_state_if_needed() is True
+    assert "delegate" not in currently_visible_tool_names()

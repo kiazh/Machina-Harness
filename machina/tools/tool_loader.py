@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from machina.core.tool_projection import CORE_TOOL_NAMES, mark_tools_loaded
+from machina.core.tool_projection import (
+    CORE_TOOL_NAMES,
+    currently_visible_tool_names,
+    mark_tools_loaded,
+)
 from machina.tools.base import registry
 
 
@@ -43,13 +47,23 @@ def _available_catalog() -> str:
 def tool_load(tools: list[str]) -> str:
     """Load schemas by name; execution permissions are still enforced later."""
     available = set(registry._tools)
-    loaded, rejected = mark_tools_loaded(list(tools), available)
+    requested = list(dict.fromkeys(tools))
+    visible = currently_visible_tool_names(available)
+    already = [name for name in requested if name in visible]
+    pending = [name for name in requested if name not in visible]
+    loaded, rejected = mark_tools_loaded(pending, available)
     parts: list[str] = []
     if loaded:
         parts.append(
             "Loaded schemas for: "
             + ", ".join(loaded)
-            + ". They are available on the next model step."
+            + ". They are callable on this next model step; call them directly."
+        )
+    if already:
+        parts.append(
+            "Already available in the current tool surface: "
+            + ", ".join(already)
+            + ". No reload is needed; call them directly."
         )
     if rejected:
         parts.append(

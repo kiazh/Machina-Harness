@@ -1,12 +1,18 @@
-"""Deterministic phase controller for repository-repair turns.
+"""Deterministic phase controllers for repository repair and exploration turns.
 
-The repair protocol is advisory prompt text. This controller supplies the
+The repair protocol is advisory prompt text. ``TaskRunPolicy`` supplies the
 authoritative part: it counts turns and tool calls, notices repeated failed
 actions, tracks whether the run has edited source and verified it, and emits
 one bounded nudge when the model has spent too long without editing.
 
-The controller is intentionally conservative. It does not force a tool or
-rewrite the model's plan; it stops runaway loops and keeps the final evidence
+``ExplorationPolicy`` is a separate controller for explicit whole-repository
+learning prompts. It is never active for repair, implementation, or ordinary
+question turns; for exploration it preloads delegation, injects one directive,
+and bounds manual directory listing so the turn ends in a report rather than an
+orientation loop.
+
+Both controllers are intentionally conservative. They do not force a tool or
+rewrite the model's plan; they stop runaway loops and keep the final evidence
 gate honest.
 """
 
@@ -46,6 +52,9 @@ DEFAULT_MAX_EXPLORATION_CALLS = 10
 # An explicit "learn the whole repository" request is not an orientation loop;
 # give it enough room to survey the tree while the turn/tool caps still bound it.
 DEFAULT_REPO_WIDE_EXPLORATION_CALLS = 200
+# The explicit exploration controller bounds *manual listing* to a short
+# orientation burst; delegation and targeted reads remain available.
+DEFAULT_MAX_EXPLORATION_LISTINGS = 25
 DEFAULT_EDIT_NUDGE_TURNS = 10
 DEFAULT_FORCE_EDIT_TURNS = 0
 DEFAULT_ARTIFACT_NUDGE_READS = 3
@@ -118,6 +127,39 @@ TASK_RUN_EXPLORATION_LIMIT_TEXT = (
     "listing directories without reading or changing a file; it stopped to prevent "
     "an orientation loop. Read the specific files the task names, or ask for the "
     "missing path, before retrying."
+)
+EXPLORATION_DELEGATION_DIRECTIVE = (
+    "Repository-wide exploration is requested. Do not walk the tree with repeated "
+    "directory listings: delegate and delegate_status are already in this step's "
+    "tool surface. Fan out read-only researchers in parallel, one per area "
+    "(for example core runtime, tools and tests, gateway/UI, docs/integrations), "
+    "then synthesize their reports. Use targeted reads for gaps; do not reload "
+    "delegate with tool_load."
+)
+EXPLORATION_FALLBACK_DIRECTIVE = (
+    "Repository-wide exploration is requested. Delegation is unavailable to this "
+    "agent, so read targeted files directly instead of walking the tree with "
+    "repeated directory listings, then produce the holistic report."
+)
+EXPLORATION_LISTING_NUDGE = (
+    "Orientation listing cap reached. Stop listing directories. Delegate the "
+    "remaining read-only surveys with delegate, or answer now from the evidence "
+    "already gathered. The final report must cover architecture, key modules and "
+    "responsibilities, main data and control flow, tests and verification, and "
+    "risks or gaps."
+)
+EXPLORATION_FINAL_DIRECTIVE = (
+    "Manual directory listing is over. No tools are available on this step. Write "
+    "the holistic report now from the evidence already gathered: architecture, key "
+    "modules and responsibilities, main data and control flow, tests and "
+    "verification, and risks or gaps."
+)
+EXPLORATION_FINAL_TEXT = (
+    "Repository exploration stopped at the manual listing cap. The turn could not "
+    "produce a tool-free report, so it is ending with the evidence already "
+    "gathered. Report the holistic findings now: architecture, key modules and "
+    "responsibilities, main data and control flow, tests and verification, and "
+    "risks or gaps."
 )
 TASK_RUN_EDIT_NUDGE = (
     "No source edit has been made after a substantial investigation. Stop widening "
@@ -203,23 +245,40 @@ _EXPLORATION_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _REPO_WIDE_PHRASE_RE = re.compile(
-    r"\b(?:line[\s-]+by[\s-]+line|file[\s-]+by[\s-]+file|"
+    r"\b(?:line[\s-]+(?:by[\s-]+)?line|file[\s-]+by[\s-]+file|"
     r"directory[\s-]+by[\s-]+directory|"
     r"learn\s+(?:the\s+)?(?:code\s*base|repo(?:sitory)?|project)|"
     r"understand\s+(?:the\s+)?(?:code\s*base|repo(?:sitory)?|project)|"
-    r"holistic\s+(?:exploration|review|analysis|understanding|view|picture|overview|map)|"
+    r"holistic\s+(?:full\s+)?"
+    r"(?:exploration|review|analysis|understanding|view|picture|overview|map)|"
     r"(?:full|complete|holistic|comprehensive)\s+"
     r"(?:view|picture|understanding|overview|review)\s+of\s+"
     r"(?:the\s+)?(?:repo(?:sitory)?|project|code\s*base))\b",
     re.IGNORECASE,
 )
+# Explicit whole-repository prompts arrive with ordinary typos. Normalize only
+# the misspellings observed in real requests; this must not fuzzy-match generic
+# wording into an exploration turn.
+_TYPO_NORMALIZATIONS = (
+    ("directoyr", "directory"),
+    ("understadn", "understand"),
+    ("understnad", "understand"),
+)
+
+
+def _normalized_exploration_text(message: str) -> str:
+    text = message.casefold()
+    for typo, replacement in _TYPO_NORMALIZATIONS:
+        text = text.replace(typo, replacement)
+    return text
 
 
 def _wants_repo_wide_exploration(message: str) -> bool:
     """Whether the prompt explicitly asks to learn/explore the whole repository."""
+    text = _normalized_exploration_text(message)
     return bool(
-        _REPO_WIDE_PHRASE_RE.search(message)
-        or (_REPO_WIDE_SCOPE_RE.search(message) and _EXPLORATION_INTENT_RE.search(message))
+        _REPO_WIDE_PHRASE_RE.search(text)
+        or (_REPO_WIDE_SCOPE_RE.search(text) and _EXPLORATION_INTENT_RE.search(text))
     )
 
 
@@ -643,4 +702,151 @@ class TaskRunPolicy:
             "artifact_reads": self.artifact_reads,
             "job_polls": self.job_polls,
             "network_attempts": self.network_attempts,
+        }
+
+
+class ExplorationPolicy:
+    """Deterministic, bounded policy for explicit whole-repository exploration.
+
+    Active only when the prompt explicitly asks to learn/explore the entire
+    repository and the prompt is not a repair task. Repair turns keep their
+    own lean controller; ordinary implementation and question turns are never
+    touched. While active this policy:
+
+    - preloads ``delegate`` and ``delegate_status`` for the first model step;
+    - injects one short directive to fan out read-only explorers;
+    - bounds consecutive manual directory listings (default 25);
+    - nudges once at the cap, then stops a listing loop so the turn ends in a
+      holistic report instead of an unbounded orientation walk.
+    """
+
+    def __init__(
+        self,
+        user_message: str,
+        *,
+        max_listing_calls: int = DEFAULT_MAX_EXPLORATION_LISTINGS,
+    ) -> None:
+        self.active = _wants_repo_wide_exploration(user_message) and not is_repair_task(
+            user_message
+        )
+        self.max_listing_calls = max(1, max_listing_calls)
+        self.listing_calls = 0
+        self.delegated = False
+        self.tools_primed = False
+        self.directive_injected = False
+        self.final_directive_injected = False
+        self.exhausted = False
+        self.answer_steps = 0
+        self._listing_nudged = False
+
+    @property
+    def force_answer(self) -> bool:
+        """Whether the next model step must be tool-free and produce a report."""
+        return self.active and self.exhausted
+
+    @property
+    def preload_tools(self) -> tuple[str, ...]:
+        """Delegation schemas the first exploration step must advertise."""
+        return ("delegate", "delegate_status") if self.active else ()
+
+    def prime_tools(self, available: set[str]) -> tuple[list[str], list[str]]:
+        """Load delegation schemas before the first model step, once."""
+        if not self.active or self.tools_primed:
+            return [], []
+        self.tools_primed = True
+        from machina.core.tool_projection import mark_tools_loaded
+
+        return mark_tools_loaded(list(self.preload_tools), available)
+
+    def inject_directive(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        delegate_visible: bool = True,
+    ) -> bool:
+        """Append the one exploration directive to the turn's system context."""
+        if not self.active or self.directive_injected:
+            return False
+        text = (
+            EXPLORATION_DELEGATION_DIRECTIVE if delegate_visible else EXPLORATION_FALLBACK_DIRECTIVE
+        )
+        self._append_system_context(messages, text)
+        self.directive_injected = True
+        return True
+
+    def inject_final_directive(self, messages: list[dict[str, Any]]) -> bool:
+        """Append the one tool-free report directive after the listing cap."""
+        if not self.active or self.final_directive_injected:
+            return False
+        self._append_system_context(messages, EXPLORATION_FINAL_DIRECTIVE)
+        self.final_directive_injected = True
+        return True
+
+    @staticmethod
+    def _append_system_context(messages: list[dict[str, Any]], text: str) -> None:
+        if (
+            messages
+            and messages[0].get("role") == "system"
+            and isinstance(messages[0].get("content"), str)
+        ):
+            messages[0]["content"] = f"{messages[0]['content'].rstrip()}\n\n{text}"
+        else:
+            messages.insert(0, {"role": "system", "content": text})
+
+    def note_answer_step(self) -> int:
+        """Count one forced tool-free report step."""
+        self.answer_steps += 1
+        return self.answer_steps
+
+    def observe(self, batch: list[dict[str, Any]] | None) -> None:
+        """Fold one tool batch into the consecutive listing budget."""
+        if not self.active:
+            return
+        for entry in batch or []:
+            if not isinstance(entry, dict):
+                continue
+            tool = str(entry.get("tool") or "")
+            if tool in {"delegate", "delegate_status", "list_agents"}:
+                self.delegated = True
+                self._reset_listing_burst()
+                continue
+            if _is_read_or_search(entry):
+                self._reset_listing_burst()
+                continue
+            if _is_exploration(entry) and not _failed(entry):
+                self.listing_calls += 1
+                if self._listing_nudged and self.listing_calls > self.max_listing_calls:
+                    self.exhausted = True
+
+    def _reset_listing_burst(self) -> None:
+        self.listing_calls = 0
+        self.exhausted = False
+        self.answer_steps = 0
+        self._listing_nudged = False
+
+    def take_nudge(self) -> str | None:
+        """Return the one deterministic listing-cap nudge."""
+        if not self.active or self._listing_nudged or self.listing_calls < self.max_listing_calls:
+            return None
+        self._listing_nudged = True
+        return EXPLORATION_LISTING_NUDGE
+
+    def stop_reason(self) -> str | None:
+        """Terminal reason when the forced tool-free report step still calls tools."""
+        if self.active and self.exhausted and self.answer_steps >= 1:
+            return EXPLORATION_FINAL_TEXT
+        return None
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "active": self.active,
+            "delegated": self.delegated,
+            "listing_calls": self.listing_calls,
+            "max_listing_calls": self.max_listing_calls,
+            "exhausted": self.exhausted,
+            "force_answer": self.force_answer,
+            "answer_steps": self.answer_steps,
+            "directive_injected": self.directive_injected,
+            "final_directive_injected": self.final_directive_injected,
+            "tools_primed": self.tools_primed,
         }

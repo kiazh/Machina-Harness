@@ -20,6 +20,7 @@ __all__ = [
     "active_tool_definitions",
     "compact_description",
     "compact_tool_definitions",
+    "currently_visible_tool_names",
     "mark_tools_loaded",
     "reset_dynamic_tool_state",
 ]
@@ -91,6 +92,17 @@ def mark_tools_loaded(names: list[str], available: set[str]) -> tuple[list[str],
             _loaded_tool_names.set(loaded_names)
         loaded_names.update(loaded)
     return loaded, rejected
+
+
+def currently_visible_tool_names(available: set[str] | None = None) -> set[str]:
+    """Names already visible this turn (core or loaded), honoring the allow-list."""
+    allowed = _allowed_tool_names.get()
+    visible = set(CORE_TOOL_NAMES) | set(_loaded_tool_names.get() or ())
+    if available is not None:
+        visible &= set(available)
+    if allowed is not None:
+        visible &= set(allowed)
+    return visible
 
 
 def active_tool_definitions(definitions: list[ToolDefinition]) -> list[ToolDefinition]:

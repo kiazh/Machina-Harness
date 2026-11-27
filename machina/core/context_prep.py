@@ -64,6 +64,21 @@ class ContextPreparer:
     def __init__(self, host: ContextHost) -> None:
         self.host = host
 
+    def _reset_dynamic_tool_state_if_needed(self) -> bool:
+        """Start a dynamic-tool turn from the core surface.
+
+        The flag lives on the agent host, not on this helper. Checking
+        ``self.dynamic_tools`` here silently skipped the reset, so tool_load
+        ran in a child task with an unset ContextVar and recorded the loaded
+        schema in a set the parent loop could not see.
+        """
+        if not getattr(self.host, "dynamic_tools", False):
+            return False
+        from machina.core.tool_projection import reset_dynamic_tool_state
+
+        reset_dynamic_tool_state()
+        return True
+
     async def prepare(
         self,
         session_id: uuid.UUID,
@@ -90,10 +105,7 @@ class ContextPreparer:
         Raises:
             ValueError: If the session is not found.
         """
-        if getattr(self, "dynamic_tools", False):
-            from machina.core.tool_projection import reset_dynamic_tool_state
-
-            reset_dynamic_tool_state()
+        self._reset_dynamic_tool_state_if_needed()
         images = validate_images(images or [])
         submitted_visual_tokens = len(images) * IMAGE_TOKEN_RESERVE
         payload: dict[str, Any] = {"content": user_message}

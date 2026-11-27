@@ -47,7 +47,7 @@ from machina.core.exceptions import UsageBudgetExceededError
 from machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent
 from machina.core.request_gate import RequestGate
 from machina.core.session import session_manager
-from machina.core.task_run import TaskRunPolicy
+from machina.core.task_run import ExplorationPolicy, TaskRunPolicy
 from machina.core.turn_flow import (
     collect_pauses,
     pause_response,
@@ -102,6 +102,13 @@ def record_turn_advisory(agent: BaseReActAgent, user_message: str) -> None:
 
 def new_turn_state(session_id: uuid.UUID, user_message: str) -> TurnState:
     """Create the per-turn state and publish the repair-network block."""
+    from machina.core.tool_projection import reset_dynamic_tool_state
+
+    # Start every turn from the core schema surface. Context preparation also
+    # resets this for factory agents, but doing it here guarantees that a
+    # dynamic tool load executed in a child task always mutates a set the
+    # parent loop can see, even when a transport substitutes context prep.
+    reset_dynamic_tool_state()
     budget = TurnBudget.for_turn(user_message)
     state = TurnState(
         session_id=session_id,
@@ -109,6 +116,7 @@ def new_turn_state(session_id: uuid.UUID, user_message: str) -> TurnState:
         messages=[],
         pending_chunks=[],
         task_run=TaskRunPolicy(user_message),
+        exploration=ExplorationPolicy(user_message),
         budget=budget,
     )
     from machina.core.task_run import set_repair_network_blocked
@@ -402,11 +410,27 @@ async def prepare_model_step(
     # evidence, force the answer step: exposing tools again lets a
     # model keep rerunning tests or inspecting the diff, which
     # costs a full provider round trip without adding evidence.
+    if state.exploration.active:
+        # Explicit whole-repo exploration advertises delegation from the first
+        # step instead of making the model discover it through tool_load.
+        from machina.tools.base import registry as _registry
+
+        state.exploration.prime_tools(set(_registry._tools))
+    force_exploration_answer = state.exploration.force_answer
+    if force_exploration_answer:
+        # The listing nudge was ignored. Remove tools for one step and require
+        # the holistic report; a tool call on this step becomes a terminal stop.
+        state.exploration.inject_final_directive(state.messages)
+        state.exploration.note_answer_step()
     tool_defs = (
         []
-        if state.task_run.active and state.task_run.edited and state.task_run.verified
+        if force_exploration_answer
+        or (state.task_run.active and state.task_run.edited and state.task_run.verified)
         else state.task_run.filter_tool_defs(agent._tool_defs())
     )
+    if state.exploration.active and not state.exploration.directive_injected:
+        delegate_visible = any(getattr(tool, "name", None) == "delegate" for tool in tool_defs)
+        state.exploration.inject_directive(state.messages, delegate_visible=delegate_visible)
     # Keep the dynamic loader inside the lean repair surface too.
     # Otherwise tool_load can add web/network tools after the schema
     # filter has already run, and the stale schema can still be
@@ -633,11 +657,23 @@ async def run_tool_step(
         result.terminal = True
         return
     state.task_run.observe(batch)
+    state.exploration.observe(batch)
     task_nudge = state.task_run.take_nudge()
     if task_nudge is not None:
         await agent._append_task_run_nudge(
             session_id=state.session_id,
             text=task_nudge,
+            messages=state.messages,
+            pending_chunks=state.pending_chunks,
+        )
+        state.advance_iteration()
+        result.replanned = True
+        return
+    exploration_nudge = state.exploration.take_nudge()
+    if exploration_nudge is not None:
+        await agent._append_task_run_nudge(
+            session_id=state.session_id,
+            text=exploration_nudge,
             messages=state.messages,
             pending_chunks=state.pending_chunks,
         )

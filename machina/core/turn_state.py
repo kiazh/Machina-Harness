@@ -14,8 +14,9 @@ the loop's previous capture-before-the-loop behavior.
 
 ``TurnState`` owns every counter and mutable reference the loop shares across
 iterations: messages, pending persistence chunks, tokens, iteration, recorded
-tool calls, the task-run policy, the workspace snapshot, nudge/recovery
-counters, stagnation history, and the recorded stop.
+tool calls, the task-run policy, the separate whole-repository exploration
+policy, the workspace snapshot, nudge/recovery counters, stagnation history,
+and the recorded stop.
 
 ``TurnState.check_stop`` applies the loop's exact stop precedence: repair
 deadline, then repair token budget, then the task-run policy. The caller logs
@@ -44,7 +45,7 @@ from machina.core.repair_gate import (
     repair_deadline_exceeded,
     repair_deadline_seconds,
 )
-from machina.core.task_run import TaskRunPolicy
+from machina.core.task_run import ExplorationPolicy, TaskRunPolicy
 from machina.core.token_budget import (
     REPAIR_TOKEN_BUDGET_TEXT,
     repair_token_budget,
@@ -131,6 +132,7 @@ class TurnState:
     pending_chunks: list[dict[str, Any]]
     task_run: TaskRunPolicy
     budget: TurnBudget
+    exploration: ExplorationPolicy = field(default_factory=lambda: ExplorationPolicy(""))
     total_tokens: int = 0
     iteration: int = 0
     tool_calls_made: list[dict[str, Any]] = field(default_factory=list)
@@ -174,7 +176,7 @@ class TurnState:
         self.stop = stop
 
     def check_stop(self) -> TurnStop | None:
-        """Apply the loop's deadline -> token -> task-run stop precedence."""
+        """Apply the loop's deadline -> token -> task-run -> exploration precedence."""
         if self.budget.deadline_exceeded():
             return TurnStop(STOP_REPAIR_DEADLINE, REPAIR_DEADLINE_TEXT)
         if self.budget.token_budget_exceeded(self.total_tokens):
@@ -183,6 +185,9 @@ class TurnState:
             turns=self.iteration,
             tool_calls=len(self.tool_calls_made),
         )
+        if reason is not None:
+            return TurnStop(STOP_TASK_RUN, reason)
+        reason = self.exploration.stop_reason()
         if reason is not None:
             return TurnStop(STOP_TASK_RUN, reason)
         return None
