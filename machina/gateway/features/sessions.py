@@ -176,8 +176,11 @@ async def context_get(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
     gw.require_db()
     session = await gw.get_session(params)
-    chunks = await context_manager.get_chunks(
-        session.id, limit=_int(params, "limit", 20, 1, 1000), include_embedding=False
+    limit = _int(params, "limit", 20, 0, 1000)
+    chunks = (
+        await context_manager.get_chunks(session.id, limit=limit, include_embedding=False)
+        if limit
+        else []
     )
     return {
         "chunks": [

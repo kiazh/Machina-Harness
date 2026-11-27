@@ -47,13 +47,13 @@ test("no workspace hints leaves the footer exactly as before", () => {
 	assert.ok(!row.includes("explorer"));
 });
 
-test("the footer shows cumulative tokens with the context percentage", () => {
+test("the chat counter shows context occupancy independently of cumulative usage", () => {
 	const footer = new Footer(new AnimationCoordinator(() => {}));
 	footer.model = "auto";
 	footer.tokens = 5_000;
 	footer.contextTokens = 3_115;
 	footer.contextPercent = 3.3;
-	const row = plain(footer, 160);
-	assert.ok(row.includes("5K (3%)"), row);
-	assert.ok(!row.includes("3,115"), row);
+	const row = stripTerminalSequences(footer.chatStatus.render(160)[0]!);
+	assert.match(row, /^ {4}3\.1K tokens \(3%\)/);
+	assert.doesNotMatch(plain(footer, 160), /tokens/);
 });

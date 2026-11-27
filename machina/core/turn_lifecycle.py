@@ -272,8 +272,8 @@ class TurnLifecycle:
     def build_terminal(self, *, cancelled: bool = False) -> dict[str, Any]:
         return self.engine.build_terminal(cancelled=cancelled)
 
-    def schedule_auto_compact(self) -> None:
-        self.engine.schedule_auto_compact()
+    def schedule_auto_compact(self, on_compacted: Callable[[], None] | None = None) -> None:
+        self.engine.schedule_auto_compact(on_compacted)
 
     # ─── internals ─────────────────────────────────────────────────────────
 

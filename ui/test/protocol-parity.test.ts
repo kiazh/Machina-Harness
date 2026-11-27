@@ -28,6 +28,7 @@ export const TS_EVENT_TYPES = [
 	"tool.start",
 	"tool.complete",
 	"usage",
+	"context.compacted",
 	"growth.status",
 	"agent.child",
 	"steering.update",

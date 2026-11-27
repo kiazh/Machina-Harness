@@ -28,6 +28,7 @@
       "contextPercent?": "number",
       "creditsUsed?": "number"
     },
+    "context.compacted": {},
     "growth.status": {
       "stage": "string",
       "detail?": "string"

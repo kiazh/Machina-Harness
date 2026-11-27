@@ -104,8 +104,9 @@ test("short transcript docks composer and footer to the bottom rows", () => {
 		assert.match(screen[0] ?? "", /hello world/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
-		assert.match(screen[20] ?? "", /Ask anything, or type \/ for commands\./);
-		assert.equal((screen[22] ?? "").trim(), "", "one padding row closes the composer");
+		assert.match(screen[19] ?? "", /Ask anything, or type \/ for commands\./);
+		assert.equal((screen[20] ?? "").trim(), "", "one padding row closes the composer");
+		assert.match(screen[21] ?? "", /^ {4}0 tokens \(0%\)/);
 	} finally {
 		footer.dispose();
 		coordinator.dispose();
@@ -123,7 +124,7 @@ test("long transcript follows the end above the docked composer", () => {
 		const composerRow = screen.findIndex((line) => line.includes("Ask anything"));
 		assert.ok(composerRow > 0, "composer visible");
 		assert.match(screen.slice(0, composerRow).join("\n"), /line 99/);
-		assert.match(screen[0] ?? "", /line 8[0-2]/);
+		assert.match(screen[0] ?? "", /line 83/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 	} finally {
@@ -152,7 +153,7 @@ test("docking holds at multiple viewport heights", () => {
 			const transcript = new Container();
 			transcript.addChild(new Text("hello", 0, 0));
 			const composer = new ComposerBox(tui, editorTheme, { paddingX: 1 });
-			footer.tokens = 1;
+			footer.contextTokens = 1;
 			const shell = new AppShell(tui, transcript, composer, footer);
 			tui.setLayoutRoot(shell.root);
 			tui.start();
@@ -160,7 +161,7 @@ test("docking holds at multiple viewport heights", () => {
 			const screen = plain(tui.getScreenLines());
 			assert.equal(screen.length, rows, `frame fills ${rows} rows`);
 			assert.match(screen[rows - 1] ?? "", /\? shortcuts/, `hints on last row at height ${rows}`);
-			assert.match(screen[rows - 1] ?? "", /ready.*1/, `usage shares hints row at height ${rows}`);
+			assert.match(screen.slice(0, -1).join("\n"), /1 token \(0%\)/, `usage stays with the composer at height ${rows}`);
 			shell.dispose();
 		} finally {
 			footer.dispose();

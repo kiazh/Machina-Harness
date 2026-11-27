@@ -54,7 +54,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -751,7 +751,7 @@ class TurnEngine:
         if not task.cancelled():
             task.exception()
 
-    def schedule_auto_compact(self) -> None:
+    def schedule_auto_compact(self, on_compacted: Callable[[], None] | None = None) -> None:
         """Fire-and-forget threshold compaction after ownership is released.
 
         The caller decides the skip predicate (release failure, cancelled
@@ -761,7 +761,12 @@ class TurnEngine:
         try:
             from machina import services as _services
 
-            task = asyncio.create_task(_services.maybe_auto_compact(self.spec.session_id))
+            async def compact() -> None:
+                result = await _services.maybe_auto_compact(self.spec.session_id)
+                if result and on_compacted:
+                    on_compacted()
+
+            task = asyncio.create_task(compact())
             task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             # Recorded at schedule time, before the task can acquire a claim
             # (§14.7): a scheduled-but-never-started task stays distinguishable

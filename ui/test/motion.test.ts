@@ -76,48 +76,36 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	const footer = new Footer(coordinator);
 	t.after(() => { footer.dispose(); coordinator.dispose(); });
 	footer.status = "working";
-	footer.tokens = 0;
-	const rows = footer.render(80).map((line) => stripTerminalSequences(line));
-	assert.equal(rows.length, 4, "live work uses a dark three-row strip plus the footer");
-	assert.match(rows[0]!, /[▁▂▃▄▅▆▇█]/);
-	assert.match(rows[1]!, /[▁▂▃▄▅▆▇█]/);
-	assert.match(rows[2]!, /0/);
-	assert.match(rows[2]!, /esc×2 to interrupt/);
-	assert.match(rows[3]!, /working/);
-	assert.match(rows[3]!, /shortcuts/);
-	assert.equal(footer.measureRows(80), 4);
-	footer.tokens = 12_400;
+	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
+	assert.equal(rows.length, 2);
+	assert.match(rows[0]!, /^ {4}0 tokens \(0%\).*◆.* {4}$/);
+	assert.match(rows[1]!, /esc×2 interrupt {4}$/);
+	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
+	assert.equal(footer.chatStatusRows(), 2);
+	footer.contextTokens = 12_400;
 	footer.contextPercent = 6.1;
-	const lit = footer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(lit[2]!, /12\.4K \(6%\)/);
-	for (const width of [20, 40, 80, 120]) {
-		for (const line of footer.render(width)) {
+	const lit = footer.chatStatus.render(80).map(stripTerminalSequences);
+	assert.match(lit[0]!, /^ {4}12\.4K tokens \(6%\)/);
+	for (const width of [1, 20, 40, 80, 120]) {
+		for (const line of footer.chatStatus.render(width)) {
 			assert.ok(visibleWidth(line) <= width, `wave row wider than ${width}`);
 		}
 	}
 	footer.compact = true;
-	assert.equal(footer.measureRows(80), 2, "short viewports keep one live row");
-	assert.equal(footer.render(80).length, 2);
+	assert.equal(footer.chatStatusRows(), 1, "short viewports keep one live row");
+	assert.equal(footer.chatStatus.render(80).length, 1);
 	footer.compact = false;
 	assert.equal(coordinator.timerCount, 1);
 	t.mock.timers.tick(200);
-	const next = footer.render(80).map((line) => stripTerminalSequences(line));
+	const next = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(renders(), 1, "streaming text must not strand the footer's animation");
 	assert.notEqual(next[0], lit[0], "the waveform advances");
-	for (const status of ["awaiting_approval", "offline", "ready"] as const) {
+	for (const status of ["awaiting_approval", "stopping", "cleanup_pending", "offline", "ready"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
-		assert.equal(footer.measureRows(80), 1);
+		assert.equal(footer.chatStatusRows(), 1);
 		assert.equal(footer.render(80).length, 1);
 		assert.match(stripTerminalSequences(footer.render(80)[0]!), /□$/);
-		footer.status = "working";
-	}
-	for (const status of ["stopping", "cleanup_pending"] as const) {
-		footer.status = status;
-		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
-		assert.equal(footer.measureRows(80), 4);
-		assert.equal(footer.render(80).length, 4);
-		assert.match(stripTerminalSequences(footer.render(80).at(-1)!), new RegExp(status.replace("_", " ")));
 		footer.status = "working";
 	}
 	footer.dispose();
@@ -137,10 +125,10 @@ test("working and learning share one timer, with static reduced motion", (t) => 
 	assert.equal(coordinator.size, 1, "learning expires while working continues");
 	footer.reducedMotion = true;
 	assert.equal(coordinator.timerCount, 0);
-	const first = footer.render(80)[0]!;
+	const first = footer.chatStatus.render(80);
 	const count = renders();
 	t.mock.timers.tick(1000);
-	assert.equal(footer.render(80)[0], first);
+	assert.deepEqual(footer.chatStatus.render(80), first);
 	assert.equal(renders(), count);
 	footer.status = "ready";
 	assert.equal(coordinator.size, 0);
@@ -335,10 +323,10 @@ test("footer_keeps_right_edge_on_one_row", (t) => {
 	footer.model = "codex-model";
 	footer.cwd = "/Users/dev/Machina1";
 	footer.branch = "main";
-	footer.tokens = 12400;
+	footer.contextTokens = 12400;
 	footer.compact = true;
 	const narrow = stripTerminalSequences(footer.render(40)[0]!);
-	assert.match(narrow, /12\.4K/, "token count survives narrow widths");
+	assert.match(stripTerminalSequences(footer.chatStatus.render(40)[0]!), /12\.4K/, "token count survives narrow widths");
 	assert.match(narrow, /[□▪■▣]$/, "square stays docked at 40 columns");
 });
 

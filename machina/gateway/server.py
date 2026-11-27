@@ -1811,7 +1811,7 @@ class Gateway:
         # with the shared runtime so shutdown cancels/joins it before DB
         # closure instead of leaking a use-after-close call.
         self._record_stage(turn_id, "compaction_maintenance", session_id=sid)
-        lifecycle.schedule_auto_compact()
+        lifecycle.schedule_auto_compact(lambda: emit("context.compacted"))
 
     async def _run_turn_with_timeout(
         self,

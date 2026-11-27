@@ -63,6 +63,7 @@ import type {
 	ChangeTurnInfo,
 	ConfigGetResult,
 	ConfigResult,
+	ContextResult,
 	GatewayEvent,
 	HistoryEntry,
 	InteropStatusResult,
@@ -310,8 +311,7 @@ export class App implements FeatureHost {
 	/** Wall-clock start of the current blink phase (kept across re-subscribes). */
 	private cursorBlinkStartedAt = 0;
 	private lastPrompt = "";
-	/** Previous context size, used to notice compaction and restart the counter. */
-	private lastContextTokens = 0;
+	private contextReadVersion = 0;
 	private lastEscAt = 0;
 	private pendingAbortEscAt = 0;
 	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
@@ -580,6 +580,7 @@ export class App implements FeatureHost {
 			// Fallback for non-viewport TUIs (and test doubles): classic stacking.
 			this.tui.addChild(this.transcriptView);
 			this.tui.addChild(this.composer);
+			this.tui.addChild(this.footer.chatStatus);
 			this.tui.addChild(this.footer);
 		}
 		this.tui.setFocus(this.editor);
@@ -786,6 +787,10 @@ export class App implements FeatureHost {
 				this.tui.requestRender();
 			}
 			if (method === "session.setModel") this.adoptSessionRoute(result);
+			if (method === "context.compress" && typeof params.sessionId === "string"
+				&& (result as { compressed?: boolean })?.compressed) {
+				void this.refreshContextUsage(params.sessionId);
+			}
 			return result;
 		} catch (error) {
 			this.log.warn("rpc.failed", {
@@ -1221,8 +1226,8 @@ export class App implements FeatureHost {
 		this.footer.dispose();
 		this.footer.tokens = 0;
 		this.footer.contextTokens = 0;
-		this.footer.contextPercent = null;
-		this.lastContextTokens = 0;
+		this.footer.contextPercent = 0;
+		this.contextReadVersion++;
 		this.setRunning(false);
 		this.syncAgentCount();
 		this.tui.requestRender();
@@ -1256,8 +1261,7 @@ export class App implements FeatureHost {
 					this.transcript.clear();
 					this.footer.tokens = 0;
 					this.footer.contextTokens = 0;
-					this.footer.contextPercent = null;
-					this.lastContextTokens = 0;
+					this.footer.contextPercent = 0;
 					this.family.reseed();
 					this.syncAgentCount();
 					this.refreshSessionMode(session.id);
@@ -1302,8 +1306,8 @@ export class App implements FeatureHost {
 		// without mixing turns: completed total plus this session's turn total.
 		this.footer.tokens = this.turnSession.displayTokens(session.id);
 		this.footer.contextTokens = 0;
-		this.footer.contextPercent = null;
-		this.lastContextTokens = 0;
+		this.footer.contextPercent = 0;
+		void this.refreshContextUsage(session.id);
 		// The backend stays paused for this session's approvals; rebuild the
 		// review cards retained while it was hidden (R15). Close every other
 		// session's card first so a stale child request cannot own the dock.
@@ -4556,7 +4560,7 @@ export class App implements FeatureHost {
 
 	private setRunning(running: boolean): void {
 		this.running = running;
-		this.composer.placeholder = running ? "Queue a message · applies at next tool boundary · Esc×2 stops" : "Ask anything, or type / for commands.";
+		this.composer.placeholder = running ? "Queue a message · applies at next tool boundary" : "Ask anything, or type / for commands.";
 		// AH-031: do NOT disable the composer while a turn runs — safe
 		// slash commands (/sessions, /new, /exit, /help, …) must stay
 		// usable. Prompt submits are guarded in submit()/submitTurn().
@@ -4566,6 +4570,20 @@ export class App implements FeatureHost {
 			else if (!["awaiting_approval", "stopping", "cleanup_pending"].includes(this.footer.status)) this.footer.status = "working";
 		}
 		this.shell.invalidateChrome();
+	}
+
+	private async refreshContextUsage(sessionId: string): Promise<void> {
+		if (this.exiting || this.current?.id !== sessionId) return;
+		const version = ++this.contextReadVersion;
+		try {
+			const { totalTokens, budget } = await this.request<ContextResult>("context.get", { sessionId, limit: 0 });
+			if (this.exiting || this.contextReadVersion !== version || !Number.isFinite(totalTokens)) return;
+			this.footer.contextTokens = totalTokens;
+			this.footer.contextPercent = budget > 0 ? 100 * totalTokens / budget : null;
+			this.tui.requestRender();
+		} catch {
+			// Usage is supplemental; retain the last reading if the RPC fails.
+		}
 	}
 
 	// ─── gateway ────────────────────────────────────────────────────────────
@@ -4667,6 +4685,10 @@ export class App implements FeatureHost {
 			// only for the current session; never steals focus.
 			if (event.sessionId !== this.current?.id) return;
 			if (this.footer.pulseGrowth()) this.tui.requestRender();
+			return;
+		}
+		if (event.type === "context.compacted") {
+			void this.refreshContextUsage(event.sessionId);
 			return;
 		}
 		const hidden = event.sessionId !== this.current?.id;
@@ -4843,21 +4865,12 @@ export class App implements FeatureHost {
 		if (event.type === "usage") {
 			this.turnSession.setUsageLatest(event.sessionId, event.tokens);
 			if (event.sessionId === this.current?.id) {
-				const contextTokens = event.contextTokens ?? 0;
-				if (
-					contextTokens > 0
-					&& this.lastContextTokens > 0
-					&& contextTokens < this.lastContextTokens * 0.5
-				) {
-					// Compaction shrank the context: restart the visible counter
-					// from this turn instead of carrying the pre-compaction total.
-					this.turnSession.resetSessionTokens();
-					this.turnSession.saveSessionTokens(event.sessionId);
-				}
-				if (contextTokens > 0) this.lastContextTokens = contextTokens;
 				this.footer.tokens = this.turnSession.sessionTokens + event.tokens;
-				this.footer.contextTokens = contextTokens;
-				this.footer.contextPercent = event.contextPercent ?? null;
+				if (event.contextTokens !== undefined) {
+					this.contextReadVersion++;
+					this.footer.contextTokens = event.contextTokens;
+					this.footer.contextPercent = event.contextPercent ?? null;
+				}
 			}
 			this.tui.requestRender();
 			return;

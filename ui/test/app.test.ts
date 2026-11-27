@@ -1212,22 +1212,34 @@ test("events for sessions with no in-flight turn are ignored", async () => {
 	await app.exit();
 });
 
-test("compaction restarts the visible token counter", async () => {
+test("the context gauge follows live usage and refreshes after compaction", async () => {
 	const { app, tui, client } = makeApp(SESSION_A);
 	await app.start();
 	await app.submitTurn("hello");
 	client.emit(ev({ type: "message.start" }));
-	const footer = widgetWith(tui, "tokens") as unknown as { tokens: number; contextPercent: number | null };
+	const footer = widgetWith(tui, "contextTokens") as unknown as {
+		tokens: number; contextTokens: number; contextPercent: number | null;
+	};
+	assert.equal(footer.contextTokens, 0);
 
 	client.emit(ev({ type: "usage", tokens: 1_200, contextTokens: 10_000, contextPercent: 5 }));
-	assert.equal(footer.tokens, 1_200);
+	assert.equal(footer.contextTokens, 10_000);
 	assert.equal(footer.contextPercent, 5);
 
-	client.emit(ev({ type: "usage", tokens: 300, contextTokens: 3_000, contextPercent: 1.5 }));
-	assert.equal(footer.tokens, 300, "a shrunken context starts the counter over");
-	assert.equal(footer.contextPercent, 1.5);
+	client.emit(ev({ type: "message.complete", tokens: 1_200, text: "done", iterations: 1, toolCalls: 0, cancelled: false }));
+	client.responses.set("context.get", { totalTokens: 8_000, budget: 200_000 });
+	client.emit(ev({ type: "context.compacted" }));
+	await Promise.resolve();
+	await Promise.resolve();
+	assert.equal(footer.contextTokens, 8_000);
+	assert.equal(footer.contextPercent, 4);
+	assert.equal(footer.tokens, 1_200, "compaction does not change accounting");
 
-	client.emit(ev({ type: "message.complete", tokens: 300, text: "done", iterations: 1, toolCalls: 0, cancelled: false }));
+	client.responses.set("context.compress", { compressed: true });
+	client.responses.set("context.get", { totalTokens: 4_000, budget: 200_000 });
+	await app.request("context.compress", { sessionId: SESSION_A.id });
+	await Promise.resolve();
+	assert.equal(footer.contextTokens, 4_000);
 	await app.exit();
 });
 

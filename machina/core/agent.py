@@ -2711,34 +2711,34 @@ async def _react_loop(
                                     yield StreamEvent(type="text", content=event.content)
                                 elif event.type == "done":
                                     final_response = event.response
-                                    total_tokens += event.response.usage.get("total_tokens", 0)
+                                    usage = event.response.usage
+                                    total_tokens += usage.get("total_tokens", 0)
+                                    prompt_tokens = usage.get("prompt_tokens", 0) or 0
+                                    completion_tokens = usage.get("completion_tokens", 0) or 0
                                     metrics.record_tokens(
-                                        str(session_id),
-                                        event.response.usage.get("prompt_tokens", 0),
-                                        event.response.usage.get("completion_tokens", 0),
+                                        str(session_id), prompt_tokens, completion_tokens
                                     )
+                                    context_tokens = int(usage.get("context_tokens", 0) or 0)
+                                    if not context_tokens:
+                                        context_tokens = (
+                                            prompt_tokens + completion_tokens
+                                            if prompt_tokens
+                                            else gate.request_tokens
+                                        )
+                                    context_percent = usage.get("context_usage_percentage")
+                                    if not isinstance(context_percent, (int, float)) or isinstance(
+                                        context_percent, bool
+                                    ):
+                                        context_percent = (
+                                            100 * context_tokens / gate.effective_budget
+                                            if gate.effective_budget > 0
+                                            else None
+                                        )
                                     yield StreamEvent(
                                         type="token_usage",
-                                        tokens_used=event.response.usage.get("total_tokens", 0),
-                                        context_tokens=int(
-                                            event.response.usage.get("context_tokens", 0) or 0
-                                        ),
-                                        context_usage_percentage=(
-                                            float(event.response.usage["context_usage_percentage"])
-                                            if isinstance(
-                                                event.response.usage.get(
-                                                    "context_usage_percentage"
-                                                ),
-                                                (int, float),
-                                            )
-                                            and not isinstance(
-                                                event.response.usage.get(
-                                                    "context_usage_percentage"
-                                                ),
-                                                bool,
-                                            )
-                                            else None
-                                        ),
+                                        tokens_used=usage.get("total_tokens", 0),
+                                        context_tokens=context_tokens,
+                                        context_usage_percentage=context_percent,
                                         credits_used=(
                                             float(event.response.usage["credits_used"])
                                             if isinstance(

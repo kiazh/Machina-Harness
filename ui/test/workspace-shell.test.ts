@@ -19,7 +19,7 @@ import { AppShell, type ComposerBudget } from "../src/components/AppShell.ts";
 import { NowPlayingBar } from "../src/components/NowPlayingBar.ts";
 import { WorkspaceShell } from "../src/components/WorkspaceShell.ts";
 import { AnimationCoordinator } from "../src/design/motion.ts";
-import { editorTheme } from "../src/theme.ts";
+import { editorTheme, repairFill } from "../src/theme.ts";
 import { computeLayout } from "../src/workspace/layout.ts";
 import { LAYOUT_BUDGETS, SPLIT_MINIMUM_COLUMNS, type LayoutInput } from "../src/workspace/state.ts";
 
@@ -174,6 +174,7 @@ test("without workspace state the shell keeps today's chat-only tree", () => {
 test("160x48 split composes chat | divider | editor | grip, composer docked in chat", () => {
 	const h = buildHarness(160, 48);
 	try {
+		h.footer.status = "working";
 		configure(h);
 		const geometry = computeLayout(h.state);
 		assert.equal(geometry.effectiveMode, "split");
@@ -207,6 +208,13 @@ test("160x48 split composes chat | divider | editor | grip, composer docked in c
 		assert.ok(composerRow > 0 && composerRow < 47, "composer visible above the footer");
 		assert.ok(screen[composerRow]!.indexOf("Ask anything") < dividerX, "composer prompt stays in chat");
 		assert.doesNotMatch(screen[composerRow]!.slice(dividerX), /EDITOR/, "editor content stays out of the composer row");
+		const usageRow = screen.findIndex((line) => line.includes("0 tokens (0%)"));
+		assert.equal(usageRow, composerRow + 2, "dark status row directly follows the input block");
+		const canvasFill = repairFill("background", " ").split(" ", 1)[0]!;
+		assert.ok(h.tui.getScreenLines()[usageRow]!.includes(canvasFill), "usage is painted on the chat canvas");
+		assert.match(screen[usageRow]!.slice(0, dividerX), /^ {4}0 tokens \(0%\).*◆/);
+		assert.match(screen[usageRow + 1]!.slice(0, dividerX), /esc×2 interrupt {4}$/);
+		assert.doesNotMatch(screen.slice(usageRow, usageRow + 2).map((line) => line.slice(dividerX)).join("\n"), /◆|interrupt/);
 		const footer = screen[47]!;
 		assert.equal(footer.length, 160, "footer still spans the full width");
 		assert.match(footer, /test-model/);
@@ -714,6 +722,8 @@ test("chrome rows are measured once per state key and the footer is never render
 	let footerRenders = 0;
 	const footer = {
 		compact: false,
+		chatStatusRows: () => 1,
+		chatStatus: { render: () => ["status"], invalidate() {} },
 		render() {
 			footerRenders += 1;
 			return ["footer"];

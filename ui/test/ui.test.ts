@@ -254,7 +254,7 @@ test("every widget respects the render width", async () => {
 	);
 	const widthCoordinator = new AnimationCoordinator(() => {}, false);
 	const footer = new Footer(widthCoordinator);
-	Object.assign(footer, { cwd: "C:\\Users\\someone\\a\\very\\long\\path\\to\\a\\project", branch: "main", model: "anthropic/claude-3.5-sonnet", tokens: 123456 });
+	Object.assign(footer, { cwd: "C:\\Users\\someone\\a\\very\\long\\path\\to\\a\\project", branch: "main", model: "anthropic/claude-3.5-sonnet", contextTokens: 123456 });
 	const picker = new Picker("Sessions", [{ value: "a", label: "session-a" }, { value: "b", label: "session-b" }], () => {}, () => {});
 
 	for (const width of [20, 40, 80, 120]) {
@@ -263,7 +263,7 @@ test("every widget respects the render width", async () => {
 		}
 	}
 	assert.match(plain(card, 80), /more lines/, "long results are truncated");
-	assert.match(plain(footer, 120), /123\.5K/);
+	assert.match(plain(footer.chatStatus, 120), /123\.5K tokens/);
 	assert.match(plain(picker, 80), /Sessions/);
 	assert.doesNotMatch(
 		picker.render(80).map((line) => stripTerminalSequences(line)).join("\n"),

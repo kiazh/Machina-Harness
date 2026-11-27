@@ -63,7 +63,7 @@ export class ThinkingIndicator implements Component {
 		const dot = theme.accent(this.activity.frame(ICONS.workingFrames, ACTIVITY_INTERVAL_MS, this.startedAt));
 		const secs = Math.floor((Date.now() - this.startedAt) / 1000);
 		const base = this.baseMessage.replace(/[.\s]+$/, "");
-		const msg = secs > 0 ? `${base} (${secs}s · esc to interrupt)` : base;
+		const msg = secs > 0 ? `${base} (${secs}s)` : base;
 		const gutter = " ".repeat(transcriptInset(width));
 		return [truncateToWidth(`${gutter}${dot} ${theme.muted(msg)}`, width)];
 	}

@@ -150,6 +150,7 @@ async def test_steering_during_tool_batch_preserves_the_current_action(monkeypat
 async def test_steering_arriving_during_model_call_replans_before_tools(monkeypatch, stream):
     from machina.core import agent as module
     from machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent
+    from machina.core.request_gate import RequestGate
     from machina.core.steering import steering_inbox
 
     session = Session(id=uuid4(), agent_id="harness")
@@ -159,7 +160,7 @@ async def test_steering_arriving_during_model_call_replans_before_tools(monkeypa
     monkeypatch.setattr(module.context_manager, "add_chunk", persist)
 
     async def gate(msgs, **kwargs):
-        return SimpleNamespace(messages=msgs, failure=None)
+        return RequestGate(messages=msgs, effective_budget=100, request_tokens=10)
 
     monkeypatch.setattr(module, "evaluate_request", gate)
     calls = []

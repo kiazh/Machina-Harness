@@ -225,20 +225,20 @@ export class AppShell {
 		// measureRows is itself keyed by the composer's draft/window state, so
 		// this stays a cheap lookup while catching draft/popup height changes.
 		const composerRows = split ? 0 : this.composer.measureRows?.(width) ?? this.composer.render(width).length;
-		const footerRows = this.footer.measureRows?.(width) ?? 1;
+		const chatStatusRows = split ? 0 : this.footer.chatStatusRows();
 		const key = [
 			width,
 			this.lastRows,
 			this.density,
 			activityRows,
 			composerRows,
-			footerRows,
+			chatStatusRows,
 			this.dock ? (this.dockInChatColumn() ? "dock-chat" : "dock") : "nodock",
 			this.navRows(),
 		].join("|");
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
-		let rows = this.navRows() + composerRows + activityRows + footerRows + this.bottomGapRows();
+		let rows = this.navRows() + composerRows + activityRows + chatStatusRows + 1 + this.bottomGapRows();
 		if (!split) rows += this.composerGapRows();
 		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;
@@ -385,11 +385,18 @@ export class AppShell {
 			{ component: topRow, basis: 0, grow: 1 },
 			...(this.dock && !this.dockInChatColumn() ? [{ component: this.dock, shrink: 0 }] : []),
 			...(!split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
-			{ component: this.composerGap, shrink: 0 },
-			...(!split ? [{ component: this.composer, shrink: 0 }] : []),
+			...(!split ? this.composerDock() : []),
 			{ component: this.bottomSpacer, shrink: 0 },
 			{ component: this.footer, shrink: 0 },
 		]);
+	}
+
+	private composerDock() {
+		return [
+			{ component: this.composerGap, shrink: 0 },
+			{ component: this.composer, shrink: 0 },
+			{ component: this.footer.chatStatus, shrink: 0 },
+		];
 	}
 
 	/**
@@ -451,7 +458,7 @@ export class AppShell {
 				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: dock && this.lastRows < 12 ? 0 : 1 },
 				...(split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
 				...(dock ? [{ component: dock, shrink: 0 }] : []),
-				...(split ? [{ component: this.composerGap, shrink: 0 }, { component: this.composer, shrink: 0 }] : []),
+				...(split ? this.composerDock() : []),
 			],
 			{ gap: 0 },
 		);

@@ -74,6 +74,7 @@ async def test_auto_parallel_synthesis_is_presented_consistently(monkeypatch) ->
 async def test_run_and_run_stream_share_terminal_accounting(monkeypatch) -> None:
     """One model turn terminates identically through either adapter."""
     from machina.core import agent as module
+    from machina.core.request_gate import RequestGate
 
     session = Session(id=uuid4(), agent_id="harness")
     messages = [{"role": "user", "content": "hello"}]
@@ -84,7 +85,7 @@ async def test_run_and_run_stream_share_terminal_accounting(monkeypatch) -> None
     )
 
     async def gate(msgs, **kwargs):
-        return SimpleNamespace(messages=msgs, failure=None)
+        return RequestGate(messages=msgs, effective_budget=100, request_tokens=15)
 
     async def complete(**_kwargs):
         return model_response
@@ -130,6 +131,8 @@ async def test_run_and_run_stream_share_terminal_accounting(monkeypatch) -> None
     ]
 
     assert [event.type for event in events] == ["text", "token_usage", "done"]
+    assert events[1].context_tokens == 11
+    assert events[1].context_usage_percentage == 11
     assert result.content == events[-1].response.content == "Same answer"
     assert result.tokens_used == events[-1].response.tokens_used == 11
     assert result.iterations == events[-1].response.iterations == 1

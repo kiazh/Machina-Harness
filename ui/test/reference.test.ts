@@ -31,7 +31,7 @@ test("reference footer is one quiet row with actual metadata and right aligned h
   Object.assign(footer, {model:"actual-model", branch:"main", tokens:17});
   const rows = plain(footer.render(120));
   assert.equal(rows.length, 1);
-  assert.match(rows[0]!, /actual-model.*main.*ask.*ready.*17/);
+  assert.match(rows[0]!, /actual-model.*main.*ask.*ready/);
   assert.match(rows[0]!, /\? shortcuts · \/ commands\s+□$/);
  } finally {coordinator.dispose();}
 });
