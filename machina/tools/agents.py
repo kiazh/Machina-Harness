@@ -60,6 +60,9 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
     description=(
         "Hand a self-contained task to another agent and get its result. Use for work "
         "that suits a specialist (e.g. 'researcher' to gather info, 'coder' to edit code). "
+        "The child already has its own role and system prompt: do not repeat or rewrite its "
+        "persona. Give it the objective, constraints, exact files or artifacts, acceptance "
+        "criteria, and expected output. "
         "Independent subtasks fan out: issue one delegate call per subtask in a single "
         "block and they run in parallel up to the configured concurrency limit; "
         "additional calls queue. "
