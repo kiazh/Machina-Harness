@@ -3,7 +3,7 @@
 // Each controller owns one concern and receives only the calls it makes on the
 // composition root. This is deliberately not an `AppContext`: a controller
 // cannot reach a field it did not declare, and every member here has a caller.
-import type { Component, SelectItem, TUI } from "@earendil-works/pi-tui";
+import type { Component, OverlayHandle, SelectItem, TUI } from "@earendil-works/pi-tui";
 import type { ActivityStore } from "../activity.ts";
 import type { ChangesPage } from "../components/ChangesPage.ts";
 import type { Footer } from "../components/Footer.ts";
@@ -97,4 +97,54 @@ export interface ChangesHost {
 	print(text: string, kind?: NoticeKind): void;
 	closeScreen(): void;
 	transcriptNotice(text: string, kind: NoticeKind): void;
+}
+
+/** A dialog overlay that an approval dock can temporarily hide and restore. */
+export interface DockDialog {
+	readonly handle: OverlayHandle;
+	hidden: boolean;
+}
+
+/** The transcript operations an approval or question card needs. */
+export interface ApprovalTranscript {
+	pauseForApproval(): void;
+	addComponent(component: Component): void;
+	addNotice(text: string, kind?: NoticeKind): void;
+}
+
+/**
+ * Approval/question controller host.
+ *
+ * Invariants:
+ * - `turnSession` is the sole owner of retained approval evidence and open
+ *   cards; this controller never keeps a second copy.
+ * - `current`/`view` are read, never assigned: the visible chat and shell
+ *   screen stay App state.
+ * - `clientRequest` is the raw gateway call used by approval resolve/read;
+ *   `request` is App's validated/logged path used for question answers.
+ * - `dialogs` is the live overlay stack, in stack order.
+ */
+export interface ApprovalHost {
+	readonly tui: TUI;
+	readonly log: LogSink;
+	readonly footer: Footer;
+	readonly turnSession: TurnSessionStore;
+	readonly transcript: ApprovalTranscript;
+	readonly dialogs: readonly DockDialog[];
+
+	current(): SessionInfo | undefined;
+	view(): ScreenView;
+	running(): boolean;
+	isExiting(): boolean;
+	request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
+	clientRequest<T>(method: string, params?: Record<string, unknown>): Promise<T>;
+	setDock(component?: Component): void;
+	invalidateChrome(): void;
+	scrollTranscriptToEnd(): void;
+	closeQuickOpen(): void;
+	focusChat(): void;
+	syncCursorBlink(): void;
+	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
+	askText(options: AskTextOptions): Promise<string | undefined>;
+	print(text: string, kind?: NoticeKind): void;
 }
