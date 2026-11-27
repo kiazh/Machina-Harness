@@ -29,8 +29,11 @@ reversible, and no task mixes a code move with a behavior change.
 | P2.4b phase split | not started | loop still one function |
 | U3.1 status controller | done | `ui/src/app/status.ts` (569) |
 | U3.2 changes controller | done | `ui/src/app/changes.ts` (438) |
-| U3.3/U3.4 approvals/sessions | in progress | — |
-| U4.* / P5.* | not started | — |
+| U3.3 approvals | done | `ui/src/app/approvals.ts` (420); wired |
+| U3.4 sessions | done | `ui/src/app/sessions.ts` (435); wired |
+| U4.1–U4.5 standalone modules | done | events/keyboard/commands/workspace/bootstrap + tests |
+| U4 integration into App | in progress | single-writer pass |
+| P5 final ratchet/docs | pending | — |
 
 Measured after the Python tranche:
 
@@ -42,9 +45,16 @@ Measured after the Python tranche:
 | `core/turn_state.py` | — | 188 |
 | `core/context_prep.py` | — | 411 |
 | `core/turn_phases.py` | — | 404 |
-| `ui/src/app.ts` | 5,399 | 4,576 |
+| `ui/src/app.ts` | 5,399 | 3,982 (before U4 integration) |
 | `ui/src/app/status.ts` | — | 569 |
 | `ui/src/app/changes.ts` | — | 438 |
+| `ui/src/app/approvals.ts` | — | 420 |
+| `ui/src/app/sessions.ts` | — | 435 |
+| `ui/src/app/events.ts` | — | 442 |
+| `ui/src/app/keyboard.ts` | — | 648 |
+| `ui/src/app/commands.ts` | — | 422 |
+| `ui/src/app/workspace.ts` | — | 1,153 |
+| `ui/src/app/bootstrap.ts` | — | 520 |
 
 Both safety nets (R0.2/R0.3) are in place. The remaining work is method-level:
 split `react_loop` into phases, then continue the UI controllers (approvals,
