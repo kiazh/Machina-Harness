@@ -16,7 +16,7 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO / "machina" / "research"))
 import head_to_head  # noqa: E402
 

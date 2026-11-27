@@ -1,10 +1,10 @@
 environment file could not be resolved
-Ignoring unreadable config persona_description in /Users/shadow/.machina/config.yaml: ImportError
+Ignoring unreadable config persona_description in <home>/.machina/config.yaml: ImportError
 ImportError
-/Users/shadow/machina/machina/core/config.py:614 (load)
-/Users/shadow/machina/machina/core/config.py:282 (validate_value)
-/Users/shadow/machina/machina/memory/__init__.py:15 (<module>)
-/Users/shadow/machina/machina/memory/approval.py:23 (<module>)
+<repo>/machina/core/config.py:614 (load)
+<repo>/machina/core/config.py:282 (validate_value)
+<repo>/machina/memory/__init__.py:15 (<module>)
+<repo>/machina/memory/approval.py:23 (<module>)
 2026-10-14 23:32:49,093 [AUDIT] {"timestamp": 1792035169.0938308, "event": "rag_index_start", "session_id": "b2ba114e-75a7-4a33-9b41-166cc2e59be3", "source": "https://alice:[REDACTED_URL_PASSWORD]@example.invalid/doc?api_key=[REDACTED_CREDENTIAL]&x=1", "doc_type": "text"}
 2026-10-14 23:32:49,103 [AUDIT] {"timestamp": 1792035169.1035259, "event": "rag_index_complete", "session_id": "b2ba114e-75a7-4a33-9b41-166cc2e59be3", "source": "https://alice:[REDACTED_URL_PASSWORD]@example.invalid/doc?api_key=[REDACTED_CREDENTIAL]&x=1", "chunks_stored": 1}
 source                   = 'https://alice:example-passphrase@example.invalid/doc?api_key=short1&x=1'

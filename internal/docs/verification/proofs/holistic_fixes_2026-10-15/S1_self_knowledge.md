@@ -1,6 +1,6 @@
 # S1 — self-knowledge completeness (always-on capability brief)
 
-- Repo: `/Users/shadow/machina`. This audit started at HEAD `3ef6d5b` with the
+- Repo: `<repo>`. This audit started at HEAD `3ef6d5b` with the
   2026-10-15 campaign **uncommitted in the tree** (files were the source of
   truth; `git log` alone was stale). The coordinating lanes committed the
   campaign while this lane ran (HEAD moved to `923b946`); all HEAD-verified

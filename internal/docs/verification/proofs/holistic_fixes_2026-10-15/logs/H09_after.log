@@ -1,4 +1,4 @@
-probed module: /Users/shadow/machina/machina/interop.py
+probed module: <repo>/machina/interop.py
 stub resolution: {'opencode': '/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/h09-stubs-jpbhv5b8/opencode', 'codex': '/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/h09-stubs-jpbhv5b8/codex', 'hermes': '/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/h09-stubs-jpbhv5b8/hermes'}
 
 platform=opencode prompt='--help'

@@ -1,6 +1,6 @@
 // Audit finding #2: missing/ambiguous approval identifiers approve the first request.
 // Imports the real UI command module and drives it with a fake host.
-const { approvalsCommand } = await import("/Users/shadow/machina/ui/src/features/mode.ts");
+const { approvalsCommand } = await import("<repo>/ui/src/features/mode.ts");
 
 const pending = [
   { request_id: "aaaaaaaa-1111-4000-a000-000000000001", operation: "terminal", target: "cmd-1", agent_id: "agent" },

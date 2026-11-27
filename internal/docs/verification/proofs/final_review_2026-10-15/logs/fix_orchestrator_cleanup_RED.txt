@@ -3,7 +3,7 @@ FFF                                                                      [100%]
 ________ test_record_start_db_error_closes_provider_and_archives_child _________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b334c30>
-_stub_registry_and_session = (<module 'machina.core.orchestrator' from '/Users/shadow/machina/machina/core/orchestrator.py'>, UUID('80e844e1-a23a-4ea8-9304-939db04c2c1c'), [])
+_stub_registry_and_session = (<module 'machina.core.orchestrator' from '<repo>/machina/core/orchestrator.py'>, UUID('80e844e1-a23a-4ea8-9304-939db04c2c1c'), [])
 
     async def test_record_start_db_error_closes_provider_and_archives_child(
         monkeypatch, _stub_registry_and_session
@@ -33,7 +33,7 @@ tests/test_final_review_2026_10_15_cleanup.py:88: AssertionError
 ______ test_record_start_cancellation_closes_provider_and_archives_child _______
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10c34f890>
-_stub_registry_and_session = (<module 'machina.core.orchestrator' from '/Users/shadow/machina/machina/core/orchestrator.py'>, UUID('85f7f3f0-4095-472f-9de6-bd263523a3c1'), [])
+_stub_registry_and_session = (<module 'machina.core.orchestrator' from '<repo>/machina/core/orchestrator.py'>, UUID('85f7f3f0-4095-472f-9de6-bd263523a3c1'), [])
 
     async def test_record_start_cancellation_closes_provider_and_archives_child(
         monkeypatch, _stub_registry_and_session

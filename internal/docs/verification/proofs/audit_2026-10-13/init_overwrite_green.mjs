@@ -5,9 +5,9 @@ import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { App } = await import("/Users/shadow/machina/ui/src/app.ts");
-const { runCommand } = await import("/Users/shadow/machina/ui/src/features/index.ts");
-const { parseCommand } = await import("/Users/shadow/machina/ui/src/commands.ts");
+const { App } = await import("<repo>/ui/src/app.ts");
+const { runCommand } = await import("<repo>/ui/src/features/index.ts");
+const { parseCommand } = await import("<repo>/ui/src/commands.ts");
 
 const work = await mkdtemp(join(tmpdir(), "green-init-app-"));
 await writeFile(join(work, "AGENTS.md"), "# AGENTS.md\n\nIMPORTANT EXISTING INSTRUCTIONS\n", "utf8");

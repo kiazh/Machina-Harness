@@ -36,7 +36,7 @@ machina/tools/file.py:14: in <module>
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
 self = <tests.test_leaf_independence._BlockCore object at 0x1093ec3d0>
-fullname = 'machina.core', path = ['/Users/shadow/machina/machina']
+fullname = 'machina.core', path = ['<repo>/machina']
 target = None
 
     def find_spec(self, fullname, path=None, target=None):

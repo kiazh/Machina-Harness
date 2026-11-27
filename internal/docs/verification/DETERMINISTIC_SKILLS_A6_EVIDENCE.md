@@ -20,17 +20,17 @@ while A6 ran — each capture states what it inspected.
 
 | Item | Value |
 |---|---|
-| Machina repo | `/Users/shadow/machina` |
+| Machina repo | `<repo>` |
 | `git rev-parse HEAD` | `0f7eb2c70dc24083d201b966f12079d8395f9087` (`feat(context): wire both loops through the shared request gate (B2, shadow default)`) |
 | Track A commits inspected | `9cfff3c` A3 (`planned_steps`, sections, stage-aware disclosure), `0908f68` A5 backend (gateway `skills.search/preview_route/section`), `1086f57` A4 (`revisions`, `events`, generation-guarded caches), `002cc19` A5-UI (interactive `/skills` directory) |
 | A0 baseline commit (frozen gates origin) | `b7bd6b6` |
 | Other commits present | `e37f3dc` B0 artifacts, `0f7eb2c` B2 loop wiring |
 | `git status --porcelain \| wc -l` at final capture | 7 modified (my 3 UI files: `ui/src/app.ts`, `ui/src/components/SkillsPicker.ts`, `ui/test/skills-picker.test.ts`; 2 uncommitted follow-up files: `ui/src/features/skills.ts`, `ui/test/features.test.ts`; 2 concurrent B2 files: `machina/core/request_gate.py`, `machina/tools/artifacts.py`) |
 | `git diff \| shasum -a 256` | `41930f12f7eef6debf981ef27c3c3963571053970bce077de03812df8d1e9ff3` (drifting while B2 writes) |
-| DevTools repo | `/Users/shadow/Machina-DevTools`, HEAD `b109027` (`tests: B2 loop-wiring suite + artifact tool surface + patch-target update`) |
+| DevTools repo | `<home>/Machina-DevTools`, HEAD `b109027` (`tests: B2 loop-wiring suite + artifact tool surface + patch-target update`) |
 | A6 test file | `tests/test_a6_release_evidence.py` (new, untracked at capture) |
 | UI test files (A6 additions) | `ui/test/skills-picker.test.ts` (+293 net lines incl. the concurrent U07 adaptation), `ui/src/components/SkillsPicker.ts` (+195), `ui/src/app.ts` (+14) |
-| Python for all runs | `/Users/shadow/machina/.venv/bin/python` (3.14.5, editable install of the checkpoint) |
+| Python for all runs | `<repo>/.venv/bin/python` (3.14.5, editable install of the checkpoint) |
 
 No commit, add, or stash was made by A6.
 
@@ -46,7 +46,7 @@ No commit, add, or stash was made by A6.
 | C4 | earlier eight-suite subset (same minus gateway/ecc/features/gateway-search) | 192 passed in 2.19 s |
 | C5 | `ui: node --test test/skills-picker.test.ts` | **23 tests, 23 pass, 0 fail** (19 pre-existing + 4 new) |
 | C6 | `ui: npm run check` (typecheck + full UI suite + eslint) | at capture: **999 tests, 993 pass, 6 skip, 0 fail**; typecheck and lint clean. Report-time re-check: the shared UI gate is red on another writer's in-flight help-palette wiring (`ui/src/components/HelpPalette.ts`, `ui/test/help-palette.test.ts`, and `HelpPaletteHost` wiring in `app.ts`/`features/types.ts` — regions outside the skills picker); A6's own UI files stay green in isolation (C5 re-run 23/23; eslint on `SkillsPicker.ts`/`app.ts`/`skills-picker.test.ts` clean). |
-| C7 | `python -c "import machina.skills.planned_steps, machina.skills.revisions, machina.skills.events, machina.skills.search"` from the installed venv | ok (resolves to `/Users/shadow/machina/machina/skills/…`) |
+| C7 | `python -c "import machina.skills.planned_steps, machina.skills.revisions, machina.skills.events, machina.skills.search"` from the installed venv | ok (resolves to `<repo>/machina/skills/…`) |
 | C8 | `.venv/bin/python -m pip wheel --no-deps --no-build-isolation . -w /private/tmp/opencode/a6wheel` | `machina-0.2.0-py3-none-any.whl`, 1 689 537 B, sha256 `9199bb9f…e052cf`, 474 entries; all A6-relevant modules present (§9) |
 | C9 | ledger with `-s` (see §8) | recorded below |
 

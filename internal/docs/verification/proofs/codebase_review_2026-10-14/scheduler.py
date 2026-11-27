@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ['HOME']=tempfile.mkdtemp(prefix='machina-scheduler-review-')
 os.environ['MACHINA_ENV_FILE']='/dev/null'
 os.environ['MACHINA_SECRET_BACKEND']=''
-sys.path.insert(0,'/Users/shadow/machina')
+sys.path.insert(0,'<repo>')
 from machina.db.connection import db
 from machina.core.session import session_manager
 from machina.core import turns

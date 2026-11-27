@@ -9,7 +9,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 import machina.rag.reranker as reranker_module

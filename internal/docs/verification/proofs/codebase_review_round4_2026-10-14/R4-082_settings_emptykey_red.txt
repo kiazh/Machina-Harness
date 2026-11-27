@@ -150,7 +150,7 @@ test at test/features.test.ts:1480:1
   
   'Could not add acme: c[redacted]o[redacted]u[redacted]l[redacted]d[redacted] [redacted]n[redacted]o[redacted]t[redacted] [redacted]r[redacted]e[redacted]a[redacted]c[redacted]h[redacted] [redacted]h[redacted]t[redacted]t[redacted]p[redacted]:[redacted]/[redacted]/[redacted]1[redacted]2[redacted]7[redacted].[redacted]0[redacted].[redacted]0[redacted].[redacted]1[redacted]:[redacted]9[redacted]0[redacted]0[redacted]0[redacted]/[redacted]v[redacted]1[redacted] [redacted]([redacted]C[redacted]o[redacted]n[redacted]n[redacted]e[redacted]c[redacted]t[redacted]E[redacted]r[redacted]r[redacted]o[redacted]r[redacted])'
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/features.test.ts:1488:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/features.test.ts:1488:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -167,7 +167,7 @@ test at test/features.test.ts:1507:1
   
     assert.ok(host.printed.some((p) => /Provider "acme" removed — store entry, MACHINA_PROVIDER_ACME_API_KEY line in \.env, 3 cached model\(s\), registry entry\./.test(p.text)))
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/features.test.ts:1553:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/features.test.ts:1553:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -184,7 +184,7 @@ test at test/features.test.ts:1557:1
   
     assert.ok(host.printed.some((p) => /MACHINA_PROVIDER_ACME_API_KEY \(no \.env line found\)/.test(p.text)))
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/features.test.ts:1574:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/features.test.ts:1574:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,

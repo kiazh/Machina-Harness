@@ -1,7 +1,7 @@
 ============================= test session starts ==============================
-platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- /Users/shadow/machina/.venv/bin/python
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/.venv/bin/python
 hypothesis profile 'default'
-rootdir: /Users/shadow/machina
+rootdir: <repo>
 configfile: pyproject.toml
 plugins: cov-7.1.0, hypothesis-6.169.0, asyncio-1.4.0, anyio-4.15.1, langsmith-0.14.8
 asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function

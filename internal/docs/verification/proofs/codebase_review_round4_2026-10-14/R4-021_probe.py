@@ -1,7 +1,7 @@
 """R4-021 probe: malformed 200 -> embed()/embed_query() behavior + cache state.
 
 Run against the unfixed tree (RED) and the fixed tree (GREEN):
-    cd <tree> && /Users/shadow/machina/.venv/bin/python <this file>
+    cd <tree> && <repo>/.venv/bin/python <this file>
 """
 
 import asyncio

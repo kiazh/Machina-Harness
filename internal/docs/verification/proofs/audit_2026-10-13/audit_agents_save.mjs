@@ -1,6 +1,6 @@
 // Audit finding: `/agents save helper My helper description` saves the name
 // as "helper my helper description".
-const { agentsCommand } = await import("/Users/shadow/machina/ui/src/features/agents.ts");
+const { agentsCommand } = await import("<repo>/ui/src/features/agents.ts");
 
 const captured = [];
 const host = {

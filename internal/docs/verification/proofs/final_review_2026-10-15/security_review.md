@@ -451,7 +451,7 @@ the HEAD guards; the HEAD guards named are the ones from `git diff cdc5232..HEAD
 ## Reproduce
 
 ```sh
-cd /Users/shadow/machina
+cd <repo>
 .venv/bin/python - <<'PY'
 from machina.core.provider.audit import _sanitize_value as s
 print(s("https://bucket.s3.amazonaws.com/o?X-Amz-Signature=abc123def456"))  # SEC-2: unredacted

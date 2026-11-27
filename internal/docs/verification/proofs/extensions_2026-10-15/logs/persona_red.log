@@ -36,10 +36,10 @@ E       AssertionError: assert 'Ignoring unreadable config' not in 'environment.
 E         
 E         'Ignoring unreadable config' is contained here:
 E           environment file could not be resolved
-E           Ignoring unreadable config persona_description in /Users/shadow/.machina/config.yaml: ImportError
+E           Ignoring unreadable config persona_description in <home>/.machina/config.yaml: ImportError
 E         ? ++++++++++++++++++++++++++
 E           ImportError
-E           /Users/shadow/machina/machina/core/config.py:616 (load)...
+E           <repo>/machina/core/config.py:616 (load)...
 E         
 E         ...Full output truncated (3 lines hidden), use '-vv' to show
 
@@ -78,7 +78,7 @@ E                                                                               
 E         AssertionError: provider stack pulled
 E         
 E       assert 'NO-STACK-OK' in ''
-E        +  where '' = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-c', "import sys;from machina.core.config import Con...                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: provider stack pulled\n').stdout
+E        +  where '' = CompletedProcess(args=['<repo>/.venv/bin/python', '-c', "import sys;from machina.core.config import Con...                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: provider stack pulled\n').stdout
 
 tests/test_config_import_cycle.py:174: AssertionError
 =========================== short test summary info ============================

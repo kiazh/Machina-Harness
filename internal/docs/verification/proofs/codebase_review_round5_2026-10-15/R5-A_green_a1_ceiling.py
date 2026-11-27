@@ -20,7 +20,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 from machina import mcp_server
 from machina.mcp_server import ProcessResult

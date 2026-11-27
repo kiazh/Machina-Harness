@@ -14,7 +14,7 @@ command prints the real authorization URL and times out cleanly (no exchange),
 and `logout` removes ONLY the Machina store (Codex file untouched; status
 falls back to `source: codex`). Runner exit 0; all 11 checks pass.
 
-- Repo: `/Users/shadow/machina` (lane worktree, uncommitted)
+- Repo: `<repo>` (lane worktree, uncommitted)
 - Runner:
   `.venv/bin/python docs/verification/proofs/chatgpt_auth_2026-10-14/run_signin_surface_proof.py`
 - Artifacts: [`auth_status.txt`](auth_status.txt) ·

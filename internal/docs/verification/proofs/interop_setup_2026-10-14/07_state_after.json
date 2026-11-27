@@ -1,6 +1,6 @@
 {
   "codex": {
-    "binary": "/Users/shadow/.local/bin/codex",
+    "binary": "<home>/.local/bin/codex",
     "enabled": true,
     "registered_at": "2026-10-14T16:53:49+00:00",
     "scope": "global",
@@ -11,7 +11,7 @@
     "version": "codex-cli 0.162.1"
   },
   "opencode": {
-    "binary": "/Users/shadow/.opencode/bin/opencode",
+    "binary": "<home>/.opencode/bin/opencode",
     "enabled": true,
     "registered_at": "2026-10-14T16:54:24+00:00",
     "scope": "project",

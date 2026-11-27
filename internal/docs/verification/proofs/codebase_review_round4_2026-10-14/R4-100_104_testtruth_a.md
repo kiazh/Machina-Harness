@@ -46,7 +46,7 @@ item (lane forbids them; none was needed).
 
 | Item | Change | Evidence |
 |---|---|---|
-| `test_repomap.py:11` hardcoded `/Users/shadow/machina` | `REPO_ROOT = str(Path(__file__).resolve().parents[1])` | `file_test_repomap.log`: 7 passed; self-map runs against the checkout root on any machine |
+| `test_repomap.py:11` hardcoded `<repo>` | `REPO_ROOT = str(Path(__file__).resolve().parents[1])` | `file_test_repomap.log`: 7 passed; self-map runs against the checkout root on any machine |
 | `live_db`-style fixture ERROR without DSN | `tests/test_turns_ownership.py:15-20`: skip when `MACHINA_TEST_DATABASE_URL` unset (matches the `conftest.db_pool` pattern; `test_compression.py:414` already skipped cleanly) | `live_db_prefix_red.log` (guard temporarily reverted): 10 ERROR; `live_db_after_green.log`: 10 skipped; final: 5× `10 passed` with DSN (`turns_ownership_run1-5.log`); no-DSN recheck: 10 skipped |
 | `test_mcp_manage_tool.py` live round trip timeout→skip | Fails with the budget breakdown (`overall=120s, connect=30s, discovery=30s, call=30s`) via `_LIVE_BUDGETS`; timeouts passed explicitly instead of literals | Real round trip `file_test_mcp_manage_tool.log`: 42 passed. Forced-timeout probe (`probe_mcp_timeout.py`): FAIL with the breakdown, never skip (`mcp_timeout_forced_red.log`) |
 | `MACHINA_API_KEY` import-time leak (`test_api.py:15`) | Module-level `os.environ[...] = "test-key-123"` → autouse `_api_key` fixture via `monkeypatch.setenv` (restored after each test) | Canary after `test_api.py` in-process: 23 passed (`env_canary_api_key_green.log`); leaky-stub discrimination: FAIL (`env_canary_api_key_red.log`). Note: the *value* `test-key-123` was the leak; the key itself is present via `.env` |

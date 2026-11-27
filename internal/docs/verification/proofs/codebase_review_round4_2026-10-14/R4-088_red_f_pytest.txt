@@ -47,7 +47,7 @@ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
     self._check_timeout(endtime, orig_timeout, stdout, stderr)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
-self = <Popen: returncode: -9 args: ['/Users/shadow/machina/.venv/bin/python', '-c'...>
+self = <Popen: returncode: -9 args: ['<repo>/.venv/bin/python', '-c'...>
 endtime = 230937.425550166, orig_timeout = 30, stdout_seq = []
 stderr_seq = [b'environment file could not be resolved\n']
 skip_check_and_raise = False
@@ -62,7 +62,7 @@ skip_check_and_raise = False
                     self.args, orig_timeout,
                     output=b''.join(stdout_seq) if stdout_seq else None,
                     stderr=b''.join(stderr_seq) if stderr_seq else None)
-E           subprocess.TimeoutExpired: Command '['/Users/shadow/machina/.venv/bin/python', '-c', "from machina.rag.chunker import RecursiveCharacterTextSplitter as S\nfor bad in (0, -1, -10):\n    try:\n        S._hard_split('abcdef', bad)\n    except ValueError:\n        pass\n    else:\n        raise SystemExit(3)\n    try:\n        S(chunk_size=4)._force_split('abcdef', bad, {})\n    except ValueError:\n        pass\n    else:\n        raise SystemExit(4)\ntry:\n    S(chunk_size=0).split_text('ab')\nexcept ValueError:\n    pass\nelse:\n    raise SystemExit(5)\nprint('guarded')\n"]' timed out after 30 seconds
+E           subprocess.TimeoutExpired: Command '['<repo>/.venv/bin/python', '-c', "from machina.rag.chunker import RecursiveCharacterTextSplitter as S\nfor bad in (0, -1, -10):\n    try:\n        S._hard_split('abcdef', bad)\n    except ValueError:\n        pass\n    else:\n        raise SystemExit(3)\n    try:\n        S(chunk_size=4)._force_split('abcdef', bad, {})\n    except ValueError:\n        pass\n    else:\n        raise SystemExit(4)\ntry:\n    S(chunk_size=0).split_text('ab')\nexcept ValueError:\n    pass\nelse:\n    raise SystemExit(5)\nprint('guarded')\n"]' timed out after 30 seconds
 
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py:1268: TimeoutExpired
 =========================== short test summary info ============================

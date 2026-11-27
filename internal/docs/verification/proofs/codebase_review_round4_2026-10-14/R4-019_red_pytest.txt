@@ -36,10 +36,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016776.885988, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10c748600> was created in a different Context
@@ -77,10 +77,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016777.809581, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10cd45780> was created in a different Context
@@ -117,10 +117,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016778.546338, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10cce8a40> was created in a different Context
@@ -158,10 +158,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016779.220358, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10ce27680> was created in a different Context
@@ -199,10 +199,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016779.8651369, "event": "
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10ce27840> was created in a different Context
@@ -241,10 +241,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016780.011162, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10aa473c0> was created in a different Context
@@ -283,10 +283,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016780.12014, "event": "ag
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10ce32b00> was created in a different Context
@@ -325,10 +325,10 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792016780.208683, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    opentelemetry.context:__init__.py:129 Failed to detach context
 Traceback (most recent call last):
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/__init__.py", line 127, in detach
     _RUNTIME_CONTEXT.detach(token)
     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/Users/shadow/machina/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
+  File "<repo>/.venv/lib/python3.14/site-packages/opentelemetry/context/contextvars_context.py", line 40, in detach
     self._current_context.reset(token)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
 ValueError: <Token var=<ContextVar name='current_context' default={} at 0x10b0e2020> at 0x10cd44f40> was created in a different Context

@@ -1,8 +1,8 @@
 
 == Environment ==
-repo: /Users/shadow/machina
+repo: <repo>
 git HEAD: 9806bee7c53ac80bcb07a01ad8216be4747ae1b5 (working tree + this wave's changes)
-python: /Users/shadow/machina/.venv/bin/python (3.14.5)
+python: <repo>/.venv/bin/python (3.14.5)
 approval store backend: in-memory (db not connected)
 connector inventory: /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-mcp-proof-0w0nl0xc/mcp.json
 
@@ -12,7 +12,7 @@ connector inventory: /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-mc
 - mcp_disconnect: effects=('fs.write',) desc=Remove an MCP server by name: disconnects it and deletes its saved configuration (set remove=false to only close the connection). Removed se...
 
 == 1. mcp_connect — add + launch + discover our own server ==
-[mcp_connect] policy verdict: pending (sensitive capability requires explicit approval: mcp_external_review) capabilities=['mcp_external_review'] network=[] argv=['/Users/shadow/machina/.venv/bin/python', '-m', 'machina.mcp_server']
+[mcp_connect] policy verdict: pending (sensitive capability requires explicit approval: mcp_external_review) capabilities=['mcp_external_review'] network=[] argv=['<repo>/.venv/bin/python', '-m', 'machina.mcp_server']
 [mcp_connect] PAUSED needs_approval: request_id=f5a042d1cd1741e0a14e04af69253e15 operation=tool.mcp_connect status=pending
 [mcp_connect] human decision recorded: approved (principal=proof-human)
 [mcp_connect] approved digest claimed; executing exactly once
@@ -25,7 +25,7 @@ connector inventory: /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-mc
     "enabled": true,
     "owner": "",
     "transport": "stdio",
-    "command": "/Users/shadow/machina/.venv/bin/python",
+    "command": "<repo>/.venv/bin/python",
     "endpoint": "",
     "credential_profile": "",
     "local_access": false,

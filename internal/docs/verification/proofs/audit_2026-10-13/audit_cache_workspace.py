@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 work_a = Path(tempfile.mkdtemp(prefix="audit-ws-a-"))

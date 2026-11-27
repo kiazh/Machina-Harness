@@ -1,5 +1,5 @@
-   Building machina @ file:///Users/shadow/machina
-      Built machina @ file:///Users/shadow/machina
+   Building machina @ file://<repo>
+      Built machina @ file://<repo>
 Uninstalled 1 package in 1ms
 Installed 1 package in 1ms
 .....FFFFFF.FFFFFF..FF...FF.................................FFFFF..      [100%]
@@ -129,7 +129,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a037930>
 >           assert kwargs.get("timeout", 0) > 0
 E           AssertionError: assert 0 > 0
 E            +  where 0 = <built-in method get of dict object at 0x10b146000>('timeout', 0)
-E            +    where <built-in method get of dict object at 0x10b146000> = {'cwd': PosixPath('/Users/shadow/machina'), 'capture_output': True, 'text': True}.get
+E            +    where <built-in method get of dict object at 0x10b146000> = {'cwd': PosixPath('<repo>'), 'capture_output': True, 'text': True}.get
 
 tests/test_benchmark_tool.py:188: AssertionError
 __________________ test_suite_timeout_is_reported_as_an_error __________________
@@ -153,12 +153,12 @@ machina/research/benchmark.py:390: in _suite
     out = subprocess.run(
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
-command = ['/Users/shadow/machina/.venv/bin/python', '-m', 'pytest', 'tests/', '-q', '-p', ...]
-kwargs = {'cwd': PosixPath('/Users/shadow/machina'), 'capture_output': True, 'text': True}
+command = ['<repo>/.venv/bin/python', '-m', 'pytest', 'tests/', '-q', '-p', ...]
+kwargs = {'cwd': PosixPath('<repo>'), 'capture_output': True, 'text': True}
 
     def timeout_run(command, **kwargs):
 >       raise subprocess.TimeoutExpired(command, kwargs.get("timeout", 0))
-E       subprocess.TimeoutExpired: Command '['/Users/shadow/machina/.venv/bin/python', '-m', 'pytest', 'tests/', '-q', '-p', 'no:cacheprovider']' timed out after 0 seconds
+E       subprocess.TimeoutExpired: Command '['<repo>/.venv/bin/python', '-m', 'pytest', 'tests/', '-q', '-p', 'no:cacheprovider']' timed out after 0 seconds
 
 tests/test_benchmark_tool.py:195: TimeoutExpired
 __________ test_workflow_benchmark_has_no_side_effects_inside_asserts __________
@@ -201,7 +201,7 @@ tmp_path = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/p
         assert out.returncode == 0, out.stderr
 >       assert "starts=2" in out.stdout
 E       AssertionError: assert 'starts=2' in 'starts=0\nresumes=0\n'
-E        +  where 'starts=0\nresumes=0\n' = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-O', '/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4.../optimized_probe.py'], returncode=0, stdout='starts=0\nresumes=0\n', stderr='environment file could not be resolved\n').stdout
+E        +  where 'starts=0\nresumes=0\n' = CompletedProcess(args=['<repo>/.venv/bin/python', '-O', '/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4.../optimized_probe.py'], returncode=0, stdout='starts=0\nresumes=0\n', stderr='environment file could not be resolved\n').stdout
 
 tests/test_benchmark_tool.py:301: AssertionError
 _________ test_compare_cleanup_attempts_every_step_when_a_delete_fails _________

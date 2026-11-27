@@ -3,7 +3,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 work = Path(tempfile.mkdtemp(prefix="audit-redos-"))
 (work / "evil.txt").write_text("a" * 36 + "!\n", encoding="utf-8")

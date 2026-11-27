@@ -2,8 +2,8 @@
   "schema_version": 1,
   "tool": "tools/e2e_gate.py",
   "generated_at_utc": "2026-10-14T18:36:04Z",
-  "command_line": "/Users/shadow/machina/.venv/bin/python tools/e2e_gate.py --json /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/e2e_run/j1_j9_closeout.json",
-  "repo_root": "/Users/shadow/machina",
+  "command_line": "<repo>/.venv/bin/python tools/e2e_gate.py --json /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/e2e_run/j1_j9_closeout.json",
+  "repo_root": "<repo>",
   "git": {
     "git_head": "c1550f9",
     "status_short": [
@@ -12,7 +12,7 @@
     ],
     "status_sha256_16": "e8ce2cfba7c39435"
   },
-  "venv_python": "/Users/shadow/machina/.venv/bin/python",
+  "venv_python": "<repo>/.venv/bin/python",
   "scratch_root": "/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-e2e-gate-3x6zrtrn",
   "journeys_selected": [
     "j1",
@@ -36,7 +36,7 @@
       "duration_seconds": 11.82,
       "commands": [
         "cd /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-e2e-gate-3x6zrtrn/j1 && machina chat --session d75cbcf6-5561-4f56-a86b-fc287828be1d \"<facts prompt>\"",
-        "/Users/shadow/machina/.venv/bin/python -c \"<build_agent_for_session + _consolidate_memories>\" d75cbcf6-5561-4f56-a86b-fc287828be1d"
+        "<repo>/.venv/bin/python -c \"<build_agent_for_session + _consolidate_memories>\" d75cbcf6-5561-4f56-a86b-fc287828be1d"
       ],
       "checks": [
         {
@@ -324,12 +324,12 @@
       "finished_at": "2026-10-14T18:37:12Z",
       "duration_seconds": 40.212,
       "commands": [
-        "/Users/shadow/machina/.venv/bin/python -c \"<context_manager.add_chunks_batch: 6 seeds + 1 document>\"",
-        "MACHINA_API_KEY=<redacted> /Users/shadow/machina/.venv/bin/python -m machina.api --host 127.0.0.1 --port 49368",
+        "<repo>/.venv/bin/python -c \"<context_manager.add_chunks_batch: 6 seeds + 1 document>\"",
+        "MACHINA_API_KEY=<redacted> <repo>/.venv/bin/python -m machina.api --host 127.0.0.1 --port 49368",
         "POST http://127.0.0.1:49368/api/v1/sessions/e2ea401d-3d3b-4e87-ab08-ba9f990e7191/prompt (SSE, X-API-Key set)",
         "cd /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/machina-e2e-gate-3x6zrtrn/j6 && machina compress e2ea401d-3d3b-4e87-ab08-ba9f990e7191",
-        "/Users/shadow/machina/.venv/bin/python -c \"<context_manager.add_chunks_batch: gateway session>\"",
-        "MACHINA_GATEWAY_TOKEN=<redacted> /Users/shadow/machina/.venv/bin/python -m machina.gateway"
+        "<repo>/.venv/bin/python -c \"<context_manager.add_chunks_batch: gateway session>\"",
+        "MACHINA_GATEWAY_TOKEN=<redacted> <repo>/.venv/bin/python -m machina.gateway"
       ],
       "checks": [
         {
@@ -714,11 +714,11 @@
       "finished_at": "2026-10-14T18:37:24Z",
       "duration_seconds": 11.495,
       "commands": [
-        "MACHINA_API_KEY=<redacted> /Users/shadow/machina/.venv/bin/python -m machina.api --host 127.0.0.1 --port 49434",
+        "MACHINA_API_KEY=<redacted> <repo>/.venv/bin/python -m machina.api --host 127.0.0.1 --port 49434",
         "POST http://127.0.0.1:49434/api/v1/sessions (provider=not-a-provider, X-API-Key set)",
         "POST http://127.0.0.1:49434/api/v1/sessions (X-API-Key set, provider=deepseek)",
         "POST http://127.0.0.1:49434/api/v1/sessions/2d4632eb-48da-4aec-a4ef-bfa0b0924331/prompt (SSE, X-API-Key set)",
-        "MACHINA_GATEWAY_TOKEN=<redacted> /Users/shadow/machina/.venv/bin/python -m machina.gateway"
+        "MACHINA_GATEWAY_TOKEN=<redacted> <repo>/.venv/bin/python -m machina.gateway"
       ],
       "checks": [
         {
@@ -972,8 +972,8 @@
       "finished_at": "2026-10-14T18:37:26Z",
       "duration_seconds": 2.715,
       "commands": [
-        "/Users/shadow/machina/.venv/bin/python -c \"<get_provider + usage_store.complete_call>\" session=5a9964c1-535f-4a05-bc0e-cdc883e01af6",
-        "cd /Users/shadow/machina && machina status"
+        "<repo>/.venv/bin/python -c \"<get_provider + usage_store.complete_call>\" session=5a9964c1-535f-4a05-bc0e-cdc883e01af6",
+        "cd <repo> && machina status"
       ],
       "checks": [
         {
@@ -1178,7 +1178,7 @@
         }
       ],
       "observed": {
-        "opencode_bin": "/Users/shadow/.opencode/bin/opencode",
+        "opencode_bin": "<home>/.opencode/bin/opencode",
         "mcp_list_exit_code": 0,
         "mcp_list_has_machina": true,
         "token": "MCPJ9-173932",

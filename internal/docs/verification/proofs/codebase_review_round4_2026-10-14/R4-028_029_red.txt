@@ -88,9 +88,9 @@ tests/test_failed_delegation_usage.py:144: AssertionError
 ------------------------------ Captured log call -------------------------------
 ERROR    machina.core.orchestrator:orchestrator.py:349 Delegation to coder failed
 RuntimeError
-/Users/shadow/machina/machina/core/orchestrator.py:334 (delegate)
+<repo>/machina/core/orchestrator.py:334 (delegate)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:488 (wait_for)
-/Users/shadow/machina/tests/test_failed_delegation_usage.py:139 (run)
+<repo>/tests/test_failed_delegation_usage.py:139 (run)
 ______ test_unavailable_production_accounting_never_reports_zero[success] ______
 
 delegation = namespace(child=Session(id=UUID('46e71654-2693-4f2e-861a-e83b9b04fddd'), title=None, agent_id='coder', status='active'...D('46e71654-2693-4f2e-861a-e83b9b04fddd'): 13}, recorded=[], build=<function delegation.<locals>.build at 0x10d49b110>)
@@ -246,9 +246,9 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792023321.3336089, "event": "
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    machina.core.orchestrator:orchestrator.py:349 Delegation to coder failed
 RuntimeError
-/Users/shadow/machina/machina/core/orchestrator.py:334 (delegate)
+<repo>/machina/core/orchestrator.py:334 (delegate)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:488 (wait_for)
-/Users/shadow/machina/tests/test_failed_delegation_usage.py:68 (run)
+<repo>/tests/test_failed_delegation_usage.py:68 (run)
 _ test_failed_child_spend_is_accounted_without_implicit_turn_cutoff[ledger_unavailable-True] _
 
 delegation = namespace(child=Session(id=UUID('998d5500-ad91-4b27-9c6c-7a2cf72ec033'), title=None, agent_id='coder', status='active'...D('998d5500-ad91-4b27-9c6c-7a2cf72ec033'): 13}, recorded=[], build=<function delegation.<locals>.build at 0x10d01c3b0>)
@@ -364,9 +364,9 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792023321.432089, "event": "t
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    machina.core.orchestrator:orchestrator.py:349 Delegation to coder failed
 RuntimeError
-/Users/shadow/machina/machina/core/orchestrator.py:334 (delegate)
+<repo>/machina/core/orchestrator.py:334 (delegate)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:488 (wait_for)
-/Users/shadow/machina/tests/test_failed_delegation_usage.py:68 (run)
+<repo>/tests/test_failed_delegation_usage.py:68 (run)
 _________ test_ledger_failure_closes_cancelled_row_with_unknown_tokens _________
 
 delegation = namespace(child=Session(id=UUID('21fd3f24-30b0-4cef-bc5b-90fceb2cc28b'), title=None, agent_id='coder', status='active'...D('21fd3f24-30b0-4cef-bc5b-90fceb2cc28b'): 13}, recorded=[], build=<function delegation.<locals>.build at 0x10d01c040>)

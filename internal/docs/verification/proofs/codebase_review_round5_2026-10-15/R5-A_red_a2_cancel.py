@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 from machina import mcp_server
 

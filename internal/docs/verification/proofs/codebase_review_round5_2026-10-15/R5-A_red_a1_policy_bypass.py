@@ -9,7 +9,7 @@ path at policy.py:858 BEFORE _sensitive_capabilities is consulted.
 """
 import sys
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 from machina.permissions.policy import ActionRequest, decide
 

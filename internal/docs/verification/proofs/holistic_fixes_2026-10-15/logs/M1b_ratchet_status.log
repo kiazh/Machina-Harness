@@ -137,7 +137,7 @@ relative_path = 'core/agent.py', ceiling = 2267
         )
 E       AssertionError: core/agent.py grew past its ceiling of 2267 lines
 E       assert 2269 <= 2267
-E        +  where 2269 = _line_count((PosixPath('/Users/shadow/machina/machina') / 'core/agent.py'))
+E        +  where 2269 = _line_count((PosixPath('<repo>/machina') / 'core/agent.py'))
 
 tests/test_architecture_layers.py:474: AssertionError
 ________ test_god_file_ceilings_only_fall[core/provider/copilot.py-431] ________
@@ -151,7 +151,7 @@ relative_path = 'core/provider/copilot.py', ceiling = 431
         )
 E       AssertionError: core/provider/copilot.py grew past its ceiling of 431 lines
 E       assert 443 <= 431
-E        +  where 443 = _line_count((PosixPath('/Users/shadow/machina/machina') / 'core/provider/copilot.py'))
+E        +  where 443 = _line_count((PosixPath('<repo>/machina') / 'core/provider/copilot.py'))
 
 tests/test_architecture_layers.py:474: AssertionError
 ____________________ test_provider_package_total_only_falls ____________________

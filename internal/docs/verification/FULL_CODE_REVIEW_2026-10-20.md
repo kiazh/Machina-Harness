@@ -16,7 +16,7 @@ The source/config inventory contains 624 tracked files and 190,087 lines. It inc
 
 The original 277 reads plus all 347 remaining paths were completed. Runtime source was read in nine bounded batches; UI tests in four batches; CI, Docker, release tools, vendored ECC scripts, and historical proof scripts in four batches. The last 20 changed files were re-hashed after fixes; `remaining-files.txt` is now empty and `combined-coverage.json` records `full-read-documented` for every path. File counts do not imply equal review depth or that every reviewed file is bug-free.
 
-Evidence directory: `/Users/shadow/machina-devtools/reports/full_code_review_2026-10-20/`. `combined-coverage.json` records reviewed byte hashes, current byte hashes, coverage sources, and unresolved paths. Each review ledger distinguishes full reads from pending/partial reads. File counts do not imply equal review depth or that an already-read file is bug-free.
+Evidence directory: `<repo>-devtools/reports/full_code_review_2026-10-20/`. `combined-coverage.json` records reviewed byte hashes, current byte hashes, coverage sources, and unresolved paths. Each review ledger distinguishes full reads from pending/partial reads. File counts do not imply equal review depth or that an already-read file is bug-free.
 
 The coverage ledgers describe the review snapshot. Verification changed several reviewed files while fixing the reproduced findings; the current tree was retested end to end rather than carrying old hashes forward. The original `head_to_head` destructive trigger was rechecked after its guard patch and remains resolved.
 

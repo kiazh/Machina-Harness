@@ -81,7 +81,7 @@ $ TMP=/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode
 $ git worktree add --detach "$TMP/machina-r4-012-red" cdc5232
 $ cp tests/test_anthropic_tool_results.py "$TMP/machina-r4-012-red/tests/"
 $ cd "$TMP/machina-r4-012-red"
-$ PYTHONPATH="$TMP/machina-r4-012-red" /Users/shadow/machina/.venv/bin/python \
+$ PYTHONPATH="$TMP/machina-r4-012-red" <repo>/.venv/bin/python \
     -m pytest tests/test_anthropic_tool_results.py -q -p no:cacheprovider
 ```
 

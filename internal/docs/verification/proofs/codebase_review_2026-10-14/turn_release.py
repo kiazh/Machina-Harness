@@ -6,7 +6,7 @@ import uuid
 from unittest.mock import patch
 os.environ['HOME']=tempfile.mkdtemp(prefix='machina-release-review-')
 os.environ['MACHINA_ENV_FILE']='/dev/null'
-sys.path.insert(0,'/Users/shadow/machina')
+sys.path.insert(0,'<repo>')
 from machina.core.turn_engine import TurnEngine,TurnSpec
 from machina.core import turns
 async def scenario(cancel):

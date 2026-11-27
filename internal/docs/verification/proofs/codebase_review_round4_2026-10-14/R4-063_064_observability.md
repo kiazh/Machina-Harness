@@ -1,6 +1,6 @@
 # R4-063 / R4-064 (+ OTel stream-span follow-up) — evidence
 
-Tree: `/Users/shadow/machina` (worktree with concurrent Round-4 work; no commit).
+Tree: `<repo>` (worktree with concurrent Round-4 work; no commit).
 Primary files: `machina/observability/safe_logging.py`, `machina/observability/traces.py`;
 span follow-up: `machina/core/agent.py` (instrument_stream only),
 `machina/gateway/server.py`, `machina/cli/__init__.py`, `machina/api/routes/streaming.py`.

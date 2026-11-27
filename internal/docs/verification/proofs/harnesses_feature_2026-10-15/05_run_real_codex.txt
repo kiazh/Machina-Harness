@@ -1,11 +1,11 @@
 $ machina harnesses run codex 'Reply with exactly the word PONG and nothing else.' --timeout 120
-$ /Users/shadow/.local/bin/codex exec 'Reply with exactly the word PONG and 
+$ <home>/.local/bin/codex exec 'Reply with exactly the word PONG and 
 nothing else.'
 PONG
 Reading additional input from stdin...
 OpenAI Codex v0.162.1
 --------
-workdir: /Users/shadow/machina
+workdir: <repo>
 model: gpt-6.1-sol
 provider: openai
 approval: never

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 from machina.core.agent_factory import definition_tool_cap

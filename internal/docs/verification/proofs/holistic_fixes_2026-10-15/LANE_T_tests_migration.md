@@ -97,7 +97,7 @@ lane_t_tests_migration/
 
 ### 2.2 Proof runs (from the DevTools layout, against the snapshot checkout)
 
-Interpreter: harness venv `/Users/shadow/machina/.venv/bin/python` (3.14.5, pytest 9.1.1) — used read-only.
+Interpreter: harness venv `<repo>/.venv/bin/python` (3.14.5, pytest 9.1.1) — used read-only.
 
 1. **Import resolution:** `python -c "import machina"` from DevTools root resolved to the **snapshot** (`.../lane_t_tests_migration/Machina-DevTools/machina/__init__.py`, i.e. via the symlink to the snapshot), never the live repo.
 2. **Representative unit suite:**
@@ -105,14 +105,14 @@ Interpreter: harness venv `/Users/shadow/machina/.venv/bin/python` (3.14.5, pyte
    → **7 passed in 0.65s** (exit 0) — log `logs/LANE_T_suite1_skill_runtime.log`
 3. **Repo-root / CWD-coupled suite:** `./run-tests.sh tests/test_protocol_conformance.py -q -p no:cacheprovider`
    → **9 passed, 1 skipped in 0.57s** (exit 0); it read `ui/src/events.ts` + `machina/protocol/events.json` through the shim — log `logs/LANE_T_suite2_protocol_conformance.log`
-4. **DB-backed suite:** `MACHINA_TEST_DATABASE_URL=$(grep '^MACHINA_TEST_DATABASE_URL=' /Users/shadow/machina/.env | cut -d= -f2-) ./run-tests.sh tests/test_approvals_ownership.py -q -p no:cacheprovider`
+4. **DB-backed suite:** `MACHINA_TEST_DATABASE_URL=$(grep '^MACHINA_TEST_DATABASE_URL=' <repo>/.env | cut -d= -f2-) ./run-tests.sh tests/test_approvals_ownership.py -q -p no:cacheprovider`
    → **10 passed in 1.16s** (exit 0) against the local disposable `machina_test` Postgres (checked idle: 0 other connections; suite namespaces its rows as `lp-test%` and deletes them) — log `logs/LANE_T_suite3_db_approvals_ownership.log`
 
 Whole-suite run deliberately **not** performed (10 lanes are exercising the same database).
 
 ### 2.3 Non-destructiveness / hygiene
 
-* All runs executed from the scratch tree; `/Users/shadow/machina` was only read. `PYTHONDONTWRITEBYTECODE=1` + `-p no:cacheprovider` → **0** `__pycache__`/`.pytest_cache` created in scratch, and import resolution never touched the live repo.
+* All runs executed from the scratch tree; `<repo>` was only read. `PYTHONDONTWRITEBYTECODE=1` + `-p no:cacheprovider` → **0** `__pycache__`/`.pytest_cache` created in scratch, and import resolution never touched the live repo.
 * The DB run connected to the local disposable test database (`.env` DSN, password never printed); session schema init is idempotent; rows cleaned by the suite itself.
 
 ### 2.4 DevTools remote reachability & credentials (read-only)

@@ -5,10 +5,10 @@ detect external agent harnesses (OpenCode, Codex, Hermes), idempotently
 register Machina's stdio MCP server (`python -m machina.mcp_server`) with the
 ones the user chooses, verify by re-listing, and surface the enabled state.
 
-- Repo: `/Users/shadow/machina` · git HEAD `b04203394c3233af3f0674d02dfc1e1e951e393f`
+- Repo: `<repo>` · git HEAD `b04203394c3233af3f0674d02dfc1e1e951e393f`
   (working tree + this wave's uncommitted changes; suite line in the completion report)
 - Host: macOS (aarch64), OpenCode v2.0.26, Codex CLI 0.162.1, Hermes v0.21.6+386
-- Interpreter registered with every harness: `/Users/shadow/machina/.venv/bin/python`
+- Interpreter registered with every harness: `<repo>/.venv/bin/python`
 
 ## 1. `machina interop status` (before) — `01_status_before.txt`
 
@@ -31,7 +31,7 @@ and Hermes were detected as installed + running but unregistered.
 ```
 $ .venv/bin/python -m machina interop enable codex
   Codex registers user-level only (no project scope); using global scope
-  run: /Users/shadow/.local/bin/codex mcp add machina -- /Users/shadow/machina/.venv/bin/python -m machina.mcp_server
+  run: <home>/.local/bin/codex mcp add machina -- <repo>/.venv/bin/python -m machina.mcp_server
   registration command exited 0
   output: Added global MCP server 'machina'.
 registered `machina` for Codex (global scope) and verified it.
@@ -47,11 +47,11 @@ printed, never silent. Registration evidence
 ```
 $ codex mcp list
 Name     Command                                 Args                   Status
-machina  /Users/shadow/machina/.venv/bin/python  -m machina.mcp_server  enabled
+machina  <repo>/.venv/bin/python  -m machina.mcp_server  enabled
 
 $ grep -A3 mcp_servers ~/.codex/config.toml
 [mcp_servers.machina]
-command = "/Users/shadow/machina/.venv/bin/python"
+command = "<repo>/.venv/bin/python"
 args = ["-m", "machina.mcp_server"]
 ```
 
@@ -60,7 +60,7 @@ State written (`04_state_after_codex.json`, also §7 schema):
 ```json
 {
   "codex": {
-    "binary": "/Users/shadow/.local/bin/codex",
+    "binary": "<home>/.local/bin/codex",
     "enabled": true,
     "registered_at": "2026-10-14T16:53:49+00:00",
     "scope": "global",
@@ -73,7 +73,7 @@ State written (`04_state_after_codex.json`, also §7 schema):
 ## 3. Live round trip: Codex → machina MCP tool — `05_codex_exec_roundtrip.log`
 
 ```console
-$ codex exec --json -C /Users/shadow/machina -s read-only \
+$ codex exec --json -C <repo> -s read-only \
     "Call the machina_status tool from the machina MCP server exactly once ...
      Then reply with exactly MCPX-CODEX-9F2A on the final line and nothing else."
 ```
@@ -95,7 +95,7 @@ returned the proof token. No auth blocker; no interactive step needed.
 
 ```
 $ .venv/bin/python -m machina interop enable opencode
-  already registered in /Users/shadow/machina/opencode.json; no changes made
+  already registered in <repo>/opencode.json; no changes made
 `machina` is already registered for OpenCode (project scope); no changes made.
   ✓ verify: present in `opencode mcp list` (connected)
 ```

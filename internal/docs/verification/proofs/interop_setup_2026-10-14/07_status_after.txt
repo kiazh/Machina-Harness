@@ -6,7 +6,7 @@
 │ Codex    │ yes       │ codex-cli 0.162.1                            │ yes     │ global     │ yes     │
 │ Hermes   │ yes       │ Hermes Agent v0.21.6+386.g5ba559c (2026.9... │ yes     │ no         │ no      │
 └──────────┴───────────┴──────────────────────────────────────────────┴─────────┴────────────┴─────────┘
-Machina MCP server: /Users/shadow/machina/.venv/bin/python -m machina.mcp_server
+Machina MCP server: <repo>/.venv/bin/python -m machina.mcp_server
 · OpenCode: registered (project scope).
 · Codex: registered (global scope).
 · Hermes: not registered — `machina interop enable hermes` (user config).

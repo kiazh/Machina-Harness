@@ -1,5 +1,5 @@
 ============================= test session starts ==============================
-platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- /Users/shadow/machina/.venv/bin/python
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/.venv/bin/python
 hypothesis profile 'default'
 rootdir: /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/devtools_seed_2026-10-15/harness-clone
 configfile: pyproject.toml

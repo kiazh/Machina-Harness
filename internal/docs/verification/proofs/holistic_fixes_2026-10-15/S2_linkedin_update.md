@@ -1,10 +1,10 @@
 # S2 — LinkedIn update post (research notes + claim audit)
 
 Date: 2026-10-15 · Lane: S2 (LinkedIn update draft, read-only on the repo)
-Draft (outside the repo): `/Users/shadow/machina_linkedin_update_2026-10-15.md`
+Draft (outside the repo): `<repo>_linkedin_update_2026-10-15.md`
 
 This lane produced **no repo changes** other than this evidence file. Every claim in the
-draft's post was checked against code, docs or git history at `/Users/shadow/machina`
+draft's post was checked against code, docs or git history at `<repo>`
 and the GitHub API on 2026-10-15. Style rules applied: post #1's voice (first person,
 concrete, informal, learning-focused), no hype, no internal/security specifics, no test
 counts.
@@ -63,5 +63,5 @@ one-command installer (`install.sh`, commit `9806bee`), delegated-subagent live 
 
 ## 4. Files
 
-- Draft: `/Users/shadow/machina_linkedin_update_2026-10-15.md` (POST + REFERENCE + <120-word variant)
+- Draft: `<repo>_linkedin_update_2026-10-15.md` (POST + REFERENCE + <120-word variant)
 - This evidence file: `docs/verification/proofs/holistic_fixes_2026-10-15/S2_linkedin_update.md`

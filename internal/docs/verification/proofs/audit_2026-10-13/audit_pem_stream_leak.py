@@ -7,7 +7,7 @@ as one string; streamed in chunks it emits raw body lines.
 import sys
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 from machina.memory.redaction import (

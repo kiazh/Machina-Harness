@@ -50,9 +50,9 @@ E   HINT:  See server log for query details.
 
 asyncpg/protocol/protocol.pyx:197: DeadlockDetectedError
 ----------------------------- Captured stderr call -----------------------------
-2026-10-14 23:32:18,741 [AUDIT] {"timestamp": 1792035138.741461, "event": "rag_index_start", "session_id": "286654d9-00ed-4b58-b0a1-b69a1a5502fb", "source": "/Users/shadow/machina/docs/PERSONALITY_GROWTH.md", "doc_type": "markdown"}
+2026-10-14 23:32:18,741 [AUDIT] {"timestamp": 1792035138.741461, "event": "rag_index_start", "session_id": "286654d9-00ed-4b58-b0a1-b69a1a5502fb", "source": "<repo>/docs/PERSONALITY_GROWTH.md", "doc_type": "markdown"}
 ------------------------------ Captured log call -------------------------------
-INFO     machina.audit:audit.py:216 {"timestamp": 1792035138.741461, "event": "rag_index_start", "session_id": "286654d9-00ed-4b58-b0a1-b69a1a5502fb", "source": "/Users/shadow/machina/docs/PERSONALITY_GROWTH.md", "doc_type": "markdown"}
+INFO     machina.audit:audit.py:216 {"timestamp": 1792035138.741461, "event": "rag_index_start", "session_id": "286654d9-00ed-4b58-b0a1-b69a1a5502fb", "source": "<repo>/docs/PERSONALITY_GROWTH.md", "doc_type": "markdown"}
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 =========================== short test summary info ============================
 FAILED tests/test_rag_quality.py::test_document_benchmark_real_postgres - asy...

@@ -6,7 +6,7 @@
 import in a fresh process logged:
 
 ```
-Ignoring unreadable config persona_description in /Users/shadow/.machina/config.yaml: ImportError
+Ignoring unreadable config persona_description in <home>/.machina/config.yaml: ImportError
 ImportError
   machina/core/config.py:616 (load)
   machina/core/config.py:282 (validate_value)

@@ -214,7 +214,7 @@ tmp_path = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/p
         assert _inside(data["module"], site_real), data
         # No allowed root, resolved path, or written path may target site-packages.
 >       assert not any(_inside(root, site_real) for root in data["roots"]), data["roots"]
-E       AssertionError: ['/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1514/test_installed_wheel_layout_ne...shadow/pytest-1514/test_installed_wheel_layout_ne0/venv/lib/python3.14/site-packages', '/Users/shadow', '/private/tmp']
+E       AssertionError: ['/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1514/test_installed_wheel_layout_ne...shadow/pytest-1514/test_installed_wheel_layout_ne0/venv/lib/python3.14/site-packages', '<home>', '/private/tmp']
 E       assert not True
 E        +  where True = any(<generator object test_installed_wheel_layout_never_targets_site_packages.<locals>.<genexpr> at 0x10a4956c0>)
 

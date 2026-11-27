@@ -3,7 +3,7 @@
 - **Task:** B3 — compaction/status coexistence and release evidence. Implemented and verified at the runtime/loop boundary where the acceptance criteria are behavioral, not source-inspection.
 - **Date:** 2026-10-16 (America/New_York), ~17:00.
 - **Baseline (moving):** Machina HEAD `0f7eb2c` ("feat(context): wire both loops through the shared request gate (B2, shadow default)"); Machina-DevTools HEAD `b109027` ("tests: B2 loop-wiring suite + artifact tool surface + patch-target update"). Worktree also carries unrelated in-flight `ui/*` edits by another agent (untouched); this task's code changes are `machina/core/request_gate.py` and `machina/tools/artifacts.py` only.
-- **Method:** executable tests + one disposable PostgreSQL database (`MACHINA_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/machina_test`). No live provider calls were made anywhere in this evidence. Spec source: `/Users/shadow/Desktop/Machina_Revised_Deterministic_Skills_and_Rolling_Context_Plan.md` (not in-repo).
+- **Method:** executable tests + one disposable PostgreSQL database (`MACHINA_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/machina_test`). No live provider calls were made anywhere in this evidence. Spec source: `<home>/Desktop/Machina_Revised_Deterministic_Skills_and_Rolling_Context_Plan.md` (not in-repo).
 - **Test file:** `Machina-DevTools/tests/test_b3_coexistence.py` (13 tests: 6 provider-free, 7 DB-backed; DB tests skip without the DSN).
 
 ## 1. What changed
@@ -15,7 +15,7 @@
 
 ## 2. Commands and observed counts
 
-All from `/Users/shadow/Machina-DevTools`, interpreter `/Users/shadow/machina/.venv/bin/python` (pytest 9.1.1; `PYTHONDONTWRITEBYTECODE=1`, temp HOME per `run-tests.sh`):
+All from `<home>/Machina-DevTools`, interpreter `<repo>/.venv/bin/python` (pytest 9.1.1; `PYTHONDONTWRITEBYTECODE=1`, temp HOME per `run-tests.sh`):
 
 | Command (suite arguments) | Result |
 | --- | --- |

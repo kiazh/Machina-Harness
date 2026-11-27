@@ -1,6 +1,6 @@
 # F — machina-managed Firecrawl/SearXNG lifecycle (config-gated, OFF by default)
 
-- Repo: `/Users/shadow/machina`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
+- Repo: `<repo>`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
 - Date: 2026-10-15
 - Lane files: `machina/core/config.py` (additive keys only — the concurrent
   `max_tokens`/`MAX_TOKENS` policy edit was not touched), `machina/core/firecrawl_lifecycle.py`

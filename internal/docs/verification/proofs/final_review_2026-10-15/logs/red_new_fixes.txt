@@ -16,7 +16,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108b0df30>
         assert payload["status"] == "completed"
         cmd = capture["cmd"]
 >       assert "--mode" in cmd
-E       AssertionError: assert '--mode' in ['/Users/shadow/machina/.venv/bin/python', '-m', 'machina', 'chat', '-q', '--', ...]
+E       AssertionError: assert '--mode' in ['<repo>/.venv/bin/python', '-m', 'machina', 'chat', '-q', '--', ...]
 
 tests/test_final_review_fixes_2026_10_15.py:62: AssertionError
 __________________ test_e2e_gate_blank_db_url_is_not_consent ___________________

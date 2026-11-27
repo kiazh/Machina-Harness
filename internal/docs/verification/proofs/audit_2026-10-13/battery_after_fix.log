@@ -48,17 +48,17 @@ pipeline 2 reranker still uses key: cohere-key-TWO
 CLAIM NOT REPRODUCED
 exit: 1
 ===== audit_consolidator_shape.py =====
-/Users/shadow/machina/machina/memory/consolidator.py:582 (_extract_memories)
+<repo>/machina/memory/consolidator.py:582 (_extract_memories)
 Failed to parse LLM memory extraction response as JSON: JSONDecodeError
 JSONDecodeError
-/Users/shadow/machina/machina/memory/consolidator.py:576 (_extract_memories)
+<repo>/machina/memory/consolidator.py:576 (_extract_memories)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py:352 (loads)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py:345 (decode)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py:363 (raw_decode)
 Memory extraction failed for session ed15270f-52da-46ea-855b-7cfb9ab4ea78
 RuntimeError
-/Users/shadow/machina/machina/memory/consolidator.py:246 (_consolidate_session_impl)
-/Users/shadow/machina/machina/memory/consolidator.py:612 (_extract_memories)
+<repo>/machina/memory/consolidator.py:246 (_consolidate_session_impl)
+<repo>/machina/memory/consolidator.py:612 (_extract_memories)
 LLM returns '{}'      -> status='failed' checkpoint=None
 LLM returns 'not json' -> status='failed' checkpoint=None
 CLAIM NOT REPRODUCED
@@ -123,11 +123,11 @@ exit: 1
   File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
     return future.result()
            ~~~~~~~~~~~~~^^
-  File "/Users/shadow/machina/docs/verification/proofs/audit_2026-10-13/audit_provider_sse.py", line 32, in main
+  File "<repo>/docs/verification/proofs/audit_2026-10-13/audit_provider_sse.py", line 32, in main
     async for event in provider.stream_complete(
     ...<2 lines>...
         events.append(event)
-  File "/Users/shadow/machina/machina/core/provider/direct.py", line 289, in stream_complete
+  File "<repo>/machina/core/provider/direct.py", line 289, in stream_complete
     raise _truncated_stream_error(self.spec.name, resolved_model)
 machina.core.exceptions.ProviderError: deepseek stream ended without a terminal frame ([DONE] or finish_reason) for audit-model
 exit: 1
@@ -151,22 +151,22 @@ exit: 1
 decision: cat .env          -> pending (sensitive capability requires explicit approval: credential_access)
 decision: grep -R TOKEN .   -> pending (sensitive capability requires explicit approval: opaque_execution_review)
 Traceback (most recent call last):
-  File "/Users/shadow/machina/docs/verification/proofs/audit_2026-10-13/audit_recursive_read.py", line 52, in <module>
+  File "<repo>/docs/verification/proofs/audit_2026-10-13/audit_recursive_read.py", line 52, in <module>
     assert d_grep.verdict == "allowed", "policy layer did not allow; can't continue"
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AssertionError: policy layer did not allow; can't continue
 exit: 1
 ===== audit_redos_child.py =====
-  File "/Users/shadow/machina/docs/verification/proofs/audit_2026-10-13/audit_redos_child.py", line 19, in main
+  File "<repo>/docs/verification/proofs/audit_2026-10-13/audit_redos_child.py", line 19, in main
     result = await registry.execute("search_files", pattern="(a+)+$", path=str(work))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/tools/base.py", line 364, in execute
+  File "<repo>/machina/tools/base.py", line 364, in execute
     result = await tool.func(**kwargs)
              ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/tools/builtins.py", line 509, in search_files
+  File "<repo>/machina/tools/builtins.py", line 509, in search_files
     matches = await _match_files_bounded(pattern, files)
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/tools/builtins.py", line 433, in _match_files_bounded
+  File "<repo>/machina/tools/builtins.py", line 433, in _match_files_bounded
     raise ToolError(
     ...<2 lines>...
     ) from None
@@ -189,8 +189,8 @@ exit: 1
 ===== audit_scheduler_failed_outcome.py =====
 Job audit failed outcome (47f130ce-58c5-4e6e-acfa-a10c36219930) failed
 RuntimeError
-/Users/shadow/machina/machina/core/scheduler.py:657 (run_due_once)
-/Users/shadow/machina/machina/core/scheduler.py:945 (_execute)
+<repo>/machina/core/scheduler.py:657 (run_due_once)
+<repo>/machina/core/scheduler.py:945 (_execute)
 run_due_once returned: True
 recorded finish error: 'RuntimeError: agent outcome: failed'
 recorded paused_for: None
@@ -228,14 +228,14 @@ aaabbbbb (file.write file-2) (nothing dispatched=true)
 case3 '/approvals allow aaaaaaaa' (unique): dispatched [{"requestId":"aaaaaaaa-1111-4000-a000-000000000001","verdict":"approved","sessionId":"sess-1"}]
 exit: 0
 ===== audit_init_overwrite_real_app.mjs =====
-file:///Users/shadow/machina/ui/src/app.ts:575
+file://<repo>/ui/src/app.ts:575
 				throw new Error(`Refusing to overwrite existing file ${full}. Delete it first or choose another path.`);
 				      ^
 
 Error: Refusing to overwrite existing file /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/audit-init-app-kBD9p9/AGENTS.md. Delete it first or choose another path.
-    at writeFile (file:///Users/shadow/machina/ui/src/app.ts:575:11)
-    at async Object.run (file:///Users/shadow/machina/ui/src/features/codex.ts:40:17)
-    at async file:///Users/shadow/machina/docs/verification/proofs/audit_2026-10-13/audit_init_overwrite_real_app.mjs:22:3
+    at writeFile (file://<repo>/ui/src/app.ts:575:11)
+    at async Object.run (file://<repo>/ui/src/features/codex.ts:40:17)
+    at async file://<repo>/docs/verification/proofs/audit_2026-10-13/audit_init_overwrite_real_app.mjs:22:3
 
 Node.js v26.10.0
 exit: 1

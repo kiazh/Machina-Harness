@@ -89,7 +89,7 @@ in" with their login hints).
 ## Reproduce
 
 ```sh
-cd /Users/shadow/machina
+cd <repo>
 .venv/bin/python docs/verification/proofs/oauth_research_2026-10-14/copilot_live_proof.py   # exit 0 (2 = no gh login)
 .venv/bin/python docs/verification/proofs/oauth_research_2026-10-14/claude_hermetic_proof.py
 .venv/bin/python docs/verification/proofs/oauth_research_2026-10-14/gemini_hermetic_proof.py

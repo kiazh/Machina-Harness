@@ -23,7 +23,7 @@ E   AssertionError: Traceback (most recent call last):
       ImportError: cannot import name 'config' from 'machina.core.config' (/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/machina-r4d1-red/machina/core/config.py)
       
     assert 1 == 0
-     +  where 1 = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-m', 'machina', 'config'], returncode=1, stdout='', ...onfig\' (/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/machina-r4d1-red/machina/core/config.py)\n').returncode
+     +  where 1 = CompletedProcess(args=['<repo>/.venv/bin/python', '-m', 'machina', 'config'], returncode=1, stdout='', ...onfig\' (/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/machina-r4d1-red/machina/core/config.py)\n').returncode
 /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/machina-r4d1-red/tests/test_r4_080_boot_config.py:79: AssertionError: Traceback (most recent call last):
 E   AssertionError: assert 'Run machina init and retry.' in '✗ Runtime schema upgrade failed. Run machina db init and retry.\n'
      +  where '✗ Runtime schema upgrade failed. Run machina db init and retry.\n' = <Result SystemExit(1)>.output

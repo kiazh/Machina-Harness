@@ -2,7 +2,7 @@ FF.FF.                                                                   [100%]
 =================================== FAILURES ===================================
 ______________ test_config_set_model_persist_overrides_stale_env _______________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b791220>
 
     def test_config_set_model_persist_overrides_stale_env(
@@ -30,7 +30,7 @@ E         + old-model
 tests/test_final_review_cli_config_setup.py:79: AssertionError
 _____________ test_config_set_provider_persist_overrides_stale_env _____________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b791350>
 
     def test_config_set_provider_persist_overrides_stale_env(

@@ -4,7 +4,7 @@ FFFF.FFFFFFF......F.FF                                                   [100%]
 =================================== FAILURES ===================================
 _ test_git_grep_walks_require_review[git grep --untracked --no-exclude-standard REVIEW_TOKEN] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re0<home>/project')
 command = 'git grep --untracked --no-exclude-standard REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -23,7 +23,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _ test_git_grep_walks_require_review[git grep --no-exclude-standard REVIEW_TOKEN] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re1/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re1<home>/project')
 command = 'git grep --no-exclude-standard REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -42,7 +42,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 __________ test_git_grep_walks_require_review[git grep REVIEW_TOKEN] ___________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re2/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re2<home>/project')
 command = 'git grep REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -61,7 +61,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _________ test_git_grep_walks_require_review[git grep REVIEW_TOKEN .] __________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re3/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re3<home>/project')
 command = 'git grep REVIEW_TOKEN .'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -80,7 +80,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 ________ test_git_grep_walks_require_review[git grep REVIEW_TOKEN src] _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re4/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re4<home>/project')
 command = 'git grep REVIEW_TOKEN src'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -99,7 +99,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _________ test_git_grep_walks_require_review[git grep -e REVIEW_TOKEN] _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re5/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re5<home>/project')
 command = 'git grep -e REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -118,7 +118,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 ______ test_git_grep_walks_require_review[git grep --regexp=REVIEW_TOKEN] ______
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re6/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re6<home>/project')
 command = 'git grep --regexp=REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -137,7 +137,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _ test_git_grep_walks_require_review[git grep --untracked REVIEW_TOKEN '*.env'] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re7/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re7<home>/project')
 command = "git grep --untracked REVIEW_TOKEN '*.env'"
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -149,12 +149,12 @@ command = "git grep --untracked REVIEW_TOKEN '*.env'"
         assert decision.verdict == "pending", (command, decision.reason)
 >       assert "opaque_execution_review" in decision.reason
 E       AssertionError: assert 'opaque_execution_review' in 'sensitive capability requires explicit approval: credential_access'
-E        +  where 'sensitive capability requires explicit approval: credential_access' = Decision(verdict='pending', reason='sensitive capability requires explicit approval: credential_access', request=Actio...k/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re7/Users/shadow/project')).reason
+E        +  where 'sensitive capability requires explicit approval: credential_access' = Decision(verdict='pending', reason='sensitive capability requires explicit approval: credential_access', request=Actio...k/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re7<home>/project')).reason
 
 tests/test_permission_risk_policy.py:599: AssertionError
 _________ test_git_grep_walks_require_review[git grep -f patterns.txt] _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re8/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re8<home>/project')
 command = 'git grep -f patterns.txt'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -166,12 +166,12 @@ command = 'git grep -f patterns.txt'
         assert decision.verdict == "pending", (command, decision.reason)
 >       assert "opaque_execution_review" in decision.reason
 E       AssertionError: assert 'opaque_execution_review' in 'write/exec or out-of-scope access requires approval'
-E        +  where 'write/exec or out-of-scope access requires approval' = Decision(verdict='pending', reason='write/exec or out-of-scope access requires approval', request=ActionRequest(reques...k/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re8/Users/shadow/project')).reason
+E        +  where 'write/exec or out-of-scope access requires approval' = Decision(verdict='pending', reason='write/exec or out-of-scope access requires approval', request=ActionRequest(reques...k/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re8<home>/project')).reason
 
 tests/test_permission_risk_policy.py:599: AssertionError
 ___ test_git_grep_walks_require_review[git grep -Osh REVIEW_TOKEN README.md] ___
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re9/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re9<home>/project')
 command = 'git grep -Osh REVIEW_TOKEN README.md'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -190,7 +190,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 __ test_git_grep_walks_require_review[git grep -nOsh REVIEW_TOKEN README.md] ___
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re10/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re10<home>/project')
 command = 'git grep -nOsh REVIEW_TOKEN README.md'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -209,7 +209,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _ test_git_grep_walks_require_review[git grep --open-files-in-pager=sh REVIEW_TOKEN README.md] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re11/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re11<home>/project')
 command = 'git grep --open-files-in-pager=sh REVIEW_TOKEN README.md'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -228,7 +228,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _ test_git_grep_walks_require_review[uv run git grep --untracked REVIEW_TOKEN] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re12/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_grep_walks_require_re12<home>/project')
 command = 'uv run git grep --untracked REVIEW_TOKEN'
 
     @pytest.mark.parametrize("command", GIT_GREP_WALK_COMMANDS)
@@ -247,7 +247,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:598: AssertionError
 _ test_git_revspec_credential_operands_require_credential_access[git show HEAD:credentials] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op0<home>/project')
 command = 'git show HEAD:credentials'
 
     @pytest.mark.parametrize("command", GIT_REVSPEC_CREDENTIAL_COMMANDS)
@@ -263,7 +263,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:643: AssertionError
 _ test_git_revspec_credential_operands_require_credential_access[git show HEAD:.netrc] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op1/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op1<home>/project')
 command = 'git show HEAD:.netrc'
 
     @pytest.mark.parametrize("command", GIT_REVSPEC_CREDENTIAL_COMMANDS)
@@ -279,7 +279,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:643: AssertionError
 _ test_git_revspec_credential_operands_require_credential_access[git show HEAD:id_rsa] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op2/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op2<home>/project')
 command = 'git show HEAD:id_rsa'
 
     @pytest.mark.parametrize("command", GIT_REVSPEC_CREDENTIAL_COMMANDS)
@@ -295,7 +295,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:643: AssertionError
 _ test_git_revspec_credential_operands_require_credential_access[git show HEAD:credentials.bak] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op3/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op3<home>/project')
 command = 'git show HEAD:credentials.bak'
 
     @pytest.mark.parametrize("command", GIT_REVSPEC_CREDENTIAL_COMMANDS)
@@ -311,7 +311,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:643: AssertionError
 _ test_git_revspec_credential_operands_require_credential_access[git show HEAD:.env-backup] _
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op4/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_git_revspec_credential_op4<home>/project')
 command = 'git show HEAD:.env-backup'
 
     @pytest.mark.parametrize("command", GIT_REVSPEC_CREDENTIAL_COMMANDS)
@@ -327,7 +327,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:643: AssertionError
 ______________ test_credential_backup_names_require_review[.env~] ______________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r0<home>/project')
 path = '.env~'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -343,7 +343,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 ___________ test_credential_backup_names_require_review[.env-backup] ___________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r1/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r1<home>/project')
 path = '.env-backup'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -359,7 +359,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 __________ test_credential_backup_names_require_review[credentials~] ___________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r2/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r2<home>/project')
 path = 'credentials~'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -375,7 +375,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 _________ test_credential_backup_names_require_review[credentials.bak] _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r3/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r3<home>/project')
 path = 'credentials.bak'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -391,7 +391,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 __________ test_credential_backup_names_require_review[credentials.1] __________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r4/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r4<home>/project')
 path = 'credentials.1'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -407,7 +407,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 _____ test_credential_backup_names_require_review[deploy/production.env~] ______
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r5/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r5<home>/project')
 path = 'deploy/production.env~'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -423,7 +423,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 ___________ test_credential_backup_names_require_review[.netrc.bak] ____________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r6/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r6<home>/project')
 path = '.netrc.bak'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -439,7 +439,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 __________ test_credential_backup_names_require_review[.netrc_backup] __________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r7/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r7<home>/project')
 path = '.netrc_backup'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -455,7 +455,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 ___________ test_credential_backup_names_require_review[id_rsa.bak] ____________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r8/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_credential_backup_names_r8<home>/project')
 path = 'id_rsa.bak'
 
     @pytest.mark.parametrize("path", CREDENTIAL_BACKUP_PATHS)
@@ -471,7 +471,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:676: AssertionError
 _________ test_terminal_read_of_backup_credential_name_requires_review _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_terminal_read_of_backup_c0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_terminal_read_of_backup_c0<home>/project')
 
     def test_terminal_read_of_backup_credential_name_requires_review(workspace):
         decision = decide(_terminal_request("cat credentials.bak"))
@@ -484,7 +484,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:682: AssertionError
 ___________ test_calibrated_bare_flags_stay_routine[wc -c README.md] ___________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta0<home>/project')
 command = 'wc -c README.md'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -502,7 +502,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 ________________ test_calibrated_bare_flags_stay_routine[ls -C] ________________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta1/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta1<home>/project')
 command = 'ls -C'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -520,7 +520,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 ________________ test_calibrated_bare_flags_stay_routine[ls -o] ________________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta2/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta2<home>/project')
 command = 'ls -o'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -538,7 +538,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 __ test_calibrated_bare_flags_stay_routine[grep -C 2 REVIEW_TOKEN README.md] ___
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta3/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta3<home>/project')
 command = 'grep -C 2 REVIEW_TOKEN README.md'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -556,7 +556,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 ________ test_calibrated_bare_flags_stay_routine[head -c 100 README.md] ________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta4/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta4<home>/project')
 command = 'head -c 100 README.md'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -574,7 +574,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 _________ test_calibrated_bare_flags_stay_routine[diff -c a.txt b.txt] _________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta5/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_bare_flags_sta5<home>/project')
 command = 'diff -c a.txt b.txt'
 
     @pytest.mark.parametrize("command", CALIBRATED_BARE_FLAG_COMMANDS)
@@ -592,7 +592,7 @@ E         + pending
 tests/test_permission_risk_policy.py:713: AssertionError
 __________ test_calibrated_flag_passes_the_real_broker_without_a_card __________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_flag_passes_th0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_calibrated_flag_passes_th0<home>/project')
 
     async def test_calibrated_flag_passes_the_real_broker_without_a_card(workspace):
         from machina.permissions.broker import permission_broker, set_approval_handler
@@ -633,7 +633,7 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792019895.006026, "event": "p
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ___________ test_recursive_copy_of_unreadable_subdir_requires_review ___________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_of_unreada0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_of_unreada0<home>/project')
 
     def test_recursive_copy_of_unreadable_subdir_requires_review(workspace):
         source = workspace / "archive-src"
@@ -659,7 +659,7 @@ E             + allowed
 tests/test_permission_risk_policy.py:771: AssertionError
 _________ test_recursive_copy_tree_scan_failures_fail_closed[iterdir] __________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_tree_scan_0/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_tree_scan_0<home>/project')
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1093916a0>
 failure = 'iterdir'
 
@@ -700,7 +700,7 @@ E         + allowed
 tests/test_permission_risk_policy.py:814: AssertionError
 ________ test_recursive_copy_tree_scan_failures_fail_closed[entry-stat] ________
 
-workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_tree_scan_1/Users/shadow/project')
+workspace = PosixPath('/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1541/test_recursive_copy_tree_scan_1<home>/project')
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b66fc40>
 failure = 'entry-stat'
 

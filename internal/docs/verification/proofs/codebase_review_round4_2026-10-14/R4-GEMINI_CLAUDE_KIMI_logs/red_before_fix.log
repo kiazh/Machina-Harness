@@ -141,7 +141,7 @@ module = 'machina.security.claude_auth'
 >       assert probe.returncode != 0, f"{module} is still importable"
 E       AssertionError: machina.security.claude_auth is still importable
 E       assert 0 != 0
-E        +  where 0 = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.security.claude_auth')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
+E        +  where 0 = CompletedProcess(args=['<repo>/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.security.claude_auth')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
 
 tests/test_subscription_removals.py:101: AssertionError
 ____ test_removed_modules_are_not_importable[machina.security.gemini_auth] _____
@@ -159,7 +159,7 @@ module = 'machina.security.gemini_auth'
 >       assert probe.returncode != 0, f"{module} is still importable"
 E       AssertionError: machina.security.gemini_auth is still importable
 E       assert 0 != 0
-E        +  where 0 = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.security.gemini_auth')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
+E        +  where 0 = CompletedProcess(args=['<repo>/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.security.gemini_auth')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
 
 tests/test_subscription_removals.py:101: AssertionError
 ____ test_removed_modules_are_not_importable[machina.core.provider.claude] _____
@@ -177,7 +177,7 @@ module = 'machina.core.provider.claude'
 >       assert probe.returncode != 0, f"{module} is still importable"
 E       AssertionError: machina.core.provider.claude is still importable
 E       assert 0 != 0
-E        +  where 0 = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.core.provider.claude')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
+E        +  where 0 = CompletedProcess(args=['<repo>/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.core.provider.claude')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
 
 tests/test_subscription_removals.py:101: AssertionError
 ____ test_removed_modules_are_not_importable[machina.core.provider.gemini] _____
@@ -195,7 +195,7 @@ module = 'machina.core.provider.gemini'
 >       assert probe.returncode != 0, f"{module} is still importable"
 E       AssertionError: machina.core.provider.gemini is still importable
 E       assert 0 != 0
-E        +  where 0 = CompletedProcess(args=['/Users/shadow/machina/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.core.provider.gemini')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
+E        +  where 0 = CompletedProcess(args=['<repo>/.venv/bin/python', '-c', "import importlib; importlib.import_module('machina.core.provider.gemini')"], returncode=0, stdout='', stderr='environment file could not be resolved\n').returncode
 
 tests/test_subscription_removals.py:101: AssertionError
 __ test_provider_facade_no_longer_exports_removed_transports[ClaudeProvider] ___
@@ -208,7 +208,7 @@ attribute = 'ClaudeProvider'
     
 >       assert not hasattr(provider_package, attribute)
 E       AssertionError: assert not True
-E        +  where True = hasattr(<module 'machina.core.provider' from '/Users/shadow/machina/machina/core/provider/__init__.py'>, 'ClaudeProvider')
+E        +  where True = hasattr(<module 'machina.core.provider' from '<repo>/machina/core/provider/__init__.py'>, 'ClaudeProvider')
 
 tests/test_subscription_removals.py:109: AssertionError
 __ test_provider_facade_no_longer_exports_removed_transports[GeminiProvider] ___
@@ -221,7 +221,7 @@ attribute = 'GeminiProvider'
     
 >       assert not hasattr(provider_package, attribute)
 E       AssertionError: assert not True
-E        +  where True = hasattr(<module 'machina.core.provider' from '/Users/shadow/machina/machina/core/provider/__init__.py'>, 'GeminiProvider')
+E        +  where True = hasattr(<module 'machina.core.provider' from '<repo>/machina/core/provider/__init__.py'>, 'GeminiProvider')
 
 tests/test_subscription_removals.py:109: AssertionError
 ________________ test_no_machina_source_mentions_a_removed_flow ________________

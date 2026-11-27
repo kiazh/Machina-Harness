@@ -16,7 +16,7 @@ other agents edit hot files (see §6) — re-resolve with the fingerprint before
 
 | Item | Value |
 |---|---|
-| Repo | `/Users/shadow/machina` |
+| Repo | `<repo>` |
 | `git rev-parse HEAD` | `b7bd6b611e5323cf0d1db0ea3e1a9f6ae1acbb2a` (unchanged across captures) |
 | `git diff \| shasum -a 256` — first capture | `6e4c38d202a36667e74e59975953d3fd3cf8a7355344c7c319d73e18d12dfc50` |
 | `git diff \| shasum -a 256` — 18:24:18Z capture | `2bf3a0bf99c9545c98a7b1b4d6e99e4bd6acda8ab2e9f561985bf31ab813c790` |
@@ -41,10 +41,10 @@ token-efficiency / nowplaying wave.** Evidence (untracked unless noted):
 `machina/core/{agent,prompt,config,assembler,compression,usage}.py`,
 `machina/skills/learning.py`, `machina/gateway/features/__init__.py` (hot files, §6).
 
-Test harness: `/Users/shadow/Machina-DevTools` is a separate repo (HEAD
+Test harness: `<home>/Machina-DevTools` is a separate repo (HEAD
 `a8b45429…`, 5 modified test files) whose `tests/`, `machina/`, `ui/`, `skills/`
-are symlinks into `/Users/shadow/machina`. Tests live there, not in the main repo
-(there is no `/Users/shadow/machina/tests`).
+are symlinks into `<repo>`. Tests live there, not in the main repo
+(there is no `<repo>/tests`).
 
 ---
 
@@ -252,7 +252,7 @@ disclosure (`runtime.py:231`) is activity telemetry, not compliance.
 
 ## 5. Deterministic request corpus (A0 deliverable 2)
 
-`/Users/shadow/Machina-DevTools/tests/data/deterministic_skills/requests.json`
+`<home>/Machina-DevTools/tests/data/deterministic_skills/requests.json`
 — 15 cases derived from spec §8.2 / §18 (S02–S11). Each case:
 `{id, kind, input, context?, required:{task_family|null, stack_resolution,
 constraints_preserved[], must_not[]}}`; schema semantics in the adjacent

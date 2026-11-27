@@ -28,7 +28,7 @@ test at test/r5-021_022-ui-affordances.test.ts:116:1
   -   ''
   - ]
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:124:10)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:124:10)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1402:25)
       at Test.start (node:internal/test_runner/test:1262:17)
@@ -51,7 +51,7 @@ test at test/r5-021_022-ui-affordances.test.ts:130:1
   -   ''
   - ]
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:140:10)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:140:10)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1402:25)
       at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
@@ -72,7 +72,7 @@ test at test/r5-021_022-ui-affordances.test.ts:170:1
   
   1 !== 0
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:191:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:191:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,
@@ -89,7 +89,7 @@ test at test/r5-021_022-ui-affordances.test.ts:196:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:204:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:204:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,
@@ -106,7 +106,7 @@ test at test/r5-021_022-ui-affordances.test.ts:209:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:217:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:217:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -123,7 +123,7 @@ test at test/r5-021_022-ui-affordances.test.ts:223:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:231:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:231:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,
@@ -140,7 +140,7 @@ test at test/r5-021_022-ui-affordances.test.ts:236:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:243:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:243:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -154,7 +154,7 @@ test at test/r5-021_022-ui-affordances.test.ts:236:1
 test at test/r5-021_022-ui-affordances.test.ts:247:1
 ✖ R5-022 abbreviations stay bounded and misses disclose the full-ID path (0.22225ms)
   AssertionError [ERR_ASSERTION]: miss discloses the bounded scope
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:256:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:256:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,

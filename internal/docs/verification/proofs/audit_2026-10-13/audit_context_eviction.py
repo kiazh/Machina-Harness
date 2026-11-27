@@ -16,7 +16,7 @@ from pathlib import Path
 
 import msgpack
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 DSN = "postgresql://postgres:postgres@localhost:5432/machina_test"

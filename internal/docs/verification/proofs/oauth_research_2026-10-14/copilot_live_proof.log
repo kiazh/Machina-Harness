@@ -4,7 +4,7 @@ started 2026-10-14 16:00:54 (python 3.14.5)
 [wire] GET /models -> HTTP 200
 [wire] live model menu: 55 models; sample=['claude-fable-5', 'claude-fable-5.1', 'claude-haiku-4.5', 'claude-haiku-5.5', 'claude-opus-4.8', 'claude-opus-4.8-fast']
 [wire] legacy copilot_internal/v2/token -> HTTP 403 (not used)
-[auth] resolved token family=gho account=None store=/Users/shadow/.machina/auth/copilot.json
+[auth] resolved token family=gho account=None store=<home>/.machina/auth/copilot.json
 [auth] machina store after: {"account": null, "last_refresh": "2026-10-14T19:58:00.060342Z", "signed_in": true, "source": "machina", "token_family": "gho"}
 2026-10-14 16:00:59,649 [AUDIT] {"timestamp": 1792008059.6489751, "event": "llm_stream_start", "provider": "copilot", "model": "gpt-4o", "message_count": 2}
 Audit event dropped before the writer started; event was not persisted

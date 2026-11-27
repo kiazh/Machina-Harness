@@ -4,7 +4,7 @@ Scope: which non-ChatGPT cloud LLM subscriptions can Machina authenticate to
 with a first-class provider, given the constraints: local-only (vendor API is
 the only network peer), no secrets scraped from non-consented sources, no
 speculative transports. Method: on-disk references (installed CLIs, the
-Hermes agent checkout at `/Users/shadow/.hermes/hermes-agent`), vendor / OSS
+Hermes agent checkout at `<home>/.hermes/hermes-agent`), vendor / OSS
 source, live HTTP probes on this machine. All token material below is
 public client metadata or observed protocol facts — never user tokens.
 
@@ -71,7 +71,7 @@ per-provider proofs.
 ### Kiro (AWS) — NOT-FEASIBLE as a native provider; POSSIBLE as ACP interop
 
 **On-disk evidence (this machine, read-only).** `kiro-cli` v2.12.1 is
-installed (`/Users/shadow/.local/bin/kiro-cli` → `/Applications/Kiro CLI.app`)
+installed (`<home>/.local/bin/kiro-cli` → `/Applications/Kiro CLI.app`)
 and logged in: `kiro-cli whoami` → `Logged in with Builder ID` (free tier).
 Credentials live in:
 

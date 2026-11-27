@@ -47,11 +47,11 @@ INFO     machina.audit:audit.py:244 {"timestamp": 1792083721.488854, "event": "a
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    machina.core.scheduler:scheduler.py:689 Job h03 researcher job (e99dfd5a-102b-4d12-b5fd-0787fdb209be) failed
 PermissionError
-/Users/shadow/machina/machina/core/scheduler.py:666 (run_due_once)
-/Users/shadow/machina/machina/core/scheduler.py:995 (_execute)
-/Users/shadow/machina/machina/core/agent.py:107 (wrapper)
-/Users/shadow/machina/machina/core/agent.py:1792 (run)
-/Users/shadow/machina/machina/core/agent.py:567 (_prepare_context)
+<repo>/machina/core/scheduler.py:666 (run_due_once)
+<repo>/machina/core/scheduler.py:995 (_execute)
+<repo>/machina/core/agent.py:107 (wrapper)
+<repo>/machina/core/agent.py:1792 (run)
+<repo>/machina/core/agent.py:567 (_prepare_context)
 =========================== short test summary info ============================
 FAILED tests/test_holistic_h03_scheduler_ownership.py::test_e2e_overridden_job_runs_and_reconciles_session_owner
 1 failed in 0.66s

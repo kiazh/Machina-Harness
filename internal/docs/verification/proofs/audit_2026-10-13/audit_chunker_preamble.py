@@ -5,7 +5,7 @@ names ('python')."""
 import sys
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 from machina.rag.chunker import RecursiveCharacterTextSplitter

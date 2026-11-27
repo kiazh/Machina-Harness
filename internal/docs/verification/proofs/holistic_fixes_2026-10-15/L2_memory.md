@@ -1,6 +1,6 @@
 # L2R — memory/redaction fixes (H02, H05, H06)
 
-Lane: L2R (replacement writer). Repo: /Users/shadow/machina. Source: docs/verification/CODEBASE_REVIEW_HOLISTIC_2026-10-15.md.
+Lane: L2R (replacement writer). Repo: <repo>. Source: docs/verification/CODEBASE_REVIEW_HOLISTIC_2026-10-15.md.
 Owned files: machina/memory/redaction.py, machina/memory/retriever.py, machina/tools/memory.py,
 machina/api/routes/memory.py, machina/gateway/features/memory.py (+ their tests only).
 

@@ -5,7 +5,7 @@ ____________ test_space_identity_is_stable_and_distinguishes_spaces ____________
     def test_space_identity_is_stable_and_distinguishes_spaces():
         """Same backend/model/width maps to one id; model or width changes it."""
 >       from machina.memory.embeddings import embedding_space_id
-E       ImportError: cannot import name 'embedding_space_id' from 'machina.memory.embeddings' (/Users/shadow/machina/machina/memory/embeddings.py)
+E       ImportError: cannot import name 'embedding_space_id' from 'machina.memory.embeddings' (<repo>/machina/memory/embeddings.py)
 
 tests/test_memory_embedding_space.py:85: ImportError
 _________________ test_space_identity_is_none_without_embedder _________________
@@ -15,7 +15,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109cda650>
     def test_space_identity_is_none_without_embedder(monkeypatch):
         """Keyword-only operation has no space: callers keep pre-H08 behavior."""
 >       from machina.memory.embeddings import embedding_space_id
-E       ImportError: cannot import name 'embedding_space_id' from 'machina.memory.embeddings' (/Users/shadow/machina/machina/memory/embeddings.py)
+E       ImportError: cannot import name 'embedding_space_id' from 'machina.memory.embeddings' (<repo>/machina/memory/embeddings.py)
 
 tests/test_memory_embedding_space.py:96: ImportError
 __________________ test_add_persists_explicit_embedding_space __________________

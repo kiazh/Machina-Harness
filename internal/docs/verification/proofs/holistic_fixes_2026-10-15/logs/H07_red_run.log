@@ -89,7 +89,7 @@ tests/test_holistic_h07_memory_outcome.py:188: KeyError
 ----------------------------- Captured stderr call -----------------------------
 2026-10-15 15:21:08,156 [AUDIT] {"timestamp": 1792092068.156399, "event": "memory_pending_create", "pending_id": "8cd947b7-6287-48c4-b2ab-a9b435c69b69", "agent_id": "harness", "category": "fact", "redactions": []}
 ------------------------------ Captured log call -------------------------------
-INFO     machina.gateway.server:server.py:123 Gateway logging initialized: /Users/shadow/.machina/logs/gateway.log
+INFO     machina.gateway.server:server.py:123 Gateway logging initialized: <home>/.machina/logs/gateway.log
 INFO     machina.audit:audit.py:244 {"timestamp": 1792092068.156399, "event": "memory_pending_create", "pending_id": "8cd947b7-6287-48c4-b2ab-a9b435c69b69", "agent_id": "harness", "category": "fact", "redactions": []}
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ____________________ test_api_memory_create_reports_pending ____________________

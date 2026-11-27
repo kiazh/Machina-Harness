@@ -1,9 +1,9 @@
-Ignoring unreadable config persona_description in /Users/shadow/.machina/config.yaml: ImportError
+Ignoring unreadable config persona_description in <home>/.machina/config.yaml: ImportError
 ImportError
-/Users/shadow/machina/machina/core/config.py:614 (load)
-/Users/shadow/machina/machina/core/config.py:282 (validate_value)
-/Users/shadow/machina/machina/memory/__init__.py:15 (<module>)
-/Users/shadow/machina/machina/memory/approval.py:23 (<module>)
+<repo>/machina/core/config.py:614 (load)
+<repo>/machina/core/config.py:282 (validate_value)
+<repo>/machina/memory/__init__.py:15 (<module>)
+<repo>/machina/memory/approval.py:23 (<module>)
 2026-10-14 22:42:38,140 [AUDIT] {"timestamp": 1792032158.140511, "event": "rag_index_start", "session_id": "d3ee9b8a-ba35-45c4-b58f-0d47af122bf2", "source": "https://alice:[REDACTED_URL_PASSWORD]@example.invalid/document", "doc_type": "text"}
 2026-10-14 22:42:38,175 [AUDIT] {"timestamp": 1792032158.175342, "event": "rag_index_complete", "session_id": "d3ee9b8a-ba35-45c4-b58f-0d47af122bf2", "source": "https://alice:[REDACTED_URL_PASSWORD]@example.invalid/document", "chunks_stored": 1}
 2026-10-14 22:42:38,175 [AUDIT] {"timestamp": 1792032158.175618, "event": "rag_index_start", "session_id": "d3ee9b8a-ba35-45c4-b58f-0d47af122bf2", "source": "https://example.invalid/doc?api_key=[REDACTED_CREDENTIAL]&x=1", "doc_type": "text"}

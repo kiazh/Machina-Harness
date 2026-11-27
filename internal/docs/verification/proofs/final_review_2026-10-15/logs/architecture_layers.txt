@@ -11,7 +11,7 @@ relative_path = 'core/provider/audit.py', ceiling = 219
         )
 E       AssertionError: core/provider/audit.py grew past its ceiling of 219 lines
 E       assert 254 <= 219
-E        +  where 254 = _line_count((PosixPath('/Users/shadow/machina/machina') / 'core/provider/audit.py'))
+E        +  where 254 = _line_count((PosixPath('<repo>/machina') / 'core/provider/audit.py'))
 
 tests/test_architecture_layers.py:444: AssertionError
 __________ test_god_file_ceilings_only_fall[core/provider/sse.py-46] ___________
@@ -25,7 +25,7 @@ relative_path = 'core/provider/sse.py', ceiling = 46
         )
 E       AssertionError: core/provider/sse.py grew past its ceiling of 46 lines
 E       assert 55 <= 46
-E        +  where 55 = _line_count((PosixPath('/Users/shadow/machina/machina') / 'core/provider/sse.py'))
+E        +  where 55 = _line_count((PosixPath('<repo>/machina') / 'core/provider/sse.py'))
 
 tests/test_architecture_layers.py:444: AssertionError
 ____________________ test_provider_package_total_only_falls ____________________

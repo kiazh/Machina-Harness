@@ -138,7 +138,7 @@ relative_path = 'core/provider/copilot.py', ceiling = 431
         )
 E       AssertionError: core/provider/copilot.py grew past its ceiling of 431 lines
 E       assert 443 <= 431
-E        +  where 443 = _line_count((PosixPath('/Users/shadow/machina/machina') / 'core/provider/copilot.py'))
+E        +  where 443 = _line_count((PosixPath('<repo>/machina') / 'core/provider/copilot.py'))
 
 tests/test_architecture_layers.py:474: AssertionError
 ____________________ test_provider_package_total_only_falls ____________________

@@ -19,7 +19,7 @@ test at test/r5-mode-indicator.test.ts:139:1
   + undefined
   - '11111111-1111-4111-8111-111111111111'
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-mode-indicator.test.ts:144:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-mode-indicator.test.ts:144:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
     generatedMessage: false,
@@ -33,7 +33,7 @@ test at test/r5-mode-indicator.test.ts:139:1
 test at test/r5-mode-indicator.test.ts:153:1
 ✖ R5-D1b switching sessions refreshes the footer to the new session's authority (18.549792ms)
   AssertionError [ERR_ASSERTION]: session switch re-queries mode.get for the newly visible session
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-mode-indicator.test.ts:166:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-mode-indicator.test.ts:166:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,

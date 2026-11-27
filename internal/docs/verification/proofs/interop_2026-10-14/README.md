@@ -10,8 +10,8 @@ PostgreSQL session rows.
 ## 1. Registration
 
 ```console
-$ opencode mcp add machina -- /Users/shadow/machina/.venv/bin/python -m machina.mcp_server
-MCP server "machina" added to /Users/shadow/machina/opencode.json
+$ opencode mcp add machina -- <repo>/.venv/bin/python -m machina.mcp_server
+MCP server "machina" added to <repo>/opencode.json
 
 $ opencode mcp list
 ✓ machina              connected
@@ -26,7 +26,7 @@ Configuration written (project scope, `opencode.json`):
     "servers": {
       "machina": {
         "type": "local",
-        "command": ["/Users/shadow/machina/.venv/bin/python", "-m", "machina.mcp_server"]
+        "command": ["<repo>/.venv/bin/python", "-m", "machina.mcp_server"]
       }
     }
   }
@@ -43,7 +43,7 @@ form used below is `opencode run --standalone --auto --format json "<message>"`.
 
 ## 2. Round trip (final run, clean reply)
 
-Command (run from `/Users/shadow/machina`):
+Command (run from `<repo>`):
 
 ```console
 $ opencode run --standalone --auto --format json \

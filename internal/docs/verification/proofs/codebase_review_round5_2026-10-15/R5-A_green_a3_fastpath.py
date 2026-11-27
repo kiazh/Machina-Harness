@@ -7,7 +7,7 @@ R5-D must disclose are exactly what the code enforces.
 """
 import sys
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 from machina.permissions.policy import ActionRequest, decide
 

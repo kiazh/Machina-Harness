@@ -1,6 +1,6 @@
 # LANE M4b — close-out: `runTimeoutSeconds` on the wire (H22 follow-up)
 
-Date: 2026-10-15 · Repo: `/Users/shadow/machina` · HEAD `3ef6d5b` + the
+Date: 2026-10-15 · Repo: `<repo>` · HEAD `3ef6d5b` + the
 uncommitted M4 working tree. Owned files only: `ui/src/protocol.ts`,
 `communications/ui-gateway-protocol.md` (and their tests — none exist).
 No commit, no push.

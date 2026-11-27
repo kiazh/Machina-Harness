@@ -9,7 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 DSN = "postgresql://postgres:postgres@localhost:5432/machina_test"

@@ -1,6 +1,6 @@
 # LANE M4 — holistic-review fixes: H09 (harness argv) + H22 (UI/backend deadline)
 
-Date: 2026-10-15 · Repo: `/Users/shadow/machina` · Findings source:
+Date: 2026-10-15 · Repo: `<repo>` · Findings source:
 `docs/verification/CODEBASE_REVIEW_HOLISTIC_2026-10-15.md` (§H09, §H22).
 
 Owned files (only): `machina/interop.py`, `machina/gateway/features/interop.py`,

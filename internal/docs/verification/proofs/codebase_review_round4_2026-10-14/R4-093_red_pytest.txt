@@ -2,7 +2,7 @@ FF.FF.FF..FFF.FFF.FFFFFF.F.                                              [100%]
 =================================== FAILURES ===================================
 ____________ test_config_set_provider_persist_syncs_env_and_dotenv _____________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 
     def test_config_set_provider_persist_syncs_env_and_dotenv(isolated_cli) -> None:
         cli = isolated_cli
@@ -19,7 +19,7 @@ tests/test_r4_093_cli_cluster.py:60: AssertionError
 DEBUG    machina.core.config:config.py:586 Config saved to /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1941/test_config_set_provider_persi0/config.yaml
 ______________ test_config_set_model_persist_syncs_env_and_dotenv ______________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 
     def test_config_set_model_persist_syncs_env_and_dotenv(isolated_cli) -> None:
         cli = isolated_cli
@@ -36,7 +36,7 @@ tests/test_r4_093_cli_cluster.py:71: AssertionError
 DEBUG    machina.core.config:config.py:586 Config saved to /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1941/test_config_set_model_persist_0/config.yaml
 _________________ test_config_set_invalid_value_is_typed_error _________________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 
     def test_config_set_invalid_value_is_typed_error(isolated_cli) -> None:
         cli = isolated_cli
@@ -50,7 +50,7 @@ E        +  where '' = <Result ValueError('execution_mode must be ask|workspace|
 tests/test_r4_093_cli_cluster.py:92: AssertionError
 ______________________ test_mode_set_syncs_env_and_dotenv ______________________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 
     def test_mode_set_syncs_env_and_dotenv(isolated_cli) -> None:
         cli = isolated_cli
@@ -68,7 +68,7 @@ tests/test_r4_093_cli_cluster.py:104: AssertionError
 DEBUG    machina.core.config:config.py:586 Config saved to /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1941/test_mode_set_syncs_env_and_do0/config.yaml
 _______________ test_repl_rejects_invalid_mode_without_launching _______________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 
     def test_repl_rejects_invalid_mode_without_launching(isolated_cli) -> None:
         cli = isolated_cli
@@ -98,7 +98,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ebfe990>
 E       assert '.env' in ''
 E        +  where '' = <Result ValueError("MACHINA_ENV_FILE must end with .env or be an existing file: 'bad-override-without-dotenv-suffix'")>.output
 
-/Users/shadow/machina/tests/test_r4_093_cli_cluster.py:141: AssertionError
+<repo>/tests/test_r4_093_cli_cluster.py:141: AssertionError
 _________________ test_output_helpers_render_markup_literally __________________
 
     def test_output_helpers_render_markup_literally() -> None:
@@ -388,7 +388,7 @@ E        +  where '' = <Result JSONDecodeError('Expecting property name enclosed
 tests/test_r4_093_cli_cluster.py:271: AssertionError
 ________________ test_models_refresh_empty_success_keeps_cache _________________
 
-isolated_cli = <module 'machina.cli' from '/Users/shadow/machina/machina/cli/__init__.py'>
+isolated_cli = <module 'machina.cli' from '<repo>/machina/cli/__init__.py'>
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ebb0cd0>
 
     def test_models_refresh_empty_success_keeps_cache(

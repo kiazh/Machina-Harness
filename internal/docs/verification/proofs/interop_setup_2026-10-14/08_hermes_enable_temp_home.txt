@@ -1,5 +1,5 @@
   Hermes registers user-level only (no project scope); using global scope
-  run: /Users/shadow/.local/bin/hermes mcp add machina --command /Users/shadow/machina/.venv/bin/python --args -m machina.mcp_server
+  run: <home>/.local/bin/hermes mcp add machina --command <repo>/.venv/bin/python --args -m machina.mcp_server
   registration command exited 0
   output: Connecting to 'machina'...
 
@@ -21,7 +21,7 @@ model:
 _config_version: 50
 mcp_servers:
   machina:
-    command: /Users/shadow/machina/.venv/bin/python
+    command: <repo>/.venv/bin/python
     args:
       - -m
       - machina.mcp_server

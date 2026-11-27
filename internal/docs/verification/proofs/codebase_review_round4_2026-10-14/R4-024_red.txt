@@ -19,7 +19,7 @@ test at test/state.test.ts:1090:1
   + 'openrouter'
   - 'acme'
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/state.test.ts:1095:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/state.test.ts:1095:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
     generatedMessage: false,
@@ -39,7 +39,7 @@ test at test/state.test.ts:1100:1
   + undefined
   - 'openrouter'
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/state.test.ts:1114:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/state.test.ts:1114:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,

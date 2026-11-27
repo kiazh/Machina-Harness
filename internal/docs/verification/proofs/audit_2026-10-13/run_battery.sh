@@ -9,7 +9,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO=/Users/shadow/machina
+REPO=<repo>
 SCRATCH="${TMPDIR:-/tmp}/opencode/audit_battery"
 mkdir -p "$SCRATCH/home"
 : > "$SCRATCH/empty.env"

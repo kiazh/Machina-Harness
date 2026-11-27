@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 work = Path(tempfile.mkdtemp(prefix="audit-recursive-"))

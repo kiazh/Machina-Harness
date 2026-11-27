@@ -488,7 +488,7 @@
 test at test/r4-094-tui.test.ts:329:1
 ✖ R4-094(h) /keys suggestions match the gateway's accepted secret allowlist (1.673958ms)
   AssertionError [ERR_ASSERTION]: /keys suggests OPENCODE_API_KEY, which secrets.set refuses
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r4-094-tui.test.ts:344:10)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r4-094-tui.test.ts:344:10)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,

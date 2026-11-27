@@ -299,11 +299,11 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792005405.517618, "event": "p
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    machina.permissions.store:store.py:522 durable approval create failed
 DeadlockDetectedError
-/Users/shadow/machina/machina/permissions/store.py:506 (create_approval)
-/Users/shadow/machina/.venv/lib/python3.14/site-packages/asyncpg/connection.py:380 (execute)
-/Users/shadow/machina/.venv/lib/python3.14/site-packages/asyncpg/connection.py:1904 (_execute)
-/Users/shadow/machina/.venv/lib/python3.14/site-packages/asyncpg/connection.py:2003 (__execute)
-/Users/shadow/machina/.venv/lib/python3.14/site-packages/asyncpg/connection.py:2069 (_do_execute)
+<repo>/machina/permissions/store.py:506 (create_approval)
+<repo>/.venv/lib/python3.14/site-packages/asyncpg/connection.py:380 (execute)
+<repo>/.venv/lib/python3.14/site-packages/asyncpg/connection.py:1904 (_execute)
+<repo>/.venv/lib/python3.14/site-packages/asyncpg/connection.py:2003 (__execute)
+<repo>/.venv/lib/python3.14/site-packages/asyncpg/connection.py:2069 (_do_execute)
 asyncpg/protocol/protocol.pyx:197 (bind_execute)
 =========================== short test summary info ============================
 FAILED tests/test_connectors_execution.py::test_sdk_remote_call_runs_through_agent_approval_pipeline[boom-arguments2-boom-failed]

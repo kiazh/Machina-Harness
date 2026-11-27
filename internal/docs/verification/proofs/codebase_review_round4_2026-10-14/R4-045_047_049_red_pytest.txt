@@ -229,7 +229,7 @@ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
     self._check_timeout(endtime, orig_timeout, stdout, stderr)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
-self = <Popen: returncode: -9 args: ['/Users/shadow/machina/.venv/bin/python', '-c'...>
+self = <Popen: returncode: -9 args: ['<repo>/.venv/bin/python', '-c'...>
 endtime = 227116.152441125, orig_timeout = 10.0, stdout_seq = []
 stderr_seq = [], skip_check_and_raise = False
 
@@ -243,7 +243,7 @@ stderr_seq = [], skip_check_and_raise = False
                     self.args, orig_timeout,
                     output=b''.join(stdout_seq) if stdout_seq else None,
                     stderr=b''.join(stderr_seq) if stderr_seq else None)
-E           subprocess.TimeoutExpired: Command '['/Users/shadow/machina/.venv/bin/python', '-c', '\nimport json, os, sys, time\n\nproviders_file = sys.argv[1]\ntimeout_override = float(sys.argv[2])\nos.environ["MACHINA_PROVIDERS_FILE"] = providers_file\n\ndef open_fds():\n    try:\n        return {int(name) for name in os.listdir("/dev/fd") if name.isdigit()}\n    except OSError:\n        return None\n\nfrom machina.security import providers as store\nif timeout_override:\n    store._STORE_LOCK_TIMEOUT_SECONDS = timeout_override\nbefore = open_fds()\nstarted = time.monotonic()\nerror = None\ntry:\n    store.add_provider("contended", "http://127.0.0.1:9000/v1")\nexcept BaseException as exc:  # reported verbatim; the parent asserts the type\n    error = {"type": type(exc).__name__, "message": str(exc)}\nelapsed = time.monotonic() - started\nafter = open_fds()\nleaked = sorted(after - before) if before is not None and after is not None else None\nprint(json.dumps({"error": error, "elapsed": elapsed, "leaked_fds": leaked}))\n', '/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1519/test_contended_store_lock_fail0/providers.json', '0.4']' timed out after 10.0 seconds
+E           subprocess.TimeoutExpired: Command '['<repo>/.venv/bin/python', '-c', '\nimport json, os, sys, time\n\nproviders_file = sys.argv[1]\ntimeout_override = float(sys.argv[2])\nos.environ["MACHINA_PROVIDERS_FILE"] = providers_file\n\ndef open_fds():\n    try:\n        return {int(name) for name in os.listdir("/dev/fd") if name.isdigit()}\n    except OSError:\n        return None\n\nfrom machina.security import providers as store\nif timeout_override:\n    store._STORE_LOCK_TIMEOUT_SECONDS = timeout_override\nbefore = open_fds()\nstarted = time.monotonic()\nerror = None\ntry:\n    store.add_provider("contended", "http://127.0.0.1:9000/v1")\nexcept BaseException as exc:  # reported verbatim; the parent asserts the type\n    error = {"type": type(exc).__name__, "message": str(exc)}\nelapsed = time.monotonic() - started\nafter = open_fds()\nleaked = sorted(after - before) if before is not None and after is not None else None\nprint(json.dumps({"error": error, "elapsed": elapsed, "leaked_fds": leaked}))\n', '/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/pytest-of-shadow/pytest-1519/test_contended_store_lock_fail0/providers.json', '0.4']' timed out after 10.0 seconds
 
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py:1268: TimeoutExpired
 

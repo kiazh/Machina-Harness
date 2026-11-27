@@ -3,7 +3,7 @@
 - **Task:** B0-audit — verify whether existing durable-artifact infrastructure satisfies "B0 — Artifact contract and recovery" (spec §14.2, §14.6, §17-B0, acceptance at §17-B0; constraints C06–C09 at §18).
 - **Date:** 2026-10-16 (America/New_York).
 - **Method:** read-only source inspection (verification level 1–2) against the working tree; one targeted test snapshot (level 2–3, DB-gated parts unexecuted). No source file was modified; this document is the only file created.
-- **Spec source:** `/Users/shadow/Desktop/Machina_Revised_Deterministic_Skills_and_Rolling_Context_Plan.md` (not in-repo).
+- **Spec source:** `<home>/Desktop/Machina_Revised_Deterministic_Skills_and_Rolling_Context_Plan.md` (not in-repo).
 
 ## 1. Baseline (moving — repo owner active)
 
@@ -52,7 +52,7 @@ In-flight files audited (untracked = `??`, i.e. "claimed mechanisms", verified a
 
 ## 4. `te_*`/artifact test snapshot — CURRENT OBSERVED (not suite truth; §19)
 
-- Command: `PYTHON=<venv> ./run-tests.sh tests/test_te_artifacts.py tests/test_te_projection.py tests/test_te_reducers.py tests/test_te_review_fixes.py tests/test_te_usage_ledger.py tests/test_te_views_integration.py tests/test_te_prompt_policy.py tests/test_te_cache_profiles.py -q -rs -p no:cacheprovider` from `/Users/shadow/Machina-DevTools`, `MACHINA_REPO=/Users/shadow/machina`, interpreter `/Users/shadow/machina/.venv/bin/python` (pytest 9.1.1), `PYTHONDONTWRITEBYTECODE=1`, temp HOME per `run-tests.sh`.
+- Command: `PYTHON=<venv> ./run-tests.sh tests/test_te_artifacts.py tests/test_te_projection.py tests/test_te_reducers.py tests/test_te_review_fixes.py tests/test_te_usage_ledger.py tests/test_te_views_integration.py tests/test_te_prompt_policy.py tests/test_te_cache_profiles.py -q -rs -p no:cacheprovider` from `<home>/Machina-DevTools`, `MACHINA_REPO=<repo>`, interpreter `<repo>/.venv/bin/python` (pytest 9.1.1), `PYTHONDONTWRITEBYTECODE=1`, temp HOME per `run-tests.sh`.
 - Result snapshot at 2026-10-16 ~14:22: **89 collected, 77 passed, 12 skipped, 0 failed (0.88 s)**.
 - Per-file collected: artifacts 9, cache_profiles 9, projection 7, prompt_policy 9, reducers 15, review_fixes 13, usage_ledger 22, views_integration 5.
 - All 12 skips = `MACHINA_TEST_DATABASE_URL not set` — 8 in `test_te_artifacts.py` (incl. `test_access_follows_delegation_tree_not_siblings:126`, quota, expiry/purge, tools paging, store guards) and 4 in `test_te_usage_ledger.py`.

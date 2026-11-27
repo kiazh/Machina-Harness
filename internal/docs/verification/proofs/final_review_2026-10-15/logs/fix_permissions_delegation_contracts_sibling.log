@@ -18,7 +18,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a4fe250>
     
         spy = MagicMock(return_value=True)
 >       monkeypatch.setattr(progress, "should_write_first", spy)
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:139: AttributeError
 ____________________________ test_empty_file_errors ____________________________
@@ -30,7 +30,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1095d0e60>
         import machina.core.progress as progress
     
 >       monkeypatch.setattr(progress, "should_write_first", MagicMock(return_value=True))
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:153: AttributeError
 ________________________ test_directory_artifact_errors ________________________
@@ -42,7 +42,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a47f850>
         import machina.core.progress as progress
     
 >       monkeypatch.setattr(progress, "should_write_first", MagicMock(return_value=True))
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:164: AttributeError
 __________________________ test_no_contract_unchanged __________________________
@@ -56,7 +56,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109a344d0>
     
         spy = MagicMock(return_value=True)
 >       monkeypatch.setattr(progress, "should_write_first", spy)
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:177: AttributeError
 _________________ test_waiting_approval_bypasses_verification __________________
@@ -69,7 +69,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1095ec5d0>
     
         spy = MagicMock(return_value=True)
 >       monkeypatch.setattr(progress, "should_write_first", spy)
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:189: AttributeError
 ___________ test_cancelled_mid_write_propagates_without_verification ___________
@@ -84,7 +84,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1095ea710>
     
         spy = MagicMock(return_value=True)
 >       monkeypatch.setattr(progress, "should_write_first", spy)
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:217: AttributeError
 ______________ test_orchestrator_direct_escape_is_error_not_raise ______________
@@ -96,7 +96,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1095a36d0>
         import machina.core.progress as progress
     
 >       monkeypatch.setattr(progress, "should_write_first", MagicMock(return_value=True))
-E       AttributeError: <module 'machina.core.progress' from '/Users/shadow/machina/machina/core/progress.py'> has no attribute 'should_write_first'
+E       AttributeError: <module 'machina.core.progress' from '<repo>/machina/core/progress.py'> has no attribute 'should_write_first'
 
 tests/test_delegation_contracts.py:241: AttributeError
 =========================== short test summary info ============================

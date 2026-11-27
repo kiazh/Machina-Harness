@@ -6,7 +6,7 @@
 # resolve_env_file, and the real child-CLI find_env_file, and asserts both
 # target the same file.
 set -eu
-REPO=/Users/shadow/machina
+REPO=<repo>
 INSTALL_SH="$REPO/install.sh"
 
 # 1. The fix must exist and must run before init (line ~341) and doctor (~377).

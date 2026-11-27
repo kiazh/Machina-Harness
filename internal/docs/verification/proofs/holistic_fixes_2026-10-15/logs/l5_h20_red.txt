@@ -54,7 +54,7 @@ E             Use -v to get more diff
 
 tests/test_holistic_l5_gateway_2026_10_15.py:120: AssertionError
 ------------------------------ Captured log call -------------------------------
-INFO     machina.gateway.server:server.py:123 Gateway logging initialized: /Users/shadow/.machina/logs/gateway.log
+INFO     machina.gateway.server:server.py:123 Gateway logging initialized: <home>/.machina/logs/gateway.log
 ________ test_compress_services_route_matches_agent_factory_precedence _________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10c0d4050>

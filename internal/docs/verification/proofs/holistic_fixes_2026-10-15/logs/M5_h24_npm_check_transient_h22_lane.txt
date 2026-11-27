@@ -534,9 +534,9 @@ test at test/app.test.ts:554:1
   + actual - expected
   
   + Error: gateway did not answer interop.run within 120000 ms
-  +     at file:///Users/shadow/machina/ui/src/gateway.ts:33:12
+  +     at file://<repo>/ui/src/gateway.ts:33:12
   +     at MockTimers.tick (node:internal/test_runner/mock/mock_timers:705:7)
-  +     at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/app.test.ts:576:16)
+  +     at TestContext.<anonymous> (file://<repo>/ui/test/app.test.ts:576:16)
   +     at Test.runInAsyncScope (node:async_hooks:226:14)
   +     at Test.run (node:internal/test_runner/test:1402:25)
   +     at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
@@ -545,15 +545,15 @@ test at test/app.test.ts:554:1
   +     at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
   - undefined
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/app.test.ts:583:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/app.test.ts:583:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,
     code: 'ERR_ASSERTION',
     actual: Error: gateway did not answer interop.run within 120000 ms
-        at file:///Users/shadow/machina/ui/src/gateway.ts:33:12
+        at file://<repo>/ui/src/gateway.ts:33:12
         at MockTimers.tick (node:internal/test_runner/mock/mock_timers:705:7)
-        at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/app.test.ts:576:16)
+        at TestContext.<anonymous> (file://<repo>/ui/test/app.test.ts:576:16)
         at Test.runInAsyncScope (node:async_hooks:226:14)
         at Test.run (node:internal/test_runner/test:1402:25)
         at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
@@ -579,7 +579,7 @@ test at test/harnesses.test.ts:214:1
       }
     }
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/harnesses.test.ts:223:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/harnesses.test.ts:223:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -593,6 +593,6 @@ test at test/harnesses.test.ts:214:1
 test at test/harnesses.test.ts:235:1
 ✖ /harnesses Run a task refuses when the gateway does not report its deadline (0.159583ms)
   TypeError [Error]: Cannot read properties of undefined (reading 'text')
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/harnesses.test.ts:247:26)
+      at TestContext.<anonymous> (file://<repo>/ui/test/harnesses.test.ts:247:26)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

@@ -5,7 +5,7 @@ no turn is active and yields twice -> RuntimeError masks the original error.
 import sys
 from pathlib import Path
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 from machina.observability import traces

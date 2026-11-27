@@ -1,6 +1,6 @@
 # H07 — approval-gated memory writes returned the wrong kind of ID as stored success
 
-Lane: H07 (subagent). Repo: /Users/shadow/machina. Source: `docs/verification/CODEBASE_REVIEW_HOLISTIC_2026-10-15.md`
+Lane: H07 (subagent). Repo: <repo>. Source: `docs/verification/CODEBASE_REVIEW_HOLISTIC_2026-10-15.md`
 finding H07 (P2). Tests run from the DevTools clone
 (`/private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/opencode/devtools_seed_2026-10-15/harness-clone`)
 against this harness via `MACHINA_REPO`; a dedicated database (`machina_test_h07`, not the shared
@@ -122,7 +122,7 @@ additive `status` fields (2)/(3).
 
 ## Files changed
 
-Harness (`/Users/shadow/machina`): `machina/memory/store.py`, `machina/memory/approval.py`,
+Harness (`<repo>`): `machina/memory/store.py`, `machina/memory/approval.py`,
 `machina/memory/consolidator.py`, `machina/memory/shared_bus.py`, `machina/tools/memory.py`,
 `machina/gateway/features/memory.py`, `machina/api/routes/memory.py`,
 `ui/src/features/memory.ts`, `ui/test/features.test.ts`.
@@ -146,9 +146,9 @@ Commands (final state):
 
 ```
 # backend focused sets — cwd = DevTools clone
-MACHINA_REPO=/Users/shadow/machina \
+MACHINA_REPO=<repo> \
 MACHINA_TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/machina_test_h07' \
-PYTHON=/Users/shadow/machina/.venv/bin/python \
+PYTHON=<repo>/.venv/bin/python \
 ./run-tests.sh tests/test_holistic_h07_memory_outcome.py -v -p no:cacheprovider
 # → 6 passed
 
@@ -168,11 +168,11 @@ MACHINA_REPO=... MACHINA_TEST_DATABASE_URL=... PYTHON=... ./run-tests.sh \
   tests/test_features_split.py tests/test_api_route_table.py -q -p no:cacheprovider
 # → 192 passed
 
-# lint/format — cwd = /Users/shadow/machina
+# lint/format — cwd = <repo>
 .venv/bin/ruff check --no-cache machina/ tools/           # All checks passed!
 .venv/bin/ruff format --check --no-cache machina/ tools/  # 237 files already formatted
 
-# UI — cwd = /Users/shadow/machina/ui
+# UI — cwd = <repo>/ui
 npx tsc --noEmit -p tsconfig.json                          # clean
 node --test --test-reporter=spec test/*.test.ts            # 501 passed, 6 skipped, 0 failed
 npm run lint                                               # clean

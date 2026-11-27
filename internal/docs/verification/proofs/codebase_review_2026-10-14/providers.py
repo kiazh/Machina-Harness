@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 os.environ['HOME'] = tempfile.mkdtemp(prefix='machina-provider-review-')
 os.environ['MACHINA_ENV_FILE'] = '/dev/null'
 os.environ['MACHINA_SECRET_BACKEND'] = ''
-sys.path.insert(0, '/Users/shadow/machina')
+sys.path.insert(0, '<repo>')
 import httpx
 from machina.core.provider.anthropic import AnthropicProvider
 from machina.core.provider.ollama import OllamaProvider

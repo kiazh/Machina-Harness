@@ -315,8 +315,8 @@ E         Use -v to get more diff
 
 tests/test_r4_090_tools.py:281: AssertionError
 ------------------------------ Captured log call -------------------------------
-WARNING  machina.skills.registry:registry.py:668 Skipping skill /Users/shadow/machina/skills/cost-optimization/SKILL.md: ValueError
-WARNING  machina.skills.registry:registry.py:668 Skipping skill /Users/shadow/machina/skills/prompt-engineering/SKILL.md: ValueError
+WARNING  machina.skills.registry:registry.py:668 Skipping skill <repo>/skills/cost-optimization/SKILL.md: ValueError
+WARNING  machina.skills.registry:registry.py:668 Skipping skill <repo>/skills/prompt-engineering/SKILL.md: ValueError
 ______ test_every_model_facing_tool_schema_declares_additional_properties ______
 
     def test_every_model_facing_tool_schema_declares_additional_properties():

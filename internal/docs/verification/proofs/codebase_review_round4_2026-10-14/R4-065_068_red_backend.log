@@ -66,7 +66,7 @@ tests/test_r4_approvals_deadline.py:150: AssertionError
 2026-10-14 19:27:52,054 [WARNING] MACHINA_GATEWAY_TOKEN not set — gateway accepts unauthenticated requests
 2026-10-14 19:27:52,084 [AUDIT] {"timestamp": 1792020472.084237, "event": "permission_pending", "request_id": "a70f0d30a01c4bd286e1a0379972b637", "session_id": "f7e8d7a2-dbc1-4b89-9468-0c1fe1653a98", "turn_id": "r4-065-memory", "agent_id": "r4-approval", "operation": "process.exec", "tool": "", "mode": "ask", "digest_prefix": "6b44bcf504494ac9", "reason": "sensitive capability requires explicit approval: destructive_system"}
 ------------------------------ Captured log call -------------------------------
-INFO     machina.gateway.server:server.py:119 Gateway logging initialized: /Users/shadow/.machina/logs/gateway.log
+INFO     machina.gateway.server:server.py:119 Gateway logging initialized: <home>/.machina/logs/gateway.log
 WARNING  machina.gateway.server:server.py:228 MACHINA_GATEWAY_TOKEN not set — gateway accepts unauthenticated requests
 DEBUG    machina.gateway.server:server.py:280 Turn r4-065-memory stage: turn_started
 DEBUG    machina.gateway.server:server.py:280 Turn r4-065-memory stage: building_agent

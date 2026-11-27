@@ -113,7 +113,7 @@ INFO     machina.audit:audit.py:144 {"timestamp": 1792028665.220404, "event": "p
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 ERROR    machina.core.agent:agent.py:1091 Tool execution failed for 'scope_probe'
 TypeError
-/Users/shadow/machina/machina/core/agent.py:1081 (_run_one)
+<repo>/machina/core/agent.py:1081 (_run_one)
 INFO     machina.audit:audit.py:144 {"timestamp": 1792028665.2210119, "event": "tool_call_error", "session_id": "0cc0ae61-fafe-46a7-8a05-cd4e69934dfa", "tool_name": "scope_probe", "duration_ms": 13}
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 INFO     machina.audit:audit.py:144 {"timestamp": 1792028665.221282, "event": "tool_call_complete", "session_id": "0cc0ae61-fafe-46a7-8a05-cd4e69934dfa", "tool_name": "scope_probe", "duration_ms": 13}

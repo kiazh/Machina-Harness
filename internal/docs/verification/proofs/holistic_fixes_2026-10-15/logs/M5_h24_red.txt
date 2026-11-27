@@ -22,7 +22,7 @@ test at test/holistic-h24-delegate-pause.test.ts:132:1
   
   1 !== 0
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:139:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:139:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
     generatedMessage: false,
@@ -36,14 +36,14 @@ test at test/holistic-h24-delegate-pause.test.ts:132:1
 test at test/holistic-h24-delegate-pause.test.ts:159:1
 ✖ /delegate paused state offers approval and continuation actions (0.148292ms)
   TypeError [Error]: Cannot read properties of undefined (reading 'map')
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:164:39)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:164:39)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
 
 test at test/holistic-h24-delegate-pause.test.ts:170:1
 ✖ /delegate approving a paused child resolves against the child session (0.35075ms)
   AssertionError [ERR_ASSERTION]: approval must be resolved through the gateway
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:177:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:177:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,
@@ -57,14 +57,14 @@ test at test/holistic-h24-delegate-pause.test.ts:170:1
 test at test/holistic-h24-delegate-pause.test.ts:187:1
 ✖ /delegate denying a paused child resolves a denial against the child session (0.09975ms)
   TypeError [Error]: Cannot read properties of undefined (reading 'params')
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:194:28)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:194:28)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
 
 test at test/holistic-h24-delegate-pause.test.ts:202:1
 ✖ /delegate switching to the paused child resumes it as the current session (0.121709ms)
   TypeError [Error]: Cannot read properties of undefined (reading 'params')
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:212:27)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:212:27)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
 
@@ -74,7 +74,7 @@ test at test/holistic-h24-delegate-pause.test.ts:217:1
   
   'Delegating to researcher…'
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/holistic-h24-delegate-pause.test.ts:223:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/holistic-h24-delegate-pause.test.ts:223:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,

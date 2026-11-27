@@ -1,6 +1,6 @@
 # M5b — H04 residual: the latest usable compaction summary no longer ages out of the live source window
 
-- Repo: `/Users/shadow/machina`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
+- Repo: `<repo>`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
 - Date: 2026-10-15
 - Lane files (ownership): `machina/core/context.py`, `machina/core/agent.py`, and their
   focused tests. `machina/core/agent.py` was **not modified** by this lane (the fix lands at the
@@ -110,7 +110,7 @@ and others, `logs/M5b_green_focused3.txt`) to show this lane does not disturb th
 ## Commands run (focused)
 
 ```bash
-# working dir /Users/shadow/machina
+# working dir <repo>
 MACHINA_TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/machina_test' \
   .venv/bin/python -m pytest tests/test_holistic_m5b_summary_window.py \
   tests/test_holistic_h04_compaction_prompt.py tests/test_context_windows.py \

@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-REPO = Path("/Users/shadow/machina")
+REPO = Path("<repo>")
 sys.path.insert(0, str(REPO))
 
 import machina.memory.retriever as retriever_module

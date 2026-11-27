@@ -333,36 +333,36 @@ done.
 ------------------------------ Captured log call -------------------------------
 WARNING  machina.memory.retriever:retriever.py:231 batch_update_access failed
 DatabaseError
-/Users/shadow/machina/machina/memory/retriever.py:229 (retrieve)
-/Users/shadow/machina/machina/memory/store.py:375 (batch_update_access)
-/Users/shadow/machina/machina/db/connection.py:141 (execute)
+<repo>/machina/memory/retriever.py:229 (retrieve)
+<repo>/machina/memory/store.py:375 (batch_update_access)
+<repo>/machina/db/connection.py:141 (execute)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py:214 (__aenter__)
-/Users/shadow/machina/machina/db/connection.py:122 (acquire)
-/Users/shadow/machina/machina/db/connection.py:106 (pool)
+<repo>/machina/db/connection.py:122 (acquire)
+<repo>/machina/db/connection.py:106 (pool)
 WARNING  machina.memory.retriever:retriever.py:231 batch_update_access failed
 DatabaseError
-/Users/shadow/machina/machina/memory/retriever.py:229 (retrieve)
-/Users/shadow/machina/machina/memory/store.py:375 (batch_update_access)
-/Users/shadow/machina/machina/db/connection.py:141 (execute)
+<repo>/machina/memory/retriever.py:229 (retrieve)
+<repo>/machina/memory/store.py:375 (batch_update_access)
+<repo>/machina/db/connection.py:141 (execute)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py:214 (__aenter__)
-/Users/shadow/machina/machina/db/connection.py:122 (acquire)
-/Users/shadow/machina/machina/db/connection.py:106 (pool)
+<repo>/machina/db/connection.py:122 (acquire)
+<repo>/machina/db/connection.py:106 (pool)
 WARNING  machina.memory.retriever:retriever.py:231 batch_update_access failed
 DatabaseError
-/Users/shadow/machina/machina/memory/retriever.py:229 (retrieve)
-/Users/shadow/machina/machina/memory/store.py:375 (batch_update_access)
-/Users/shadow/machina/machina/db/connection.py:141 (execute)
+<repo>/machina/memory/retriever.py:229 (retrieve)
+<repo>/machina/memory/store.py:375 (batch_update_access)
+<repo>/machina/db/connection.py:141 (execute)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py:214 (__aenter__)
-/Users/shadow/machina/machina/db/connection.py:122 (acquire)
-/Users/shadow/machina/machina/db/connection.py:106 (pool)
+<repo>/machina/db/connection.py:122 (acquire)
+<repo>/machina/db/connection.py:106 (pool)
 WARNING  machina.memory.retriever:retriever.py:231 batch_update_access failed
 DatabaseError
-/Users/shadow/machina/machina/memory/retriever.py:229 (retrieve)
-/Users/shadow/machina/machina/memory/store.py:375 (batch_update_access)
-/Users/shadow/machina/machina/db/connection.py:141 (execute)
+<repo>/machina/memory/retriever.py:229 (retrieve)
+<repo>/machina/memory/store.py:375 (batch_update_access)
+<repo>/machina/db/connection.py:141 (execute)
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py:214 (__aenter__)
-/Users/shadow/machina/machina/db/connection.py:122 (acquire)
-/Users/shadow/machina/machina/db/connection.py:106 (pool)
+<repo>/machina/db/connection.py:122 (acquire)
+<repo>/machina/db/connection.py:106 (pool)
 INFO     machina.audit:audit.py:244 {"timestamp": 1792050564.4469628, "event": "rag_search_start", "session_id": "aa1fcf44-d5d6-41f1-b524-49aabbe776d4", "top_k": 3}
 ERROR    machina.observability.audit:audit.py:42 Audit event dropped before the writer started; event was not persisted
 WARNING  machina.rag.pipeline:pipeline.py:493 no embedder configured, keyword-only search

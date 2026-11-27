@@ -8,7 +8,7 @@ policy proof in red_a1_policy_bypass.py.
 """
 import sys
 
-sys.path.insert(0, "/Users/shadow/machina")
+sys.path.insert(0, "<repo>")
 
 from machina import mcp_server
 
@@ -19,6 +19,6 @@ assert cmd[cmd.index("--mode") + 1] == "full", "expected full forwarded verbatim
 
 # No ceiling seam exists pre-fix:
 assert not hasattr(mcp_server, "_mcp_mode_ceiling"), "ceiling helper must not exist pre-fix"
-assert "MCP_MAX_MODE" not in open("/Users/shadow/machina/machina/mcp_server/__init__.py").read()
+assert "MCP_MAX_MODE" not in open("<repo>/machina/mcp_server/__init__.py").read()
 
 print("RED A1-hop1 REPRODUCED: tool mode='full' forwarded as CLI --mode full, no ceiling")

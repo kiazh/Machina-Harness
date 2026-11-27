@@ -10,7 +10,7 @@ a full `machina chat` agent turn. All ended in `response.completed`, served by
 the machine's ChatGPT account (`x-codex-plan-type: plus`, `x-codex-active-limit:
 premium`).
 
-- Repo: `/Users/shadow/machina`, git HEAD `9806bee` (uncommitted lane)
+- Repo: `<repo>`, git HEAD `9806bee` (uncommitted lane)
 - Runner: `.venv/bin/python docs/verification/proofs/chatgpt_auth_2026-10-14/run_live_proof.py`
   (Python 3.14.5, repo venv; exit code 0)
 - Raw output: [`live_completion.log`](live_completion.log)
@@ -108,7 +108,7 @@ are not credentials.
 ## Reproduce
 
 ```sh
-cd /Users/shadow/machina
+cd <repo>
 codex login status                    # expect: Logged in using ChatGPT
 .venv/bin/python docs/verification/proofs/chatgpt_auth_2026-10-14/run_live_proof.py
 # exit 0, appends/overwrites live_completion.log with the evidence above

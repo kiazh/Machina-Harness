@@ -45,7 +45,7 @@ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
     self._check_timeout(endtime, orig_timeout, stdout, stderr)
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
-self = <Popen: returncode: -9 args: ['/Users/shadow/machina/.venv/bin/python', '-m'...>
+self = <Popen: returncode: -9 args: ['<repo>/.venv/bin/python', '-m'...>
 endtime = 223981.048845458, orig_timeout = 10.0
 stdout_seq = [b'New session: 2af3394c-0ce0-4b88-b98f-0cba6f146b34\nModel: fake-model (custom)\nMode: ask (backend: host)\n\n2026-10...n": "routine trusted project command"}\nAudit event dropped before the writer started; event was not persisted\n', b'']
 stderr_seq = None, skip_check_and_raise = False
@@ -60,7 +60,7 @@ stderr_seq = None, skip_check_and_raise = False
                     self.args, orig_timeout,
                     output=b''.join(stdout_seq) if stdout_seq else None,
                     stderr=b''.join(stderr_seq) if stderr_seq else None)
-E           subprocess.TimeoutExpired: Command '['/Users/shadow/machina/.venv/bin/python', '-m', 'machina', 'chat', 'go', '--provider', 'custom', '--model', 'fake-model']' timed out after 10.0 seconds
+E           subprocess.TimeoutExpired: Command '['<repo>/.venv/bin/python', '-m', 'machina', 'chat', 'go', '--provider', 'custom', '--model', 'fake-model']' timed out after 10.0 seconds
 
 /opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py:1268: TimeoutExpired
 
@@ -117,8 +117,8 @@ E                   Audit event dropped before the writer started; event was not
 E                   no embedder configured, keyword-only search
 E                   2026-10-14 18:21:54,743 [AUDIT] {"timestamp": 1792016514.7437, "event": "rag_search_complete", "session_id": "2af3394c-0ce0-4b88-b98f-0cba6f146b34", "results_returned": 0}
 E                   Audit event dropped before the writer started; event was not persisted
-E                   Skipping skill /Users/shadow/machina/skills/cost-optimization/SKILL.md: ValueError
-E                   Skipping skill /Users/shadow/machina/skills/prompt-engineering/SKILL.md: ValueError
+E                   Skipping skill <repo>/skills/cost-optimization/SKILL.md: ValueError
+E                   Skipping skill <repo>/skills/prompt-engineering/SKILL.md: ValueError
 E                   2026-10-14 18:21:54,838 [AUDIT] {"timestamp": 1792016514.838791, "event": "llm_stream_start", "provider": "custom", "model": "fake-model", "message_count": 1}
 E                   Audit event dropped before the writer started; event was not persisted
 E                   2026-10-14 18:21:54,861 [AUDIT] {"timestamp": 1792016514.861569, "event": "llm_stream_complete", "provider": "custom", "model": "fake-model", "tool_calls": 1}
@@ -167,8 +167,8 @@ E             Audit event dropped before the writer started; event was not persi
 E             no embedder configured, keyword-only search
 E             2026-10-14 18:22:05,906 [AUDIT] {"timestamp": 1792016525.905985, "event": "rag_search_complete", "session_id": "599f1577-9eab-45a5-ac87-1447d190ccf6", "results_returned": 0}
 E             Audit event dropped before the writer started; event was not persisted
-E             Skipping skill /Users/shadow/machina/skills/cost-optimization/SKILL.md: ValueError
-E             Skipping skill /Users/shadow/machina/skills/prompt-engineering/SKILL.md: ValueError
+E             Skipping skill <repo>/skills/cost-optimization/SKILL.md: ValueError
+E             Skipping skill <repo>/skills/prompt-engineering/SKILL.md: ValueError
 E             2026-10-14 18:22:05,992 [AUDIT] {"timestamp": 1792016525.992605, "event": "llm_stream_start", "provider": "custom", "model": "fake-model", "message_count": 1}
 E             Audit event dropped before the writer started; event was not persisted
 E             2026-10-14 18:22:06,016 [AUDIT] {"timestamp": 1792016526.015994, "event": "llm_stream_complete", "provider": "custom", "model": "fake-model", "tool_calls": 1}
@@ -195,7 +195,7 @@ E             Iterations: 1 | Tool calls: 1 | Tokens: 12
 E             Session ID: 599f1577-9eab-45a5-ac87-1447d190ccf6
 E             
 E           assert 3 == 0
-E            +  where 3 = <Popen: returncode: 3 args: ['/Users/shadow/machina/.venv/bin/python', '-m',...>.returncode
+E            +  where 3 = <Popen: returncode: 3 args: ['<repo>/.venv/bin/python', '-m',...>.returncode
 
 tests/test_cli_turn_e2e.py:376: AssertionError
 =========================== short test summary info ============================

@@ -1,6 +1,6 @@
 == 1. console-script style (machina init / machina serve) ==
 console script: sys.path[0] = /private/var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T/r4095-mount.XKxXUk/bin
-console script: machina.__file__ = /Users/shadow/machina/machina/__init__.py
+console script: machina.__file__ = <repo>/machina/__init__.py
    shadow at /var/folders/sk/y8w9dwmd4lnc2yvygqqxd4xw0000gn/T//r4095-mount.XKxXUk/app/machina: NOT USED
 
 == 2. python -c / python -m style from cwd (the caveat) ==

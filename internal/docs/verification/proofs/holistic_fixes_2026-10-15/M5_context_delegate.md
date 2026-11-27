@@ -1,6 +1,6 @@
 # M5 — holistic review fixes: H04 (compaction summaries in prompts) + H24 (/delegate hides paused approval)
 
-- Repo: `/Users/shadow/machina`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
+- Repo: `<repo>`, base revision `3ef6d5b` (working tree, uncommitted by instruction)
 - Date: 2026-10-15
 - Lane files (ownership): `machina/core/compression.py`, `machina/core/assembler.py`,
   `machina/core/orchestrator.py`, `machina/gateway/features/agents.py`,
@@ -181,7 +181,7 @@ binding (`gateway/features/mode.py:213-236` validates the session binding).
 ## Commands run (focused)
 
 ```bash
-# Python (working dir /Users/shadow/machina)
+# Python (working dir <repo>)
 MACHINA_TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/machina_test' \
   .venv/bin/python -m pytest tests/test_compression.py tests/test_compaction_checkpoint.py \
   tests/test_comprehensive.py tests/test_basic.py tests/test_property_based.py \
@@ -197,7 +197,7 @@ MACHINA_TEST_DATABASE_URL='postgresql://postgres:postgres@localhost:5432/machina
   machina/core/orchestrator.py machina/gateway/features/agents.py \
   tests/test_holistic_h04_compaction_prompt.py    # All checks passed (logs/M5_ruff.txt)
 
-# UI (working dir /Users/shadow/machina/ui)
+# UI (working dir <repo>/ui)
 node --test --test-reporter=spec test/holistic-h24-delegate-pause.test.ts   # 7/7
 npm run typecheck && npm run lint                                            # exit 0
 npm run check    # exit 0: typecheck + 506 tests (500 pass, 6 skip) + eslint

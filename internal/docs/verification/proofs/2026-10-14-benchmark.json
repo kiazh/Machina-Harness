@@ -50,7 +50,7 @@
     "_section_seconds": 0.07
   },
   "locomo": {
-    "dataset": "/Users/shadow/.machina/locomo/locomo10.json",
+    "dataset": "<home>/.machina/locomo/locomo10.json",
     "conversations": 10,
     "questions": 1986,
     "baseline_tfidf": {

@@ -4,8 +4,8 @@ import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { App } = await import("/Users/shadow/machina/ui/src/app.ts");
-const { codexCommands } = await import("/Users/shadow/machina/ui/src/features/codex.ts");
+const { App } = await import("<repo>/ui/src/app.ts");
+const { codexCommands } = await import("<repo>/ui/src/features/codex.ts");
 
 const work = await mkdtemp(join(tmpdir(), "audit-init-app-"));
 await writeFile(join(work, "AGENTS.md"), "# AGENTS.md\n\nIMPORTANT EXISTING INSTRUCTIONS\n", "utf8");

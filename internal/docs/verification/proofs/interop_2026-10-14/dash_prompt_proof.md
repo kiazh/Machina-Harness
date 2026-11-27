@@ -9,7 +9,7 @@ exit 0 — both recorded in the round-2 findings.
 
 ## Provenance
 
-- Repo: `/Users/shadow/machina` · git HEAD `217f8c16e0877f65ac4fc24475106048157d0174`
+- Repo: `<repo>` · git HEAD `217f8c16e0877f65ac4fc24475106048157d0174`
   (working tree + Stage-2 shim/docs changes; suite and proof commands in the
   Stage-2 completion-bundle entry)
 - Host: OpenCode v2.0.26, project-registered `machina` MCP server

@@ -7,9 +7,9 @@ or removing a server pauses for one explicit approval (operation
 then executes exactly once against the same configuration store the human
 `/mcp` surface uses.
 
-- Repo: `/Users/shadow/machina` · git HEAD `9806bee7c53ac80bcb07a01ad8216be4747ae1b5`
+- Repo: `<repo>` · git HEAD `9806bee7c53ac80bcb07a01ad8216be4747ae1b5`
   (working tree + this wave's uncommitted changes)
-- Host: macOS (aarch64) · Python `/Users/shadow/machina/.venv/bin/python` 3.14.5
+- Host: macOS (aarch64) · Python `<repo>/.venv/bin/python` 3.14.5
 - Target for the live runs: Machina's own MCP server
   (`python -m machina.mcp_server`), which reports server `machina 0.2.0`,
   protocol `2025-11-25`, and exactly three tools: `machina_chat`,
@@ -25,7 +25,7 @@ uses). Excerpts:
 
 ```
 [mcp_connect] policy verdict: pending (sensitive capability requires explicit approval: mcp_external_review)
-             capabilities=['mcp_external_review'] argv=['/Users/shadow/machina/.venv/bin/python', '-m', 'machina.mcp_server']
+             capabilities=['mcp_external_review'] argv=['<repo>/.venv/bin/python', '-m', 'machina.mcp_server']
 [mcp_connect] PAUSED needs_approval: operation=tool.mcp_connect status=pending
 [mcp_connect] human decision recorded: approved (principal=proof-human)
 [mcp_connect] approved digest claimed; executing exactly once

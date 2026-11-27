@@ -16,7 +16,7 @@ Everything below was produced on this machine on 2026-10-14.
 
 Working references (read, not guessed):
 
-1. `/Users/shadow/.hermes/hermes-agent` — `hermes_cli/codex_models.py`,
+1. `<home>/.hermes/hermes-agent` — `hermes_cli/codex_models.py`,
    `agent/model_metadata.py`, `agent/codex_headers.py`,
    `agent/reasoning_effort.py`. Its live path:
    `GET https://chatgpt.com/backend-api/codex/models?client_version=<v>`

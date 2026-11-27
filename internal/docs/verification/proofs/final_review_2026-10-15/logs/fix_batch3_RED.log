@@ -17,7 +17,7 @@ E       TypeError: _serialize_event() got an unexpected keyword argument 'tool_i
 
 tests/test_final_review_2026_10_15_batch3_gateway_obs_memory.py:55: TypeError
 ------------------------------ Captured log call -------------------------------
-INFO     machina.gateway.server:server.py:122 Gateway logging initialized: /Users/shadow/.machina/logs/gateway.log
+INFO     machina.gateway.server:server.py:122 Gateway logging initialized: <home>/.machina/logs/gateway.log
 _____________ test_sse_route_v2_tool_complete_carries_real_iserror _____________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d3d4dd0>

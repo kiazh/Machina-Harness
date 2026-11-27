@@ -10,7 +10,7 @@ await writeFile(join(work, "AGENTS.md"), existing, "utf8");
 
 // Exercise the real /init command with host.writeFile implemented exactly as
 // ui/src/app.ts:566-571 (three lines, no flags -> truncate).
-const { codexCommands } = await import("/Users/shadow/machina/ui/src/features/codex.ts");
+const { codexCommands } = await import("<repo>/ui/src/features/codex.ts");
 const init = codexCommands.find((c) => c.name === "init");
 const previousCwd = process.cwd();
 process.chdir(work);

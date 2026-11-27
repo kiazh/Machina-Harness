@@ -1,6 +1,6 @@
 $ codex mcp list
 Name     Command                                 Args                   Env  Cwd  Status   Auth       
-machina  /Users/shadow/machina/.venv/bin/python  -m machina.mcp_server  -    -    enabled  Unsupported
+machina  <repo>/.venv/bin/python  -m machina.mcp_server  -    -    enabled  Unsupported
 
 $ codex mcp list --json
 [
@@ -10,7 +10,7 @@ $ codex mcp list --json
     "disabled_reason": null,
     "transport": {
       "type": "stdio",
-      "command": "/Users/shadow/machina/.venv/bin/python",
+      "command": "<repo>/.venv/bin/python",
       "args": [
         "-m",
         "machina.mcp_server"
@@ -29,7 +29,7 @@ $ codex mcp get machina
 machina
   enabled: true
   transport: stdio
-  command: /Users/shadow/machina/.venv/bin/python
+  command: <repo>/.venv/bin/python
   args: -m machina.mcp_server
   cwd: -
   env: -
@@ -38,5 +38,5 @@ machina
 $ grep -A6 mcp_servers ~/.codex/config.toml
 
 [mcp_servers.machina]
-command = "/Users/shadow/machina/.venv/bin/python"
+command = "<repo>/.venv/bin/python"
 args = ["-m", "machina.mcp_server"]

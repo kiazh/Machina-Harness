@@ -40,7 +40,7 @@ can we test the task workflow what do you do for large task and codebases
 I'll walk through the actual workflow on a real task. Let me first check what's available in the environment.
 
 **Tool:** `terminal({'command': 'pwd && ls -la && echo "---GIT---" && git log --oneline -5 2>/dev/null || echo "not a git repo"'})`
-**Result:** /Users/shadow/machina
+**Result:** <repo>
 total 1752
 drwxr-xr-x@  36 shadow  staff    1152 Oct 13 08:26 .
 drwxr-x---+  97 shadow  staff    3104 Oct 13 07:53 ..
@@ -693,7 +693,7 @@ independent of the tone description. Enabling a feature alone never proves learn
 
 I have enough orientation. Let me demonstrate the workflow on a **real, verifiable task in this repo** rather than describe it abstractly. I'll pick a concrete audit target and run it end-to-end.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && echo "===INTENT.PY===" && wc -l machina/core/intent.py && echo "===TESTS for intent===" && ls tests/ | grep -i intent && echo "===RUN===" && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -15'})`
+**Tool:** `terminal({'command': 'cd <repo> && echo "===INTENT.PY===" && wc -l machina/core/intent.py && echo "===TESTS for intent===" && ls tests/ | grep -i intent && echo "===RUN===" && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -15'})`
 **Result:** ===INTENT.PY===
       36 machina/core/intent.py
 ===TESTS for intent===
@@ -742,7 +742,7 @@ def conversational(query: str) -> bool:
     )
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && head -50 tests/test_turn_intent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && head -50 tests/test_turn_intent.py'})`
 **Result:** """Skill workflows and learned strategy agree about questions versus actions."""
 
 import pytest
@@ -799,7 +799,7 @@ def test_growth_brief_distinguishes_automatic_learning_from_persona_trials():
 **Result:**     )
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '50,120p' tests/test_turn_intent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '50,120p' tests/test_turn_intent.py"})`
 **Result:**     assert "peer chat" in FEATURES["execution"]
 
 
@@ -823,7 +823,7 @@ def conversational(query: str) -> bool:
     )
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '35,50p' tests/test_turn_intent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '35,50p' tests/test_turn_intent.py"})`
 **Result:**         "Do a Python code review",
         "Can you do a Python code review?",
         "Have a look at the Python test failures",
@@ -846,7 +846,7 @@ def test_growth_brief_distinguishes_automatic_learning_from_persona_trials():
 
 I now understand the discrimination logic. Let me probe it for a real gap — this is the "verify, don't assume" step.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -c "\nfrom machina.core.intent import conversational\ncases = [\n    \'hello\',\n    \'What is a vector database?\',\n    \'What is the bug? Then can you fix it?\',\n    \'Do you have Python testing? Please run the tests.\',\n    \'Can you do a Python code review?\',\n    \'Have a look at the Python test failures\',\n    \'add a feature to the gateway\',\n    \'What is in the config file?\',\n    \'What does the gateway do?\',\n    \'Can you explain the RSI loop?\',\n    \'Thanks, now fix the failing test\',\n    \'ok\',\n    \'What is the default persona?\',\n    \'What is the default persona? And can you change it?\',\n]\nfor c in cases:\n    print(f\'{conversational(c)!s:5}  {c}\')\n"'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -c "\nfrom machina.core.intent import conversational\ncases = [\n    \'hello\',\n    \'What is a vector database?\',\n    \'What is the bug? Then can you fix it?\',\n    \'Do you have Python testing? Please run the tests.\',\n    \'Can you do a Python code review?\',\n    \'Have a look at the Python test failures\',\n    \'add a feature to the gateway\',\n    \'What is in the config file?\',\n    \'What does the gateway do?\',\n    \'Can you explain the RSI loop?\',\n    \'Thanks, now fix the failing test\',\n    \'ok\',\n    \'What is the default persona?\',\n    \'What is the default persona? And can you change it?\',\n]\nfor c in cases:\n    print(f\'{conversational(c)!s:5}  {c}\')\n"'})`
 **Result:** True   hello
 True   What is a vector database?
 False  What is the bug? Then can you fix it?
@@ -867,7 +867,7 @@ True   What is the default persona? And can you change it?
 
 Found a real defect. `"What is the default persona? And can you change it?"` routes as **conversational** (True) — but it has an explicit follow-on action ("change it"). The `_FOLLOW_ON_ACTION` regex requires an action verb like `fix|build|implement|add|...`, and **"change" is not in that list**. Let me confirm this is a genuine gap and not caught elsewhere.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -c "\nfrom machina.core.intent import conversational\nfrom machina.skills.workflow import plan_workflow\nfrom machina.skills.registry import SkillRegistry\nfrom machina.memory.rsi import task_domain\nimport tempfile, pathlib\ntmp = pathlib.Path(tempfile.mkdtemp())\nq = \'What is the default persona? And can you change it?\'\nprint(\'conversational:\', conversational(q))\nprint(\'workflow kind:\', plan_workflow(q, skills=SkillRegistry(tmp)).kind)\nprint(\'domain       :\', task_domain(q))\nprint()\n# check which verbs are listed\nimport re\nfrom machina.core import intent\nprint(\'verbs in _FOLLOW_ON_ACTION:\', re.search(r\'\\(\\?:([a-z|]+)\\)\\\\\\\\b\', intent._FOLLOW_ON_ACTION.pattern).group(1))\n"'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -c "\nfrom machina.core.intent import conversational\nfrom machina.skills.workflow import plan_workflow\nfrom machina.skills.registry import SkillRegistry\nfrom machina.memory.rsi import task_domain\nimport tempfile, pathlib\ntmp = pathlib.Path(tempfile.mkdtemp())\nq = \'What is the default persona? And can you change it?\'\nprint(\'conversational:\', conversational(q))\nprint(\'workflow kind:\', plan_workflow(q, skills=SkillRegistry(tmp)).kind)\nprint(\'domain       :\', task_domain(q))\nprint()\n# check which verbs are listed\nimport re\nfrom machina.core import intent\nprint(\'verbs in _FOLLOW_ON_ACTION:\', re.search(r\'\\(\\?:([a-z|]+)\\)\\\\\\\\b\', intent._FOLLOW_ON_ACTION.pattern).group(1))\n"'})`
 **Result:** conversational: True
 workflow kind: conversation
 domain       : general
@@ -881,7 +881,7 @@ Confirmed: a real, reproducible defect. `"change"` (and siblings like `update`, 
 
 Now let me **verify with a test** before touching code (TDD), then fix minimally.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat >> tests/test_turn_intent.py << \'EOF\'\n\n\n@pytest.mark.parametrize(\n    "query",\n    [\n        "What is the default persona? And can you change it?",\n        "What is the config? Then update the timeout.",\n        "How does the gateway work? Please enable debug logging.",\n        "What is the default model? Can you set it to gpt-4?",\n        "Where is the persona stored? Remove the old one.",\n        "What is the bug? Then modify the handler.",\n        "ok, now disable the feature flag",\n    ],\n)\ndef test_mutating_follow_on_action_after_a_question_routes_to_task(query, tmp_path):\n    assert conversational(query) is False\n    assert plan_workflow(query, skills=SkillRegistry(tmp_path)).kind != "conversation"\nEOF\n.venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && cat >> tests/test_turn_intent.py << \'EOF\'\n\n\n@pytest.mark.parametrize(\n    "query",\n    [\n        "What is the default persona? And can you change it?",\n        "What is the config? Then update the timeout.",\n        "How does the gateway work? Please enable debug logging.",\n        "What is the default model? Can you set it to gpt-4?",\n        "Where is the persona stored? Remove the old one.",\n        "What is the bug? Then modify the handler.",\n        "ok, now disable the feature flag",\n    ],\n)\ndef test_mutating_follow_on_action_after_a_question_routes_to_task(query, tmp_path):\n    assert conversational(query) is False\n    assert plan_workflow(query, skills=SkillRegistry(tmp_path)).kind != "conversation"\nEOF\n.venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -20'})`
 **Result:**             "Where is the persona stored? Remove the old one.",
             "What is the bug? Then modify the handler.",
             "ok, now disable the feature flag",
@@ -908,7 +908,7 @@ FAILED tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_questio
 
 Need the import. Let me add it and re-run.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -i \'\' \'s/^from machina.memory.rsi import task_domain$/from machina.core.intent import conversational\\nfrom machina.memory.rsi import task_domain/\' tests/test_turn_intent.py && head -8 tests/test_turn_intent.py && echo "===RUN===" && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -i \'\' \'s/^from machina.memory.rsi import task_domain$/from machina.core.intent import conversational\\nfrom machina.memory.rsi import task_domain/\' tests/test_turn_intent.py && head -8 tests/test_turn_intent.py && echo "===RUN===" && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -20'})`
 **Result:** """Skill workflows and learned strategy agree about questions versus actions."""
 
 import pytest
@@ -961,7 +961,7 @@ def conversational(query: str) -> bool:
         _GREETING.fullmatch(query)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && python3 - << \'EOF\'\nimport pathlib\np = pathlib.Path("machina/core/intent.py")\ns = p.read_text()\nold = \'\'\'    r"(?:fix|build|implement|add|refactor|review|research|create|test|check|"\n    r"inspect|run|verify|investigate|search|read|write|export|plan|design)\\\\b",\'\'\'\nnew = \'\'\'    r"(?:fix|build|implement|add|refactor|review|research|create|test|check|"\n    r"inspect|run|verify|investigate|search|read|write|export|plan|design|"\n    r"change|update|modify|edit|remove|delete|set|enable|disable|rename|"\n    r"migrate|deploy|install|configure)\\\\b",\'\'\'\nassert old in s, "anchor not found"\np.write_text(s.replace(old, new))\nprint("patched")\nEOF\nsed -n \'21,30p\' machina/core/intent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && python3 - << \'EOF\'\nimport pathlib\np = pathlib.Path("machina/core/intent.py")\ns = p.read_text()\nold = \'\'\'    r"(?:fix|build|implement|add|refactor|review|research|create|test|check|"\n    r"inspect|run|verify|investigate|search|read|write|export|plan|design)\\\\b",\'\'\'\nnew = \'\'\'    r"(?:fix|build|implement|add|refactor|review|research|create|test|check|"\n    r"inspect|run|verify|investigate|search|read|write|export|plan|design|"\n    r"change|update|modify|edit|remove|delete|set|enable|disable|rename|"\n    r"migrate|deploy|install|configure)\\\\b",\'\'\'\nassert old in s, "anchor not found"\np.write_text(s.replace(old, new))\nprint("patched")\nEOF\nsed -n \'21,30p\' machina/core/intent.py'})`
 **Result:** patched
 _FOLLOW_ON_ACTION = re.compile(
     r"(?:[.!?;,]\s*|\b(?:and|then)\s+)"
@@ -975,7 +975,7 @@ _FOLLOW_ON_ACTION = re.compile(
 )
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -8'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -m pytest tests/test_turn_intent.py -q 2>&1 | tail -8'})`
 **Result:** ........................                                                 [100%]
 24 passed in 0.35s
 
@@ -984,7 +984,7 @@ _FOLLOW_ON_ACTION = re.compile(
 
 Green — 24 passed (17 original + 7 new). Now the **regression check**: make sure the fix didn't break the conversational side (greetings and pure questions must stay conversational).
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -c "\nfrom machina.core.intent import conversational\n# must stay conversational (True)\nconv = [\'hello\',\'thanks!\',\'ok\',\'What is a vector database?\',\'What is the default persona?\',\'Can you explain the RSI loop?\',\'What does the gateway do?\',\'How does memory work?\']\nbad = [c for c in conv if not conversational(c)]\nprint(\'should-be-conversational failures:\', bad or \'none\')\n# must be task (False)\ntask = [\'What is the default persona? And can you change it?\',\'What is the config? Then update the timeout.\',\'ok, now disable the feature flag\',\'add a feature\',\'review the code\']\nbad2 = [c for c in task if conversational(c)]\nprint(\'should-be-task failures:\', bad2 or \'none\')\n"'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -c "\nfrom machina.core.intent import conversational\n# must stay conversational (True)\nconv = [\'hello\',\'thanks!\',\'ok\',\'What is a vector database?\',\'What is the default persona?\',\'Can you explain the RSI loop?\',\'What does the gateway do?\',\'How does memory work?\']\nbad = [c for c in conv if not conversational(c)]\nprint(\'should-be-conversational failures:\', bad or \'none\')\n# must be task (False)\ntask = [\'What is the default persona? And can you change it?\',\'What is the config? Then update the timeout.\',\'ok, now disable the feature flag\',\'add a feature\',\'review the code\']\nbad2 = [c for c in task if conversational(c)]\nprint(\'should-be-task failures:\', bad2 or \'none\')\n"'})`
 **Result:** should-be-conversational failures: none
 should-be-task failures: none
 
@@ -993,7 +993,7 @@ should-be-task failures: none
 
 Clean separation. Now run the broader suite to confirm no wider regression, plus lint.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -m pytest tests/test_turn_intent.py tests/test_skill_workflow.py tests/test_self_knowledge.py -q 2>&1 | tail -12; echo "===RUFF==="; .venv/bin/ruff check machina/core/intent.py tests/test_turn_intent.py 2>&1 | tail -10'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -m pytest tests/test_turn_intent.py tests/test_skill_workflow.py tests/test_self_knowledge.py -q 2>&1 | tail -12; echo "===RUFF==="; .venv/bin/ruff check machina/core/intent.py tests/test_turn_intent.py 2>&1 | tail -10'})`
 **Result:** ERROR: file or directory not found: tests/test_skill_workflow.py
 
 
@@ -1002,7 +1002,7 @@ no tests ran in 0.07s
 All checks passed!
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls tests/ | grep -iE \'workflow|self_know|rsi|skill\' ; echo "===RUN==="; .venv/bin/python -m pytest tests/test_turn_intent.py tests/test_rsi.py tests/test_self_knowledge.py -q 2>&1 | tail -12'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls tests/ | grep -iE \'workflow|self_know|rsi|skill\' ; echo "===RUN==="; .venv/bin/python -m pytest tests/test_turn_intent.py tests/test_rsi.py tests/test_self_knowledge.py -q 2>&1 | tail -12'})`
 **Result:** test_ecc_skills.py
 test_prompt_versioning.py
 test_reversible_eviction.py
@@ -1021,7 +1021,7 @@ workflow_trial
 62 passed in 1.61s
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && .venv/bin/python -m pytest tests/test_skill_workflows.py tests/test_skill_runtime.py tests/test_rsi.py tests/test_turn_intent.py -q 2>&1 | tail -8'})`
+**Tool:** `terminal({'command': 'cd <repo> && .venv/bin/python -m pytest tests/test_skill_workflows.py tests/test_skill_runtime.py tests/test_rsi.py tests/test_turn_intent.py -q 2>&1 | tail -8'})`
 **Result:** ........................................................................ [ 85%]
 ............                                                             [100%]
 84 passed in 2.61s
@@ -1031,7 +1031,7 @@ workflow_trial
 
 84 passed across the affected modules. Let me capture the observed lesson and record the evidence in the ledger, per the plan's honesty rules.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git diff --stat && echo "===LEDGER TAIL===" && tail -20 FEATURE_LEDGER.md'})`
+**Tool:** `terminal({'command': 'cd <repo> && git diff --stat && echo "===LEDGER TAIL===" && tail -20 FEATURE_LEDGER.md'})`
 **Result:**  machina/core/intent.py    |  4 +++-
  tests/test_turn_intent.py | 18 ++++++++++++++++++
  2 files changed, 21 insertions(+), 1 deletion(-)
@@ -1061,7 +1061,7 @@ v1.0.0 gate stays open until DB/Docker/staging verification per
 **Tool:** `learn_personality({'kind': 'lesson', 'key': 'intent-followon-verb-list', 'content': 'OBSERVED FAILURE: core/intent.py _FOLLOW_ON_ACTION verb list omitted mutation verbs, so "What is the default persona? And can you change it?" routed as conversational (True) and never got task routing. REMEDY: added change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure; verified pure questions/greetings still conversational. Evidence: tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task (7 cases, red->green).'})`
 **Result:** Learned lesson:intent-followon-verb-list; available in future conversations.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat >> FEATURE_LEDGER.md << \'EOF\'\n\n## Intent routing fix (dogfood iteration, 2026-10-13)\n\n| Boundary | Change | Proof |\n|---|---|---|\n| Conversational routing | `core/intent.py` `_FOLLOW_ON_ACTION` verb list extended with mutation verbs (`change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure`); question+mutating follow-on now routes to a task instead of conversation | `tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task` (7 new cases, red->green); pure questions/greetings re-verified conversational; 84 passed across intent/skill/rsi modules |\nEOF\necho "appended" && tail -6 FEATURE_LEDGER.md'})`
+**Tool:** `terminal({'command': 'cd <repo> && cat >> FEATURE_LEDGER.md << \'EOF\'\n\n## Intent routing fix (dogfood iteration, 2026-10-13)\n\n| Boundary | Change | Proof |\n|---|---|---|\n| Conversational routing | `core/intent.py` `_FOLLOW_ON_ACTION` verb list extended with mutation verbs (`change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure`); question+mutating follow-on now routes to a task instead of conversation | `tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task` (7 new cases, red->green); pure questions/greetings re-verified conversational; 84 passed across intent/skill/rsi modules |\nEOF\necho "appended" && tail -6 FEATURE_LEDGER.md'})`
 **Result:** appended
 
 ## Intent routing fix (dogfood iteration, 2026-10-13)
@@ -1212,56 +1212,56 @@ I'm in the Machina repo. Let me orient on the actual code layout and find how to
 
 **Tool:** `search_files({'pattern': 'token|usage|tokens_used|prompt_tokens|completion_tokens|compact', 'path': 'machina', 'file_glob': '*.py'})`
 **Result:** Found 55 matches:
-/Users/shadow/machina/machina/services.py:24: "maybe_auto_compact",
-/Users/shadow/machina/machina/services.py:124: mutation_token: str | None = None,
-/Users/shadow/machina/machina/services.py:134: owned = mutation_token is None
-/Users/shadow/machina/machina/services.py:137: mutation_token = await begin_mutation(session.id)
-/Users/shadow/machina/machina/services.py:141: if not mutation_token:
-/Users/shadow/machina/machina/services.py:188: expected_owner=mutation_token,
-/Users/shadow/machina/machina/services.py:216: await end_mutation(session.id, mutation_token)
-/Users/shadow/machina/machina/services.py:226: mutation_token: str | None = None,
-/Users/shadow/machina/machina/services.py:236: owned = mutation_token is None
-/Users/shadow/machina/machina/services.py:238: mutation_token = await begin_mutation(session.id)
-/Users/shadow/machina/machina/services.py:239: if not mutation_token:
-/Users/shadow/machina/machina/services.py:248: # AH-AUDIT-034: conversational compaction scope excludes indexed
-/Users/shadow/machina/machina/services.py:290: # AH-AUDIT-014/015: the live mutation token travels INTO the
-/Users/shadow/machina/machina/services.py:303: expected_owner=mutation_token,
-/Users/shadow/machina/machina/services.py:331: await end_mutation(session.id, mutation_token)
-/Users/shadow/machina/machina/services.py:343: their allowlist, not the full registry), reserved output tokens, and
-/Users/shadow/machina/machina/services.py:347: compaction trigger threshold, never as exact request accounting. No
-/Users/shadow/machina/machina/services.py:350: from machina.core.assembler import get_token_count
-/Users/shadow/machina/machina/services.py:354: # Stored context tokens (actual message content)
-/Users/shadow/machina/machina/services.py:356: total += await context_manager.get_token_usage(session_id)
-/Users/shadow/machina/machina/services.py:384: total += get_token_count(str(registry.get_tool_definitions()))
-/Users/shadow/machina/machina/services.py:387: total += get_token_count(
-/Users/shadow/machina/machina/services.py:399: # Reserved output tokens
-/Users/shadow/machina/machina/services.py:401: total += int(config.get("max_tokens") or 4096)
-/Users/shadow/machina/machina/services.py:408: total += get_token_count(SYSTEM_PROMPT + (definition_prompt or ""))
-/Users/shadow/machina/machina/services.py:415: async def maybe_auto_compact(session_id) -> dict | None:
-/Users/shadow/machina/machina/services.py:416: """Threshold-triggered rolling compaction at a safe turn boundary.
-/Users/shadow/machina/machina/services.py:425: if not config.get("auto_compaction_enabled"):
-/Users/shadow/machina/machina/services.py:431: record_failure("services.maybe_auto_compact", _boundary_error)
-/Users/shadow/machina/machina/services.py:438: token = await begin_mutation(session_id)
-/Users/shadow/machina/machina/services.py:440: record_failure("services.maybe_auto_compact", _claim_error)
-/Users/shadow/machina/machina/services.py:442: if not token:
-/Users/shadow/machina/machina/services.py:459: # No-progress guard: skip when a previous run already compacted at
-/Users/shadow/machina/machina/services.py:462: last = state.get("last_auto_compact_tokens")
-/Users/shadow/machina/machina/services.py:463: total_now = await context_manager.get_token_usage(session_id)
-/Users/shadow/machina/machina/services.py:466: # compress_session verifies this same token before replacing (shared
-/Users/shadow/machina/machina/services.py:468: result = await compress_session(session, mutation_token=token)
-/Users/shadow/machina/machina/services.py:480: if current is None or current.get("claim_owner") != token:
-/Users/shadow/machina/machina/services.py:484: record_failure("services.maybe_auto_compact", _boundary_error)
-/Users/shadow/machina/machina/services.py:490: session_id, {"last_auto_compact_tokens": result.compressed_tokens}
-/Users/shadow/machina/machina/services.py:494: record_failure("services.maybe_auto_compact", _boundary_error)
-/Users/shadow/machina/machina/services.py:498: max_tokens = int(config.get("eviction_max_tokens") or 0)
-/Users/shadow/machina/machina/services.py:500: max_tokens = 0
-/Users/shadow/machina/machina/services.py:502: if max_tokens and max_tokens > 0:
-/Users/shadow/machina/machina/services.py:504: evicted = await context_manager.evict_old_chunks(session_id, max_tokens=max_tokens)
-/Users/shadow/machina/machina/services.py:509: "originalTokens": result.original_tokens,
-/Users/shadow/machina/machina/services.py:510: "compressedTokens": result.compressed_tokens,
-/Users/shadow/machina/machina/services.py:514: except Exception as _compact_error:
-/Users/shadow/machina/machina/services.py:515: record_failure("services.maybe_auto_compact", _compact_error)
-/Users/shadow/machina/machina/services.py:519: await end_mutation(session_id, token)
+<repo>/machina/services.py:24: "maybe_auto_compact",
+<repo>/machina/services.py:124: mutation_token: str | None = None,
+<repo>/machina/services.py:134: owned = mutation_token is None
+<repo>/machina/services.py:137: mutation_token = await begin_mutation(session.id)
+<repo>/machina/services.py:141: if not mutation_token:
+<repo>/machina/services.py:188: expected_owner=mutation_token,
+<repo>/machina/services.py:216: await end_mutation(session.id, mutation_token)
+<repo>/machina/services.py:226: mutation_token: str | None = None,
+<repo>/machina/services.py:236: owned = mutation_token is None
+<repo>/machina/services.py:238: mutation_token = await begin_mutation(session.id)
+<repo>/machina/services.py:239: if not mutation_token:
+<repo>/machina/services.py:248: # AH-AUDIT-034: conversational compaction scope excludes indexed
+<repo>/machina/services.py:290: # AH-AUDIT-014/015: the live mutation token travels INTO the
+<repo>/machina/services.py:303: expected_owner=mutation_token,
+<repo>/machina/services.py:331: await end_mutation(session.id, mutation_token)
+<repo>/machina/services.py:343: their allowlist, not the full registry), reserved output tokens, and
+<repo>/machina/services.py:347: compaction trigger threshold, never as exact request accounting. No
+<repo>/machina/services.py:350: from machina.core.assembler import get_token_count
+<repo>/machina/services.py:354: # Stored context tokens (actual message content)
+<repo>/machina/services.py:356: total += await context_manager.get_token_usage(session_id)
+<repo>/machina/services.py:384: total += get_token_count(str(registry.get_tool_definitions()))
+<repo>/machina/services.py:387: total += get_token_count(
+<repo>/machina/services.py:399: # Reserved output tokens
+<repo>/machina/services.py:401: total += int(config.get("max_tokens") or 4096)
+<repo>/machina/services.py:408: total += get_token_count(SYSTEM_PROMPT + (definition_prompt or ""))
+<repo>/machina/services.py:415: async def maybe_auto_compact(session_id) -> dict | None:
+<repo>/machina/services.py:416: """Threshold-triggered rolling compaction at a safe turn boundary.
+<repo>/machina/services.py:425: if not config.get("auto_compaction_enabled"):
+<repo>/machina/services.py:431: record_failure("services.maybe_auto_compact", _boundary_error)
+<repo>/machina/services.py:438: token = await begin_mutation(session_id)
+<repo>/machina/services.py:440: record_failure("services.maybe_auto_compact", _claim_error)
+<repo>/machina/services.py:442: if not token:
+<repo>/machina/services.py:459: # No-progress guard: skip when a previous run already compacted at
+<repo>/machina/services.py:462: last = state.get("last_auto_compact_tokens")
+<repo>/machina/services.py:463: total_now = await context_manager.get_token_usage(session_id)
+<repo>/machina/services.py:466: # compress_session verifies this same token before replacing (shared
+<repo>/machina/services.py:468: result = await compress_session(session, mutation_token=token)
+<repo>/machina/services.py:480: if current is None or current.get("claim_owner") != token:
+<repo>/machina/services.py:484: record_failure("services.maybe_auto_compact", _boundary_error)
+<repo>/machina/services.py:490: session_id, {"last_auto_compact_tokens": result.compressed_tokens}
+<repo>/machina/services.py:494: record_failure("services.maybe_auto_compact", _boundary_error)
+<repo>/machina/services.py:498: max_tokens = int(config.get("eviction_max_tokens") or 0)
+<repo>/machina/services.py:500: max_tokens = 0
+<repo>/machina/services.py:502: if max_tokens and max_tokens > 0:
+<repo>/machina/services.py:504: evicted = await context_manager.evict_old_chunks(session_id, max_tokens=max_tokens)
+<repo>/machina/services.py:509: "originalTokens": result.original_tokens,
+<repo>/machina/services.py:510: "compressedTokens": result.compressed_tokens,
+<repo>/machina/services.py:514: except Exception as _compact_error:
+<repo>/machina/services.py:515: record_failure("services.maybe_auto_compact", _compact_error)
+<repo>/machina/services.py:519: await end_mutation(session_id, token)
 
 **Tool:** `terminal({'command': 'find machina -type f -name \'*.py\' | head -100 && echo "---COUNT---" && find machina -type f -name \'*.py\' | wc -l && echo "---TREE---" && find machina -maxdepth 2 -type d | sort'})`
 **Result:** machina/research/locomo.py
@@ -1484,7 +1484,7 @@ machina/core/usage.py
 machina/cli/__init__.py
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls machina/rag/ machina/core/ machina/gateway/ machina/observability/ && echo "===USAGE FILES===" && grep -rl "tokens" machina --include=*.py | grep -v __pycache__'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls machina/rag/ machina/core/ machina/gateway/ machina/observability/ && echo "===USAGE FILES===" && grep -rl "tokens" machina --include=*.py | grep -v __pycache__'})`
 **Result:** machina/core/:
 __init__.py
 __pycache__
@@ -4098,10 +4098,10 @@ async def openrouter_context_window(client, model: str) -> int:
 
 I have a solid picture. Now let me delegate the deep-dive analysis to two ECC specialists in parallel — codebase onboarding for AI/token architecture, and an architecture review of the RAG pipeline. Meanwhile I'll gather the usage/optimisation evidence myself.
 
-**Tool:** `delegate({'agent': 'ecc-codebase-onboarding', 'task': 'Onboard me onto the AI/LLM architecture of the Machina codebase at /Users/shadow/machina (a self-hosted Python AI agent). Produce a structured, evidence-backed onboarding guide focused ONLY on these areas:\n\n1. LLM provider layer: machina/core/provider.py, machina/core/models.py, machina/core/context_windows.py — how model calls are made, how context windows are resolved, fallback behavior.\n2. Token accounting & budgets: machina/core/usage.py, machina/core/metrics.py — how tokens are reserved/recorded, session vs agent limits, advisory locking.\n3. Context management & optimisation: machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks), machina/core/compression.py (ContextCompressor, RollingCompaction), machina/core/context.py.\n4. Agent orchestration: machina/core/agent.py, machina/core/orchestrator.py, machina/core/intent.py — how a turn flows, where tokens are spent.\n\nFor EACH area report: key files + line ranges, the actual mechanism (cite code), and any token-optimisation techniques already present (tiktoken counting, truncation, rolling compaction, RRF, caching, TTLCache, etc). Explicitly flag anything that looks inefficient or a missed optimisation, with file:line evidence. Do NOT edit any files. Return a concise markdown report with a file->responsibility table and a list of concrete findings. Cite real file paths and line numbers only.'})`
+**Tool:** `delegate({'agent': 'ecc-codebase-onboarding', 'task': 'Onboard me onto the AI/LLM architecture of the Machina codebase at <repo> (a self-hosted Python AI agent). Produce a structured, evidence-backed onboarding guide focused ONLY on these areas:\n\n1. LLM provider layer: machina/core/provider.py, machina/core/models.py, machina/core/context_windows.py — how model calls are made, how context windows are resolved, fallback behavior.\n2. Token accounting & budgets: machina/core/usage.py, machina/core/metrics.py — how tokens are reserved/recorded, session vs agent limits, advisory locking.\n3. Context management & optimisation: machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks), machina/core/compression.py (ContextCompressor, RollingCompaction), machina/core/context.py.\n4. Agent orchestration: machina/core/agent.py, machina/core/orchestrator.py, machina/core/intent.py — how a turn flows, where tokens are spent.\n\nFor EACH area report: key files + line ranges, the actual mechanism (cite code), and any token-optimisation techniques already present (tiktoken counting, truncation, rolling compaction, RRF, caching, TTLCache, etc). Explicitly flag anything that looks inefficient or a missed optimisation, with file:line evidence. Do NOT edit any files. Return a concise markdown report with a file->responsibility table and a list of concrete findings. Cite real file paths and line numbers only.'})`
 **Result:** Error: no agent named 'ecc-codebase-onboarding'. Use list_agents to see available agents.
 
-**Tool:** `delegate({'agent': 'ecc-architecture-decision-records', 'task': 'Review the RAG architecture of the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent, PostgreSQL + pgvector). Scope ONLY the RAG subsystem: machina/rag/pipeline.py, machina/rag/search.py, machina/rag/embedder.py, machina/rag/reranker.py, machina/rag/chunker.py, machina/rag/loaders.py, machina/rag/evaluation.py, plus the DB schema (machina/db/) for vector tables/indexes.\n\nDeliver:\n1. A component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) with the real function/class names backing each stage.\n2. The retrieval strategy as implemented: BM25/full-text + dense vector + Reciprocal Rank Fusion — cite the exact code (file:line) for RRF fusion, the SQL queries used, and the embedding model/dimension.\n3. Reranking: what reranker is wired in by default vs optional (IdentityReranker vs cross-encoder), and where it is applied.\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?), and whether it is wired into CI/tests.\n5. Concrete architectural gaps vs the reference RAG best-practice pipeline (HyDE query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nDo NOT edit files. Return a concise markdown report. Cite only real file paths and line numbers you actually verified.'})`
+**Tool:** `delegate({'agent': 'ecc-architecture-decision-records', 'task': 'Review the RAG architecture of the Machina codebase at <repo> (self-hosted Python AI agent, PostgreSQL + pgvector). Scope ONLY the RAG subsystem: machina/rag/pipeline.py, machina/rag/search.py, machina/rag/embedder.py, machina/rag/reranker.py, machina/rag/chunker.py, machina/rag/loaders.py, machina/rag/evaluation.py, plus the DB schema (machina/db/) for vector tables/indexes.\n\nDeliver:\n1. A component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) with the real function/class names backing each stage.\n2. The retrieval strategy as implemented: BM25/full-text + dense vector + Reciprocal Rank Fusion — cite the exact code (file:line) for RRF fusion, the SQL queries used, and the embedding model/dimension.\n3. Reranking: what reranker is wired in by default vs optional (IdentityReranker vs cross-encoder), and where it is applied.\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?), and whether it is wired into CI/tests.\n5. Concrete architectural gaps vs the reference RAG best-practice pipeline (HyDE query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nDo NOT edit files. Return a concise markdown report. Cite only real file paths and line numbers you actually verified.'})`
 **Result:** Error: no agent named 'ecc-architecture-decision-records'. Use list_agents to see available agents.
 
 **Tool:** `list_agents({})`
@@ -4264,7 +4264,7 @@ The ECC names in the workflow aren't real agents here. Let me see the full roste
 
 The roster is truncated. Let me find the relevant specialists directly.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls machina/bundled_agents/ecc/ 2>/dev/null | head -60; echo "---"; find . -path ./.venv -prune -o -name \'*.md\' -path \'*agents*\' -print 2>/dev/null | grep -i "rag\\|architect\\|onboard\\|codebase\\|token\\|perf" | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls machina/bundled_agents/ecc/ 2>/dev/null | head -60; echo "---"; find . -path ./.venv -prune -o -name \'*.md\' -path \'*agents*\' -print 2>/dev/null | grep -i "rag\\|architect\\|onboard\\|codebase\\|token\\|perf" | head -30'})`
 **Result:** a11y-architect.md
 agent-evaluator.md
 architect.md
@@ -4335,7 +4335,7 @@ refactor-cleaner.md
 ./machina/bundled_agents/ecc/network-architect.md
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls machina/bundled_agents/ecc/ | tail -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls machina/bundled_agents/ecc/ | tail -40'})`
 **Result:** healthcare-reviewer.md
 homelab-architect.md
 java-build-resolver.md
@@ -4390,15 +4390,15 @@ There's `rag-pipeline-reviewer`, `performance-optimizer`, `code-explorer`, `arch
 
 **Failed delegations:** `ecc-architecture-decision-records` and `ecc-codebase-onboarding` agents don't exist. Available ECC agents are file-based (architect, code-explorer, etc.).
 
-**Repo explored:** `/Users/shadow/machina` — Python AI agent (PostgreSQL + pgvector). Key files read: `core/assembler.py`, `core/compression.py`, `core/context_windows.py`, `core/usage.py`, `rag/search.py`, `rag/pipeline.py`.
+**Repo explored:** `<repo>` — Python AI agent (PostgreSQL + pgvector). Key files read: `core/assembler.py`, `core/compression.py`, `core/context_windows.py`, `core/usage.py`, `rag/search.py`, `rag/pipeline.py`.
 
 **Real defect found & fixed (TDD):** `machina/core/intent.py::conversational` — `_FOLLOW_ON_ACTION` regex omitted mutation verbs, so "What is the default persona? And can you change it?" misrouted as
 
-**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'Review the RAG architecture of the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent, PostgreSQL + pgvector). Scope ONLY the RAG subsystem: machina/rag/pipeline.py, machina/rag/search.py, machina/rag/embedder.py, machina/rag/reranker.py, machina/rag/chunker.py, machina/rag/loaders.py, machina/rag/evaluation.py, plus the DB schema (machina/db/) for vector tables/indexes.\n\nDeliver:\n1. A component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) with the real function/class names backing each stage.\n2. The retrieval strategy as implemented: full-text/BM25 + dense vector + Reciprocal Rank Fusion — cite the exact code (file:line) for RRF fusion, the SQL used, and the embedding model/dimension.\n3. Reranking: what reranker is wired in by default vs optional (IdentityReranker vs cross-encoder), and where it is applied.\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?), and whether it is wired into tests/CI.\n5. Concrete architectural gaps vs reference RAG best practice (HyDE query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nDo NOT edit files. Return a concise markdown report. Cite only real file paths and line numbers you actually verified.'})`
+**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'Review the RAG architecture of the Machina codebase at <repo> (self-hosted Python AI agent, PostgreSQL + pgvector). Scope ONLY the RAG subsystem: machina/rag/pipeline.py, machina/rag/search.py, machina/rag/embedder.py, machina/rag/reranker.py, machina/rag/chunker.py, machina/rag/loaders.py, machina/rag/evaluation.py, plus the DB schema (machina/db/) for vector tables/indexes.\n\nDeliver:\n1. A component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) with the real function/class names backing each stage.\n2. The retrieval strategy as implemented: full-text/BM25 + dense vector + Reciprocal Rank Fusion — cite the exact code (file:line) for RRF fusion, the SQL used, and the embedding model/dimension.\n3. Reranking: what reranker is wired in by default vs optional (IdentityReranker vs cross-encoder), and where it is applied.\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?), and whether it is wired into tests/CI.\n5. Concrete architectural gaps vs reference RAG best practice (HyDE query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nDo NOT edit files. Return a concise markdown report. Cite only real file paths and line numbers you actually verified.'})`
 **Result:** [rag-pipeline-reviewer responded]
 LLM provider error. Check server logs.
 
-**Tool:** `delegate({'agent': 'performance-optimizer', 'task': 'Audit token usage and LLM-call optimisation in the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent). Scope ONLY:\n- machina/core/usage.py (budget reservation/accounting)\n- machina/core/metrics.py\n- machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks)\n- machina/core/compression.py (ContextCompressor, RollingCompaction)\n- machina/core/context_windows.py\n- machina/core/provider.py (where provider calls happen)\n- machina/core/agent.py, machina/core/orchestrator.py (turn flow)\n\nDeliver:\n1. Where tokens are actually counted and spent per turn (file:line, real function names).\n2. Every token-optimisation technique already present (tiktoken, truncation, rolling compaction thresholds, TTLCache on context windows, prompt caching if any, RRF, etc) — cite file:line.\n3. Concrete inefficiencies / missed optimisations with file:line evidence and a one-line suggested fix each. Look specifically for: repeated re-tokenisation, full-context resend without prompt caching, missing streaming usage capture, unbounded tool-output injection, no per-call usage logging on error paths.\n4. Whether usage accounting is robust when the provider omits usage data.\n\nDo NOT edit files. Return a concise markdown report with a findings table (finding | file:line | impact | suggested fix). Cite only real paths/lines you verified.'})`
+**Tool:** `delegate({'agent': 'performance-optimizer', 'task': 'Audit token usage and LLM-call optimisation in the Machina codebase at <repo> (self-hosted Python AI agent). Scope ONLY:\n- machina/core/usage.py (budget reservation/accounting)\n- machina/core/metrics.py\n- machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks)\n- machina/core/compression.py (ContextCompressor, RollingCompaction)\n- machina/core/context_windows.py\n- machina/core/provider.py (where provider calls happen)\n- machina/core/agent.py, machina/core/orchestrator.py (turn flow)\n\nDeliver:\n1. Where tokens are actually counted and spent per turn (file:line, real function names).\n2. Every token-optimisation technique already present (tiktoken, truncation, rolling compaction thresholds, TTLCache on context windows, prompt caching if any, RRF, etc) — cite file:line.\n3. Concrete inefficiencies / missed optimisations with file:line evidence and a one-line suggested fix each. Look specifically for: repeated re-tokenisation, full-context resend without prompt caching, missing streaming usage capture, unbounded tool-output injection, no per-call usage logging on error paths.\n4. Whether usage accounting is robust when the provider omits usage data.\n\nDo NOT edit files. Return a concise markdown report with a findings table (finding | file:line | impact | suggested fix). Cite only real paths/lines you verified.'})`
 **Result:** [performance-optimizer responded]
 LLM provider error. Check server logs.
 
@@ -4410,7 +4410,7 @@ LLM provider error. Check server logs.
 
 use those skills dotn look at them for the machina directory to do a review dont implemnt chnages just review go through entire orchastration now also use any subagents you need also I actually want you to
 
-**Tool:** `list_files({'path': '/Users/shadow/machina'})`
+**Tool:** `list_files({'path': '<repo>'})`
 **Result:** .coverage (86016 bytes)
 .dockerignore (595 bytes)
 .env.example (2245 bytes)
@@ -4555,7 +4555,7 @@ OPENCODE_CONTINUATION.md
 PER
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=855528d3-ab0a-4b47-963b-933b8b0aebfe | harness_status {"read_only":true,"session":{"agent_id":"harness","session_id":"5f625662-8480-4688-9580-b919d5f3bbcb","mode":"full"},"configuration":{"memory":tr
 
-**Tool:** `list_files({'path': '/Users/shadow/machina/docs'})`
+**Tool:** `list_files({'path': '<repo>/docs'})`
 **Result:** BUGFIX_AUDIT.md (6574 bytes)
 ECC_AGENTS.md (4132 bytes)
 ECC_DEBLOAT_REVIEW.md (8232 bytes)
@@ -4572,7 +4572,7 @@ design/ (dir)
 screenshot.png (665359 bytes)
 verification/ (dir)
 
-**Tool:** `list_files({'path': '/Users/shadow/machina/machina/core'})`
+**Tool:** `list_files({'path': '<repo>/machina/core'})`
 **Result:** __init__.py (875 bytes)
 agent.py (94001 bytes)
 agent_def.py (16105 bytes)
@@ -4607,7 +4607,7 @@ turns.py (21294 bytes)
 usage.py (15243 bytes)
 windows_job.py (3275 bytes)
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/machina/core/orchestrator.py'})`
+**Tool:** `read_file({'path': '<repo>/machina/core/orchestrator.py'})`
 **Result:** """Multi-agent orchestration (Phase 5).
 
 Builds a :class:`~machina.core.agent.ReActAgent` from an :class:`AgentDef` and runs a
@@ -5194,15 +5194,15 @@ orchestrator = Orchestrator()
 
 Orienting on the repo first, then fanning out specialists.
 
-**Tool:** `delegate({'agent': 'architect', 'task': 'READ-ONLY ARCHITECTURE REVIEW (do not edit anything) of the core turn/delegation orchestration in the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent).\n\nScope ONLY these files: machina/core/agent.py (ReActAgent), machina/core/orchestrator.py (Orchestrator/DelegationResult), machina/core/turns.py, machina/core/runtime.py, machina/core/container.py, machina/core/context.py (context manager/injection), machina/core/scheduler.py, machina/core/session.py, machina/core/approval_resume.py.\n\nDeliver a concise markdown report covering:\n1. End-to-end turn lifecycle: user message -> intent/routing -> context assembly -> provider call -> tool-call loop -> tool execution/approval -> delegation -> persistence. Name the REAL functions/classes and cite file:line for each hop.\n2. The delegation path specifically: how a child agent session is created, whether it inherits the parent\'s restrictions/permissions, how results return, and whether sibling agents can communicate (should be parent-mediated only). Cite file:line.\n3. Control-flow risks: unbounded loops / missing max-iteration caps, missing timeouts or deadlines on delegation, error swallowing (broad except / bare except that hides failures), recursion or re-entrancy hazards, concurrency/async pitfalls (unawaited tasks, shared mutable state, ContextVar misuse). Cite file:line for each.\n4. State and persistence: where state is written (session, agent_messages, jobs), and any place where a failed turn can leave inconsistent state. Cite file:line.\n5. Top 5 architectural gaps ranked by severity, each with file:line evidence and one-line remediation. Do NOT implement the remediation.\n\nRules: cite ONLY real file paths and line numbers you actually opened and verified. Mark unverified claims explicitly as "not verified" instead of guessing. End with an "Evidence checked" list of files and line ranges you read.'})`
+**Tool:** `delegate({'agent': 'architect', 'task': 'READ-ONLY ARCHITECTURE REVIEW (do not edit anything) of the core turn/delegation orchestration in the Machina codebase at <repo> (self-hosted Python AI agent).\n\nScope ONLY these files: machina/core/agent.py (ReActAgent), machina/core/orchestrator.py (Orchestrator/DelegationResult), machina/core/turns.py, machina/core/runtime.py, machina/core/container.py, machina/core/context.py (context manager/injection), machina/core/scheduler.py, machina/core/session.py, machina/core/approval_resume.py.\n\nDeliver a concise markdown report covering:\n1. End-to-end turn lifecycle: user message -> intent/routing -> context assembly -> provider call -> tool-call loop -> tool execution/approval -> delegation -> persistence. Name the REAL functions/classes and cite file:line for each hop.\n2. The delegation path specifically: how a child agent session is created, whether it inherits the parent\'s restrictions/permissions, how results return, and whether sibling agents can communicate (should be parent-mediated only). Cite file:line.\n3. Control-flow risks: unbounded loops / missing max-iteration caps, missing timeouts or deadlines on delegation, error swallowing (broad except / bare except that hides failures), recursion or re-entrancy hazards, concurrency/async pitfalls (unawaited tasks, shared mutable state, ContextVar misuse). Cite file:line for each.\n4. State and persistence: where state is written (session, agent_messages, jobs), and any place where a failed turn can leave inconsistent state. Cite file:line.\n5. Top 5 architectural gaps ranked by severity, each with file:line evidence and one-line remediation. Do NOT implement the remediation.\n\nRules: cite ONLY real file paths and line numbers you actually opened and verified. Mark unverified claims explicitly as "not verified" instead of guessing. End with an "Evidence checked" list of files and line ranges you read.'})`
 **Result:** [architect failed]
 Error: delegation timed out
 
-**Tool:** `delegate({'agent': 'performance-optimizer', 'task': 'READ-ONLY AUDIT (do not edit or create files) of token usage and LLM-call optimisation in the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent).\n\nScope ONLY these paths:\n- machina/core/usage.py (budget reservation/accounting)\n- machina/core/metrics.py\n- machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks)\n- machina/core/compression.py (ContextCompressor, RollingCompaction)\n- machina/core/context_windows.py\n- machina/core/provider.py (where provider calls happen)\n- machina/core/agent.py and machina/core/orchestrator.py (turn flow)\n\nDeliver a concise markdown report:\n1. Where tokens are actually counted and spent per turn (file:line, real function names).\n2. Every token-optimisation technique already present (tiktoken, truncation, rolling compaction thresholds, TTLCache on context windows, prompt caching, streaming usage capture, etc.) with file:line.\n3. A findings table: finding | file:line | impact | one-line suggested fix. Specifically look for: repeated re-tokenisation, full-context resend without prompt caching, missing streaming usage capture, unbounded tool-output injection into context, no per-call usage logging on error paths.\n4. Whether usage accounting is robust when the provider omits usage data (cite the fallback path, or state it is absent).\n\nRules: cite ONLY real paths/lines you actually opened and verified; mark anything unverified as "not verified". End with an "Evidence checked" list of files+line ranges read.'})`
+**Tool:** `delegate({'agent': 'performance-optimizer', 'task': 'READ-ONLY AUDIT (do not edit or create files) of token usage and LLM-call optimisation in the Machina codebase at <repo> (self-hosted Python AI agent).\n\nScope ONLY these paths:\n- machina/core/usage.py (budget reservation/accounting)\n- machina/core/metrics.py\n- machina/core/assembler.py (TokenCounter, PromptAssembler, truncate_to_tokens, compress_context_chunks)\n- machina/core/compression.py (ContextCompressor, RollingCompaction)\n- machina/core/context_windows.py\n- machina/core/provider.py (where provider calls happen)\n- machina/core/agent.py and machina/core/orchestrator.py (turn flow)\n\nDeliver a concise markdown report:\n1. Where tokens are actually counted and spent per turn (file:line, real function names).\n2. Every token-optimisation technique already present (tiktoken, truncation, rolling compaction thresholds, TTLCache on context windows, prompt caching, streaming usage capture, etc.) with file:line.\n3. A findings table: finding | file:line | impact | one-line suggested fix. Specifically look for: repeated re-tokenisation, full-context resend without prompt caching, missing streaming usage capture, unbounded tool-output injection into context, no per-call usage logging on error paths.\n4. Whether usage accounting is robust when the provider omits usage data (cite the fallback path, or state it is absent).\n\nRules: cite ONLY real paths/lines you actually opened and verified; mark anything unverified as "not verified". End with an "Evidence checked" list of files+line ranges read.'})`
 **Result:** [performance-optimizer failed]
 Error: delegation timed out
 
-**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'READ-ONLY REVIEW (do not edit, create or run anything that mutates state) of the RAG subsystem in the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent, PostgreSQL + pgvector).\n\nScope ONLY: machina/rag/* (pipeline.py, search.py, embedder.py, reranker.py, chunker.py, loaders.py, evaluation.py, and any other files in that package) plus the DB layer under machina/db/ that defines vector tables/indexes.\n\nDeliver a concise markdown report with:\n1. Component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) naming the REAL function/class names backing each stage.\n2. Retrieval strategy as implemented: full-text/BM25 + dense vector + Reciprocal Rank Fusion. Cite exact file:line for the RRF fusion, the SQL used, and the embedding model + dimension.\n3. Reranking: which reranker is wired by default vs optional (e.g. IdentityReranker vs cross-encoder), and where it is applied (file:line).\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?) and whether it is wired into tests/CI (cite the test file or state clearly that it is not).\n5. Concrete architectural gaps vs RAG best practice (HyDE/query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nRules: cite ONLY file paths and line numbers you actually opened and verified. If you cannot verify something, say "not verified" rather than guessing. End with a short "Evidence checked" list of the files+line ranges you read.'})`
+**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'READ-ONLY REVIEW (do not edit, create or run anything that mutates state) of the RAG subsystem in the Machina codebase at <repo> (self-hosted Python AI agent, PostgreSQL + pgvector).\n\nScope ONLY: machina/rag/* (pipeline.py, search.py, embedder.py, reranker.py, chunker.py, loaders.py, evaluation.py, and any other files in that package) plus the DB layer under machina/db/ that defines vector tables/indexes.\n\nDeliver a concise markdown report with:\n1. Component diagram in text (ingestion -> chunk -> embed -> store -> hybrid retrieve -> fuse -> rerank -> generate) naming the REAL function/class names backing each stage.\n2. Retrieval strategy as implemented: full-text/BM25 + dense vector + Reciprocal Rank Fusion. Cite exact file:line for the RRF fusion, the SQL used, and the embedding model + dimension.\n3. Reranking: which reranker is wired by default vs optional (e.g. IdentityReranker vs cross-encoder), and where it is applied (file:line).\n4. Evaluation: what machina/rag/evaluation.py actually measures (Recall@k? MRR? CRAG three-way classification?) and whether it is wired into tests/CI (cite the test file or state clearly that it is not).\n5. Concrete architectural gaps vs RAG best practice (HyDE/query rewriting, cross-encoder rerank, CRAG evaluation, context compression), each with file:line evidence for where it is absent or stubbed.\n\nRules: cite ONLY file paths and line numbers you actually opened and verified. If you cannot verify something, say "not verified" rather than guessing. End with a short "Evidence checked" list of the files+line ranges you read.'})`
 **Result:** [rag-pipeline-reviewer failed]
 Error: delegation timed out
 
@@ -5210,7 +5210,7 @@ Error: delegation timed out
 
 All three delegates timed out — same failure mode as the interrupted turn earlier. Narrowing scope and verifying the delegation path with one small test while I read the code myself.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && for f in machina/core/orchestrator.py machina/core/turns.py machina/core/runtime.py machina/core/container.py; do echo "=== $f ==="; grep -n "^class \\|^def \\|^async def \\|^    def \\|^    async def " $f; done'})`
+**Tool:** `terminal({'command': 'cd <repo> && for f in machina/core/orchestrator.py machina/core/turns.py machina/core/runtime.py machina/core/container.py; do echo "=== $f ==="; grep -n "^class \\|^def \\|^async def \\|^    def \\|^    async def " $f; done'})`
 **Result:** === machina/core/orchestrator.py ===
 33:class AgentNotFoundError(Exception):
 38:class DelegationResult:
@@ -5305,7 +5305,7 @@ All three delegates timed out — same failure mode as the interrupted turn earl
 226:    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && echo "=== agent.py classes/defs ===" && grep -n "^class \\|^    def \\|^    async def " machina/core/agent.py | head -120 && echo && echo "=== line counts ===" && wc -l machina/core/agent.py machina/core/orchestrator.py machina/core/turns.py machina/core/runtime.py machina/core/context.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && echo "=== agent.py classes/defs ===" && grep -n "^class \\|^    def \\|^    async def " machina/core/agent.py | head -120 && echo && echo "=== line counts ===" && wc -l machina/core/agent.py machina/core/orchestrator.py machina/core/turns.py machina/core/runtime.py machina/core/context.py'})`
 **Result:** === agent.py classes/defs ===
 61:    async def wrapper(self, session_id, user_message, verbose=True, **kwargs):
 82:    async def wrapper(self, session_id, user_message, verbose=True, **kwargs):
@@ -5342,7 +5342,7 @@ All three delegates timed out — same failure mode as the interrupted turn earl
     4907 total
 
 
-**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'Tiny read-only task (fewer than 5 minutes of work, one file). Open ONLY /Users/shadow/machina/machina/rag/reranker.py. Report: (a) the class names defined in it, (b) which reranker is used by default versus optional, (c) the exact file:line where the default is selected/instantiated, and (d) whether anything in that file is a stub/no-op. Keep the answer under 200 words. Do not open any other file except to confirm the import site if it takes one grep. Do not edit anything.'})`
+**Tool:** `delegate({'agent': 'rag-pipeline-reviewer', 'task': 'Tiny read-only task (fewer than 5 minutes of work, one file). Open ONLY <repo>/machina/rag/reranker.py. Report: (a) the class names defined in it, (b) which reranker is used by default versus optional, (c) the exact file:line where the default is selected/instantiated, and (d) whether anything in that file is a stub/no-op. Keep the answer under 200 words. Do not open any other file except to confirm the import site if it takes one grep. Do not edit anything.'})`
 **Result:** [rag-pipeline-reviewer failed]
 Error: delegation timed out
 
@@ -5350,11 +5350,11 @@ Error: delegation timed out
 
 Delegation is timing out even on a one-file task — I'll verify once more with a different specialist, and meanwhile read the orchestration myself.
 
-**Tool:** `delegate({'agent': 'architect', 'task': 'Tiny read-only task, one grep, under 150 words. In /Users/shadow/machina/machina/core/orchestrator.py, open the delegate() method and report ONLY: (a) the exact file:line where a delegation timeout/deadline is set (or state "no timeout found"), (b) the exact file:line where the child agent inherits the parent\'s authority/permissions, and (c) whether the child\'s tokens are charged to the parent budget (file:line). Do not open other files. Do not edit anything. If you cannot finish in a few reads, reply immediately with what you have.'})`
+**Tool:** `delegate({'agent': 'architect', 'task': 'Tiny read-only task, one grep, under 150 words. In <repo>/machina/core/orchestrator.py, open the delegate() method and report ONLY: (a) the exact file:line where a delegation timeout/deadline is set (or state "no timeout found"), (b) the exact file:line where the child agent inherits the parent\'s authority/permissions, and (c) whether the child\'s tokens are charged to the parent budget (file:line). Do not open other files. Do not edit anything. If you cannot finish in a few reads, reply immediately with what you have.'})`
 **Result:** [architect failed]
 Error: delegation timed out
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && echo "=== turns.py ===" && grep -n "class \\|def " machina/core/turns.py && echo && echo "=== agent.py defs after 1466 ===" && grep -n "class \\|    def \\|    async def " machina/core/agent.py | awk -F: \'$1>1466\''})`
+**Tool:** `terminal({'command': 'cd <repo> && echo "=== turns.py ===" && grep -n "class \\|def " machina/core/turns.py && echo && echo "=== agent.py defs after 1466 ===" && grep -n "class \\|    def \\|    async def " machina/core/agent.py | awk -F: \'$1>1466\''})`
 **Result:** === turns.py ===
 51:def _local_try_claim(session_id: object, kind: str, token: str) -> bool:
 61:def _local_release(session_id: object, token: str | None) -> bool:
@@ -5403,7 +5403,7 @@ Error: delegation timed out
 1807:    async def run_stream(
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/machina/core/orchestrator.py', 'offset': 129, 'limit': 230})`
+**Tool:** `read_file({'path': '<repo>/machina/core/orchestrator.py', 'offset': 129, 'limit': 230})`
 **Result:**     async def delegate(
         self,
         agent_name: str,
@@ -5640,7 +5640,7 @@ Error: delegation timed out
 
 Delegation is unusable this session (5 attempts / 4 timeouts across 3 different specialists, including a one-grep task). Proceeding solo with targeted code evidence.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "MAX_HOP_COUNT\\|timeout\\|deadline\\|authority\\|reserve\\|budget" machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "MAX_HOP_COUNT\\|timeout\\|deadline\\|authority\\|reserve\\|budget" machina/core/orchestrator.py'})`
 **Result:** 30:delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
 52:    MAX_HOP_COUNT = 10  # Maximum delegation depth to prevent circular delegation
 96:    async def _default_agent(self, definition: AgentDef, authority: dict | None = None):
@@ -5681,14 +5681,14 @@ Delegation is unusable this session (5 attempts / 4 timeouts across 3 different 
 316:                    # Optional fallback preserves the primary outcome; report no payload.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "while True\\|max_iter\\|MAX_ITER\\|max_turns\\|for _ in range" machina/core/agent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "while True\\|max_iter\\|MAX_ITER\\|max_turns\\|for _ in range" machina/core/agent.py'})`
 **Result:** 279:        max_iterations: int | None = None,
 292:        self.max_iterations = max_iterations
 1654:        while True:
 1847:        while True:
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rc "except Exception\\|except:" machina/core/*.py | grep -v ":0$" | sort -t: -k2 -rn | head -15'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rc "except Exception\\|except:" machina/core/*.py | grep -v ":0$" | sort -t: -k2 -rn | head -15'})`
 **Result:** machina/core/agent.py:33
 machina/core/scheduler.py:15
 machina/core/provider.py:15
@@ -5718,7 +5718,7 @@ what is the issue with delegation i can ask for codex to fix give me full report
 
 I'll investigate the delegation implementation in the repo, then write a thorough report.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls machina/core/ 2>/dev/null; echo "---"; ls docs/ 2>/dev/null | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls machina/core/ 2>/dev/null; echo "---"; ls docs/ 2>/dev/null | head -30'})`
 **Result:** __init__.py
 __pycache__
 agent_def.py
@@ -5771,7 +5771,7 @@ SELF_IMPROVEMENT_PLAN.md
 verification
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls && echo "---" && git log --oneline -8 && echo "---" && find . -path ./node_modules -prune -o -name "*.py" -print | xargs grep -ln "delegat" 2>/dev/null | head -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls && echo "---" && git log --oneline -8 && echo "---" && find . -path ./node_modules -prune -o -name "*.py" -print | xargs grep -ln "delegat" 2>/dev/null | head -40'})`
 **Result:** CHANGELOG.md
 communications
 docker-compose.yml
@@ -5843,7 +5843,7 @@ b471708 tool call changes and permission changes
 ./tests/test_delegation_transport.py
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && wc -l machina/tools/agents.py machina/core/orchestrator.py machina/core/agent.py machina/core/turns.py machina/core/agent_factory.py && echo "=== agents.py ===" && cat machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && wc -l machina/tools/agents.py machina/core/orchestrator.py machina/core/agent.py machina/core/turns.py machina/core/agent_factory.py && echo "=== agents.py ===" && cat machina/tools/agents.py'})`
 **Result:**      184 machina/tools/agents.py
      504 machina/core/orchestrator.py
     2057 machina/core/agent.py
@@ -6037,7 +6037,7 @@ registry.declare_effects(
 )
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls tests/ | grep -i "deleg\\|agent" ; echo "---"; grep -rn "delegate" machina/tools/__init__.py | head -20; echo "--- tool registry"; grep -rn "list_agents\\|delegate" machina/core/*.py | head -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls tests/ | grep -i "deleg\\|agent" ; echo "---"; grep -rn "delegate" machina/tools/__init__.py | head -20; echo "--- tool registry"; grep -rn "list_agents\\|delegate" machina/core/*.py | head -40'})`
 **Result:** test_delegate_scope.py
 test_delegation_boundaries.py
 test_delegation_transport.py
@@ -6075,7 +6075,7 @@ machina/core/turns.py:572:        """Owner-authorized internal mutation token fo
 machina/core/turns.py:585:    """Shared coordinator object (Phase B/6). Module functions delegate here."""
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1,120p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1,120p' machina/core/orchestrator.py"})`
 **Result:** """Multi-agent orchestration (Phase 5).
 
 Builds a :class:`~machina.core.agent.ReActAgent` from an :class:`AgentDef` and runs a
@@ -6198,7 +6198,7 @@ class Orchestrator:
         provider_name = definition.provider or config.get("provider")
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '30,184p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '30,184p' machina/tools/agents.py"})`
 **Result:** 
 
 async def active_agent_scope() -> tuple[str, uuid.UUID]:
@@ -6356,7 +6356,7 @@ registry.declare_effects(
 )
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/machina/core/orchestrator.py', 'offset': 120, 'limit': 240})`
+**Tool:** `read_file({'path': '<repo>/machina/core/orchestrator.py', 'offset': 120, 'limit': 240})`
 **Result:**         provider_name = definition.provider or config.get("provider")
         model = definition.model or config.get("model")
         return ReActAgent(
@@ -6599,7 +6599,7 @@ registry.declare_effects(
         from machina.core.usage import db as usage_db
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/machina/tools/agents.py'})`
+**Tool:** `read_file({'path': '<repo>/machina/tools/agents.py'})`
 **Result:** """Multi-agent tools: delegate a task to another agent, or list agents."""
 
 from __future__ import annotations
@@ -6786,7 +6786,7 @@ registry.declare_effects(
 )
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '60,100p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '60,100p' machina/tools/agents.py"})`
 **Result:**             },
         },
         "required": ["agent", "task"],
@@ -6830,7 +6830,7 @@ async def delegate(agent: str, task: str) -> str:
             parent_session_id=parent_session_id,
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '27,60p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '27,60p' machina/tools/agents.py"})`
 **Result:**         result.needs_approval = needs_approval
         result.tokens_used = tokens_used
         return result
@@ -6867,7 +6867,7 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
             },
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '100,184p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '100,184p' machina/tools/agents.py"})`
 **Result:**             parent_session_id=parent_session_id,
             _hop_count=delegation_depth.get() + 1,
             authority=parent_authority,
@@ -6955,14 +6955,14 @@ registry.declare_effects(
 )
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && (uv run pytest tests/test_delegation_boundaries.py tests/test_delegation_transport.py tests/test_delegate_scope.py tests/test_multi_agent.py tests/test_failed_delegation_usage.py tests/test_review_delegation.py -x -q 2>&1 | tail -30)', 'timeout': 300})`
+**Tool:** `terminal({'command': 'cd <repo> && (uv run pytest tests/test_delegation_boundaries.py tests/test_delegation_transport.py tests/test_delegate_scope.py tests/test_multi_agent.py tests/test_failed_delegation_usage.py tests/test_review_delegation.py -x -q 2>&1 | tail -30)', 'timeout': 300})`
 **Result:** Uninstalled 1 package in 16ms
 Installed 1 package in 15ms
 ....................................................................     [100%]
 68 passed in 1.42s
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "def agent_defs\\|def list_agents\\|agents.yaml\\|agent_def" machina/core/agent_def.py | head -20; echo "---"; sed -n \'1,60p\' machina/core/agent_def.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "def agent_defs\\|def list_agents\\|agents.yaml\\|agent_def" machina/core/agent_def.py | head -20; echo "---"; sed -n \'1,60p\' machina/core/agent_def.py'})`
 **Result:** machina/core/agent_def.py:228:                    definition = SoulSpec.from_dict(structured).to_agent_def()
 machina/core/agent_def.py:257:                definition = spec.to_agent_def()
 ---
@@ -7028,7 +7028,7 @@ class AgentDef:
 
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '60,140p' machina/core/agent_def.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '60,140p' machina/core/agent_def.py"})`
 **Result:** 
 
 # Always-available personas. The default general agent uses the harness prompt.
@@ -7188,7 +7188,7 @@ def _ecc_agents() -> dict[str, AgentDef]:
 - typescript-reviewer: Expert TypeScript/JavaScript code reviewer specializing in type safety, async correctness, Node/web security, and idiomatic patterns. Use for all TypeScript and JavaScript code changes. MUST BE USED for TypeScript/JavaScript projects.
 - vue-reviewer: Expert Vue.js code reviewer specializing in Composition API correctness, reactivity pitfalls, component architecture, template security, and Vue-specific performance. Use for any change touching .vue, .ts/.js files with Vue imports, or Vue ecosystem code (Pinia, Vue Router, Nuxt). MUST BE USED for Vue projects.
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '140,240p' machina/core/agent_def.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '140,240p' machina/core/agent_def.py"})`
 **Result:**         upstream = [tool.strip() for tool in metadata["tools"].split(",")]
         tools = list(dict.fromkeys(tool_names[tool] for tool in upstream if tool in tool_names))
         if not tools:
@@ -7292,7 +7292,7 @@ class AgentRegistry:
                     source="yaml",
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn -i "delegat" docs/*.md CHANGELOG.md FEATURE_LEDGER.md README.md | head -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn -i "delegat" docs/*.md CHANGELOG.md FEATURE_LEDGER.md README.md | head -40'})`
 **Result:** docs/BUGFIX_AUDIT.md:13:- Delegation retains parent mode, isolation, and intersected tool restrictions, including when a child is resumed directly. Parent cancellation drains child tasks. Child pauses reach parent responses and RPC/SSE results with their continuation identity; sequential RPC returns early pauses instead of raising a strict-zip error.
 docs/ECC_AGENTS.md:11:Select **Delegate** in the slash menu, choose an agent, and enter its task.
 docs/ECC_AGENTS.md:12:`/delegate planner <task>` also works. `/agents` lists available definitions;
@@ -7419,7 +7419,7 @@ import copy
 import hashlib
 import loggin
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "def \\|class \\|DEADLINE\\|deadline\\|depth\\|_hop_count\\|MAX_" machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "def \\|class \\|DEADLINE\\|deadline\\|depth\\|_hop_count\\|MAX_" machina/core/orchestrator.py'})`
 **Result:** 18:from machina.core.agent_def import AgentDef, agent_registry
 29:delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
 30:delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
@@ -7458,7 +7458,7 @@ import loggin
 480:    async def history(self, session_id: uuid.UUID, limit: int = 50) -> list[dict]:
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "def \\|delegation_depth\\|delegation_deadline\\|MAX_DEPTH\\|DEADLINE\\|parent_authority" machina/core/agent_factory.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "def \\|delegation_depth\\|delegation_deadline\\|MAX_DEPTH\\|DEADLINE\\|parent_authority" machina/core/agent_factory.py'})`
 **Result:** 26:parent_authority_var: _ContextVar[dict | None] = _ContextVar("parent_authority", default=None)
 29:def _memory_enabled() -> bool:
 38:def _rag_enabled() -> bool:
@@ -7477,7 +7477,7 @@ import loggin
 260:    def report(outcome: str, error: BaseException | None = None) -> None:
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '129,205p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '129,205p' machina/core/orchestrator.py"})`
 **Result:**     async def delegate(
         self,
         agent_name: str,
@@ -7557,7 +7557,7 @@ import loggin
         child_authority["tools"] = cap_child_authority(parent, definition.tools or None)
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '205,300p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '205,300p' machina/core/orchestrator.py"})`
 **Result:**         child_authority["tools"] = cap_child_authority(parent, definition.tools or None)
         if parent_mode == "sandbox" or config.get("terminal_sandbox") == "docker":
             child_authority["terminal_backend"] = "sandbox"
@@ -7656,7 +7656,7 @@ import loggin
             delegation_deadline.reset(deadline_token)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "delegation_deadline\\|DELEGATION_TIMEOUT\\|timeout" machina/core/orchestrator.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "delegation_deadline\\|DELEGATION_TIMEOUT\\|timeout" machina/core/orchestrator.py | head -20'})`
 **Result:** machina/core/orchestrator.py:30:delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
 machina/core/orchestrator.py:53:    DELEGATION_TIMEOUT_SECONDS = 120.0
 machina/core/orchestrator.py:268:        deadline_token=[REDACTED_SECRET].set(
@@ -7665,7 +7665,7 @@ machina/core/orchestrator.py:276:                timeout=max(0, delegation_deadl
 machina/core/orchestrator.py:300:            delegation_deadline.reset(deadline_token)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "gather\\|as_completed\\|Semaphore\\|for call in\\|await self._execute\\|def _run_tools\\|parallel" machina/core/agent.py | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "gather\\|as_completed\\|Semaphore\\|for call in\\|await self._execute\\|def _run_tools\\|parallel" machina/core/agent.py | head -30'})`
 **Result:** 108:Delegation: assess whether independent, substantial subtasks benefit from specialists. Use list_agents to choose from the available roster rather than assuming only the three core roles exist. When useful, issue one delegate call per independent subtask in a single block (no more than three) so they run in parallel. Give each subagent a complete standalone task, constraints and required evidence; synthesize and verify their answers yourself. Researcher gathers information (read-only), coder edits code and runs tests, harness does mixed work; ECC specialists add focused roles. Subagents inherit your restrictions, cannot approve actions, and have bounded deadlines; never delegate to evade an approval or for a trivial task. Results and sequential handoffs move through the parent; there is no live sibling peer chat. share_memory delivers a signed owned memory, not a chat message.
 942:        # after gather() finishes. Starts are emitted in request order with
 1177:            semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
@@ -7674,7 +7674,7 @@ machina/core/orchestrator.py:300:            delegation_deadline.reset(deadline_
 1772:                await self._execute_tool_calls(
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '925,970p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '925,970p' machina/core/agent.py"})`
 **Result:**                 planned.append(
                     {
                         "tc": tc,
@@ -7723,7 +7723,7 @@ machina/core/orchestrator.py:300:            delegation_deadline.reset(deadline_
 
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1160,1215p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1160,1215p' machina/core/agent.py"})`
 **Result:**                 and _rsi_skills.get() is not None
                 and len(_rsi_skills.get()) < 200
             ):
@@ -7782,7 +7782,7 @@ machina/core/orchestrator.py:300:            delegation_deadline.reset(deadline_
                     ]
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "_MAX_PARALLEL_TOOLS" machina/ | head; echo "---"; grep -rn "MAX_CONCURRENT\\|three\\|semaphore" machina/core/orchestrator.py machina/tools/agents.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "_MAX_PARALLEL_TOOLS" machina/ | head; echo "---"; grep -rn "MAX_CONCURRENT\\|three\\|semaphore" machina/core/orchestrator.py machina/tools/agents.py | head -20'})`
 **Result:** Binary file machina/core/__pycache__/agent.cpython-314.pyc matches
 Binary file machina/core/__pycache__/agent.cpython-311.pyc matches
 machina/core/agent.py:250:_MAX_PARALLEL_TOOLS = 8
@@ -7792,7 +7792,7 @@ machina/core/agent.py:1177:            semaphore = asyncio.Semaphore(_MAX_PARALL
 machina/tools/agents.py:50:        "block (no more than three) and they run in parallel. "
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '300,400p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '300,400p' machina/core/orchestrator.py"})`
 **Result:**             delegation_deadline.reset(deadline_token)
             try:
                 from machina.core.agent_factory import parent_authority_var as _pav
@@ -7896,7 +7896,7 @@ machina/tools/agents.py:50:        "block (no more than three) and they run in p
         results: list[DelegationResult] = []
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'27,60p\' machina/tools/agents.py; echo "=== 100-140"; sed -n \'100,140p\' machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'27,60p\' machina/tools/agents.py; echo "=== 100-140"; sed -n \'100,140p\' machina/tools/agents.py'})`
 **Result:**         result.needs_approval = needs_approval
         result.tokens_used = tokens_used
         return result
@@ -7975,7 +7975,7 @@ async def list_agents() -> str:
         return "No agents are available."
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "current_session_id\\|current_agent_id\\|set_agent_scope\\|agent_scope" machina/ --include=*.py | grep -v "^machina/tools/agents.py" | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "current_session_id\\|current_agent_id\\|set_agent_scope\\|agent_scope" machina/ --include=*.py | grep -v "^machina/tools/agents.py" | head -30'})`
 **Result:** machina/tools/session_recall.py:9:from machina.tools.agents import active_agent_scope
 machina/tools/session_recall.py:14:    agent_id, _ = await active_agent_scope()
 machina/tools/harness.py:14:from machina.tools.agents import active_agent_scope
@@ -8008,7 +8008,7 @@ machina/core/usage.py:153:                agent_scopes = sorted({agent_id, *ance
 machina/core/usage.py:154:                scopes = [("agent", aid) for aid in agent_scopes] + [
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "current_session_id.set\\|current_agent_id.set\\|current_session_id=\\|agent_session_id" machina/ tests/ --include=*.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "current_session_id.set\\|current_agent_id.set\\|current_session_id=\\|agent_session_id" machina/ tests/ --include=*.py | head -20'})`
 **Result:** machina/tools/agents.py:18:current_session_id: ContextVar[uuid.UUID | None] = ContextVar("agent_session_id", default=None)
 machina/core/agent.py:971:                    token=[REDACTED_SECRET].set(session_id)
 machina/core/agent.py:972:                    agent_token=[REDACTED_SECRET].set(self.agent_id)
@@ -8031,7 +8031,7 @@ tests/test_session_recall.py:170:        agent_token=[REDACTED_SECRET].set(agent
 tests/test_session_recall.py:184:            mismatch_token=[REDACTED_SECRET].set(other_agent)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "current_session_id\\|current_agent_id" machina/core/*.py machina/protocol/*.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "current_session_id\\|current_agent_id" machina/core/*.py machina/protocol/*.py | head -20'})`
 **Result:** machina/core/agent.py:969:                    from machina.tools.agents import current_agent_id, current_session_id
 machina/core/agent.py:971:                    token=[REDACTED_SECRET].set(session_id)
 machina/core/agent.py:972:                    agent_token=[REDACTED_SECRET].set(self.agent_id)
@@ -8043,7 +8043,7 @@ machina/core/execution_context.py:55:    from machina.tools.agents import curren
 machina/core/execution_context.py:57:    sid = current_session_id.get()
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '955,1015p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '955,1015p' machina/core/agent.py"})`
 **Result:** 
         # ── Phase C: execute concurrently, yielding completions as they finish
         async def _run_one(item: dict[str, Any]) -> None:
@@ -8107,7 +8107,7 @@ machina/core/execution_context.py:57:    sid = current_session_id.get()
                         )
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'1120,1150p\' machina/core/agent.py; echo "=== 40-70 execution_context"; sed -n \'40,75p\' machina/core/execution_context.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'1120,1150p\' machina/core/agent.py; echo "=== 40-70 execution_context"; sed -n \'40,75p\' machina/core/execution_context.py'})`
 **Result:**                             # snapshot.
                             from machina.permissions.broker import (
                                 clear_execution_context as _clear_ctx,
@@ -8172,7 +8172,7 @@ def execution_context(
 **Tool:** `recall({'query': 'delegation issue subagent problem', 'limit': 8})`
 **Result:** No memories found for query: 'delegation issue subagent problem'
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn -i "delegat" CHANGELOG.md | head -20; echo "=== ledger"; grep -rn -i "delegat" FEATURE_LEDGER.md | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn -i "delegat" CHANGELOG.md | head -20; echo "=== ledger"; grep -rn -i "delegat" FEATURE_LEDGER.md | head -20'})`
 **Result:** CHANGELOG.md:7:- Agent selection before delegation and checked, confirmed session deletion.
 === ledger
 FEATURE_LEDGER.md:52:| P1-01 | `machina/core/orchestrator.py::delegate` | `agent = None` before factory; `close_agent_provider` only when `agent is not None`; original exception propagates | `test_orchestrator_default_factory_raise_preserves_original`, `test_orchestrator_injected_factory_raise_no_close` |
@@ -8182,7 +8182,7 @@ FEATURE_LEDGER.md:108:Catalog in prompt, bodies on demand (`skill_read`); packag
 FEATURE_LEDGER.md:134:| Feature | CLI (`machina chat`) | TUI/gateway | HTTP | Jobs | Delegation | Disabled/fallback proof |
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '240,287p' machina/core/agent_def.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '240,287p' machina/core/agent_def.py"})`
 **Result:**                     source="yaml",
                 )
             except (
@@ -8233,7 +8233,7 @@ FEATURE_LEDGER.md:134:| Feature | CLI (`machina chat`) | TUI/gateway | HTTP | Jo
         (all keyed by agent id) work with no schema change and no stored
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '138,184p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '138,184p' machina/tools/agents.py"})`
 **Result:**     agents = await agent_registry.list()
     if not agents:
         return "No agents are available."
@@ -8283,7 +8283,7 @@ registry.declare_effects(
 )
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '60,120p' machina/core/agent_def.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '60,120p' machina/core/agent_def.py"})`
 **Result:** 
 
 # Always-available personas. The default general agent uses the harness prompt.
@@ -8347,12 +8347,12 @@ def _ecc_agents() -> dict[str, AgentDef]:
     tool_names = {
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls -la agents 2>/dev/null | head; echo "=== soul.json"; find . -name "soul.json" -not -path "*/node_modules/*" | head -20; echo "=== yaml agents"; find . -name "*.yaml" -path "*agent*" -not -path "*/node_modules/*" | head'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls -la agents 2>/dev/null | head; echo "=== soul.json"; find . -name "soul.json" -not -path "*/node_modules/*" | head -20; echo "=== yaml agents"; find . -name "*.yaml" -path "*agent*" -not -path "*/node_modules/*" | head'})`
 **Result:** === soul.json
 === yaml agents
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "needs_approval\\|tokens_used" machina/core/agent.py machina/core/turns.py machina/protocol/*.py | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "needs_approval\\|tokens_used" machina/core/agent.py machina/core/turns.py machina/protocol/*.py | head -30'})`
 **Result:** machina/core/agent.py:69:        if not response.needs_approval:
 machina/core/agent.py:88:                        if event.response is not None and not event.response.needs_approval:
 machina/core/agent.py:1071:                            # the tool item into AgentResponse.needs_approval.
@@ -8385,7 +8385,7 @@ machina/core/agent.py:2042:                for pause in (entry.get("needs_approv
 machina/core/agent.py:2051:                        tokens_used=total_tokens,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "needs_approval" machina/ --include=*.py | grep -v "^machina/core/agent.py" | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "needs_approval" machina/ --include=*.py | grep -v "^machina/core/agent.py" | head -30'})`
 **Result:** machina/connectors/policy.py:259:    """Return 'trusted_read' or 'needs_approval'.
 machina/connectors/policy.py:269:    return "needs_approval"
 machina/services.py:678:            "OR (status = 'error' AND last_error ILIKE '%needs_approval%')"
@@ -8418,7 +8418,7 @@ machina/cli/__init__.py:172:            # structured needs_approval instead of h
 machina/permissions/broker.py:5:never hang: they receive a structured needs_approval result and release
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'29,60p\' machina/core/orchestrator.py; echo "=== 260-300"; sed -n \'258,300p\' machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'29,60p\' machina/core/orchestrator.py; echo "=== 260-300"; sed -n \'258,300p\' machina/core/orchestrator.py'})`
 **Result:** delegation_depth: ContextVar[int] = ContextVar("delegation_depth", default=0)
 delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
 
@@ -8497,7 +8497,7 @@ class Orchestrator:
             delegation_deadline.reset(deadline_token)
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '262,282p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '262,282p' machina/core/orchestrator.py"})`
 **Result:**         if self._agent_factory is not None:
             agent = self._agent_factory(definition)
         else:
@@ -8521,7 +8521,7 @@ class Orchestrator:
                     message_id, status="cancelled", response="cancelled", tokens=tokens
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "TimeoutError\\|wait_for\\|status=\\|status =" machina/core/orchestrator.py | sed -n \'1,40p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "TimeoutError\\|wait_for\\|status=\\|status =" machina/core/orchestrator.py | sed -n \'1,40p\''})`
 **Result:** 274:            response = await asyncio.wait_for(
 282:                    message_id, status="cancelled", response="cancelled", tokens=tokens
 290:            detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
@@ -8532,10 +8532,10 @@ class Orchestrator:
 471:            SET status = $2, response = $3, tokens_used = $4, completed_at = now()
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn -i "TODO\\|FIXME\\|KNOWN ISSUE\\|not implemented\\|XXX" machina/core/orchestrator.py machina/tools/agents.py machina/core/agent_def.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn -i "TODO\\|FIXME\\|KNOWN ISSUE\\|not implemented\\|XXX" machina/core/orchestrator.py machina/tools/agents.py machina/core/agent_def.py | head -20'})`
 **Result:** (exit code 0, no output)
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git status --short | head -20; echo "=== log delegation"; git log --oneline -15 -- machina/tools/agents.py machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && git status --short | head -20; echo "=== log delegation"; git log --oneline -15 -- machina/tools/agents.py machina/core/orchestrator.py'})`
 **Result:**  M FEATURE_LEDGER.md
  M machina/core/intent.py
  M tests/test_turn_intent.py
@@ -8545,7 +8545,7 @@ b471708 tool call changes and permission changes
 00df258 README: add terminal UI screenshot banner
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && python3 - <<\'EOF\'\nimport re\nsrc=open(\'machina/core/agent_def.py\').read()\ni=src.index(\'BUILTIN_AGENTS\')\nseg=src[i:i+6000]\nfor m in re.finditer(r\'AgentDef\\(|name="([^"]+)"|tools=\\[([^\\]]*)\\]\', seg):\n    print(m.group(0)[:300].replace(\'\\n\',\' \'))\nEOF'})`
+**Tool:** `terminal({'command': 'cd <repo> && python3 - <<\'EOF\'\nimport re\nsrc=open(\'machina/core/agent_def.py\').read()\ni=src.index(\'BUILTIN_AGENTS\')\nseg=src[i:i+6000]\nfor m in re.finditer(r\'AgentDef\\(|name="([^"]+)"|tools=\\[([^\\]]*)\\]\', seg):\n    print(m.group(0)[:300].replace(\'\\n\',\' \'))\nEOF'})`
 **Result:** AgentDef(
 name="harness"
 AgentDef(
@@ -8557,7 +8557,7 @@ tools=[             "read_file",             "write_file",             "list_fil
 AgentDef(
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '100,146p' machina/core/agent_def.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '100,146p' machina/core/agent_def.py"})`
 **Result:**         ),
         tools=[
             "read_file",
@@ -8607,7 +8607,7 @@ def _ecc_agents() -> dict[str, AgentDef]:
             "Machina integration: handle only the delegated task. Use the registered "
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '60,116p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '60,116p' machina/core/orchestrator.py"})`
 **Result:**         Args:
             agent_name: Name of the agent being delegated to.
             task: The task description.
@@ -8667,7 +8667,7 @@ def _ecc_agents() -> dict[str, AgentDef]:
 
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'38,49p\' machina/core/orchestrator.py; echo "=== parent_session_id usage"; grep -n "parent_session_id" machina/core/orchestrator.py; echo "=== child session create"; grep -n "create_session\\|session_manager\\." machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'38,49p\' machina/core/orchestrator.py; echo "=== parent_session_id usage"; grep -n "parent_session_id" machina/core/orchestrator.py; echo "=== child session create"; grep -n "create_session\\|session_manager\\." machina/core/orchestrator.py'})`
 **Result:** class DelegationResult:
     agent: str
     task: str
@@ -8703,7 +8703,7 @@ class Orchestrator:
 377:        parent = await session_manager.get_fresh(session_id)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "_parent_context" -A 40 machina/core/orchestrator.py | sed -n \'1,60p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "_parent_context" -A 40 machina/core/orchestrator.py | sed -n \'1,60p\''})`
 **Result:** 172:        handoff = await self._parent_context(parent_session_id) if parent_session_id else ""
 173-
 174-        from machina.core.agent_factory import (
@@ -8766,7 +8766,7 @@ class Orchestrator:
 391-
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "async def _parent_context" -A 38 machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "async def _parent_context" -A 38 machina/core/orchestrator.py'})`
 **Result:** 374:    async def _parent_context(self, session_id: uuid.UUID) -> str:
 375-        """Pass a bounded summary of recent parent activity to a child agent."""
 376-        # AH-AUDIT-019: delegation reads current durable parent state.
@@ -8808,7 +8808,7 @@ class Orchestrator:
 412-                    _hop_count=_hop_count + 1,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "class Database\\|async def fetch\\|async def execute\\|dsn\\|connect(" machina/db/connection.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "class Database\\|async def fetch\\|async def execute\\|dsn\\|connect(" machina/db/connection.py | head -20'})`
 **Result:** machina/db/connection.py:22:class Database:
 machina/db/connection.py:25:    def __init__(self, dsn: str | None = None) -> None:
 machina/db/connection.py:26:        self.dsn = (
@@ -8824,7 +8824,7 @@ machina/db/connection.py:140:    async def fetchrow(self, query: str, *args) -> 
 machina/db/connection.py:155:    async def fetchval(self, query: str, *args):
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls tools/ | head -20; echo "=== env"; grep -rn "DATABASE_URL\\|postgres" docker-compose.yml | head -10'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls tools/ | head -20; echo "=== env"; grep -rn "DATABASE_URL\\|postgres" docker-compose.yml | head -10'})`
 **Result:** __pycache__
 check_release_artifacts.py
 install-helpers.sh
@@ -8838,16 +8838,16 @@ docker-compose.yml:11:      test: ["CMD-SHELL", "pg_isready -U postgres"]
 docker-compose.yml:24:      DATABASE_URL: postgresql://postgres:[REDACTED_DB_PASSWORD]@db:5432/machina
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/del_report.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\n\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""\n        SELECT status, count(*) FROM agent_messages GROUP BY status ORDER BY 2 DESC\n    """)\n    print("agent_messages by status:", [dict(r) for r in rows])\n    cols = await db.fetch("""\n        SELECT column_name FROM information_schema.columns\n        WHERE table_name=\'agent_messages\' ORDER BY ordinal_position\n    """)\n    print("columns:", [r["column_name"] for r in cols])\n    await db.disconnect()\n\nasyncio.run(main())\nEOF\npython3 /tmp/del_report.py 2>&1 | tail -20', 'timeout': 120})`
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/del_report.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\n\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""\n        SELECT status, count(*) FROM agent_messages GROUP BY status ORDER BY 2 DESC\n    """)\n    print("agent_messages by status:", [dict(r) for r in rows])\n    cols = await db.fetch("""\n        SELECT column_name FROM information_schema.columns\n        WHERE table_name=\'agent_messages\' ORDER BY ordinal_position\n    """)\n    print("columns:", [r["column_name"] for r in cols])\n    await db.disconnect()\n\nasyncio.run(main())\nEOF\npython3 /tmp/del_report.py 2>&1 | tail -20', 'timeout': 120})`
 **Result:** Traceback (most recent call last):
   File "/tmp/del_report.py", line 3, in <module>
     from machina.db.connection import db
-  File "/Users/shadow/machina/machina/db/connection.py", line 12, in <module>
+  File "<repo>/machina/db/connection.py", line 12, in <module>
     import asyncpg
 ModuleNotFoundError: No module named 'asyncpg'
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && uv run python /tmp/del_report.py 2>&1 | tail -20', 'timeout': 180})`
+**Tool:** `terminal({'command': 'cd <repo> && uv run python /tmp/del_report.py 2>&1 | tail -20', 'timeout': 180})`
 **Result:** agent_messages by status: [{'status': 'error', 'count': 5}, {'status': 'complete', 'count': 2}]
 columns: ['id', 'session_id', 'from_agent', 'to_agent', 'task', 'response', 'status', 'tokens_used', 'created_at', 'completed_at']
 Traceback (most recent call last):
@@ -8869,14 +8869,14 @@ Traceback (most recent call last):
 AttributeError: 'Database' object has no attribute 'disconnect'. Did you mean: 'connect'?
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/del2.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""\n        SELECT to_agent, status, created_at, completed_at, tokens_used,\n               left(task, 120) AS task, left(response, 300) AS response\n        FROM agent_messages ORDER BY created_at DESC\n    """)\n    for r in rows:\n        d = dict(r)\n        print("---")\n        for k, v in d.items():\n            print(f"{k}: {v}")\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del2.py 2>&1 | head -80', 'timeout': 180})`
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/del2.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""\n        SELECT to_agent, status, created_at, completed_at, tokens_used,\n               left(task, 120) AS task, left(response, 300) AS response\n        FROM agent_messages ORDER BY created_at DESC\n    """)\n    for r in rows:\n        d = dict(r)\n        print("---")\n        for k, v in d.items():\n            print(f"{k}: {v}")\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del2.py 2>&1 | head -80', 'timeout': 180})`
 **Result:** ---
 to_agent: architect
 status: error
 created_at: 2026-10-13 12:38:12.013632+00:00
 completed_at: 2026-10-13 12:39:12.008450+00:00
 tokens_used: 75913
-task: Tiny read-only task, one grep, under 150 words. In /Users/shadow/machina/machina/core/orchestrator.py, open the delegate
+task: Tiny read-only task, one grep, under 150 words. In <repo>/machina/core/orchestrator.py, open the delegate
 response: TimeoutError: delegation timed out
 ---
 to_agent: rag-pipeline-reviewer
@@ -8884,7 +8884,7 @@ status: error
 created_at: 2026-10-13 12:37:00.873257+00:00
 completed_at: 2026-10-13 12:38:00.872961+00:00
 tokens_used: 70131
-task: Tiny read-only task (fewer than 5 minutes of work, one file). Open ONLY /Users/shadow/machina/machina/rag/reranker.py. R
+task: Tiny read-only task (fewer than 5 minutes of work, one file). Open ONLY <repo>/machina/rag/reranker.py. R
 response: TimeoutError: delegation timed out
 ---
 to_agent: architect
@@ -8916,7 +8916,7 @@ status: complete
 created_at: 2026-10-13 12:34:38.809969+00:00
 completed_at: 2026-10-13 12:34:49.472544+00:00
 tokens_used: 19666
-task: Audit token usage and LLM-call optimisation in the Machina codebase at /Users/shadow/machina (self-hosted Python AI agen
+task: Audit token usage and LLM-call optimisation in the Machina codebase at <repo> (self-hosted Python AI agen
 response: LLM provider error. Check server logs.
 ---
 to_agent: rag-pipeline-reviewer
@@ -8924,14 +8924,14 @@ status: complete
 created_at: 2026-10-13 12:34:38.809660+00:00
 completed_at: 2026-10-13 12:34:43.845998+00:00
 tokens_used: 14098
-task: Review the RAG architecture of the Machina codebase at /Users/shadow/machina (self-hosted Python AI agent, PostgreSQL + 
+task: Review the RAG architecture of the Machina codebase at <repo> (self-hosted Python AI agent, PostgreSQL + 
 response: LLM provider error. Check server logs.
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && uv run python /tmp/del2.py 2>&1 | sed -n '80,140p'"})`
+**Tool:** `terminal({'command': "cd <repo> && uv run python /tmp/del2.py 2>&1 | sed -n '80,140p'"})`
 **Result:** (exit code 0, no output)
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "timeout" machina/core/agent.py | head -30; echo "=== 60"; grep -rn "= 60\\|60\\.0\\|timeout=60" machina/core/*.py machina/tools/*.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "timeout" machina/core/agent.py | head -30; echo "=== 60"; grep -rn "= 60\\|60\\.0\\|timeout=60" machina/core/*.py machina/tools/*.py | head -20'})`
 **Result:** machina/core/agent.py:232:# Per-tool execution timeouts. Delegation-style tools fan out to sub-agents
 machina/core/agent.py:962:            tool_timeout = _TOOL_TIMEOUTS.get(tool_name, _TOOL_TIMEOUT_DEFAULT)
 machina/core/agent.py:1026:                            tool_timeout = int(_spec.get("timeout", 60)) + 1
@@ -8953,7 +8953,7 @@ machina/tools/base.py:77:        self._cache_ttl: float = 60.0  # 1 minute defau
 machina/tools/terminal.py:308:async def terminal(command: str, timeout: int = 60, workdir: str = ".") -> str:
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1015,1060p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1015,1060p' machina/core/agent.py"})`
 **Result:**                         )
                         from machina.permissions.broker import NeedsApproval as _Needs
                         from machina.permissions.broker import permission_broker as _broker
@@ -9002,7 +9002,7 @@ machina/tools/terminal.py:308:async def terminal(command: str, timeout: int = 60
                             item["_approval_id"] = _req.approval_id or ""
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '225,250p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '225,250p' machina/core/agent.py"})`
 **Result:** 
 MAX_PENDING_LEARNING_REVIEWS = 16
 _pending_learning_reviews: set[asyncio.Task] = set()
@@ -9031,7 +9031,7 @@ _TOOL_TIMEOUT_DEFAULT = 30.0
 _MAX_PARALLEL_TOOLS = 8
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '955,1000p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '955,1000p' machina/core/agent.py"})`
 **Result:** 
         # ── Phase C: execute concurrently, yielding completions as they finish
         async def _run_one(item: dict[str, Any]) -> None:
@@ -9080,7 +9080,7 @@ _MAX_PARALLEL_TOOLS = 8
                             _merged["tools"] = list(_parent_tools)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "timeout" machina/core/turns.py machina/permissions/policy.py machina/permissions/tools.py | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "timeout" machina/core/turns.py machina/permissions/policy.py machina/permissions/tools.py | head -30'})`
 **Result:** machina/core/turns.py:15:- Crash recovery: claims expire (turn TTL covers the turn timeout + margin).
 machina/core/turns.py:518:    async def wait_for_approval(self, timeout: float) -> bool:
 machina/core/turns.py:521:        Returns True when approved, False on denial/timeout/cancel. Compute
@@ -9098,7 +9098,7 @@ machina/permissions/tools.py:43:            timeout = 60
 machina/permissions/tools.py:49:            "timeout": timeout,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "timeout" machina/core/agent.py | sed -n \'1,40p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "timeout" machina/core/agent.py | sed -n \'1,40p\''})`
 **Result:** machina/core/agent.py:232:# Per-tool execution timeouts. Delegation-style tools fan out to sub-agents
 machina/core/agent.py:962:            tool_timeout = _TOOL_TIMEOUTS.get(tool_name, _TOOL_TIMEOUT_DEFAULT)
 machina/core/agent.py:1026:                            tool_timeout = int(_spec.get("timeout", 60)) + 1
@@ -9109,7 +9109,7 @@ machina/core/agent.py:1410:                    asyncio.wait_for(self._flush_pend
 machina/core/agent.py:1428:                    timeout=10.0,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "timeout" machina/permissions/tools.py machina/permissions/broker.py | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "timeout" machina/permissions/tools.py machina/permissions/broker.py | head -30'})`
 **Result:** machina/permissions/tools.py:41:            timeout = int(args.get("timeout", 60))
 machina/permissions/tools.py:43:            timeout = 60
 machina/permissions/tools.py:49:            "timeout": timeout,
@@ -9120,14 +9120,14 @@ machina/permissions/broker.py:330:    shell-looking string), cwd, backend, timeo
 machina/permissions/broker.py:355:        "timeout": req.timeout,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git log -1 --format="HEAD date: %ci"; git log --oneline -5 -S\'_TOOL_TIMEOUTS\' -- machina/core/agent.py; echo "=== whom"; git log -1 --format="%ci %s" -S\'"delegate": 120.0\' -- machina/core/agent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && git log -1 --format="HEAD date: %ci"; git log --oneline -5 -S\'_TOOL_TIMEOUTS\' -- machina/core/agent.py; echo "=== whom"; git log -1 --format="%ci %s" -S\'"delegate": 120.0\' -- machina/core/agent.py'})`
 **Result:** HEAD date: 2026-10-13 08:28:07 -0400
 00df258 README: add terminal UI screenshot banner
 === whom
 2026-10-12 20:39:27 -0400 README: add terminal UI screenshot banner
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/del3.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""SELECT id, session_id, from_agent, to_agent, status, tokens_used,\n        created_at, completed_at, EXTRACT(EPOCH FROM (completed_at-created_at)) AS secs\n        FROM agent_messages ORDER BY created_at""")\n    for r in rows: print(dict(r))\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del3.py 2>&1 | tail -12', 'timeout': 120})`
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/del3.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""SELECT id, session_id, from_agent, to_agent, status, tokens_used,\n        created_at, completed_at, EXTRACT(EPOCH FROM (completed_at-created_at)) AS secs\n        FROM agent_messages ORDER BY created_at""")\n    for r in rows: print(dict(r))\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del3.py 2>&1 | tail -12', 'timeout': 120})`
 **Result:** {'id': UUID('2d79f6f6-7074-492b-9ae7-777a022a10d0'), 'session_id': UUID('5f625662-8480-4688-9580-b919d5f3bbcb'), 'from_agent': 'harness', 'to_agent': 'rag-pipeline-reviewer', 'status': 'complete', 'tokens_used': 14098, 'created_at': datetime.datetime(2026, 10, 13, 12, 34, 38, 809660, tzinfo=datetime.timezone.utc), 'completed_at': datetime.datetime(2026, 10, 13, 12, 34, 43, 845998, tzinfo=datetime.timezone.utc), 'secs': Decimal('5.036338')}
 {'id': UUID('d0a30923-ad47-491e-9722-64738cc2b16c'), 'session_id': UUID('5f625662-8480-4688-9580-b919d5f3bbcb'), 'from_agent': 'harness', 'to_agent': 'performance-optimizer', 'status': 'complete', 'tokens_used': 19666, 'created_at': datetime.datetime(2026, 10, 13, 12, 34, 38, 809969, tzinfo=datetime.timezone.utc), 'completed_at': datetime.datetime(2026, 10, 13, 12, 34, 49, 472544, tzinfo=datetime.timezone.utc), 'secs': Decimal('10.662575')}
 {'id': UUID('29597939-600e-4b85-8e3f-bb3f506e5915'), 'session_id': UUID('5f625662-8480-4688-9580-b919d5f3bbcb'), 'from_agent': 'harness', 'to_agent': 'rag-pipeline-reviewer', 'status': 'error', 'tokens_used': 39504, 'created_at': datetime.datetime(2026, 10, 13, 12, 35, 52, 100880, tzinfo=datetime.timezone.utc), 'completed_at': datetime.datetime(2026, 10, 13, 12, 36, 52, 124776, tzinfo=datetime.timezone.utc), 'secs': Decimal('60.023896')}
@@ -9137,7 +9137,7 @@ machina/permissions/broker.py:355:        "timeout": req.timeout,
 {'id': UUID('cd6165c2-f34e-46fe-a9ae-b7cb3f87e737'), 'session_id': UUID('5f625662-8480-4688-9580-b919d5f3bbcb'), 'from_agent': 'harness', 'to_agent': 'architect', 'status': 'error', 'tokens_used': 75913, 'created_at': datetime.datetime(2026, 10, 13, 12, 38, 12, 13632, tzinfo=datetime.timezone.utc), 'completed_at': datetime.datetime(2026, 10, 13, 12, 39, 12, 8450, tzinfo=datetime.timezone.utc), 'secs': Decimal('59.994818')}
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'76,100p\' machina/tools/agents.py; echo "=== grep 60 in agents.py"; grep -n "60\\|deadline\\|timeout" machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'76,100p\' machina/tools/agents.py; echo "=== grep 60 in agents.py"; grep -n "60\\|deadline\\|timeout" machina/tools/agents.py'})`
 **Result:**     parent_session_id = current_session_id.get()
     from_agent = "delegate-tool"
     if parent_session_id is not None:
@@ -9173,7 +9173,7 @@ machina/permissions/broker.py:355:        "timeout": req.timeout,
 113:        delegation_deadline.reset(deadline_token)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'1080,1100p\' machina/core/agent.py; echo "=== 940-965"; sed -n \'940,965p\' machina/core/agent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'1080,1100p\' machina/core/agent.py; echo "=== 940-965"; sed -n \'940,965p\' machina/core/agent.py'})`
 **Result:**                                 "status": _ap.get("status", "pending"),
                             }
                             item["elapsed_ms"] = (time.monotonic() - start) * 1000
@@ -9228,11 +9228,11 @@ machina/permissions/broker.py:355:        "timeout": req.timeout,
 
 Found strong evidence. Let me confirm the mechanism and check for related defects.
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "delegation_deadline\\|60" tests/test_delegation_boundaries.py tests/test_multi_agent.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "delegation_deadline\\|60" tests/test_delegation_boundaries.py tests/test_multi_agent.py | head -20'})`
 **Result:** tests/test_multi_agent.py:67:            content=f"[{self.definition.name}] handled: {user_message[:60]}",
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "delegation_deadline\\|deadline" machina/tools/agents.py; echo "=== rest of delegate tool"; sed -n \'100,136p\' machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "delegation_deadline\\|deadline" machina/tools/agents.py; echo "=== rest of delegate tool"; sed -n \'100,136p\' machina/tools/agents.py'})`
 **Result:** machina/tools/agents.py:69:        delegation_deadline,
 machina/tools/agents.py:88:    # Let the orchestrator own the deadline so a timed-out child can return
 machina/tools/agents.py:90:    deadline = asyncio.get_running_loop().time() + 60
@@ -9280,7 +9280,7 @@ async def list_agents() -> str:
     from machina.core.agent_def import agent_registry
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "deadline\\|timeout" machina/core/orchestrator.py | sed -n \'1,30p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "deadline\\|timeout" machina/core/orchestrator.py | sed -n \'1,30p\''})`
 **Result:** machina/core/orchestrator.py:30:delegation_deadline: ContextVar[float | None] = ContextVar("delegation_deadline", default=None)
 machina/core/orchestrator.py:268:        deadline_token=[REDACTED_SECRET].set(
 machina/core/orchestrator.py:269:            delegation_deadline.get() or loop.time() + self.DELEGATION_TIMEOUT_SECONDS
@@ -9288,22 +9288,22 @@ machina/core/orchestrator.py:276:                timeout=max(0, delegation_deadl
 machina/core/orchestrator.py:300:            delegation_deadline.reset(deadline_token)
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/probe_deadline.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    remaining = delegation_deadline.get() - asyncio.get_running_loop().time()\n    seen["remaining"] = remaining\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\n\no.orchestrator.delegate = fake_delegate\nt.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n\nfrom machina.core.agent import _TOOL_TIMEOUTS\nprint("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\nprint("agent._TOOL_TIMEOUTS[\'delegate\']      =", _TOOL_TIMEOUTS["delegate"])\nprint("ambient before call                   =", delegation_deadline.get())\nout = asyncio.run(t.delegate("architect", "probe"))\nprint("effective child budget (seconds)      =", round(seen["remaining"], 2))\nprint("ambient after call (must be None)     =", delegation_deadline.get())\nprint("tool output                           =", repr(out))\nEOF\nuv run python /tmp/probe_deadline.py 2>&1 | tail -12', 'timeout': 180})`
-**Result:**   File "/Users/shadow/machina/machina/db/connection.py", line 160, in fetchval
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/probe_deadline.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    remaining = delegation_deadline.get() - asyncio.get_running_loop().time()\n    seen["remaining"] = remaining\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\n\no.orchestrator.delegate = fake_delegate\nt.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n\nfrom machina.core.agent import _TOOL_TIMEOUTS\nprint("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\nprint("agent._TOOL_TIMEOUTS[\'delegate\']      =", _TOOL_TIMEOUTS["delegate"])\nprint("ambient before call                   =", delegation_deadline.get())\nout = asyncio.run(t.delegate("architect", "probe"))\nprint("effective child budget (seconds)      =", round(seen["remaining"], 2))\nprint("ambient after call (must be None)     =", delegation_deadline.get())\nprint("tool output                           =", repr(out))\nEOF\nuv run python /tmp/probe_deadline.py 2>&1 | tail -12', 'timeout': 180})`
+**Result:**   File "<repo>/machina/db/connection.py", line 160, in fetchval
     async with self.acquire() as conn:
                ~~~~~~~~~~~~^^
   File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py", line 214, in __aenter__
     return await anext(self.gen)
            ^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/db/connection.py", line 84, in acquire
+  File "<repo>/machina/db/connection.py", line 84, in acquire
     acquire_cm = self.pool.acquire(timeout=timeout)
                  ^^^^^^^^^
-  File "/Users/shadow/machina/machina/db/connection.py", line 68, in pool
+  File "<repo>/machina/db/connection.py", line 68, in pool
     raise DatabaseError("Database not connected. Call connect() first.")
 machina.core.exceptions.DatabaseError: Database not connected. Call connect() first.
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '116,140p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '116,140p' machina/tools/agents.py"})`
 **Result:**         "failed"
         if result.status == "error"
         else "waiting for approval"
@@ -9331,7 +9331,7 @@ async def list_agents() -> str:
         return "No agents are available."
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -i \'\' \'1a\\\nimport machina.db.connection as _c\n\' /dev/null 2>/dev/null; cat > /tmp/probe2.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasyncio.run(db.connect())\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\nfrom machina.core.agent import _TOOL_TIMEOUTS\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    seen["remaining"] = delegation_deadline.get() - asyncio.get_running_loop().time()\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\no.orchestrator.delegate = fake_delegate\n\nasync def main():\n    t.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n    print("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\n    print("agent._TOOL_TIMEOUTS[\'delegate\']        =", _TOOL_TIMEOUTS["delegate"])\n    out = await t.delegate("architect", "probe")\n    print("effective child budget (s)              =", round(seen["remaining"], 2))\n    print("ambient after call                      =", delegation_deadline.get())\n    print("tool output                             =", repr(out))\nasyncio.run(main())\nEOF\nuv run python /tmp/probe2.py 2>&1 | tail -8', 'timeout': 180})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -i \'\' \'1a\\\nimport machina.db.connection as _c\n\' /dev/null 2>/dev/null; cat > /tmp/probe2.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasyncio.run(db.connect())\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\nfrom machina.core.agent import _TOOL_TIMEOUTS\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    seen["remaining"] = delegation_deadline.get() - asyncio.get_running_loop().time()\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\no.orchestrator.delegate = fake_delegate\n\nasync def main():\n    t.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n    print("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\n    print("agent._TOOL_TIMEOUTS[\'delegate\']        =", _TOOL_TIMEOUTS["delegate"])\n    out = await t.delegate("architect", "probe")\n    print("effective child budget (s)              =", round(seen["remaining"], 2))\n    print("ambient after call                      =", delegation_deadline.get())\n    print("tool output                             =", repr(out))\nasyncio.run(main())\nEOF\nuv run python /tmp/probe2.py 2>&1 | tail -8', 'timeout': 180})`
 **Result:**              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "asyncpg/protocol/protocol.pyx", line 330, in query
   File "asyncpg/protocol/protocol.pyx", line 737, in asyncpg.protocol.protocol.BaseProtocol._check_state
@@ -9342,18 +9342,18 @@ future: <Future finished exception=ConnectionDoesNotExistError('connection was c
 asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed in the middle of operation
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/probe3.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\nfrom machina.core.agent import _TOOL_TIMEOUTS\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    seen["remaining"] = delegation_deadline.get() - asyncio.get_running_loop().time()\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\no.orchestrator.delegate = fake_delegate\n\nasync def main():\n    await db.connect()\n    t.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n    print("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\n    print("agent._TOOL_TIMEOUTS[\'delegate\']        =", _TOOL_TIMEOUTS["delegate"])\n    out = await t.delegate("architect", "probe")\n    print("effective child budget (s)              =", round(seen["remaining"], 2))\n    print("ambient after call                      =", delegation_deadline.get())\n    print("tool output                             =", repr(out))\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/probe3.py 2>&1 | tail -8', 'timeout': 180})`
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/probe3.py <<\'EOF\'\nimport asyncio, sys, uuid\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nfrom machina.core import orchestrator as o\nfrom machina.core.orchestrator import DelegationResult, delegation_deadline\nfrom machina.tools import agents as t\nfrom machina.core.agent import _TOOL_TIMEOUTS\n\nseen = {}\nasync def fake_delegate(agent, task, **kw):\n    seen["remaining"] = delegation_deadline.get() - asyncio.get_running_loop().time()\n    return DelegationResult(agent=agent, task=task, response="ok", session_id=uuid.uuid4(),\n                            tokens=0, iterations=1, status="complete", needs_approval=[])\no.orchestrator.delegate = fake_delegate\n\nasync def main():\n    await db.connect()\n    t.current_session_id.set(uuid.uuid4()); t.current_agent_id.set("harness")\n    print("orchestrator.DELEGATION_TIMEOUT_SECONDS =", o.Orchestrator.DELEGATION_TIMEOUT_SECONDS)\n    print("agent._TOOL_TIMEOUTS[\'delegate\']        =", _TOOL_TIMEOUTS["delegate"])\n    out = await t.delegate("architect", "probe")\n    print("effective child budget (s)              =", round(seen["remaining"], 2))\n    print("ambient after call                      =", delegation_deadline.get())\n    print("tool output                             =", repr(out))\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/probe3.py 2>&1 | tail -8', 'timeout': 180})`
 **Result:**     out = await t.delegate("architect", "probe")
           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/tools/agents.py", line 79, in delegate
+  File "<repo>/machina/tools/agents.py", line 79, in delegate
     from_agent, parent_session_id = await active_agent_scope()
                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/shadow/machina/machina/tools/agents.py", line 40, in active_agent_scope
+  File "<repo>/machina/tools/agents.py", line 40, in active_agent_scope
     raise ToolError("active session does not belong to the running agent")
 machina.core.exceptions.ToolError: active session does not belong to the running agent
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'285,300p\' machina/core/orchestrator.py; echo "=== 325,350"; sed -n \'325,350p\' machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'285,300p\' machina/core/orchestrator.py; echo "=== 325,350"; sed -n \'325,350p\' machina/core/orchestrator.py'})`
 **Result:**                 # Accounting failures must not swallow the parent's cancellation.
                 record_failure("orchestrator.delegate", accounting_error)
             raise
@@ -9399,7 +9399,7 @@ machina.core.exceptions.ToolError: active session does not belong to the running
     async def _charged_child_tokens(
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && python3 - <<\'EOF\'\nsrc = open(\'/tmp/probe3.py\').read()\nsrc = src.replace(\'o.orchestrator.delegate = fake_delegate\',\n"""o.orchestrator.delegate = fake_delegate\nasync def fake_scope():\n    return ("harness", uuid.uuid4())\nt.active_agent_scope = fake_scope""")\nopen(\'/tmp/probe4.py\',\'w\').write(src)\nEOF\nuv run python /tmp/probe4.py 2>&1 | tail -8', 'timeout': 180})`
+**Tool:** `terminal({'command': 'cd <repo> && python3 - <<\'EOF\'\nsrc = open(\'/tmp/probe3.py\').read()\nsrc = src.replace(\'o.orchestrator.delegate = fake_delegate\',\n"""o.orchestrator.delegate = fake_delegate\nasync def fake_scope():\n    return ("harness", uuid.uuid4())\nt.active_agent_scope = fake_scope""")\nopen(\'/tmp/probe4.py\',\'w\').write(src)\nEOF\nuv run python /tmp/probe4.py 2>&1 | tail -8', 'timeout': 180})`
 **Result:** orchestrator.DELEGATION_TIMEOUT_SECONDS = 120.0
 agent._TOOL_TIMEOUTS['delegate']        = 120.0
 effective child budget (s)              = 60.0
@@ -9407,7 +9407,7 @@ ambient after call                      = None
 tool output                             = '[architect responded]\nok'
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "tool_timeout\\|wait_for\\|_TOOL_TIMEOUT" machina/core/agent.py | sed -n \'1,40p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "tool_timeout\\|wait_for\\|_TOOL_TIMEOUT" machina/core/agent.py | sed -n \'1,40p\''})`
 **Result:** 238:_TOOL_TIMEOUTS: dict[str, float] = {
 246:_TOOL_TIMEOUT_DEFAULT = 30.0
 626:                decision = await asyncio.wait_for(
@@ -9421,7 +9421,7 @@ tool output                             = '[architect responded]\nok'
 1582:            await asyncio.wait_for(
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'315,332p\' machina/core/orchestrator.py; echo "=== registry.execute"; grep -n "def execute" -A 25 machina/tools/base.py | head -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'315,332p\' machina/core/orchestrator.py; echo "=== registry.execute"; grep -n "def execute" -A 25 machina/tools/base.py | head -40'})`
 **Result:**                 except Exception as _boundary_error:
                     # Optional fallback preserves the primary outcome; report no payload.
                     record_failure("orchestrator.delegate", _boundary_error)
@@ -9469,7 +9469,7 @@ tool output                             = '[architect responded]\nok'
 276-            now = time.monotonic()
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && python3 - <<\'EOF\'\nimport ast\nsrc = open(\'machina/core/agent.py\').read()\ntree = ast.parse(src)\nfor node in ast.walk(tree):\n    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n        print(f"{node.lineno:5d}-{node.end_lineno:5d}  {node.name}")\nEOF'})`
+**Tool:** `terminal({'command': 'cd <repo> && python3 - <<\'EOF\'\nimport ast\nsrc = open(\'machina/core/agent.py\').read()\ntree = ast.parse(src)\nfor node in ast.walk(tree):\n    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n        print(f"{node.lineno:5d}-{node.end_lineno:5d}  {node.name}")\nEOF'})`
 **Result:**    59-   77  instrument_run
    80-   99  instrument_stream
   130-  132  add_growth_listener
@@ -9509,7 +9509,7 @@ tool output                             = '[architect responded]\nok'
  1179- 1182  _bounded
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '813,838p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '813,838p' machina/core/agent.py"})`
 **Result:**     async def _execute_tool_calls(
         self,
         response: LLMResponse,
@@ -9538,7 +9538,7 @@ tool output                             = '[architect responded]\nok'
 
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1015,1035p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1015,1035p' machina/core/agent.py"})`
 **Result:**                         )
                         from machina.permissions.broker import NeedsApproval as _Needs
                         from machina.permissions.broker import permission_broker as _broker
@@ -9562,7 +9562,7 @@ tool output                             = '[architect responded]\nok'
                         if tool_name == "terminal" and _merged.get("terminal_backend") == "sandbox":
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "MAX_HOP_COUNT\\|hop_count" machina/tools/agents.py machina/core/orchestrator.py | head; echo "=== 151-172 orchestrator"; sed -n \'151,172p\' machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "MAX_HOP_COUNT\\|hop_count" machina/tools/agents.py machina/core/orchestrator.py | head; echo "=== 151-172 orchestrator"; sed -n \'151,172p\' machina/core/orchestrator.py'})`
 **Result:** machina/tools/agents.py:101:            _hop_count=delegation_depth.get() + 1,
 machina/core/orchestrator.py:52:    MAX_HOP_COUNT = 10  # Maximum delegation depth to prevent circular delegation
 machina/core/orchestrator.py:136:        _hop_count: int = 0,
@@ -9598,7 +9598,7 @@ machina/core/orchestrator.py:412:                    _hop_count=_hop_count + 1,
         handoff = await self._parent_context(parent_session_id) if parent_session_id else ""
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && cat > /tmp/del4.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""SELECT to_agent, status, tokens_used,\n        round(EXTRACT(EPOCH FROM (completed_at-created_at))::numeric,1) AS secs,\n        left(response,60) AS resp FROM agent_messages ORDER BY created_at""")\n    for r in rows:\n        print(f"{r[\'to_agent\'][:26]:28} {r[\'status\']:9} {r[\'tokens_used\']:>7} tok {r[\'secs\']:>6}s  {r[\'resp\'][:40]!r}")\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del4.py 2>&1 | tail -10', 'timeout': 120})`
+**Tool:** `terminal({'command': 'cd <repo> && cat > /tmp/del4.py <<\'EOF\'\nimport asyncio, sys\nsys.path.insert(0, ".")\nfrom machina.db.connection import db\nasync def main():\n    await db.connect()\n    rows = await db.fetch("""SELECT to_agent, status, tokens_used,\n        round(EXTRACT(EPOCH FROM (completed_at-created_at))::numeric,1) AS secs,\n        left(response,60) AS resp FROM agent_messages ORDER BY created_at""")\n    for r in rows:\n        print(f"{r[\'to_agent\'][:26]:28} {r[\'status\']:9} {r[\'tokens_used\']:>7} tok {r[\'secs\']:>6}s  {r[\'resp\'][:40]!r}")\n    await db.close()\nasyncio.run(main())\nEOF\nuv run python /tmp/del4.py 2>&1 | tail -10', 'timeout': 120})`
 **Result:** rag-pipeline-reviewer        complete    14098 tok    5.0s  'LLM provider error. Check server logs.'
 performance-optimizer        complete    19666 tok   10.7s  'LLM provider error. Check server logs.'
 rag-pipeline-reviewer        error       39504 tok   60.0s  'TimeoutError: delegation timed out'
@@ -9608,13 +9608,13 @@ rag-pipeline-reviewer        error       70131 tok   60.0s  'TimeoutError: deleg
 architect                    error       75913 tok   60.0s  'TimeoutError: delegation timed out'
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "LLM provider error" machina/ --include=*.py | head'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "LLM provider error" machina/ --include=*.py | head'})`
 **Result:** machina/core/agent.py:1712:                    content="LLM provider error. Check server logs.",
 machina/core/agent.py:1950:                        content="LLM provider error. Check server logs.",
 machina/memory/rsi.py:100:        ("Reached max", "Reached maximum", "LLM provider error")
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '396,430p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '396,430p' machina/core/orchestrator.py"})`
 **Result:**         parent_session_id: uuid.UUID | None = None,
         _hop_count: int = 0,
     ) -> list[DelegationResult]:
@@ -9652,7 +9652,7 @@ machina/memory/rsi.py:100:        ("Reached max", "Reached maximum", "LLM provid
         (return_exceptions=True) so callers never lose results.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'1700,1720p\' machina/core/agent.py; echo "=== 1940,1955"; sed -n \'1940,1955p\' machina/core/agent.py; echo "=== AgentResponse fields"; sed -n \'120,145p\' machina/core/models.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'1700,1720p\' machina/core/agent.py; echo "=== 1940,1955"; sed -n \'1940,1955p\' machina/core/agent.py; echo "=== AgentResponse fields"; sed -n \'120,145p\' machina/core/models.py'})`
 **Result:**                 )
             except Exception as e:
                 await self._flush_pending_chunks(pending_chunks)
@@ -9728,7 +9728,7 @@ class AgentResponse:
 
 **Code evidence:** `orchestrator.py`: `DELEGATION_TIMEOUT_SECONDS = 120.0`, `MAX_HOP_COUNT = 10`, `delegation_deadline` ContextVar. `tools/agents.py`: delegate tool, deadline passed via contextvar
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "outcome" machina/core/orchestrator.py machina/tools/agents.py; echo "=== orchestrator status line"; grep -n "status = \\"waiting_approval\\"\\|status=status\\|content=response.content" machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "outcome" machina/core/orchestrator.py machina/tools/agents.py; echo "=== orchestrator status line"; grep -n "status = \\"waiting_approval\\"\\|status=status\\|content=response.content" machina/core/orchestrator.py'})`
 **Result:** machina/core/orchestrator.py:306:                # Optional fallback preserves the primary outcome; report no payload.
 machina/core/orchestrator.py:316:                    # Optional fallback preserves the primary outcome; report no payload.
 === orchestrator status line
@@ -9737,7 +9737,7 @@ machina/core/orchestrator.py:316:                    # Optional fallback preserv
 346:            status=status,
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "outcome" machina/core/models.py | head -20; echo "=== response outcome uses"; grep -rn "\\.outcome" machina/ --include=*.py | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "outcome" machina/core/models.py | head -20; echo "=== response outcome uses"; grep -rn "\\.outcome" machina/ --include=*.py | head -20'})`
 **Result:** machina/core/models.py:120:    tool_outcome: str = ""
 machina/core/models.py:127:    needs_approval carries typed pause outcomes (AH-AUDIT-022): each entry
 machina/core/models.py:138:    outcome: str = "completed"
@@ -9804,7 +9804,7 @@ import u
      603 machina/core/turns.py
      287 machina/c
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git status --short && echo "=== recent log" && git log --oneline -12'})`
+**Tool:** `terminal({'command': 'cd <repo> && git status --short && echo "=== recent log" && git log --oneline -12'})`
 **Result:**  M FEATURE_LEDGER.md
  M machina/core/intent.py
  M tests/test_turn_intent.py
@@ -9817,7 +9817,7 @@ b471708 tool call changes and permission changes
 00df258 README: add terminal UI screenshot banner
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git diff FEATURE_LEDGER.md | head -60'})`
+**Tool:** `terminal({'command': 'cd <repo> && git diff FEATURE_LEDGER.md | head -60'})`
 **Result:** diff --git a/FEATURE_LEDGER.md b/FEATURE_LEDGER.md
 index 739246e..7551c64 100644
 --- a/FEATURE_LEDGER.md
@@ -9834,7 +9834,7 @@ index 739246e..7551c64 100644
 +| Conversational routing | `core/intent.py` `_FOLLOW_ON_ACTION` verb list extended with mutation verbs (`change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure`); question+mutating follow-on now routes to a task instead of conversation | `tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task` (7 new cases, red->green); pure questions/greetings re-verified conversational; 84 passed across intent/skill/rsi modules |
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git diff --stat && echo "=== intent.py diff" && git diff machina/core/intent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && git diff --stat && echo "=== intent.py diff" && git diff machina/core/intent.py'})`
 **Result:**  FEATURE_LEDGER.md         |  6 ++++++
  machina/core/intent.py    |  4 +++-
  tests/test_turn_intent.py | 18 ++++++++++++++++++
@@ -9857,7 +9857,7 @@ index 423b027..530e2d1 100644
  
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "outcome" docs/SELF_IMPROVEMENT_PLAN.md FEATURE_LEDGER.md 2>/dev/null | head -20; echo "=== plan tail"; tail -40 docs/SELF_IMPROVEMENT_PLAN.md 2>/dev/null'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "outcome" docs/SELF_IMPROVEMENT_PLAN.md FEATURE_LEDGER.md 2>/dev/null | head -20; echo "=== plan tail"; tail -40 docs/SELF_IMPROVEMENT_PLAN.md 2>/dev/null'})`
 **Result:** docs/SELF_IMPROVEMENT_PLAN.md:10:  permissions. Automatic tool outcomes already provide weak operational updates; human
 docs/SELF_IMPROVEMENT_PLAN.md:81:  can adapt without those ratings. Measure real outcomes rather than promising improvement.
 docs/SELF_IMPROVEMENT_PLAN.md:102:database writer, weak automatic outcomes already tune routing, and lens configuration is
@@ -9906,7 +9906,7 @@ database writer, weak automatic outcomes already tune routing, and lens configur
 independent of the tone description. Enabling a feature alone never proves learning quality.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && tail -20 FEATURE_LEDGER.md && echo "=== tests diff" && git diff tests/test_turn_intent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && tail -20 FEATURE_LEDGER.md && echo "=== tests diff" && git diff tests/test_turn_intent.py'})`
 **Result:** 
 Code-level leftovers closed on top of the production-completion merge; the
 v1.0.0 gate stays open until DB/Docker/staging verification per
@@ -9963,7 +9963,7 @@ index 006ab20..381a2cf 100644
 +    assert plan_workflow(query, skills=SkillRegistry(tmp_path)).kind != "conversation"
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md'})`
+**Tool:** `read_file({'path': '<repo>/docs/SELF_IMPROVEMENT_PLAN.md'})`
 **Result:** # Machina self-improvement loop (dogfooding on this repo)
 
 Not a test harness. The benchmark is **real work on this codebase**, observed and rated.
@@ -10069,7 +10069,7 @@ database writer, weak automatic outcomes already tune routing, and lens configur
 independent of the tone description. Enabling a feature alone never proves learning quality.
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '175,200p' FEATURE_LEDGER.md"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '175,200p' FEATURE_LEDGER.md"})`
 **Result:** | Boundary | Change | Proof |
 |---|---|---|
 | RAG metadata | `_redact_metadata` recurses via the shared redactor (nested dicts/lists/tuples/sets/bytes), matching its documented claim | `test_audit_remediation.py::test_012_metadata_redacted_and_reserved_fields_win`, `npm --prefix ui` n/a |
@@ -10087,7 +10087,7 @@ independent of the tone description. Enabling a feature alone never proves learn
 | Conversational routing | `core/intent.py` `_FOLLOW_ON_ACTION` verb list extended with mutation verbs (`change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure`); question+mutating follow-on now routes to a task instead of conversation | `tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task` (7 new cases, red->green); pure questions/greetings re-verified conversational; 84 passed across intent/skill/rsi modules |
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md', 'offset': 30})`
+**Tool:** `read_file({'path': '<repo>/docs/SELF_IMPROVEMENT_PLAN.md', 'offset': 30})`
 **Result:**    that made things worse; delete stale ledger lines. Un-pruned growth is noise.
 
 ## Discrimination table (the core fix)
@@ -10164,7 +10164,7 @@ database writer, weak automatic outcomes already tune routing, and lens configur
 independent of the tone description. Enabling a feature alone never proves learning quality.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "^#\\|^##" FEATURE_LEDGER.md | tail -15 && echo "=== raw tail" && tail -c 700 FEATURE_LEDGER.md'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "^#\\|^##" FEATURE_LEDGER.md | tail -15 && echo "=== raw tail" && tail -c 700 FEATURE_LEDGER.md'})`
 **Result:** 81:## Runtime
 90:## Context/history
 94:## Memory
@@ -10190,7 +10190,7 @@ val.resumed`/`turn.started` | `npm --prefix ui test` (87 passed, 3 DB-skipped), 
 | Conversational routing | `core/intent.py` `_FOLLOW_ON_ACTION` verb list extended with mutation verbs (`change|update|modify|edit|remove|delete|set|enable|disable|rename|migrate|deploy|install|configure`); question+mutating follow-on now routes to a task instead of conversation | `tests/test_turn_intent.py::test_mutating_follow_on_action_after_a_question_routes_to_task` (7 new cases, red->green); pure questions/greetings re-verified conversational; 84 passed across intent/skill/rsi modules |
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "\\.outcome\\|outcome=" machina/ --include=*.py | grep -v test | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "\\.outcome\\|outcome=" machina/ --include=*.py | grep -v test | head -30'})`
 **Result:** machina/research/train_memory_policy.py:115:    by_identity = {id(example.state): example.outcomes for example in examples}
 machina/tools/mcp.py:15:        instance.outcome_unknown = outcome_unknown
 machina/tools/mcp.py:105:        result if outcome.ok else "Error: " + result, outcome_unknown=outcome.outcome_unknown
@@ -10204,7 +10204,7 @@ machina/core/agent.py:1931:                        outcome="failed",
 machina/core/agent.py:1951:                        outcome="failed",
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "outcome" machina/core/models.py machina/core/orchestrator.py machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "outcome" machina/core/models.py machina/core/orchestrator.py machina/tools/agents.py'})`
 **Result:** machina/core/models.py:120:    tool_outcome: str = ""
 machina/core/models.py:127:    needs_approval carries typed pause outcomes (AH-AUDIT-022): each entry
 machina/core/models.py:138:    outcome: str = "completed"
@@ -10213,7 +10213,7 @@ machina/core/orchestrator.py:306:                # Optional fallback preserves t
 machina/core/orchestrator.py:316:                    # Optional fallback preserves the primary outcome; report no payload.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "def delegate\\|response\\.\\|DelegateResult\\|return " machina/core/orchestrator.py | head -60'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "def delegate\\|response\\.\\|DelegateResult\\|return " machina/core/orchestrator.py | head -60'})`
 **Result:** 85:        return "\n".join(parts)
 115:        return agent
 122:        return ReActAgent(
@@ -10235,7 +10235,7 @@ machina/core/orchestrator.py:316:                    # Optional fallback preserv
 489:        return [
 
 
-**Tool:** `read_file({'path': '/Users/shadow/machina/machina/core/models.py', 'offset': 110, 'limit': 60})`
+**Tool:** `read_file({'path': '<repo>/machina/core/models.py', 'offset': 110, 'limit': 60})`
 **Result:**     content: str = ""
     tool_name: str = ""
     tool_args: dict = field(default_factory=dict)
@@ -10292,7 +10292,7 @@ class AgentResponse:
             record_failure("models.__post_init__", _boundary_error)
 
 
-**Tool:** `read_file({'limit': 225, 'offset': 129, 'path': '/Users/shadow/machina/machina/core/orchestrator.py'})`
+**Tool:** `read_file({'limit': 225, 'offset': 129, 'path': '<repo>/machina/core/orchestrator.py'})`
 **Result:**     async def delegate(
         self,
         agent_name: str,
@@ -10520,7 +10520,7 @@ class AgentResponse:
         """Read spend for this fresh child, including descendant reservations.
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '255,360p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '255,360p' machina/core/orchestrator.py"})`
 **Result:**             )
         message_id = await self._record_start(parent_session_id, from_agent, agent_name, task)
 
@@ -10629,7 +10629,7 @@ class AgentResponse:
         from machina.core.usage import usage_store
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '288,360p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '288,360p' machina/core/orchestrator.py"})`
 **Result:**         except Exception as e:
             logger.exception("Delegation to %s failed", agent_name)
             detail = "delegation timed out" if isinstance(e, TimeoutError) else str(e)
@@ -10705,7 +10705,7 @@ class AgentResponse:
         from machina.core.usage import usage_store
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "class DelegationResult" -A 25 machina/core/orchestrator.py | head -40'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "class DelegationResult" -A 25 machina/core/orchestrator.py | head -40'})`
 **Result:** 38:class DelegationResult:
 39-    agent: str
 40-    task: str
@@ -10734,7 +10734,7 @@ class AgentResponse:
 63-            context: Parent session context (may be empty).
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '318,352p' machina/core/orchestrator.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '318,352p' machina/core/orchestrator.py"})`
 **Result:** 
         tokens = await self._charged_child_tokens(child.id, agent_name, response.tokens_used)
         pauses = getattr(response, "needs_approval", None)
@@ -10772,7 +10772,7 @@ class AgentResponse:
     ) -> int:
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'132,145p\' machina/core/models.py && echo "=== outcome assignments in agent.py" && grep -n "outcome=\\|outcome =" machina/core/agent.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'132,145p\' machina/core/models.py && echo "=== outcome assignments in agent.py" && grep -n "outcome=\\|outcome =" machina/core/agent.py'})`
 **Result:** 
     content: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -10799,7 +10799,7 @@ class AgentResponse:
 1951:                        outcome="failed",
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "DelegationResult\\|\\.status" machina/tools/agents.py | head -20 && echo "=== agents.py delegate render" && sed -n \'95,190p\' machina/tools/agents.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "DelegationResult\\|\\.status" machina/tools/agents.py | head -20 && echo "=== agents.py delegate render" && sed -n \'95,190p\' machina/tools/agents.py'})`
 **Result:** machina/tools/agents.py:117:        if result.status == "error"
 machina/tools/agents.py:119:        if result.status == "waiting_approval"
 machina/tools/agents.py:172:        f"Memory delivery {receipt.status} for {recipient_agent}; "
@@ -10896,7 +10896,7 @@ registry.declare_effects(
 )
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '110,150p' machina/tools/agents.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '110,150p' machina/tools/agents.py"})`
 **Result:**         logger.exception("delegate tool failed")
         raise ToolError(f"delegation failed: {e}") from None
     finally:
@@ -10940,7 +10940,7 @@ async def list_agents() -> str:
             "memory_id": {"type": "string", "description": "Memory UUID from remember or recall"},
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1670,1720p' machina/core/agent.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1670,1720p' machina/core/agent.py"})`
 **Result:**                     "agent_request_context_exceeded",
                     session_id=str(session_id),
                     total_tokens=total_tokens,
@@ -11003,7 +11003,7 @@ Ev
 
 Not a test harness. The benchmark is **real work on this codebase**, observed and rated.
 Ev
-[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md # Machi
+[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to <repo>/docs/SELF_IMPROVEMENT_PLAN.md <repo>/docs/SELF_IMPROVEMENT_PLAN.md # Machi
 [live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=36fa2f16-f0d5-4632-89e7-507bcbbc878d | **Yes, it's there and running — but it's idling, not learning much yet.**
 
 Live state (`harness_status`, just now):
@@ -11076,7 +11076,7 @@ delegation_deadline: ContextVar[float | None] = ContextVar("delegation_de
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=78b2bc7d-098e-40b4-a3c7-19409e65bc53 | terminal                 # Accounting failures must not swallow the parent's cancellation.
                 record_failure("orchestrator.delegate", accounting_er
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rln "DelegationResult\\|delegate" tests/ | head -20 && echo "=== status assertions" && grep -rn "status == \\"complete\\"\\|status=\\"complete\\"\\|\\"complete\\"" tests/ | grep -i deleg | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rln "DelegationResult\\|delegate" tests/ | head -20 && echo "=== status assertions" && grep -rn "status == \\"complete\\"\\|status=\\"complete\\"\\|\\"complete\\"" tests/ | grep -i deleg | head -20'})`
 **Result:** tests/test_review_delegation.py
 tests/test_deadlock_guard.py
 tests/test_multi_agent.py
@@ -11110,7 +11110,7 @@ tests/test_delegation_boundaries.py:465:    assert result.status == "complete"
 tests/test_delegation_boundaries.py:562:    assert result.status == "complete"
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'296,318p\' machina/core/orchestrator.py && echo "=== grep status assignments" && grep -n "status" machina/core/orchestrator.py | sed -n \'1,40p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'296,318p\' machina/core/orchestrator.py && echo "=== grep status assignments" && grep -n "status" machina/core/orchestrator.py | sed -n \'1,40p\''})`
 **Result:**                 agent_name, task, f"Error: {detail}", child.id, tokens, 0, "error"
             )
         finally:
@@ -11149,12 +11149,12 @@ tests/test_delegation_boundaries.py:562:    assert result.status == "complete"
 496:                "status": r["status"],
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "status = " machina/core/orchestrator.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "status = " machina/core/orchestrator.py'})`
 **Result:** 329:        status = "waiting_approval" if pauses else "complete"
 471:            SET status = $2, response = $3, tokens_used = $4, completed_at = now()
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -n "outcome" machina/core/agent.py | sed -n \'1,60p\''})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -n "outcome" machina/core/agent.py | sed -n \'1,60p\''})`
 **Result:** 106:For substantial work, keep a short task plan and update it as results arrive. Orient before editing: inspect the project structure, design docs and relevant existing code; consult indexed documents or prior memory when they can inform the task. Automatic skills may already supply relevant workflows; read their remaining steps when needed and search skill_list with a focused query for gaps. Do not require a skill search on every turn or pretend unindexed repo files are in RAG. Verify real outcomes before reporting success. Capture reusable observed failures and user corrections with learn_personality when available, updating an existing lesson key; do not turn assumptions into memories.
 613:            # Optional fallback preserves the primary outcome; report no payload.
 686:            # Optional fallback preserves the primary outcome; report no payload.
@@ -11183,7 +11183,7 @@ tests/test_delegation_boundaries.py:562:    assert result.status == "complete"
 1951:                        outcome="failed",
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && grep -rn "outcome=" machina/core/agent.py machina/core/models.py machina/eval/*.py 2>/dev/null | head -30; echo "=== summarize_outcome"; grep -rn "def summarize_outcome" -A 20 machina/ --include=*.py | head -35'})`
+**Tool:** `terminal({'command': 'cd <repo> && grep -rn "outcome=" machina/core/agent.py machina/core/models.py machina/eval/*.py 2>/dev/null | head -30; echo "=== summarize_outcome"; grep -rn "def summarize_outcome" -A 20 machina/ --include=*.py | head -35'})`
 **Result:** machina/core/agent.py:1209:                        tool_outcome="outcome_unknown" if finished.get("_outcome_unknown") else "",
 machina/core/agent.py:1586:                    outcome=summarize_outcome(response) if response is not None else None,
 machina/core/agent.py:1680:                    outcome="failed",
@@ -11216,7 +11216,7 @@ machina/memory/rsi.py-98-    content = response.content or ""
 machina/memory/rsi.py-99-    failed = getattr(response, "outcome", "completed") == "failed" or content.startswith(
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && for l in 1675 1693 1710 1870 1928 1948; do echo "--- around $l"; sed -n "$((l-12)),$((l+4))p" machina/core/agent.py | grep -n "context_exceeded\\|budget\\|max_iter\\|cancel\\|provider\\|outcome=\\|reason\\|return AgentResponse" ; done'})`
+**Tool:** `terminal({'command': 'cd <repo> && for l in 1675 1693 1710 1870 1928 1948; do echo "--- around $l"; sed -n "$((l-12)),$((l+4))p" machina/core/agent.py | grep -n "context_exceeded\\|budget\\|max_iter\\|cancel\\|provider\\|outcome=\\|reason\\|return AgentResponse" ; done'})`
 **Result:** --- around 1675
 1:            if request_tokens > effective_budget:
 5:                    effective_budget,
@@ -11245,7 +11245,7 @@ machina/memory/rsi.py-99-    failed = getattr(response, "outcome", "completed") 
 16:                        outcome="failed",
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1,80p' tests/test_failed_delegation_usage.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1,80p' tests/test_failed_delegation_usage.py"})`
 **Result:** """Failed delegations still charge the parent for child and descendant work."""
 
 import asyncio
@@ -11328,7 +11328,7 @@ async def test_failed_child_returns_its_charged_usage(delegation, monkeypatch, o
     assert result.status == "error"
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '80,200p' tests/test_failed_delegation_usage.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '80,200p' tests/test_failed_delegation_usage.py"})`
 **Result:**     assert result.status == "error"
     assert result.tokens == 13
     assert delegation.recorded[-1]["tokens"] == 13
@@ -11452,7 +11452,7 @@ async def test_failed_child_spend_is_accounted_without_implicit_turn_cutoff(
     from machina.core.agent import registry
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '14,80p' tests/test_failed_delegation_usage.py"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '14,80p' tests/test_failed_delegation_usage.py"})`
 **Result:** from machina.core.execution_context import ExecutionContext
 from machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent
 from machina.core.orchestrator import Orchestrator
@@ -11522,7 +11522,7 @@ async def test_failed_child_returns_its_charged_usage(delegation, monkeypatch, o
     assert result.status == "error"
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && sed -n \'80,120p\' tests/test_failed_delegation_usage.py; echo "=== lines 55-100 raw"; awk \'NR>=55 && NR<=100\' tests/test_failed_delegation_usage.py'})`
+**Tool:** `terminal({'command': 'cd <repo> && sed -n \'80,120p\' tests/test_failed_delegation_usage.py; echo "=== lines 55-100 raw"; awk \'NR>=55 && NR<=100\' tests/test_failed_delegation_usage.py'})`
 **Result:**     assert result.status == "error"
     assert result.tokens == 13
     assert delegation.recorded[-1]["tokens"] == 13
@@ -11613,7 +11613,7 @@ async def test_success_uses_maximum_of_durable_and_response_usage(
 async def test_success_keeps_known_usage_without_database(delegation, monkeypatch):
 
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && awk 'NR>=20 && NR<=54' tests/test_failed_delegation_usage.py"})`
+**Tool:** `terminal({'command': "cd <repo> && awk 'NR>=20 && NR<=54' tests/test_failed_delegation_usage.py"})`
 **Result:** def delegation(monkeypatch):
     from machina.core import orchestrator as module
     from machina.core.usage import usage_store
@@ -11686,7 +11686,7 @@ Error: delegation timed out performance-optimizer READ-ONLY A
 
 ## What I actually did (a real iteration)
 
-[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md # Machi
+[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to <repo>/docs/SELF_IMPROVEMENT_PLAN.md <repo>/docs/SELF_IMPROVEMENT_PLAN.md # Machi
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=855528d3-ab0a-4b47-963b-933b8b0aebfe | harness_status {"read_only":true,"session":{"agent_id":"harness","session_id":"5f625662-8480-4688-9580-b919d5f3bbcb","mode":"full"},"configuration":{"memory":tr
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=eab28c5a-0f8a-4d28-a165-dfe39d9638b9 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=9324359a-8712-4e2b-8a5c-d6067d098fed | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
@@ -11694,7 +11694,7 @@ Error: delegation timed out performance-optimizer READ-ONLY A
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=5c593f84-a8d9-4299-bb0e-33a6faa601b5 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=04358c93-5b4f-4eb7-9471-fff4c628b0c0 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 
-**Tool:** `terminal({'command': "cd /Users/shadow/machina && sed -n '1,60p' docs/BUGFIX_AUDIT.md"})`
+**Tool:** `terminal({'command': "cd <repo> && sed -n '1,60p' docs/BUGFIX_AUDIT.md"})`
 **Result:** # Post-OpenCode bug-fix audit
 
 Date: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`, plus the existing uncommitted harness changes. The user authorized fixing remaining bugs through verification. Existing work is preserved; this audit does not restore the removed ECC bundle or add the planned MCP feature.
@@ -11747,7 +11747,7 @@ External model behavior, Docker daemon operation, and optional third-party resea
 All bugs found in this audit have fixes and the available native checks pass. Changes are left uncommitted for review; no commit, push, or database-history rewrite was requested. Preserve the uncommitted implementation and new test/migration files. The broader TUI and MCP roadmap remains in [the handoff](HANDOFF.md); MCP support was not added during this bug-fix pass.
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git status --short && echo "=== recent md ===" && ls -lt docs/*.md | head -15'})`
+**Tool:** `terminal({'command': 'cd <repo> && git status --short && echo "=== recent md ===" && ls -lt docs/*.md | head -15'})`
 **Result:**  M FEATURE_LEDGER.md
  M machina/core/intent.py
  M tests/test_turn_intent.py
@@ -11765,7 +11765,7 @@ All bugs found in this audit have fixes and the available native checks pass. Ch
 -rw-r--r--@ 1 shadow  staff    6574 Oct 12 20:42 docs/BUGFIX_AUDIT.md
 
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git diff FEATURE_LEDGER.md | head -60 && echo "=== delegation tests ===" && ls -lt tests/ | head -12'})`
+**Tool:** `terminal({'command': 'cd <repo> && git diff FEATURE_LEDGER.md | head -60 && echo "=== delegation tests ===" && ls -lt tests/ | head -12'})`
 **Result:** diff --git a/FEATURE_LEDGER.md b/FEATURE_LEDGER.md
 index 739246e..7551c64 100644
 --- a/FEATURE_LEDGER.md
@@ -11809,7 +11809,7 @@ drwxr-xr-x@   3 shadow  staff     96 Oct 13 07:43 data
 Date: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`, plus the existing uncommitted harness c
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=e9974d3b-678a-403f-81c9-16bc9ec3c044 | terminal docs/BUGFIX_AUDIT.md:13:- Delegation retains parent mode, isolation, and intersected tool restrictions, including when a child is resumed directly. Par
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git diff FEATURE_LEDGER.md | tail -20 && echo "=== grep ===" && grep -rn -i "failed delegation\\|failed_delegation" --include=*.py --include=*.md . | head -20'})`
+**Tool:** `terminal({'command': 'cd <repo> && git diff FEATURE_LEDGER.md | tail -20 && echo "=== grep ===" && grep -rn -i "failed delegation\\|failed_delegation" --include=*.py --include=*.md . | head -20'})`
 **Result:** diff --git a/FEATURE_LEDGER.md b/FEATURE_LEDGER.md
 index 739246e..7551c64 100644
 --- a/FEATURE_LEDGER.md
@@ -11847,7 +11847,7 @@ Date: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`,
 
 ## What I actually did (a real iteration)
 
-[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md # Machi
+[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to <repo>/docs/SELF_IMPROVEMENT_PLAN.md <repo>/docs/SELF_IMPROVEMENT_PLAN.md # Machi
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=eab28c5a-0f8a-4d28-a165-dfe39d9638b9 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=9324359a-8712-4e2b-8a5c-d6067d098fed | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=383a27b4-9437-4361-ba1b-6cac86aee579 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
@@ -11869,7 +11869,7 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=8851b352-61cc-4ac9-b737-7f1cf2ba1d74 | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 [live] New session | session=0d20c53f-f15b-492b-a337-91fbaef48784 chunk=f517f613-6143-4c12-8ddd-f69fe163dbcc | list_agents - a11y-architect: Accessibility Architect specializing in WCAG 2.2 compliance for Web and Native platforms. Use PROACTIVELY when designing UI compon
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && git log --oneline -5 && echo "=== ledger tail ===" && tail -12 FEATURE_LEDGER.md'})`
+**Tool:** `terminal({'command': 'cd <repo> && git log --oneline -5 && echo "=== ledger tail ===" && tail -12 FEATURE_LEDGER.md'})`
 **Result:** abfcb99 Identity changes and soulspec
 ea91ec2 rag changes
 6ff9ca8 ci changes
@@ -11977,7 +11977,7 @@ Date: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`,
 **Tool:** `recall({'query': 'pending md file deliverable documentation to write'})`
 **Result:** No memories found for query: 'pending md file deliverable documentation to write'
 
-**Tool:** `terminal({'command': 'cd /Users/shadow/machina && ls -lt docs/*.md | tail -20 && echo "=== new/untracked ===" && git status --short --untracked-files=all | head -30'})`
+**Tool:** `terminal({'command': 'cd <repo> && ls -lt docs/*.md | tail -20 && echo "=== new/untracked ===" && git status --short --untracked-files=all | head -30'})`
 **Result:** -rw-r--r--@ 1 shadow  staff   15348 Oct 13 08:21 docs/PERSONALITY_GROWTH.md
 -rw-------@ 1 shadow  staff    6712 Oct 13 06:57 docs/SELF_IMPROVEMENT_PLAN.md
 -rw-r--r--@ 1 shadow  staff    5379 Oct 12 20:42 docs/PERMISSION_POLICY_REVIEW.md
@@ -11996,11 +11996,11 @@ Date: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`,
 
 
 **Tool:** `session_recall_window({'session_id': '5f625662-8480-4688-9580-b919d5f3bbcb', 'chunk_id': '5aa546bb-7159-4cf4-a42a-f6d58e009bf0'})`
-**Result:** [tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && sed -n '1,80p' tests/test_failed_delegation_usage.py"}, 'result_preview': '"""Failed delegations still charge the parent for child and descendant work."""\n\nimport asyncio\nfrom contextlib import nullcontext\nfrom pathlib import 
-[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && sed -n '80,200p' tests/test_failed_delegation_usage.py"}, 'result_preview': '    assert result.status == "error"\n    assert result.tokens == 13\n    assert delegation.recorded[-1]["tokens"] == 13\n\n\n@pytest.mark.parametrize("ch
-[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && sed -n '14,80p' tests/test_failed_delegation_usage.py"}, 'result_preview': 'from machina.core.execution_context import ExecutionContext\nfrom machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent\nfrom machin
-[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd /Users/shadow/machina && sed -n \'80,120p\' tests/test_failed_delegation_usage.py; echo "=== lines 55-100 raw"; awk \'NR>=55 && NR<=100\' tests/test_failed_delegation_usage.py'}, 'result_preview': '    assert result.status == "error"\n    assert result.to
-[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && awk 'NR>=20 && NR<=54' tests/test_failed_delegation_usage.py"}, 'result_preview': 'def delegation(monkeypatch):\n    from machina.core import orchestrator as module\n    from machina.core.usage import usage_store\n\n    child = Se
+**Result:** [tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && sed -n '1,80p' tests/test_failed_delegation_usage.py"}, 'result_preview': '"""Failed delegations still charge the parent for child and descendant work."""\n\nimport asyncio\nfrom contextlib import nullcontext\nfrom pathlib import 
+[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && sed -n '80,200p' tests/test_failed_delegation_usage.py"}, 'result_preview': '    assert result.status == "error"\n    assert result.tokens == 13\n    assert delegation.recorded[-1]["tokens"] == 13\n\n\n@pytest.mark.parametrize("ch
+[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && sed -n '14,80p' tests/test_failed_delegation_usage.py"}, 'result_preview': 'from machina.core.execution_context import ExecutionContext\nfrom machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent\nfrom machin
+[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd <repo> && sed -n \'80,120p\' tests/test_failed_delegation_usage.py; echo "=== lines 55-100 raw"; awk \'NR>=55 && NR<=100\' tests/test_failed_delegation_usage.py'}, 'result_preview': '    assert result.status == "error"\n    assert result.to
+[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && awk 'NR>=20 && NR<=54' tests/test_failed_delegation_usage.py"}, 'result_preview': 'def delegation(monkeypatch):\n    from machina.core import orchestrator as module\n    from machina.core.usage import usage_store\n\n    child = Se
 
 **Tool:** `session_recall({'query': 'create docs file explaining'})`
 **Result:** [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=e9974d3b-678a-403f-81c9-16bc9ec3c044 | terminal docs/BUGFIX_AUDIT.md:13:- Delegation retains parent mode, isolation, and intersected tool restrictions, including when a child is resumed directly. Par
@@ -12086,7 +12086,7 @@ Ev
 One iteration = one real task on this repo (never a fixture):
 **orient (repo + ledger + docs) 
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=855528d3-ab0a-4b47-963b-933b8b0aebfe | harness_status {"read_only":true,"session":{"agent_id":"harness","session_id":"5f625662-8480-4688-9580-b919d5f3bbcb","mode":"full"},"configuration":{"memory":tr
-[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md /Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md # Machi
+[live] New session | session=f63e16e5-154e-4d57-b6c0-e6873d2705b5 chunk=d1a0e233-291a-4c51-aea8-97f95a758084 | write_file Successfully wrote 4436 characters to <repo>/docs/SELF_IMPROVEMENT_PLAN.md <repo>/docs/SELF_IMPROVEMENT_PLAN.md # Machi
 [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=b6c20919-a313-4df2-a7d1-344f3d64d1a4 | terminal      183 FEATURE_LEDGER.md
 ===HEAD===
 # Machina runtime/feature ledger
@@ -12158,18 +12158,18 @@ Ev
 [live] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=68ee4f99-b13d-421a-8199-925b8928804a | session_recall [archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=eab28c5a-0f8a-4d28-a165-dfe39d9638b9 | list_agents - a11y-architect: A
 
 **Tool:** `session_recall_window({'session_id': '5f625662-8480-4688-9580-b919d5f3bbcb', 'chunk_id': '8ecfd383-4791-4b3c-99ce-1ef66d42d9b2'})`
-**Result:** [tool_call/live] {'tool': 'read_file', 'args': {'path': '/Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md'}, 'result_preview': '# Machina self-improvement loop (dogfooding on this repo)\n\nNot a test harness. The benchmark is **real work on this codebase**, observed and rated.\nEvery iteration produces genuine ev
-[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && sed -n '175,200p' FEATURE_LEDGER.md"}, 'result_preview': '| Boundary | Change | Proof |\n|---|---|---|\n| RAG metadata | `_redact_metadata` recurses via the shared redactor (nested dicts/lists/tuples/sets/bytes), matching its docu
-[tool_call/live] {'tool': 'read_file', 'args': {'path': '/Users/shadow/machina/docs/SELF_IMPROVEMENT_PLAN.md', 'offset': 30}, 'result_preview': '   that made things worse; delete stale ledger lines. Un-pruned growth is noise.\n\n## Discrimination table (the core fix)\n\n| Input | Behavior |\n|---|---|\n| Greeting / 
-[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd /Users/shadow/machina && grep -n "^#\\|^##" FEATURE_LEDGER.md | tail -15 && echo "=== raw tail" && tail -c 700 FEATURE_LEDGER.md'}, 'result_preview': '81:## Runtime\n90:## Context/history\n94:## Memory\n98:## RAG/embeddings\n102:## Compaction/eviction\n10
-[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd /Users/shadow/machina && grep -rn "\\.outcome\\|outcome=" machina/ --include=*.py | grep -v test | head -30'}, 'result_preview': 'machina/research/train_memory_policy.py:115:    by_identity = {id(example.state): example.outcomes for example in examples}\n
+**Result:** [tool_call/live] {'tool': 'read_file', 'args': {'path': '<repo>/docs/SELF_IMPROVEMENT_PLAN.md'}, 'result_preview': '# Machina self-improvement loop (dogfooding on this repo)\n\nNot a test harness. The benchmark is **real work on this codebase**, observed and rated.\nEvery iteration produces genuine ev
+[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && sed -n '175,200p' FEATURE_LEDGER.md"}, 'result_preview': '| Boundary | Change | Proof |\n|---|---|---|\n| RAG metadata | `_redact_metadata` recurses via the shared redactor (nested dicts/lists/tuples/sets/bytes), matching its docu
+[tool_call/live] {'tool': 'read_file', 'args': {'path': '<repo>/docs/SELF_IMPROVEMENT_PLAN.md', 'offset': 30}, 'result_preview': '   that made things worse; delete stale ledger lines. Un-pruned growth is noise.\n\n## Discrimination table (the core fix)\n\n| Input | Behavior |\n|---|---|\n| Greeting / 
+[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd <repo> && grep -n "^#\\|^##" FEATURE_LEDGER.md | tail -15 && echo "=== raw tail" && tail -c 700 FEATURE_LEDGER.md'}, 'result_preview': '81:## Runtime\n90:## Context/history\n94:## Memory\n98:## RAG/embeddings\n102:## Compaction/eviction\n10
+[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd <repo> && grep -rn "\\.outcome\\|outcome=" machina/ --include=*.py | grep -v test | head -30'}, 'result_preview': 'machina/research/train_memory_policy.py:115:    by_identity = {id(example.state): example.outcomes for example in examples}\n
 
 **Tool:** `session_recall_window({'session_id': '5f625662-8480-4688-9580-b919d5f3bbcb', 'chunk_id': '94ae384c-db58-4bc2-8440-3add921f1d57'})`
 **Result:** [user_message/live] what are you doing can you just write the md file?
 [tool_call/live] {'tool': 'session_recall', 'args': {'query': 'md file documentation delegation failed usage'}, 'result_preview': '[archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=e9974d3b-678a-403f-81c9-16bc9ec3c044 | terminal docs/BUGFIX_AUDIT.md:13:- Delegation retains parent mode, isola
 [tool_call/live] {'tool': 'session_recall', 'args': {'query': 'write the md file delegation doc'}, 'result_preview': '[archive] New session | session=5f625662-8480-4688-9580-b919d5f3bbcb chunk=e9974d3b-678a-403f-81c9-16bc9ec3c044 | terminal docs/BUGFIX_AUDIT.md:13:- Delegation retains parent mode, isolation, and int
-[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd /Users/shadow/machina && sed -n '1,60p' docs/BUGFIX_AUDIT.md"}, 'result_preview': '# Post-OpenCode bug-fix audit\n\nDate: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`, plus the existing uncommitted harness changes. The user au
-[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd /Users/shadow/machina && git status --short && echo "=== recent md ===" && ls -lt docs/*.md | head -15'}, 'result_preview': ' M FEATURE_LEDGER.md\n M machina/core/intent.py\n M tests/test_turn_intent.py\n=== recent md ===\n-rw-r--r--@ 1 shadow  staff   15
+[tool_call/live] {'tool': 'terminal', 'args': {'command': "cd <repo> && sed -n '1,60p' docs/BUGFIX_AUDIT.md"}, 'result_preview': '# Post-OpenCode bug-fix audit\n\nDate: 2026-10-10. Reviewed OpenCode commits `e7fe0e6`, `e9cd169`, and `639e833`, plus the existing uncommitted harness changes. The user au
+[tool_call/live] {'tool': 'terminal', 'args': {'command': 'cd <repo> && git status --short && echo "=== recent md ===" && ls -lt docs/*.md | head -15'}, 'result_preview': ' M FEATURE_LEDGER.md\n M machina/core/intent.py\n M tests/test_turn_intent.py\n=== recent md ===\n-rw-r--r--@ 1 shadow  staff   15
 
 ### Assistant
 

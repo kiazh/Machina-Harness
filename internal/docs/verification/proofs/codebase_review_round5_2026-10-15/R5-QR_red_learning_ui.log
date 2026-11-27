@@ -18,7 +18,7 @@ test at test/r5-021_022-ui-affordances.test.ts:264:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:272:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:272:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
     generatedMessage: false,
@@ -35,7 +35,7 @@ test at test/r5-021_022-ui-affordances.test.ts:277:1
   
   0 !== 1
   
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:284:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:284:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: true,
@@ -49,7 +49,7 @@ test at test/r5-021_022-ui-affordances.test.ts:277:1
 test at test/r5-021_022-ui-affordances.test.ts:288:1
 ✖ R5-022 /skills approve abbreviations stay bounded and disclose the full-ID path (0.16725ms)
   AssertionError [ERR_ASSERTION]: miss discloses the bounded scope
-      at TestContext.<anonymous> (file:///Users/shadow/machina/ui/test/r5-021_022-ui-affordances.test.ts:297:9)
+      at TestContext.<anonymous> (file://<repo>/ui/test/r5-021_022-ui-affordances.test.ts:297:9)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
     generatedMessage: false,

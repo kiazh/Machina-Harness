@@ -2,7 +2,7 @@
 
 Lane: generic OpenAI-compatible provider (`--provider custom`) + OpenCode Zen
 preset (`--provider opencode`). All commands below were run on 2026-10-14 from
-`/Users/shadow/machina`; raw outputs are saved next to this file. No API keys,
+`<repo>`; raw outputs are saved next to this file. No API keys,
 tokens, or other secrets are recorded here.
 
 ## Part A — OpenCode Zen base-URL probe (live)
@@ -57,14 +57,14 @@ model `big-pickle`, key requirement, and the status honesty path
 
 ## Part B — Hermes local endpoint: LIVE completion through the generic provider
 
-Hermes (installed under `/Users/shadow/.hermes`) ships an **OpenAI-compatible
+Hermes (installed under `<home>/.hermes`) ships an **OpenAI-compatible
 loopback proxy** (`hermes proxy`, `hermes_cli/proxy/`): allowed paths
 `/chat/completions`, `/completions`, `/embeddings`, `/models`; it attaches the
 operator's credential to any request that reaches the loopback bind. Its
 `nous` adapter reported ready (`hermes proxy status`).
 
 ```console
-$ /Users/shadow/.hermes/hermes-agent/.hermes/bin/hermes proxy start --provider nous --port 8645
+$ <home>/.hermes/hermes-agent/.hermes/bin/hermes proxy start --provider nous --port 8645
 Starting Hermes proxy for Nous Portal
   Listening on:  http://127.0.0.1:8645/v1
 $ curl -sS http://127.0.0.1:8645/v1/models   # HTTP 200, 423 models (hermes_models.json)

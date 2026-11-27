@@ -1,7 +1,7 @@
 // Audit finding: sanitizeDisplay leaves C1 OSC/ST controls intact and
 // hasNoTerminalControls accepts them.
 const { sanitizeDisplay, hasNoTerminalControls } = await import(
-  "/Users/shadow/machina/ui/src/design/text.ts"
+  "<repo>/ui/src/design/text.ts"
 );
 
 const c1OscWithSt = "A\u009d0;attack\u009cB";   // C1 OSC ... C1 ST
