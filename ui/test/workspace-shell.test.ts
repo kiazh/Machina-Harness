@@ -209,8 +209,7 @@ test("160x48 split composes chat | divider | editor | grip, composer docked in c
 		assert.ok(screen[composerRow]!.indexOf("Ask anything") < dividerX, "composer prompt stays in chat");
 		assert.doesNotMatch(screen[composerRow]!.slice(dividerX), /EDITOR/, "editor content stays out of the composer row");
 		const usageRow = screen.findIndex((line) => line.includes("0 tokens (0%)"));
-		assert.equal(usageRow, composerRow + 3, "half-height strip sits above the dark status row");
-		assert.match(screen[usageRow - 1]!.slice(0, dividerX), /^ {4}▄+ {4}$/u);
+		assert.equal(usageRow, composerRow + 2, "dark status row directly follows the input block");
 		const canvasFill = repairFill("background", " ").split(" ", 1)[0]!;
 		assert.ok(h.tui.getScreenLines()[usageRow]!.includes(canvasFill), "usage is painted on the chat canvas");
 		assert.match(screen[usageRow]!.slice(0, dividerX), /^ {4}[·∘○◉]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
