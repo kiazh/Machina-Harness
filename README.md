@@ -203,11 +203,11 @@ sequenceDiagram
         Tool-->>Engine: tool result
         Engine->>DB: record result and retain artifact where applicable
       else denied or unavailable
-        Broker-->>Engine: denial or failure; no tool effect
+        Broker-->>Engine: denial or failure, no tool effect
       end
     end
   end
-  Engine->>DB: flush durable records; attempt fenced release
+  Engine->>DB: flush durable records, then attempt fenced release
   Engine-->>Edge: terminal outcome and cleanup status
   Edge-->>Surface: transport-specific result
 ```
