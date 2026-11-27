@@ -14,7 +14,7 @@ reversible, and no task mixes a code move with a behavior change.
 | Task | State | Evidence |
 |---|---|---|
 | R0.1 metrics + ratchet | done | `tools/architecture_report.py`, baseline, CI step |
-| R0.2 Python golden traces | not started | — |
+| R0.2 Python golden traces | done | `tests/test_golden_turns.py`, 12 traces in `tests/golden/turns` |
 | R0.3 UI golden traces | not started | — |
 | R0.4 ADR + seams | done | `docs/adr/0004-god-object-decomposition.md` |
 | P1.1 `agent_support.py` | done | 168-line module; `agent.py` re-exports |
@@ -24,7 +24,7 @@ reversible, and no task mixes a code move with a behavior change.
 | P2.2 `tool_results.py` | done | recording/artifacts/approval retirement |
 | P2.3a `tool_batch.py` | done (pure move) | 606-line executor; constants moved |
 | P2.4a `react_loop.py` | done (pure move) | 555-line loop module |
-| P2.1 `turn_state.py` | not started | — |
+| P2.1 `turn_state.py` | done | 188-line `TurnState`/`TurnBudget`; loop reads state; stop/counter table tests |
 | P2.3b explicit tool interface | not started | executor still bound to the facade |
 | P2.4b phase split | not started | loop still one function |
 | U3.* / U4.* / P5.* | not started | `app.ts` unchanged |
@@ -35,7 +35,8 @@ Measured after the Python tranche:
 |---|---:|---:|
 | `core/agent.py` | 3,067 | **698** |
 | `core/tool_batch.py` | — | 710 (606-line method) |
-| `core/react_loop.py` | — | 610 (555-line method) |
+| `core/react_loop.py` | — | 583 (533-line method) |
+| `core/turn_state.py` | — | 188 |
 | `core/context_prep.py` | — | 411 |
 | `core/turn_phases.py` | — | 404 |
 

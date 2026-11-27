@@ -1,0 +1,73 @@
+{
+  "scenario": "auto-parallel",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_stream_start"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [],
+      "condense": [],
+      "consolidations": 0,
+      "events": [
+        {
+          "seq": 0,
+          "text_len": 28,
+          "text_sha256": "aabbc776139f67cb98025214b0d1bbeb7cdeaa85b5617dbb0c56aa5f0d829db6",
+          "type": "text"
+        },
+        {
+          "context_tokens": 0,
+          "context_usage_percentage": null,
+          "credits_used": null,
+          "seq": 1,
+          "tokens_used": 42,
+          "type": "token_usage"
+        },
+        {
+          "content_len": 28,
+          "content_sha256": "aabbc776139f67cb98025214b0d1bbeb7cdeaa85b5617dbb0c56aa5f0d829db6",
+          "iterations": 0,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 2,
+          "tokens_used": 42,
+          "tool_names": [],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "2593a9b6b15b5303b36331e6fdb94fddc4c18274433f03d6e0639527f2ff6865"
+          ]
+        }
+      ],
+      "gates": [],
+      "learning_reviews": 0,
+      "markers": [],
+      "provider_attempts": [],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 28,
+        "content_sha256": "aabbc776139f67cb98025214b0d1bbeb7cdeaa85b5617dbb0c56aa5f0d829db6",
+        "iterations": 0,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 2,
+        "tokens_used": 42,
+        "tool_names": []
+      },
+      "token_metrics": [],
+      "tool_batches": []
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "scenario": "one-tool",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_stream_start",
+        "agent_run_complete"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [
+        {
+          "content_sha256": "8692be3f0fd0110bfbf6bc9eac3afc538d7d598a41708bbf5ae67aec14977d6b",
+          "outcome": "completed",
+          "tool_calls": 1
+        }
+      ],
+      "condense": [
+        {
+          "stale_chars": null
+        },
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 0,
+          "tokens_used": 10,
+          "type": "token_usage"
+        },
+        {
+          "seq": 1,
+          "tool_args_sha256": "4cf29611a66934862f29acfcc817e30b905c1ab73d5e65831413eb6b454d49db",
+          "tool_call_id": "call-1",
+          "tool_name": "terminal",
+          "type": "tool_call"
+        },
+        {
+          "seq": 2,
+          "tool_call_id": "call-1",
+          "tool_name": "terminal",
+          "tool_outcome": "completed",
+          "tool_result_len": 9,
+          "tool_result_sha256": "c643247e56f2d7285d7008c68264bdfaa9e1129c6eca6840b98a5ab9a2e17feb",
+          "type": "tool_result"
+        },
+        {
+          "seq": 3,
+          "text_len": 35,
+          "text_sha256": "8692be3f0fd0110bfbf6bc9eac3afc538d7d598a41708bbf5ae67aec14977d6b",
+          "type": "text"
+        },
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 4,
+          "tokens_used": 9,
+          "type": "token_usage"
+        },
+        {
+          "content_len": 35,
+          "content_sha256": "8692be3f0fd0110bfbf6bc9eac3afc538d7d598a41708bbf5ae67aec14977d6b",
+          "iterations": 2,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 5,
+          "tokens_used": 19,
+          "tool_names": [
+            "terminal"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "c97296a3c5c2bcf5f2f894c9c40e6c7cdccbf60173e2b72fa443621c3c356535"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "70c6b63847c91a95fe5c275c9ed6ddd77b479833be0daf8ab0906dfee31b2388"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        },
+        {
+          "iterations": 1,
+          "messages": 4,
+          "tool_calls": 1,
+          "tools": 3,
+          "total_tokens": 10
+        }
+      ],
+      "learning_reviews": 1,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "stream",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "stream",
+          "messages": 4,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 35,
+        "content_sha256": "8692be3f0fd0110bfbf6bc9eac3afc538d7d598a41708bbf5ae67aec14977d6b",
+        "iterations": 2,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 5,
+        "tokens_used": 19,
+        "tool_names": [
+          "terminal"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "terminal"
+          ],
+          "recorded": [
+            "terminal"
+          ],
+          "requested": [
+            "terminal"
+          ]
+        }
+      ]
+    }
+  ]
+}

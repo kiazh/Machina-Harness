@@ -1,0 +1,181 @@
+{
+  "scenario": "repair-edit-verification",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_start",
+        "agent_task_run_nudge",
+        "agent_run_complete"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [
+        {
+          "content_sha256": "74e6ada9e5b74156bbcba21e7eddf63e501248c9f26a43644abf04813298d368",
+          "outcome": "completed",
+          "tool_calls": 2
+        }
+      ],
+      "condense": [
+        {
+          "stale_chars": null
+        },
+        {
+          "stale_chars": null
+        },
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "content_len": 38,
+          "content_sha256": "74e6ada9e5b74156bbcba21e7eddf63e501248c9f26a43644abf04813298d368",
+          "iterations": 3,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 0,
+          "tokens_used": 29,
+          "tool_names": [
+            "write_file",
+            "terminal"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "a7921c08acbaa1019f0dc3591312183ae08e3de373fb7d88854cf92faddb58af"
+          ]
+        },
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "2ee3b970e69345c5ced206be22b56a2bf166d92d0867ab8a58a40079e104f216"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "7b31ecaaa4650e7fa5f2f823b15ad6ffb9b3ee0cb1fa6235f368abfbbea976d0"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        },
+        {
+          "iterations": 1,
+          "messages": 4,
+          "tool_calls": 1,
+          "tools": 3,
+          "total_tokens": 10
+        },
+        {
+          "iterations": 2,
+          "messages": 7,
+          "tool_calls": 2,
+          "tools": 0,
+          "total_tokens": 20
+        }
+      ],
+      "learning_reviews": 1,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "complete",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "complete",
+          "messages": 4,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "complete",
+          "messages": 7,
+          "outcome": "ok",
+          "status": null,
+          "tools": 0
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 38,
+        "content_sha256": "74e6ada9e5b74156bbcba21e7eddf63e501248c9f26a43644abf04813298d368",
+        "iterations": 3,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 0,
+        "tokens_used": 29,
+        "tool_names": [
+          "write_file",
+          "terminal"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "write_file"
+          ],
+          "recorded": [
+            "write_file"
+          ],
+          "requested": [
+            "write_file"
+          ]
+        },
+        {
+          "completion_order": [
+            "terminal"
+          ],
+          "recorded": [
+            "terminal"
+          ],
+          "requested": [
+            "terminal"
+          ]
+        }
+      ]
+    }
+  ]
+}
