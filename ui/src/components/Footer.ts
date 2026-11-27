@@ -18,9 +18,9 @@ const GROWTH_DURATION_MS = 800;
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
 const WORK_INTERVAL_MS = 33;
-const WORK_CYCLE_MS = 1500;
-const WORK_CELLS = 7;
-const WORK_STROKES = ["╲", "│", "╱"];
+const WORK_CYCLE_MS = 480;
+const WORK_REELS = ["◐", "◓", "◑", "◒"];
+const WORK_REELS_WIDTH = 13;
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -162,17 +162,17 @@ export class Footer implements Component {
 		if (this.status === "working" && room >= 5) {
 			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
 			activity = theme.muted(hint);
-			if (room >= WORK_CELLS * 2 + 1 + visibleWidth(hint)) {
+			if (room >= WORK_REELS_WIDTH + 2 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
 				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
-				const ribbon = Array.from({ length: WORK_CELLS }, (_, index) => {
-					const angle = (phase - index / WORK_CELLS) * 2 * Math.PI;
-					const tilt = Math.sin(angle);
-					const glyph = WORK_STROKES[Math.round(tilt + 1)]!;
-					const light = 0.25 + 0.75 * ((1 + tilt) / 2) ** 2;
-					return theme.activity(glyph, light, index / (WORK_CELLS - 1));
-				}).join(" ");
-				activity = `${ribbon}  ${activity}`;
+				const reelCount = WORK_REELS.length;
+				const step = Math.floor(phase * reelCount);
+				const reverseStep = (reelCount - step + reelCount / 2) % reelCount;
+				const light = 0.34 * Math.cos(phase * 2 * Math.PI);
+				const left = theme.activity(WORK_REELS[step]!, 0.66 + light, 0);
+				const right = theme.activity(WORK_REELS[reverseStep]!, 0.66 - light, 1);
+				const reels = `${theme.dim("[")}   ${left}   ${right}   ${theme.dim("]")}`;
+				activity = `${reels}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
