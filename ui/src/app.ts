@@ -9,12 +9,7 @@ import {
 	Container,
 	type Component,
 	type Editor,
-	isKeyRelease,
-	isKeyRepeat,
 	isViewportTUI,
-	Key,
-	matchesKey,
-	parseKey,
 	type OverlayOptions,
 	type OverlayHandle,
 	type SelectItem,
@@ -26,8 +21,8 @@ import { parseCommand, splitSub, type ParsedCommand } from "./commands.ts";
 import { ComposerBox, Footer, Picker, SecretForm, TextForm, ThinkingIndicator } from "./components.ts";
 import { NavBar, type NavSnapshot, type NavView } from "./components/NavBar.ts";
 import { DEFAULT_MENU_VISIBLE_ROWS, Menu } from "./components/Menu.ts";
-import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsFilters, type SkillsPreviewResult, type SkillsSearchParams, type SkillsSearchResult, type SkillsSectionParams, type SkillsSectionResult } from "./components/SkillsMenu.ts";
+import { OAuthProgress } from "./components/OAuthProgress.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { ActivityBar, ActivityStore, type SteeringItem, type ShellJob } from "./activity.ts";
@@ -84,6 +79,7 @@ import { StatusController, type HarnessJobView } from "./app/status.ts";
 import { ChangesController } from "./app/changes.ts";
 import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
+import { KeyboardRouter, type KeyboardHost } from "./app/keyboard.ts";
 import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
 
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
@@ -128,33 +124,6 @@ export function defaultProfileId(): string {
 		return userInfo().username || "default";
 	} catch {
 		return "default";
-	}
-}
-
-/**
- * Normalize modifier-arrow encodings used by Windows consoles.
- *
- * Windows Terminal/ConPTY normally sends the standard xterm form
- * (\x1b[1;5D), which pi-tui parses. A few console hosts drop the leading
- * "1;" and send \x1b[5D instead. Rewrite only those unambiguous variants so
- * the focused editor and the workspace shortcuts see one canonical key.
- */
-function normalizeModifierArrow(data: string): string {
-	switch (data) {
-		case "\x1b[5D":
-			return "\x1b[1;5D";
-		case "\x1b[5C":
-			return "\x1b[1;5C";
-		case "\x1b[6D":
-			return "\x1b[1;6D";
-		case "\x1b[6C":
-			return "\x1b[1;6C";
-		case "\x1bO5D":
-			return "\x1b[1;5D";
-		case "\x1bO5C":
-			return "\x1b[1;5C";
-		default:
-			return data;
 	}
 }
 
@@ -258,8 +227,6 @@ export class App implements FeatureHost {
 	private readonly composer: ComposerBox;
 	private readonly editor: Editor;
 	private readonly keybindings = new AppKeybindings();
-	private pendingKeyLeader: { key: string; at: number } | undefined;
-	private pendingKeyLeaderTimer: ReturnType<typeof setTimeout> | undefined;
 	private keybindingSave: Promise<unknown> = Promise.resolve();
 	private readonly coordinator: AnimationCoordinator;
 	private readonly footer: Footer;
@@ -284,7 +251,6 @@ export class App implements FeatureHost {
 	private cursorBlinkStartedAt = 0;
 	private lastPrompt = "";
 	private contextReadVersion = 0;
-	private lastEscAt = 0;
 	private pendingAbortEscAt = 0;
 	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
 	private readonly defaultProfile = defaultProfileId();
@@ -297,12 +263,10 @@ export class App implements FeatureHost {
 	private readonly sessions: SessionController;
 	private readonly status: StatusController;
 	private readonly changes: ChangesController;
+	private readonly keyboard: KeyboardRouter;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
-	private explorerBurstStartedAt = 0;
-	private explorerBurstCount = 0;
-	private explorerBurstKey = "";
 	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
 	private readonly turnSession = new TurnSessionStore({
 		visibleSessionId: () => this.current?.id,
@@ -474,6 +438,8 @@ export class App implements FeatureHost {
 				onClearHandled: (turnId) => this.changes.clearHandledFindings(turnId),
 			},
 		);
+		// App remains the state owner; this adapter exposes only the keyboard seam.
+		this.keyboard = new KeyboardRouter(this.keyboardHost());
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
@@ -590,6 +556,77 @@ export class App implements FeatureHost {
 		};
 	}
 
+	private keyboardHost(): KeyboardHost {
+		return {
+			tui: this.tui,
+			editor: this.editor,
+			footer: this.footer,
+			transcript: this.transcript,
+			keybindings: this.keybindings,
+			screen: () => this.view,
+			activeRegion: () => this.activeRegion,
+			syncShell: () => this.shell.sync(),
+			syncWorkspaceShellIfChanged: () => this.syncWorkspaceShellIfChanged(),
+			scheduleWorkspaceChromeSync: () => this.scheduleWorkspaceChromeSync(),
+			reconcileFocus: () => this.reconcileFocus(),
+			statusPage: () => this.statusPage,
+			changesPage: () => this.changesPage,
+			dialogCount: () => this.dialogs.length,
+			hasVisibleDialog: () => this.dialogs.some((dialog) => !dialog.hidden),
+			quickOpenActive: () => Boolean(this.quickOpenPane),
+			dismissQuickOpen: () => this.closeQuickOpen(),
+			commandRunning: () => this.commandRunning,
+			commandRunningAt: () => this.commandRunningAt,
+			approvalDialogCount: () => this.turnSession.approvalDialogCount(),
+			isRunning: () => this.running,
+			pendingAbortEscAt: () => this.pendingAbortEscAt,
+			armPendingAbortEsc: () => this.armPendingAbortEsc(),
+			clearPendingAbortEsc: () => this.clearPendingAbortEsc(),
+			lastPrompt: () => this.lastPrompt,
+			hasPendingImageLoads: () => this.pendingImageLoads > 0,
+			cancel: () => this.cancel(),
+			exit: () => this.exit(),
+			clear: () => this.clear(),
+			openStatus: () => this.openStatus(),
+			openScreen: (screen) => this.openScreen(screen),
+			closeScreen: () => this.closeScreen(),
+			selectNav: (view) => this.selectNav(view),
+			openShortcutReference: () => this.openShortcutReference(),
+			familyCount: () => this.familyRows().length,
+			cycleFamily: (direction) => this.cycleFamily(direction),
+			closeFamilyCurrent: async () => { await this.sessions.closeCurrentFamily(); },
+			openSubagentMenu: () => this.openSubagentMenu(),
+			pasteFromClipboard: (imageOnly) => this.pasteFromClipboard(imageOnly),
+			clearImages: () => this.clearImages(),
+			completionSession: () => this.completionSession,
+			activeEditorDocumentId: () => this.integration?.tabs.activeDocumentId() ?? undefined,
+			acceptCompletion: () => this.acceptCompletion(),
+			clearCompletion: () => this.clearCompletion(),
+			problemsOpen: () => this.problemsOpen,
+			closeProblems: () => this.closeProblems(),
+			hasWorkspace: () => this.integration !== undefined,
+			workspaceReady: () => this.integration?.controller.phase === "ready",
+			workspaceLayoutActive: () => this.workspaceLayoutActive,
+			workspaceUnsupported: () => this.workspaceUnsupported,
+			explorerRequested: () => this.integration?.controller.getLayoutInput().explorerRequested ?? false,
+			setExplorerRequested: (requested) => this.workspaceSurface?.setExplorerRequested(requested),
+			restoreSplit: () => this.workspaceHostSurface?.restoreSplit(),
+			toggleChatMaximize: () => this.workspaceHostSurface?.toggleChatMaximize(),
+			toggleEditorMaximize: () => this.workspaceHostSurface?.toggleEditorMaximize(),
+			editorHasSelection: () => this.integration?.view.hasSelection() ?? false,
+			handleEditorInput: (data) => { this.integration?.view.handleInput(data); },
+			openQuickOpen: () => this.openQuickOpen(),
+			closeActiveWorkspaceTab: () => this.closeActiveWorkspaceTab(),
+			cycleFocus: (direction) => this.cycleFocus(direction),
+			attachSelectionToDraft: () => this.attachSelectionToDraft(),
+			startCompletion: () => this.startCompletion(),
+			runDefinitionOrReferences: (operation) => this.runDefinitionOrReferences(operation),
+			runRenamePreview: () => this.runRenamePreview(),
+			saveActiveDocument: () => this.saveActiveDocument(),
+			print: (text, kind) => this.print(text, kind),
+		};
+	}
+
 	async start(): Promise<void> {
 		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
 		this.log.info("start", {
@@ -615,7 +652,7 @@ export class App implements FeatureHost {
 		}
 		this.tui.setFocus(this.editor);
 		this.syncCursorBlink();
-		this.inputListenerDisposer = this.tui.addInputListener((data) => this.onInput(data));
+		this.inputListenerDisposer = this.tui.addInputListener((data) => this.keyboard.handle(data));
 
 		this.footer.cwd = process.cwd();
 		this.footer.status = "offline";
@@ -1725,9 +1762,7 @@ export class App implements FeatureHost {
 		}
 		if (this.exiting) return;
 		this.exiting = true;
-		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
-		this.pendingKeyLeaderTimer = undefined;
-		this.pendingKeyLeader = undefined;
+		this.keyboard.dispose();
 		this.clearPendingAbortEsc();
 		this.footer.keyHint = "";
 		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
@@ -1885,337 +1920,6 @@ export class App implements FeatureHost {
 		});
 	}
 
-	private onInput(data: string): { consume: boolean } | undefined {
-		// Kitty-aware terminals can deliver key-up and auto-repeat events. A
-		// release must never cancel a pending leader, and a held leader must not
-		// restart its own timer. Legacy terminals send plain bytes, so the
-		// action-level cooldowns below still cover those repeats.
-		if (isKeyRelease(data)) return { consume: true };
-		// A command that has not opened its dialog yet owns the keyboard.
-		// Once a dialog/approval is visible it receives keys normally.
-		if (this.commandRunning && !this.dialogs.length && !this.turnSession.approvalDialogCount()) {
-			// Commands normally open their dialog immediately. A slow RPC must
-			// not make the composer look dead: keep keys for the first 1.5s,
-			// then let ordinary typing reach the editor while still reserving
-			// Enter/Esc for the command's own flow.
-			const startedAt = this.commandRunningAt || Date.now();
-			if (Date.now() - startedAt < 1500) return { consume: true };
-			if (matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
-				return { consume: true };
-			}
-			return undefined;
-		}
-		const repeated = isKeyRepeat(data);
-		const normalized = normalizeModifierArrow(data);
-		if (repeated && matchesKey(normalized, Key.enter)
-			&& (this.turnSession.approvalDialogCount() || this.view !== "chat" || this.activeRegion === "chat-composer")) {
-			return { consume: true };
-		}
-		if (this.pendingAbortEscAt && !matchesKey(normalized, Key.escape)) this.clearPendingAbortEsc();
-		if (repeated && this.pendingAbortEscAt && matchesKey(normalized, Key.escape)) return { consume: true };
-		if (repeated && this.pendingKeyLeader) return { consume: true };
-		if (this.pendingKeyLeaderTimer) clearTimeout(this.pendingKeyLeaderTimer);
-		this.pendingKeyLeaderTimer = undefined;
-		this.footer.keyHint = "";
-		if (this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane) {
-			this.pendingKeyLeader = undefined;
-			return this.onKey(normalized);
-		}
-		const pending = this.pendingKeyLeader;
-		this.pendingKeyLeader = undefined;
-		if (pending && Date.now() - pending.at < 5_000) {
-			if (matchesKey(normalized, Key.escape)) return { consume: true };
-			if (matchesKey(normalized, pending.key as Parameters<typeof matchesKey>[1])) {
-				// Holding the leader keeps it armed instead of consuming the
-				// repeat as an unknown second key.
-				this.pendingKeyLeader = { key: pending.key, at: Date.now() };
-				this.pendingKeyLeaderTimer = setTimeout(() => {
-					this.pendingKeyLeader = undefined;
-					this.pendingKeyLeaderTimer = undefined;
-					this.footer.keyHint = "";
-					this.tui.requestRender();
-				}, 5_000);
-				this.footer.keyHint = `${pending.key.toUpperCase()} then key · Esc cancels`;
-				this.tui.requestRender();
-				return { consume: true };
-			}
-			const next = parseKey(normalized);
-			if (next) this.onKey(`${pending.key} ${next.length === 1 ? next.toLowerCase() : next}`);
-			return { consume: true };
-		}
-		for (const leader of this.keybindings.leaders()) {
-			if (matchesKey(normalized, leader as Parameters<typeof matchesKey>[1])) {
-				this.pendingKeyLeader = { key: leader, at: Date.now() };
-				this.footer.keyHint = `${leader.toUpperCase()} then key · Esc cancels`;
-				this.pendingKeyLeaderTimer = setTimeout(() => {
-					this.pendingKeyLeader = undefined;
-					this.pendingKeyLeaderTimer = undefined;
-					this.footer.keyHint = "";
-					this.tui.requestRender();
-				}, 5_000);
-				this.tui.requestRender();
-				return { consume: true };
-			}
-		}
-		const result = this.onKey(normalized);
-		if (result) return result;
-		if (normalized === data) return undefined;
-		// The toolkit only sees modifier-arrow sequences in its canonical xterm
-		// form. Dispatch an unrecognized legacy encoding ourselves instead of
-		// letting the focused component receive the original bytes.
-		if (this.activeRegion === "chat-composer") {
-			this.editor.handleInput(normalized);
-			this.tui.requestRender();
-			return { consume: true };
-		}
-		if (this.activeRegion === "editor" && this.integration) {
-			this.integration.view.handleInput(normalized);
-			return { consume: true };
-		}
-		return undefined;
-	}
-
-	private onKey(data: string): { consume: boolean } | undefined {
-		this.shell.sync();
-		this.syncWorkspaceShellIfChanged();
-		// A key may only reach a component the current geometry still composes.
-		// Layout changes normally reconcile already; this closes the window where
-		// the TUI still targets a pane removed by a resize/visibility toggle.
-		if (this.view === "chat") this.reconcileFocus();
-		// The composer's autocomplete popup can change the chrome height while
-		// this key is being handled by the focused Editor. Recheck after the
-		// input dispatch so the panes (including Problems) get the remaining
-		// rows instead of being clipped by the grown composer.
-		this.scheduleWorkspaceChromeSync();
-		// A visible dialog owns its keys. A dialog merely hidden by the approval
-		// dock must still let the screen strip navigate; Esc keeps going to the
-		// page it belongs to, never to the dialog underneath.
-		if (this.dialogs.length) {
-			if (this.dialogs.some(dialog => !dialog.hidden)) return undefined;
-			const navKey = this.keybindings.matches(data, "showChat")
-				|| this.keybindings.matches(data, "statusLeft")
-				|| this.keybindings.matches(data, "activity")
-				|| this.keybindings.matches(data, "statusRight");
-			const pageKey = this.view !== "chat" && (
-				matchesKey(data, Key.escape)
-				|| this.keybindings.matches(data, "shortcuts")
-				|| matchesKey(data, Key.question)
-				|| matchesKey(data, Key.shift("?"))
-				|| matchesKey(data, Key.shift("/"))
-			);
-			if (!(navKey || pageKey)) return undefined;
-		}
-
-		const questionKey = matchesKey(data, Key.question) || matchesKey(data, Key.shift("?")) || matchesKey(data, Key.shift("/"));
-		const tabKey = !this.quickOpenPane && (
-			this.keybindings.matches(data, "showChat")
-			|| this.keybindings.matches(data, "statusLeft")
-			|| this.keybindings.matches(data, "activity")
-			|| this.keybindings.matches(data, "statusRight"));
-		// A pending approval owns decisions, not navigation: browsing Activity
-		// or Changes and coming back to decide is always allowed. While a page
-		// is open, the page owns its own keys (Esc closes it).
-		if (this.turnSession.approvalDialogCount() && this.view === "chat" && !tabKey) return undefined;
-		if (!this.quickOpenPane) {
-			// Activity ← Chat → Changes. The arrows walk one linear strip, so
-			// Chat is reachable from either side and Esc always returns to it.
-			if (this.keybindings.matches(data, "statusLeft")) {
-				if (this.view === "changes") this.closeScreen();
-				else if (this.view === "chat") this.openStatus();
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "statusRight")) {
-				if (this.view === "status") this.closeScreen();
-				else if (this.view === "chat") this.openScreen("changes");
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "showChat")) {
-				this.selectNav("chat");
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "activity")) {
-				if (this.view !== "status") this.openStatus();
-				return { consume: true };
-			}
-		}
-		if (this.view !== "chat") {
-			// A page owns its content keys, never the chat draft. Stop and exit
-			// stay global: watching a run from Activity must still cancel it.
-			if (this.keybindings.matches(data, "stop")) {
-				if (this.running) this.cancel();
-				this.tui.requestRender();
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "exit") && !this.running) {
-				void this.exit();
-				return { consume: true };
-			}
-			if (matchesKey(data, Key.escape)) {
-				this.closeScreen();
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "shortcuts") || questionKey) return this.openShortcutReference();
-			if (this.view === "status") this.statusPage.handleInput(data);
-			else this.changesPage.handleInput(data);
-			return { consume: true };
-		}
-
-		// ── integrated workspace (plan §8 focus priority) ────────────────────
-		// The Quick Open overlay owns every key except Esc/Ctrl+C (which would
-		// otherwise reach the stop/exit branches below): returning early lets
-		// the focused overlay component receive everything else.
-		if (this.quickOpenPane) {
-			if (matchesKey(data, Key.escape) || this.keybindings.matches(data, "stop")) {
-				this.quickOpenPane.dismiss();
-				return { consume: true };
-			}
-			return undefined;
-		}
-		if (this.view === "chat" && this.activeRegion !== "editor" && matchesKey(data, Key.ctrl("o"))) {
-			if (this.transcript.toggleLastTool()) return { consume: true };
-		}
-		const integration = this.integration;
-		const explorerKey = this.matchesExplorerKey(data);
-		if (explorerKey) {
-			// Ctrl+T is a toggle, so terminal auto-repeat must not flip it
-			// indefinitely while the user holds the key. Allow two deliberate
-			// presses in a short burst, then suppress the repeat stream.
-			const now = Date.now();
-			if (data !== this.explorerBurstKey || now - this.explorerBurstStartedAt > 700) {
-				this.explorerBurstKey = data;
-				this.explorerBurstStartedAt = now;
-				this.explorerBurstCount = 0;
-			}
-			if (this.explorerBurstCount >= 2) return { consume: true };
-			this.explorerBurstCount++;
-		}
-		if (explorerKey && (!integration || this.workspaceUnsupported || !this.workspaceLayoutActive)) {
-			this.print(
-				this.workspaceUnsupported
-					? "The file explorer is unavailable on this backend."
-					: "Open a workspace first: /workspace open .",
-				"warning",
-			);
-			return { consume: true };
-		}
-		if (integration && !this.workspaceUnsupported) {
-			// Ghost text owns only Tab and Escape; Enter and arrows keep editing.
-			if (this.completionSession && this.activeRegion === "editor") {
-				if (matchesKey(data, Key.tab)
-					&& this.activeEditorContext()?.document.id === this.completionSession.documentId
-					&& this.completionSession.inlinePreview() !== undefined) {
-					this.acceptCompletion();
-					return { consume: true };
-				}
-				const dismiss = matchesKey(data, Key.escape);
-				this.clearCompletion();
-				if (dismiss) return { consume: true };
-			}
-			// The Problems pane owns Esc while focused: it closes the section
-			// instead of falling into the double-Esc prompt refill or stopping
-			// the running turn.
-			if (this.problemsOpen && this.activeRegion === "problems" && matchesKey(data, Key.escape)) {
-				this.closeProblems();
-				return { consume: true };
-			}
-			const workspaceKey = this.handleWorkspaceKey(data);
-			if (workspaceKey) return workspaceKey;
-		}
-
-        // Ctrl+V belongs to the focused file editor. The explicit image
-        // shortcut reaches the composer even when the terminal owns Ctrl+V.
-        const paste = this.keybindings.matches(data, "pasteImage");
-        const macPaste = this.keybindings.matches(data, "pasteImageMac");
-        const imageOnly = this.keybindings.matches(data, "pasteImageDirect");
-        if (paste && !imageOnly && this.activeRegion === "editor") return undefined;
-        if (paste || macPaste || imageOnly) {
-            this.pasteFromClipboard(imageOnly);
-            return { consume: true };
-        }
-
-		if (this.keybindings.matches(data, "shortcuts") || (questionKey && !this.editor.getText() && !this.editor.isShowingAutocomplete())) {
-			return this.openShortcutReference();
-		}
-
-		if (this.keybindings.matches(data, "stop")) {
-			// A focused editor owns Ctrl+C while it has selected text; the
-			// global exit/cancel/clear route must not preempt a copy.
-			if (this.activeRegion === "editor" && this.integration?.view.hasSelection()) {
-				return undefined;
-			}
-			if (this.running) this.cancel();
-            else if (this.editor.getText() || this.pendingImageLoads) { this.editor.setText(""); this.clearImages(); }
-			else void this.exit();
-			this.tui.requestRender();
-			return { consume: true };
-		}
-		if (this.keybindings.matches(data, "exit") && !this.running && !this.editor.getText()) {
-			void this.exit();
-			return { consume: true };
-		}
-		if (this.keybindings.matches(data, "cancelTurn") && this.running && !this.editor.isShowingAutocomplete()) {
-			// Escape is destructive: require a deliberate second press. Ctrl+C
-			// remains the immediate stop path.
-			const now = Date.now();
-			if (this.pendingAbortEscAt && now - this.pendingAbortEscAt <= 900) {
-				this.clearPendingAbortEsc();
-				this.cancel();
-			} else {
-				this.armPendingAbortEsc();
-			}
-			return { consume: true };
-		}
-		if (this.keybindings.matches(data, "clear") && !this.running) {
-			this.clear();
-			return { consume: true };
-		}
-		// Agent family: Alt+J/K cycles from the composer. Ctrl+Shift+Arrow
-		// remains available for word selection in the file editor.
-		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
-		if (this.keybindings.matches(data, "agentClose")) {
-			void this.sessions.closeCurrentFamily();
-			return { consume: true };
-		}
-		if (cycle !== 0 && this.activeRegion === "chat-composer" && this.familyRows().length > 1) {
-			void this.cycleFamily(cycle as 1 | -1);
-			return { consume: true };
-		}
-		// Down on an empty composer opens the subagent menu (the same picker
-		// as /agents sessions). With text, with an inline suggestion, or with
-		// no subagents it falls through untouched to the editor's own
-		// Down handling (movement and history). Dialogs and approvals were
-		// already given the key above.
-		if (
-			this.keybindings.matches(data, "agentMenu") &&
-			!this.editor.getText() &&
-			!this.editor.isShowingAutocomplete() &&
-			this.familyRows().length > 1
-		) {
-			void this.openSubagentMenu();
-			return { consume: true };
-		}
-		if (
-			matchesKey(data, Key.escape) &&
-			!this.running &&
-			!this.editor.getText() &&
-			!this.editor.isShowingAutocomplete()
-		) {
-			// Codex double-Esc: refill the previous prompt for editing.
-			const now = Date.now();
-			if (now - this.lastEscAt < 800 && this.lastPrompt) {
-				this.editor.setText(this.lastPrompt);
-				this.lastEscAt = 0;
-			} else {
-				this.lastEscAt = now;
-			}
-			return { consume: true };
-		}
-		return undefined;
-	}
-
-	// ─── integrated workspace (T3/T6/T12) ───────────────────────────────────
-
-	/** Delegate: workspace shell geometry lives on WorkspaceSurface. */
 	private syncWorkspaceShell(): void {
 		this.workspaceSurface?.syncShell();
 	}
@@ -2404,107 +2108,6 @@ export class App implements FeatureHost {
 	 * Ctrl+T / Ctrl+Shift+E / Alt+E. Ctrl+Shift+E is the browser-safe
 	 * alias because Chrome/Edge reserve Ctrl+T before the page sees it.
 	 */
-	private matchesExplorerKey(data: string): boolean {
-		return (
-			this.keybindings.matches(data, "explorer") ||
-			this.keybindings.matches(data, "explorerAlt") ||
-			this.keybindings.matches(data, "explorerSafe")
-		);
-	}
-
-	/**
-	 * Global workspace key routing. Keys are consumed only while the workspace
-	 * is live and the feature was not disabled; editor-scoped keys additionally
-	 * require the editor region so they can never fire while the composer (or a
-	 * dialog, handled earlier) owns focus. Ctrl+W closes the active tab through
-	 * the same dirty-guarded flow as the tab strip's ✕ (the terminal may
-	 * intercept Ctrl+W; `/editor close` is the fallback).
-	 */
-	private handleWorkspaceKey(data: string): { consume: boolean } | undefined {
-		const integration = this.integration;
-		if (!integration) return undefined;
-		const ready = integration.controller.phase === "ready";
-		// Ctrl+P — Quick Open overlay (fallback: /quickopen; palette-safe).
-		if (this.keybindings.matches(data, "quickOpen") && ready) {
-			void this.openQuickOpen();
-			return { consume: true };
-		}
-		if (!this.workspaceLayoutActive) return undefined;
-		// Ctrl+T / Ctrl+Shift+E / Alt+E: explorer toggle.
-		if (this.matchesExplorerKey(data)) {
-			this.workspaceSurface?.setExplorerRequested(!integration.controller.getLayoutInput().explorerRequested);
-			return { consume: true };
-		}
-		// Ctrl+W — close the active editor tab (dirty → Save/Discard/Cancel).
-		// NOT in the chat composer: the composer's Editor owns Ctrl+W as
-		// delete-word-backward, and stealing it there would break typing
-		// (CodeRabbit pass-2 major; composer scoping per the ADR matrix).
-		if (this.keybindings.matches(data, "closeTab") && this.activeRegion !== "chat-composer") {
-			this.closeActiveWorkspaceTab();
-			return { consume: true };
-		}
-		// Alt+Q/W cycles focus without modifier-arrow ambiguity.
-		const previousFocus = this.keybindings.matches(data, "focusPrevious");
-		if (this.keybindings.matches(data, "focusNext") || previousFocus) {
-			this.cycleFocus(previousFocus ? -1 : 1);
-			return { consume: true };
-		}
-		// Pane modes are available from every workspace region. Text fields keep
-		// their ordinary Ctrl+Arrow navigation.
-		if (ready && this.keybindings.matches(data, "restoreSplit")) {
-			this.workspaceHostSurface?.restoreSplit();
-			return { consume: true };
-		}
-		if (ready && this.keybindings.matches(data, "chatMaximize")) {
-			this.workspaceHostSurface?.toggleChatMaximize();
-			return { consume: true };
-		}
-		if (ready && this.keybindings.matches(data, "editorMaximize")) {
-			this.workspaceHostSurface?.toggleEditorMaximize();
-			return { consume: true };
-		}
-		if (!ready || this.activeRegion !== "editor") return undefined;
-		// Ctrl+Shift+A — attach the editor selection to the composer draft
-		// (plan §20 explicit sharing). Delivered as a distinct CSI-u sequence
-		// only under the Kitty keyboard protocol; legacy terminals send Ctrl+A,
-		// which this never consumes (the editor's select-all stays intact).
-		// /attach is the fallback everywhere.
-		if (this.keybindings.matches(data, "attach")) {
-			const result = this.attachSelectionToDraft();
-			this.print(result.notice, result.ok ? "info" : "warning");
-			return { consume: true };
-		}
-		// Ctrl+Space — completion at the cursor (explicit-only in v1; the
-		// legacy NUL byte is accepted when the Kitty protocol is inactive).
-		if (this.keybindings.matches(data, "complete")) {
-			void this.startCompletion();
-			return { consume: true };
-		}
-		// Alt+G/R: go to definition / find references.
-		if (this.keybindings.matches(data, "references")) {
-			void this.runDefinitionOrReferences("references");
-			return { consume: true };
-		}
-		if (this.keybindings.matches(data, "definition")) {
-			void this.runDefinitionOrReferences("definition");
-			return { consume: true };
-		}
-		// Alt+M: rename preview (honest "unavailable" until supported).
-		if (this.keybindings.matches(data, "rename")) {
-			void this.runRenamePreview();
-			return { consume: true };
-		}
-		// Ctrl+S — compare-and-swap save of the active buffer.
-		if (this.keybindings.matches(data, "save")) {
-			void this.saveActiveDocument();
-			return { consume: true };
-		}
-		return undefined;
-	}
-
-	// ─── workspace documents ────────────────────────────────────────────────
-
-	/** Editor context for intelligence: active record + LSP cursor position. */
 	private activeEditorContext(): { document: DocumentRecord; position: LspPosition } | undefined {
 		const integration = this.integration;
 		if (!integration || integration.controller.phase !== "ready") return undefined;
@@ -3903,10 +3506,7 @@ export class App implements FeatureHost {
 		this.nowPlayingAnim?.stop();
 		this.nowPlayingAnim = undefined;
 		this.workspaceSurface?.disposeTimer();
-		if (this.pendingKeyLeaderTimer !== undefined) {
-			clearTimeout(this.pendingKeyLeaderTimer);
-			this.pendingKeyLeaderTimer = undefined;
-		}
+		this.keyboard.dispose();
 		if (this.automaticCompletionTimer !== undefined) {
 			clearTimeout(this.automaticCompletionTimer);
 			this.automaticCompletionTimer = undefined;
@@ -3979,4 +3579,3 @@ export function commandCarriesSecret(command: ParsedCommand | undefined): boolea
 function isTurnStart(event: GatewayEvent): boolean {
 	return event.type === "message.start" || event.type === "turn.started";
 }
-
