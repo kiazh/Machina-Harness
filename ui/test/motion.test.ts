@@ -78,7 +78,7 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	footer.status = "working";
 	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(rows.length, 1);
-	assert.match(rows[0]!, /^ {4}[\u2801-\u28ff]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+	assert.match(rows[0]!, /^ {4}[\u2801-\u28ff]{6}❄[\u2801-\u28ff]{6} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
 	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
 	assert.equal(footer.chatStatusRows(), 1);
 	footer.contextTokens = 12_400;
