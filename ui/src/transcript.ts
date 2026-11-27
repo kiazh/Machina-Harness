@@ -459,6 +459,7 @@ export class Transcript {
 			}
 			const elapsed = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
 			const final = this.current;
+			let keepWork = false;
 			if (this.work) {
 				if (final) {
 					this.work.detach(final);
@@ -473,6 +474,7 @@ export class Transcript {
 					this.enforceScrollbackCap();
 				} else {
 					this.lastWork = this.work;
+					keepWork = true;
 				}
 				if (this.work.empty) {
 					this.container.removeChild(this.work);
@@ -485,14 +487,16 @@ export class Transcript {
 			this.tools.clear();
 			this.current = undefined;
 			this.turnStartedAt = 0;
-			this.retain(
-				new TurnSummaryLine({
-					elapsedMs: elapsed,
-					tools: this.turnTools,
-					tokens: event.tokens,
-					cancelled: event.cancelled,
-				}),
-			);
+			if (!keepWork) {
+				this.retain(
+					new TurnSummaryLine({
+						elapsedMs: elapsed,
+						tools: this.turnTools,
+						tokens: event.tokens,
+						cancelled: event.cancelled,
+					}),
+				);
+			}
 			this.turnTools = 0;
 			return { tokens: event.tokens, cancelled: event.cancelled };
 		}

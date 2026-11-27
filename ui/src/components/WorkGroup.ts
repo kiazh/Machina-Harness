@@ -1,7 +1,6 @@
 // A per-turn work block: intermediate thoughts and tool calls collapse into
 // one count row after the turn finishes. The final answer stays outside.
 import { truncateToWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { theme } from "../theme.ts";
 import { ToolTurn } from "./ToolTurn.ts";
 
 type WorkKind = "thought" | "tool";
@@ -27,13 +26,6 @@ function plural(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function duration(ms: number): string {
-	const seconds = Math.max(0, Math.round(ms / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-}
-
 export class WorkGroup implements Component {
 	private readonly children: Component[] = [];
 	private readonly counts: WorkCounts = {
@@ -45,8 +37,6 @@ export class WorkGroup implements Component {
 		thoughts: 0,
 	};
 	private collapsed = false;
-	private finished = false;
-	private elapsedMs = 0;
 	private readonly cached = new Map<number, string[]>();
 
 	add(component: Component, kind: WorkKind, toolName = ""): void {
@@ -64,9 +54,7 @@ export class WorkGroup implements Component {
 		this.cached.clear();
 	}
 
-	finish(elapsedMs: number): void {
-		this.elapsedMs = elapsedMs;
-		this.finished = true;
+	finish(_elapsedMs: number): void {
 		this.collapsed = true;
 		this.cached.clear();
 	}
@@ -117,21 +105,16 @@ export class WorkGroup implements Component {
 		if (this.counts.agents) parts.push(plural(this.counts.agents, "agent"));
 		if (this.counts.other) parts.push(plural(this.counts.other, "tool"));
 		if (!parts.length) parts.push(plural(this.children.length, "step"));
-		const elapsed = this.finished
-			? this.elapsedMs > 0
-				? ` · ${duration(this.elapsedMs)}`
-				: ""
-			: " · working";
-		return `${parts.join(", ")}${elapsed}`;
+		return parts.join(", ");
 	}
 
 	render(width: number): string[] {
 		const cached = this.cached.get(width);
 		if (cached && this.cached.size > 0) return cached;
 		const total = Math.max(0, width);
-		const chevron = theme.secondary(this.collapsed ? "▸" : "▾");
-		const line = truncateToWidth(`  ${chevron} ${theme.muted(this.summary())}`, total);
-		const rows = this.collapsed ? ["", line] : ["", line, ...this.children.flatMap((child) => child.render(width))];
+		const marker = this.collapsed ? "+" : "-";
+		const line = truncateToWidth(`${marker} ${this.summary()}`, total);
+		const rows = this.collapsed ? [line] : [line, ...this.children.flatMap((child) => child.render(width))];
 		if (this.collapsed && this.cached.size >= 4) this.cached.clear();
 		if (this.collapsed) this.cached.set(width, rows);
 		return rows;
@@ -139,12 +122,12 @@ export class WorkGroup implements Component {
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		if (event.y === 1) {
+		if (event.y === 0) {
 			this.toggle();
 			return { handled: true, render: true };
 		}
 		if (this.collapsed) return undefined;
-		let offset = 2;
+		let offset = 1;
 		for (const child of this.children) {
 			const height = child.render(event.width).length;
 			if (event.y >= offset && event.y < offset + height) {
