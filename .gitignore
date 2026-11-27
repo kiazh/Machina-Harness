@@ -24,7 +24,8 @@ wheels/
 venv/
 env/
 ENV/
-.venv/
+# No trailing slash: also covers the `.venv` symlink used by some worktrees.
+.venv
 
 # IDE
 .vscode/
@@ -47,8 +48,10 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
+.mypy_cache/
 
 # OS
 .DS_Store
@@ -104,12 +107,15 @@ skills/ecc/**/*.test.js
 vendor/ecc/**/tests/
 vendor/ecc/**/test/
 
-# Archived virtual environments and generated coverage
+# Archived virtual environments
 .venv.*/
-coverage.xml
 
-# Installed Node dependencies are restored from the lockfile
-node_modules/
+# Isolated worktrees created outside the checkout
+.worktrees/
+
+# Installed Node dependencies are restored from the lockfile.
+# No trailing slash: also covers node_modules symlinks used by worktrees.
+node_modules
 
 test-results/
 playwright-report/

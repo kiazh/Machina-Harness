@@ -114,8 +114,7 @@ def main() -> int:
     print(f"{len(rows)} candidate(s) with no textual reference outside their definition")
     for row in rows:
         print(
-            f"  {row['language']:10} {row['path']}:{row['line']:<5} "
-            f"{row['kind']:8} {row['name']}"
+            f"  {row['language']:10} {row['path']}:{row['line']:<5} {row['kind']:8} {row['name']}"
         )
     return 0
 

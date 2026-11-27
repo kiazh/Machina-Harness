@@ -55,7 +55,7 @@ npm --prefix ui run typecheck
 npm --prefix ui run lint
 npm --prefix ui test
 npm --prefix ui run check
-/Users/shadow/.local/share/opencode/worktree/.../.venv/bin/python -m pytest tests -q -p no:cacheprovider
+./.venv/bin/python -m pytest tests -q -p no:cacheprovider
 python tools/architecture_report.py --check
 ```
 
