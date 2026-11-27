@@ -30,7 +30,7 @@ PROXY_BLOCK = '''                # MACHINA HARNESS-BENCH ADAPTER: OpenCode Go re
                 if owner.upstream.hostname == "opencode.ai":
                     session = getattr(owner, "_machina_opencode_session", None)
                     if session is None:
-                        session = owner.session_id or f"hb-{secrets.token_hex(8)}"
+                        session = getattr(owner, "session_id", None) or f"hb-{secrets.token_hex(8)}"
                         setattr(owner, "_machina_opencode_session", session)
                     headers.setdefault("x-opencode-session", session)
                     headers.setdefault("User-Agent", "machina-harness-bench/1.0")
@@ -119,6 +119,11 @@ def patch_runtime(source: str) -> str:
 
 def patch_model_proxy(source: str) -> str:
     """Teach the model proxy the OpenCode Go session contract, exactly once."""
+    # Migrate a checkout patched before the proxy kept a trace-only session id.
+    source = source.replace(
+        '                        session = owner.session_id or f"hb-{secrets.token_hex(8)}"',
+        '                        session = getattr(owner, "session_id", None) or f"hb-{secrets.token_hex(8)}"',
+    )
     if PROXY_MARKER in source:
         return source
     insertion_point = "                if body:\n                    headers[\"Content-Length\"] = str(len(body))\n"
