@@ -18,8 +18,8 @@ const GROWTH_DURATION_MS = 800;
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
 const WORK_INTERVAL_MS = 33;
-const WORK_CYCLE_MS = 1400;
-const WORK_CELLS = 7;
+const WORK_CYCLE_MS = 1600;
+const WORK_GLYPHS = ["‹", "‹", "‹", "◇", "›", "›", "›"];
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -161,16 +161,17 @@ export class Footer implements Component {
 		if (this.status === "working" && room >= 5) {
 			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
 			activity = theme.muted(hint);
-			if (room >= WORK_CELLS * 2 + 1 + visibleWidth(hint)) {
+			if (room >= WORK_GLYPHS.length * 2 + 1 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
 				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
-				const pulse = Array.from({ length: WORK_CELLS }, (_, column) => {
-					const tint = column / (WORK_CELLS - 1);
-					const angle = (phase - column / WORK_CELLS) * 2 * Math.PI;
-					const level = ((1 + Math.cos(angle)) / 2) ** 3;
-					return theme.activity("▪", level, tint);
+				const center = (WORK_GLYPHS.length - 1) / 2;
+				const radius = center * (1 - Math.cos(phase * 2 * Math.PI)) / 2;
+				const ripple = WORK_GLYPHS.map((glyph, column) => {
+					const distance = Math.abs(Math.abs(column - center) - radius);
+					const level = Math.exp(-1.6 * distance ** 2);
+					return theme.activity(glyph, level, column / (2 * center));
 				}).join(" ");
-				activity = `${pulse}  ${activity}`;
+				activity = `${ripple}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
