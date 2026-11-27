@@ -258,10 +258,10 @@ export class AppShell {
 		return Math.max(0, this.navBar.rows?.() ?? 0);
 	}
 
-	/** Breathing room under the composer; taller terminals get more of it. */
+	/** One spacer below the chat status on tall terminals. */
 	private bottomGapRows(): number {
 		if (this.page) return 0;
-		return this.lastRows >= 40 ? 2 : this.lastRows >= 16 ? 1 : 0;
+		return this.lastRows >= 40 ? 1 : 0;
 	}
 
 	private composerGapRows(): number {
