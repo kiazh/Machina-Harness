@@ -99,6 +99,7 @@ test("usage page renders stats, heatmap, models, and skills", () => {
 	assert.match(text, /Su /);
 	assert.match(text, /Activity insights/);
 	assert.match(text, /deepseek-v4\.1-flash/);
+	assert.match(text, /@ecc-search-first/);
 	assert.match(text, /Skills explored/);
 	assert.match(text, /Skills explored\s+29/);
 });

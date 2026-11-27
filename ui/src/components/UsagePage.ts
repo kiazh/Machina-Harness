@@ -12,7 +12,7 @@ import {
 	type Component,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import type { UsageDailyPoint, UsageModelRow, UsageReportResult, UsageSkillRow } from "../protocol.ts";
+import type { UsageDailyPoint, UsageReportResult, UsageSkillRow } from "../protocol.ts";
 import { theme } from "../theme.ts";
 
 type Tab = "usage" | "skills";
@@ -26,7 +26,7 @@ const TAB_LABELS: ReadonlyArray<{ id: Tab; label: string }> = [
 const MODES = ["Daily", "Weekly", "Cumulative"] as const;
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-const CONTENT_MAX = 84;
+const CONTENT_MAX = 112;
 const CHART_ROWS = 8;
 
 export interface UsagePageOptions {
@@ -263,17 +263,24 @@ export class UsagePage implements Component {
 		return this.mode === 0 ? this.heatmap(report, width) : this.barChart(report, width);
 	}
 
-	private monthLabels(start: Date, last: Date, visible: number, offset: number): string[] {
-		const labels = Array.from({ length: visible }, () => " ");
+	private monthLabels(
+		start: Date,
+		last: Date,
+		visible: number,
+		offset: number,
+		step: number,
+	): string[] {
+		const labels = Array.from({ length: visible * step }, () => " ");
 		for (let month = 0; month < 13; month++) {
 			const probe = new Date(start.getFullYear(), start.getMonth() + month, 1);
 			if (probe < start || probe > last) continue;
-			const col = Math.floor(Math.floor((probe.getTime() - start.getTime()) / 86_400_000) / 7) - offset;
-			if (col < 0 || col >= visible) continue;
+			const week = Math.floor(Math.floor((probe.getTime() - start.getTime()) / 86_400_000) / 7) - offset;
+			if (week < 0 || week >= visible) continue;
+			const col = week * step;
 			const label = MONTHS[probe.getMonth()]!;
 			const end = col + label.length;
 			if (labels.slice(Math.max(0, col - 1), end).some((value) => value !== " ")) continue;
-			for (let index = 0; index < label.length && col + index < visible; index++) {
+			for (let index = 0; index < label.length && col + index < labels.length; index++) {
 				labels[col + index] = label[index]!;
 			}
 		}
@@ -282,7 +289,8 @@ export class UsagePage implements Component {
 
 	private heatmap(report: UsageReportResult, width: number): string[] {
 		const { start, last, columns, byDate } = this.weeks(report);
-		const visible = Math.min(columns, Math.max(1, width - 4));
+		const step = width >= 109 ? 2 : 1;
+		const visible = Math.min(columns, Math.max(1, Math.floor((width - 3) / step)));
 		const offset = columns - visible;
 		const dates: Array<Array<Date | undefined>> = [];
 		const values: number[][] = [];
@@ -301,20 +309,24 @@ export class UsagePage implements Component {
 			values.push(rowValues);
 		}
 		const maximum = Math.max(1, ...values.flat());
-		const labels = this.monthLabels(start, last, visible, offset);
+		const labels = this.monthLabels(start, last, visible, offset, step);
 
 		const out = [truncateToWidth(`   ${theme.dim(labels.join(""))}`.trimEnd(), width)];
+		const spacer = " ".repeat(step - 1);
 		for (let row = 0; row < 7; row++) {
 			const cells = dates.map((week, col) => {
 				const day = week[row];
-				if (!day) return " ";
+				if (!day) return " ".repeat(step);
 				const level = intensity(values[col]![row]!, maximum);
-				return level <= 0 ? theme.dim("▪") : theme.activity("▪", level / 4, 0);
+				const glyph = level <= 0 ? theme.dim("▪") : theme.activity("▪", level / 4, 0);
+				return `${glyph}${spacer}`;
 			});
-			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`);
+			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
 		}
-		const legend = [0.25, 0.5, 0.75, 1].map((level) => theme.activity("▪", level, 0)).join(" ");
-		out.push(`${theme.dim("Less")} ${legend} ${theme.dim("More")}`);
+		const legend = [0.25, 0.5, 0.75, 1]
+			.map((level) => `${theme.activity("▪", level, 0)}${" ".repeat(step - 1)}`)
+			.join(" ");
+		out.push(`${theme.dim("Less")} ${legend}${theme.dim(" More")}`);
 		return out;
 	}
 
@@ -339,16 +351,20 @@ export class UsagePage implements Component {
 		}
 		const values = this.mode === 1 ? weekly : cumulative;
 		const maximum = Math.max(1, ...values);
-		const visible = Math.min(columns, Math.max(1, width - 4));
+		const step = width >= 109 ? 2 : 1;
+		const visible = Math.min(columns, Math.max(1, Math.floor((width - 4) / step)));
 		const offset = columns - visible;
 		const shown = values.slice(offset);
-		const out: string[] = [`    ${theme.dim(this.monthLabels(start, last, visible, offset).join(""))}`.trimEnd()];
+		const labels = this.monthLabels(start, last, visible, offset, step);
+		const out: string[] = [`   ${theme.dim(labels.join(""))}`.trimEnd()];
+		const spacer = " ".repeat(step - 1);
 		for (let row = 0; row < CHART_ROWS; row++) {
 			const axis = row === 0 ? "max" : row === CHART_ROWS - 1 ? "0" : "";
 			const cells = shown
 				.map((value) => {
 					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
-					return height > CHART_ROWS - row - 1 ? theme.activity("▪", 0.6, 0) : " ";
+					const glyph = height > CHART_ROWS - row - 1 ? theme.activity("▪", 0.6, 0) : " ";
+					return `${glyph}${spacer}`;
 				})
 				.join("");
 			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());
@@ -378,10 +394,17 @@ export class UsagePage implements Component {
 			const shown = truncateToWidth(value, room);
 			return `${theme.dim(label)}${" ".repeat(Math.max(1, left - label.length - visibleWidth(shown)))}${theme.bold(shown)}`;
 		});
-		const modelLines = report.models.slice(0, 5).map((model) => this.modelRow(model, right));
-		if (!modelLines.length) modelLines.push(theme.dim("No model calls recorded"));
+		const used = [
+			...report.models.slice(0, 3).map((model) => ({
+				label: `${model.provider}/${model.model}`,
+				runs: model.requests,
+			})),
+			...report.skills.top.slice(0, 3).map((skill) => ({ label: `@${skill.name}`, runs: skill.uses })),
+		].slice(0, 5);
+		const modelLines = used.map((entry) => this.usedRow(entry.label, entry.runs, right));
+		if (!modelLines.length) modelLines.push(theme.dim("No model or skill calls recorded"));
 
-		const out = [`${padRight(theme.accentBold("Activity insights"), left)}${" ".repeat(gap)}${theme.accentBold("Models used")}`];
+		const out = [`${padRight(theme.accentBold("Activity insights"), left)}${" ".repeat(gap)}${theme.accentBold("Models & skills used")}`];
 		const count = Math.max(metrics.length, modelLines.length);
 		for (let index = 0; index < count; index++) {
 			out.push(`${padRight(metrics[index] ?? "", left)}${" ".repeat(gap)}${modelLines[index] ?? ""}`.trimEnd());
@@ -389,12 +412,11 @@ export class UsagePage implements Component {
 		return out;
 	}
 
-	private modelRow(model: UsageModelRow, width: number): string {
-		const runs = `${compact(model.requests)} reqs`;
-		const label = `${model.provider}/${model.model}`;
-		const room = Math.max(4, width - runs.length - 1);
+	private usedRow(label: string, runs: number, width: number): string {
+		const suffix = `${compact(runs)} runs`;
+		const room = Math.max(4, width - suffix.length - 1);
 		const shown = truncateToWidth(label, room);
-		return `${shown}${" ".repeat(Math.max(1, width - visibleWidth(shown) - runs.length))}${theme.dim(runs)}`;
+		return `${shown}${" ".repeat(Math.max(1, width - visibleWidth(shown) - suffix.length))}${theme.dim(suffix)}`;
 	}
 
 	private skillsBody(width: number): string[] {
@@ -465,7 +487,7 @@ export class UsagePage implements Component {
 		const height = Math.max(12, this.options.tui.terminal.rows);
 		const innerWidth = Math.min(CONTENT_MAX, Math.max(48, content - 8));
 		const inset = Math.max(0, Math.floor((content - innerWidth) / 2));
-		const frame = 5; // header, tabs, mode, blank, hint
+		const frame = 6; // header, tabs, rule, mode, blank, hint
 		const viewport = Math.max(1, height - frame);
 		this.viewport = viewport;
 
@@ -488,6 +510,7 @@ export class UsagePage implements Component {
 		const out = [
 			this.header(content),
 			this.tabs(content),
+			theme.dim("─".repeat(content)),
 			modeLine,
 			"",
 			...shown.map((line) => `${" ".repeat(inset)}${truncateToWidth(line, innerWidth)}`),
