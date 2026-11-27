@@ -117,6 +117,15 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         reasoning="none",
         description="OpenCode Zen (free + paid models, OpenAI-compatible gateway)",
     ),
+    "opencode-go": ProviderSpec(
+        name="opencode-go",
+        base_url="https://opencode.ai/inference/go/v1",
+        api_key_env="OPENCODE_GO_TOKEN",
+        default_model="deepseek-v4.1-flash",
+        reasoning="none",
+        description="OpenCode Go subscription",
+        requires_key=False,
+    ),
     "kimi": ProviderSpec(
         name="kimi",
         # Kimi Code (overseas base; China uses
@@ -167,7 +176,8 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
 # Every chat provider the harness can route to: OpenRouter (multi-model),
 # the direct families above, Anthropic (native API), ChatGPT subscription
 # accounts (Codex protocol; auth-file based, no API key), GitHub Copilot
-# seats (GitHub token; auth-file based), and "custom" — any
+# seats (GitHub token; auth-file based), OpenCode Go subscriptions (device
+# login; auth-file based), and "custom" — any
 # OpenAI-compatible endpoint configured via CUSTOM_BASE_URL (built dynamically
 # in factory.py, so it is deliberately absent from PROVIDER_SPECS, the fixed
 # vendor table).
