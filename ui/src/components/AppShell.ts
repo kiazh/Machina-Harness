@@ -12,6 +12,7 @@
 
 import { HStack, isViewportTUI, ScrollView, VStack, type Component, type TUI } from "@earendil-works/pi-tui";
 import { LIMITS } from "../design/tokens.ts";
+import { theme } from "../theme.ts";
 import type { LayoutInput } from "../workspace/state.ts";
 import type { Footer } from "./Footer.ts";
 import { WorkspaceShell } from "./WorkspaceShell.ts";
@@ -56,6 +57,11 @@ export class AppShell {
 	private dock: Component | undefined;
 	/** Pinned top bar above the transcript (music); hidden rows collapse. */
 	private pinnedBar: PinnedBarSlot | undefined;
+	/** Hairline between ambient chrome and the conversation. */
+	private readonly pinnedRule: Component = {
+		render: (width: number): string[] => [theme.border("─".repeat(Math.max(0, width)))],
+		invalidate: (): void => {},
+	};
 	private agentBar: (Component & { visible: boolean }) | undefined;
 	private activityBar: (Component & { visible: boolean }) | undefined;
 	/** Cached chrome row budget; invalidated by composer/dock changes. */
@@ -74,7 +80,7 @@ export class AppShell {
 		// Follow new output only when already following the end; scrolling
 		// upward freezes follow until an explicit return-to-end.
 		this.transcriptScroll = new ScrollView(transcript, { follow: "end" });
-		this.currentRoot = this.build("full");
+		this.currentRoot = this.build();
 		// Resolve responsive budgets before the viewport engine measures children.
 		const root = {
 			[LAYOUT_NODE]: () => {
@@ -242,9 +248,9 @@ export class AppShell {
 		this.chromeCache = undefined;
 	}
 
-	/** Inter-section gap for the current density and dock state (single source). */
+	/** Inter-section gap: chrome touches directly; the transcript rules carry rhythm. */
 	private gapRows(): number {
-		return this.density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
+		return 0;
 	}
 
 	/** Rows the persistent command strip occupies on this viewport. */
@@ -347,7 +353,7 @@ export class AppShell {
 		return mode === undefined || mode === "chat" || mode === "split";
 	}
 
-	private build(density: Density): VStack {
+	private build(): VStack {
 		const navEntries = this.navBar ? [{ component: this.navBar, shrink: 0 }] : [];
 		// Page tabs own the whole viewport: no composer, dock, activity bar or
 		// footer chrome underneath them.
@@ -360,7 +366,7 @@ export class AppShell {
 		}
 		// Full density keeps one chrome gap row; smaller viewports spend
 		// every row on transcript, composer, or status.
-		const gap = density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
+		const gap = 0;
 		const topRow = this.workspaceRow();
 		const dockOutsideChat = Boolean(this.dock) && !this.dockInChatColumn();
 		const activity = this.activityBar;
@@ -447,6 +453,11 @@ export class AppShell {
 					shrink: 0,
 					minSize: 0,
 					visible: () => bar.visible,
+				}, {
+					component: this.pinnedRule,
+					basis: 1,
+					shrink: 0,
+					visible: () => bar.visible,
 				}] : []),
 				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: dock && this.lastRows < 12 ? 0 : 1 },
 				...(dock ? [{ component: dock, shrink: 0 }] : []),
@@ -456,7 +467,7 @@ export class AppShell {
 	}
 
 	private rebuild(): void {
-		this.currentRoot = this.build(this.density);
+		this.currentRoot = this.build();
 		if (isViewportTUI(this.tui)) this.tui.setLayoutRoot(this.viewportRoot);
 	}
 }

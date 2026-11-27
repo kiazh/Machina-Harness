@@ -554,6 +554,44 @@ test("a child paused for approval keeps its inspection tab", async (t) => {
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id)?.running, false);
 });
 
+test("a delegated child approval opens on the child and resolves against it", async (t) => {
+	const { app, tui, client, type } = await boot({ sessions: [MAIN] });
+	t.after(() => app.exit());
+	await settle();
+	client.sessions = [MAIN, CHILD];
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
+	});
+	await settle();
+	type("\x1bj");
+	await settle();
+	tui.renderNow(true);
+	assert.equal(app.session()?.id, CHILD.id, "inspect the running child");
+
+	client.emit(CHILD.id, "child-turn", {
+		type: "needs_approval",
+		requestId: "child-request",
+		operation: "process.exec",
+		tool: "terminal",
+		target: "cargo test",
+		argv: ["cargo", "test"],
+		status: "pending",
+	});
+	await settle();
+	tui.renderNow(true);
+	assert.match(screenOf(tui), /Allow terminal · cargo test\?/, "the child approval owns the dock");
+
+	type("\r");
+	await settle();
+	const resolved = client.requests.filter((request) => request.method === "approvals.resolve");
+	assert.deepEqual(resolved.map((request) => request.params), [{
+		requestId: "child-request",
+		sessionId: CHILD.id,
+		verdict: "approved",
+		grant: "once",
+	}]);
+});
+
 test("Alt+0 closes the selected idle child and returns to main", async (t) => {
 	const { app, type } = await boot({
 		sessions: [MAIN, CHILD],

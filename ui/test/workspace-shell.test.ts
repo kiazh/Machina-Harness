@@ -683,8 +683,8 @@ test("split mode pins the music bar to the chat column top, editor untouched", (
 		assert.match(screen[0] ?? "", /EDITOR/, "editor column shares the same screen row");
 		assert.equal(
 			screen.findIndex((line) => line.includes("chat transcript row")),
-			1,
-			"transcript sits directly below the one-line bar",
+			2,
+			"transcript sits below the bar and its hairline",
 		);
 	} finally {
 		teardown(h);

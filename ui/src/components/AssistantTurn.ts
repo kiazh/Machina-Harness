@@ -207,7 +207,7 @@ export class AssistantTurn implements Component {
 			return cached.geometry;
 		}
 		const indent = transcriptInset(width);
-		const contentWidth = Math.max(1, Math.min(96, width - indent - 2));
+		const contentWidth = Math.max(1, width - indent - 4);
 		const geometry: ResponseGeometry = {
 			paneWidth: width,
 			widthClass: "full",
@@ -231,9 +231,9 @@ export class AssistantTurn implements Component {
 		const pad = " ".repeat(geometry.indent);
 		const marker = this.streaming
 			? theme.accent(this.activity?.frame(ICONS.workingFrames, ACTIVITY_INTERVAL_MS, this.startedAt) ?? ICONS.workingFrames[0])
-			: theme.dim("·");
+			: theme.secondary("·");
 		const output = [...BLOCK_GAP];
-		const label = this.label && this.label !== "assistant" ? theme.dim(this.label) : "";
+		const label = this.label && this.label !== "assistant" ? theme.secondary(this.label) : "";
 		if (label) output.push(truncateToWidth(`${pad}${label}`, width));
 		rows.forEach((line, index) => {
 			output.push(truncateToWidth(`${pad}${index === 0 ? marker : " "} ${line}`, width));

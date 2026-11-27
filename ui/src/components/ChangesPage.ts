@@ -498,7 +498,7 @@ export class ChangesPage implements Component {
 			const action = "Enter  Fix this";
 			body.push({ text: selectionBar(action, visibleWidth(action)), kind: "failure", key: code, hitWidth: Math.min(width, visibleWidth(action)) });
 		}
-		const lines = wrapDisplay(message, Math.min(width, 76));
+		const lines = wrapDisplay(message, width);
 		this.pageSize = Math.max(1, height - body.length);
 		const start = this.scroll = Math.min(this.scroll, Math.max(0, lines.length - this.pageSize));
 		for (const line of lines.slice(start, start + this.pageSize)) body.push({ text: theme.text(line), kind: "detail" });
@@ -640,7 +640,7 @@ export class ChangesPage implements Component {
 		const available = Math.max(1, height);
 		if (this.promptExpanded) {
 			body.push({ text: theme.bold(theme.text("Full prompt")), kind: "detail" });
-			const lines = wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), Math.min(72, width));
+			const lines = wrapDisplay(sanitizeDisplay(turn.prompt || "(prompt not recorded)"), width);
 			this.pageSize = Math.max(1, available - (lines.length > available ? 1 : 0));
 			const start = this.scroll = Math.min(this.scroll, Math.max(0, lines.length - this.pageSize));
 			const end = Math.min(lines.length, start + this.pageSize);
@@ -671,7 +671,7 @@ export class ChangesPage implements Component {
 		if (available >= 8) body.push({ text: "", kind: "detail" });
 		if (this.tab === "files") {
 			if (available >= 6) {
-				const heading = wrapDisplay(turn.prompt || "(prompt not recorded)", Math.min(76, width)).slice(0, 2);
+				const heading = wrapDisplay(turn.prompt || "(prompt not recorded)", width).slice(0, 2);
 				for (const line of heading) body.push({ text: theme.bold(theme.text(line)), kind: "detail" });
 				const stats = `${theme.success(`+${turn.stats.additions}`)} ${theme.error(`−${turn.stats.deletions}`)}`;
 				body.push({ text: `${stats}   ${reviewChip(turn.review)}`, kind: "detail" }, { text: "", kind: "detail" });
@@ -852,7 +852,7 @@ export class ChangesPage implements Component {
 		const lineNumber = finding.line ? `:${finding.line}` : "";
 		const pathWidth = Math.max(1, width - visibleWidth(severity + position + lineNumber) - 3);
 		const location = finding.file ? `${pathLabel(finding.file, pathWidth)}${lineNumber}` : "Changed files";
-		const title = wrapDisplay(finding.title || "Review finding", Math.min(width, 76)).slice(0, available >= 7 ? 2 : 1);
+		const title = wrapDisplay(finding.title || "Review finding", width).slice(0, available >= 7 ? 2 : 1);
 		const actionLine: ScreenLine = {
 			text: canFix ? selectionBar(action, visibleWidth(action))
 				: theme.text(this.snapshot().hasChat === false
@@ -886,7 +886,7 @@ export class ChangesPage implements Component {
 		});
 		const gap = available >= 9 ? 1 : 0;
 		if (gap) body.push({ text: "", kind: "detail" });
-		const explanation = wrapDisplay(finding.body || "No additional detail.", Math.min(width, 76));
+		const explanation = wrapDisplay(finding.body || "No additional detail.", width);
 		// Reserve the action plus handled lines so paging never pushes the fix
 		// off the pane; at degenerate heights the explanation yields first.
 		const handledRows = handled.length ? 1 + Math.min(4, handled.length) + (handled.length > 4 ? 1 : 0) : 0;

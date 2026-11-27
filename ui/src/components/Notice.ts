@@ -5,7 +5,7 @@
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { NoticeKind } from "../features/types.ts";
 import { BLOCK_GAP } from "../design/tokens.ts";
-import { transcriptInset } from "../design/spacing.ts";
+import { chatColumnWidth, transcriptInset } from "../design/spacing.ts";
 import { sanitizeDisplay, wrapDisplay } from "../design/text.ts";
 import { theme } from "../theme.ts";
 
@@ -71,7 +71,7 @@ export class Notice extends Text {
 	private renderNotice(width: number): string[] {
 		const total = Math.max(0, width);
 		const pad = " ".repeat(transcriptInset(width));
-		const inner = Math.max(1, total - pad.length - 2);
+		const inner = Math.max(1, chatColumnWidth(total) - pad.length - 2);
 		const body = sanitizeDisplay(this.raw);
 		const lines = body.split("\n").flatMap((line) => wrapDisplay(line, inner));
 		const out = [...BLOCK_GAP];

@@ -17,7 +17,7 @@ test("completed tools use quiet indented log rows with bounded reading width", (
  const tool = new ToolTurn("read_file", {path:"install.sh"}, {frame: f => f[0] ?? ""});
  tool.settle({text:"Homebrew fallback configuration", backendTruncated:false, locallyTruncated:false}, "success");
  const rows = tool.render(160);
- assert.match(plain(rows)[1]!, /^ {4}✔/);
+ assert.match(plain(rows)[1]!, /^ {2}✔/);
  assert.doesNotMatch(plain(rows).join("\n"), /┌|└/);
  assert.ok(rows.every(row => visibleWidth(row) <= 108));
  assert.match(plain(rows).join("\n"), /read_file.*install.sh/);

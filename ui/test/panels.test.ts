@@ -38,22 +38,22 @@ for (const trueColor of [true, false]) {
 		const resultRow = plain.findIndex(row => row.includes("Homebrew fallback"));
 		assert.ok(resultRow >= 0);
 		const topRow = resultRow - 1;
-		assert.match(plain[topRow]!, /^ {4}[✔⊘✖] read_file/);
+		assert.match(plain[topRow]!, /^ {2}[✔⊘✖] read_file/);
 		assert.match(plain[resultRow]!, /^ {4}⎿ Example inspection/);
 		assert.doesNotMatch(plain[resultRow]!, /[┌┐└┘│]/, "routine successes remain unboxed");
 		const assistantRow = plain.findIndex(row => row.includes("I’ll inspect"));
 		const assistant = plain[assistantRow]!;
 		assert.match(assistant, /^ {2}·\s+I’ll inspect/, "assistant prose uses a quiet text glyph");
 		assert.doesNotMatch(assistant, /[┌┐└┘│]/, "assistant prose has no frame");
-		assert.equal(plain[topRow]!.indexOf("✔"), assistant.indexOf("I’ll"), "tool marker aligns with the assistant text column");
+		assert.equal(plain[topRow]!.indexOf("✔"), assistant.indexOf("·"), "tool marker aligns with the assistant marker column");
 		assert.equal(plain[topRow - 1]?.trim(), "", "space outside the panel");
-		const evidenceTop = plain.findIndex(row => /^ {4}╭─ Approval evidence/.test(row));
+		const evidenceTop = plain.findIndex(row => /^ {2}╭─ Approval evidence/.test(row));
 		assert.ok(evidenceTop >= 0, "approval evidence has a bounded card");
 		const edge = luminance(color(screen[evidenceTop]!));
 		const fill = luminance(color(screen[evidenceTop + 2]!, true));
 		const backdrop = luminance([8, 9, 11]);
 		assert.ok((edge + 0.05) / (fill + 0.05) >= 2.5, "approval card edge remains visible against its fill");
 		assert.ok((fill + 0.05) / (backdrop + 0.05) >= 1.1, "approval fill differs visibly from the transcript background");
-		assert.match(plain[evidenceTop]!, /^ {4}╭.*╮\s*$/);
+		assert.match(plain[evidenceTop]!, /^ {2}╭.*╮\s*$/);
 	});
 }

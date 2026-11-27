@@ -134,26 +134,26 @@ export class NowPlayingBar implements PinnedBarBudget {
 
 	private titleLine(width: number): string {
 		const glyph = this.glyph();
-		const title = theme.bold(
+		const title = theme.bold(theme.text(
 			truncateToWidth(this.identity(), Math.max(0, width - 10), "…"),
-		);
+		));
 		const left = `${glyph} ${title}`;
 		const right = this.clockSuffix();
 		if (!right) return truncateToWidth(left, width);
-		const rightText = theme.dim(right);
+		const rightText = theme.muted(right);
 		const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(rightText));
 		return truncateToWidth(`${left}${" ".repeat(gap)}${rightText}`, width);
 	}
 
 	private metaLine(width: number): string {
 		const state = this.state;
-		if (!state) return truncateToWidth(theme.dim("♪ Nothing playing"), width);
+		if (!state) return truncateToWidth(theme.muted("♪ Nothing playing"), width);
 		if (state.error) return truncateToWidth(theme.warning(sanitizeLabelText(state.error)), width);
-		if (!state.title) return truncateToWidth(theme.dim("♪ Nothing playing"), width);
+		if (!state.title) return truncateToWidth(theme.muted("♪ Nothing playing"), width);
 		const parts = [state.artist, state.source]
 			.filter((part): part is string => Boolean(part && part.trim()))
 			.map((part) => sanitizeLabelText(part));
-		return truncateToWidth(theme.dim(parts.join(" · ")), width);
+		return truncateToWidth(theme.muted(parts.join(" · ")), width);
 	}
 
 	private progressCells(width: number, ratio: number | undefined): string {
@@ -197,7 +197,7 @@ export class NowPlayingBar implements PinnedBarBudget {
 						)
 					: state?.error
 						? theme.warning(sanitizeLabelText(state.error))
-						: theme.dim("♪ Nothing playing");
+						: theme.muted("♪ Nothing playing");
 			return truncateToWidth(message, width);
 		}
 		const artist = state.artist ? ` — ${sanitizeLabelText(state.artist)}` : "";
@@ -205,7 +205,7 @@ export class NowPlayingBar implements PinnedBarBudget {
 			? ` · ${formatClock(this.elapsedNow())} / ${formatClock(state.duration)}`
 			: "";
 		return truncateToWidth(
-			`${this.glyph()} ${theme.bold(`${sanitizeLabelText(state.title)}${artist}`)}${theme.dim(clock)}`,
+			`${this.glyph()} ${theme.bold(theme.text(`${sanitizeLabelText(state.title)}`))}${theme.muted(artist)}${theme.muted(clock)}`,
 			width,
 		);
 	}

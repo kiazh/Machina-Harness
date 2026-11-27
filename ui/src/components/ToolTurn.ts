@@ -6,7 +6,7 @@ import { truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } fro
 import { ICONS, TOOL_MARKERS } from "../design/icons.ts";
 import { uiLog } from "../debug.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource } from "../design/motion.ts";
-import { panelInset } from "../design/spacing.ts";
+import { chatColumnWidth, panelInset } from "../design/spacing.ts";
 import { sanitizeDisplay, shapePreview, truncateUtf8ByBytes } from "../design/text.ts";
 import { toolCallDisplayName } from "../mcpNames.ts";
 import { theme } from "../theme.ts";
@@ -74,12 +74,6 @@ function markerFor(outcome: ToolOutcome): string {
 		case "historical":
 			return "○";
 	}
-}
-
-function between(left: string, right: string, width: number): string {
-	const room = Math.max(0, width - visibleWidth(right) - 1);
-	const first = truncateToWidth(left, room, "…", true);
-	return `${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))} ${truncateToWidth(right, width)}`;
 }
 
 function duration(ms: number): string {
@@ -183,16 +177,21 @@ export class ToolTurn implements Component {
 		if (this.outcome !== "running" && cached) return cached;
 		const total = Math.max(0, width);
 		const indent = " ".repeat(panelInset(width));
-		const room = Math.max(1, Math.min(Math.max(1, 108 - indent.length), total - indent.length));
+		const room = Math.max(1, Math.min(chatColumnWidth(total), total - indent.length));
 		const marker = this.outcome === "running" && !this.paused
 			? theme.accent(this.activity.frame([...ICONS.toolActiveFrames], ACTIVITY_INTERVAL_MS, this.startedAt))
 			: styleMarker(this.outcome, markerFor(this.outcome));
 		const elapsed = this.completedAt === undefined ? "" : duration(this.completedAt - this.startedAt);
 		const status = this.statusText();
-		const chevron = theme.dim(this.expanded ? "▾" : "▸");
-		const header = `${marker} ${theme.text(this.name)}${this.args ? ` ${theme.dim(this.args)}` : ""} ${chevron}`
+		const chevron = theme.secondary(this.expanded ? "▾" : "▸");
+		const header = `${marker} ${theme.text(this.name)}${this.args ? ` ${theme.muted(this.args)}` : ""}`
 			.replace(/\r?\n/g, " ");
-		const lines = [between(header, status, room)];
+		const timing = elapsed && this.outcome !== "queued" && this.outcome !== "running" && this.outcome !== "historical"
+			? ` ${theme.dim(elapsed)}`
+			: "";
+		const statusPart = `${chevron}${status ? `  ${status}${timing}` : timing}`;
+		const headerRoom = Math.max(1, room - visibleWidth(statusPart) - 1);
+		const lines = [truncateToWidth(`${truncateToWidth(header, headerRoom)} ${statusPart}`, room)];
 		const showContent = Boolean(this.content)
 			&& !["error", "denied", "interrupted", "outcome_unknown"].includes(this.outcome);
 		const source = showContent ? this.content! : this.result.text;
@@ -203,7 +202,7 @@ export class ToolTurn implements Component {
 			shaped.shown.forEach((line, index) => {
 				const prefix = index === 0 ? theme.dim("⎿ ") : "  ";
 				const styled = diff ? styleDiffLine(line) : theme.text(line);
-				lines.push(`${prefix}${truncateToWidth(styled, Math.max(1, room - 2))}`);
+				lines.push(`  ${prefix}${truncateToWidth(styled, Math.max(1, room - 4))}`);
 			});
 			if (shaped.omitted > 0) {
 				lines.push(theme.dim(`  … ${shaped.omitted} more line${shaped.omitted === 1 ? "" : "s"}`));
@@ -216,9 +215,6 @@ export class ToolTurn implements Component {
 		}
 		if (this.result.backendTruncated && this.outcome !== "running") {
 			lines.push(theme.dim("  server output truncated"));
-		}
-		if (elapsed && this.outcome !== "queued" && this.outcome !== "running" && this.outcome !== "historical") {
-			lines[0] = between(header, `${status} ${theme.dim(elapsed)}`, room);
 		}
 		const rows = ["", ...lines.map((line) => truncateToWidth(`${indent}${line}`, total))];
 		if (this.outcome !== "running") {
@@ -244,18 +240,18 @@ export class ToolTurn implements Component {
 	private statusText(): string {
 		if (this.outcome === "running") {
 			if (this.paused) {
-				return theme.dim(`${this.paused === "stopping" ? "stopping" : "cleanup pending"}; outcome pending`);
+				return theme.warning(`${this.paused === "stopping" ? "stopping" : "cleanup pending"}; outcome pending`);
 			}
-			return theme.dim(this.externalHarness ? "waiting for external harness" : "running");
+			return theme.muted(this.externalHarness ? "waiting for external harness" : "running");
 		}
-		if (this.outcome === "queued") return theme.dim("queued");
+		if (this.outcome === "queued") return theme.muted("queued");
 		if (this.outcome === "awaiting_approval") return theme.warning("awaiting approval");
 		if (this.outcome === "denied") return theme.muted("denied; not executed");
 		if (this.outcome === "interrupted") return theme.warning("interrupted; outcome unknown");
 		if (this.outcome === "outcome_unknown") return theme.muted("completion not reported");
-		if (this.outcome === "historical") return theme.dim("recorded output");
+		if (this.outcome === "historical") return theme.muted("recorded output");
 		if (this.outcome === "error") return theme.error("failed");
-		return theme.dim("done");
+		return theme.muted("done");
 	}
 
 	invalidate(): void { this.cached.clear(); }

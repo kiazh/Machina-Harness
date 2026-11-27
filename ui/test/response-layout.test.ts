@@ -16,12 +16,12 @@ function plainLines(component: Component, width: number): string[] {
 	return component.render(width).map((line) => stripTerminalSequences(line));
 }
 
-test("assistant prose is frameless and uses a readable measure", () => {
+test("assistant prose is frameless and uses the pane width", () => {
 	const turn = new AssistantTurn(SHORT);
 	const geometry = turn.responseGeometry(160);
 	assert.equal(geometry.widthClass, "full");
 	assert.equal(geometry.framed, false);
-	assert.equal(geometry.contentWidth, 96, "the prose column caps at a readable measure");
+	assert.equal(geometry.contentWidth, 154, "the prose column fills the pane minus its gutter");
 	const lines = plainLines(turn, 160);
 	const text = lines.join("\n");
 	assert.match(text, /hello/);
@@ -69,11 +69,11 @@ test("streaming text is exact and the marker disappears on canonical text", () =
 	for (const frame of ICONS.workingFrames) assert.ok(!text.includes(frame), `no ${frame} marker remains after completion`);
 });
 
-test("the measure caps at 96 and follows narrower panes", () => {
+test("the measure follows the pane and fills it", () => {
 	const turn = new AssistantTurn(LONG);
-	assert.equal(turn.responseGeometry(240).contentWidth, 96);
+	assert.equal(turn.responseGeometry(240).contentWidth, 234);
 	assert.ok(turn.responseGeometry(80).contentWidth < 96);
-	assert.equal(turn.responseGeometry(80).contentWidth, 76);
+	assert.equal(turn.responseGeometry(80).contentWidth, 74);
 	for (const line of turn.render(240)) assert.ok(visibleWidth(line) <= 240);
 });
 

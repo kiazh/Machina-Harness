@@ -104,9 +104,8 @@ test("short transcript docks composer and footer to the bottom rows", () => {
 		assert.match(screen[0] ?? "", /hello world/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
-		assert.match(screen[20] ?? "", /Ask anything, or type \/ for commands\./);
-		assert.equal((screen[18] ?? "").trim(), "", "one blank row separates the transcript from the composer");
-		assert.equal((screen[22] ?? "").trim(), "", "one blank row separates the composer from the footer");
+		assert.match(screen[21] ?? "", /Ask anything, or type \/ for commands\./);
+		assert.equal((screen[22] ?? "").trim(), "", "one padding row closes the composer");
 	} finally {
 		footer.dispose();
 		coordinator.dispose();
@@ -120,9 +119,9 @@ test("long transcript follows the end above the docked composer", () => {
 	try {
 		const screen = plain(tui.getScreenLines());
 		assert.equal(screen.length, 24);
-		// 17-row viewport over 100 lines: last line sits one gap row above the composer.
-		assert.match(screen[17] ?? "", /line 99/);
-		assert.match(screen[0] ?? "", /line 82/);
+		// 20-row viewport over 100 lines: the last line sits just above the composer.
+		assert.match(screen[19] ?? "", /line 99/);
+		assert.match(screen[0] ?? "", /line 80/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 	} finally {
@@ -386,10 +385,11 @@ test("the pinned music bar stays at row 0 while the transcript grows", () => {
 		let screen = plain(tui.getScreenLines());
 		assert.match(screen[0] ?? "", /Example track title/, "bar pinned at row 0");
 		assert.match(screen[0] ?? "", /Example artist/, "the one-line bar keeps the artist");
+		assert.match(screen[1] ?? "", /^─+$/, "a hairline separates the bar from the transcript");
 		assert.equal(
 			screen.findIndex((line) => line.includes("history row 0")),
-			1,
-			"transcript starts directly below the one-line bar",
+			2,
+			"transcript starts below the bar and its hairline",
 		);
 
 		for (let i = 4; i < 60; i++) transcript.addChild(new Text(`history row ${i}`, 0, 0));

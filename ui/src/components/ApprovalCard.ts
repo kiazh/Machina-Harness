@@ -8,7 +8,7 @@ import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type 
 import { sanitizeDisplay } from "../design/text.ts";
 import { isOpaqueBackground, selectionBar, surfaceLine, theme } from "../theme.ts";
 import { renderCard } from "../design/box.ts";
-import { panelInset } from "../design/spacing.ts";
+import { chatColumnWidth, panelInset } from "../design/spacing.ts";
 import { DiffBlock } from "./DiffBlock.ts";
 
 /** One physical row for identity fields that must never split the frame. */
@@ -141,9 +141,10 @@ export class ApprovalCard implements Component {
 	}
 
 	private allowBlocked(width: number, rows: number): boolean {
-		// The full decision card needs room for the question, three choices
-		// and the hint. Below that the compact dock still denies safely.
-		return rows < 12 || width < 30;
+		// The decision needs the question, three choices, a hint, and enough
+		// transcript to review the evidence. Below that the compact dock still
+		// denies safely.
+		return rows <= 12 || width < 48;
 	}
 
 	private evidenceRows(): string[] {
@@ -234,12 +235,12 @@ export class ApprovalCard implements Component {
 
 	private renderEvidence(width: number): string[] {
 		const indentWidth = panelInset(width);
-		const cardWidth = Math.max(1, Math.min(104, width - indentWidth));
+		const cardWidth = Math.max(1, Math.min(chatColumnWidth(width), width - indentWidth));
 		const content = Math.max(8, cardWidth - 6);
 		const d = this.details;
-		const title = `${theme.warning("●")} ${theme.text(oneLine(d.tool ?? d.operation))} ${theme.muted(oneLine(d.target))} ${theme.dim("·")} ${theme.warning(this.recorded)}`;
+		const title = `${theme.warning("●")} ${theme.bold(theme.text(oneLine(d.tool ?? d.operation)))} ${theme.text(oneLine(d.target))} ${theme.dim("·")} ${theme.warning(this.recorded)}`;
 		const fields = this.evidenceRows();
-		const all = [title, "", ...fields.flatMap(line => wrapTextWithAnsi(line, content))];
+		const all = [title, "", ...fields.flatMap(line => wrapTextWithAnsi(theme.text(line), content))];
 		const diff = d.fileDiff?.diff ? new DiffBlock(sanitizeDisplay(d.fileDiff.diff).split("\n"), 8).render(content) : [];
 		if (d.fileDiff?.truncated) diff.push(theme.dim("… diff truncated"));
 		all.push(...diff);
@@ -257,7 +258,7 @@ export class ApprovalCard implements Component {
 			paddingX: 1,
 			paddingY: false,
 			fill: "toolBg",
-			titleTone: theme.muted,
+			titleTone: theme.secondary,
 		});
 		const indent = " ".repeat(indentWidth);
 		return ["", ...card.map(line => truncateToWidth(`${indent}${line}`, width, "", true))];
@@ -267,14 +268,14 @@ export class ApprovalCard implements Component {
 		this.lastWidth = width;
 		this.lastRows = this.tui?.terminal.rows ?? 24;
 		const compact = this.lastRows < 14 || width < 56;
-		const tight = this.lastRows <= 10;
+		const tight = this.lastRows <= 12;
 		const blocked = this.isAllowBlocked();
 		const question = `Allow ${oneLine(this.details.tool ?? this.details.operation)} · ${oneLine(this.details.target)}?`;
 		const descriptions = ["Only this exact action", "Where supported by policy", "Do not run this action"];
 		const inner = Math.max(1, width - 2);
 		const choices = DECISIONS.map((option, index) => {
 			const mark = index === this.selected ? "›" : " ";
-			const description = !compact && !tight && width >= 56 ? `  ${theme.dim(descriptions[index]!)}` : "";
+			const description = !compact && !tight && width >= 56 ? `  ${theme.muted(descriptions[index]!)}` : "";
 			const line = truncateToWidth(` ${mark} ${option.label}${description}`, inner, "…", true);
 			return index === this.selected ? selectionBar(line, inner) : theme.text(line);
 		});
@@ -309,7 +310,9 @@ export class ApprovalCard implements Component {
 			const bottom = theme.border(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
 			return [truncateToWidth(top, width, "", true), ...body, truncateToWidth(bottom, width, "", true)];
 		}
-		const lines = [surfaceLine(theme.bold(theme.warning(heading)), width, true), ...body];
+		const lines = tight
+			? body
+			: [surfaceLine(theme.bold(theme.warning(heading)), width, true), ...body];
 		return tight ? lines : [...lines, surfaceLine("", width, true)];
 	}
 

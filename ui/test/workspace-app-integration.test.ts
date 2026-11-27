@@ -420,18 +420,18 @@ test("METHOD_NOT_FOUND disables the workspace quietly with one notice and never 
 
 // ─── successful open + geometry ─────────────────────────────────────────────
 
-test("a workspace opens with the editor visible beside the chat", async () => {
+test("a workspace opens chat-first and reveals the editor on demand", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 
 	const layout = internals(app).workspaceLayout;
-	assert.equal(layout?.effectiveMode, "split", "the editor is part of the default layout");
-	assert.ok((layout?.editor?.columns ?? 0) >= 48, "the editor column is real, not a placeholder");
+	assert.equal(layout?.effectiveMode, "chat", "chat owns the default layout");
+	assert.equal(layout?.editor, undefined, "no empty editor pane is composed");
 	assert.equal(internals(app).integration?.controller.phase, "ready");
 	await internals(app).openWorkspacePath("src/a.ts");
 	const split = internals(app).workspaceLayout;
-	assert.equal(split?.effectiveMode, "split", "the split survives opening a file");
+	assert.equal(split?.effectiveMode, "split", "opening a file reveals the editor");
 	assert.ok((split?.editor?.columns ?? 0) >= 48, "editor column keeps its minimum at 160 cols");
 	assert.ok((split?.chat?.columns ?? 0) >= 40, "chat column keeps its minimum");
 	const opens = client.requests.filter((entry) => entry.method === "workspace.open");
@@ -538,7 +538,7 @@ async function bootFramed(columns: number, rows: number): Promise<{
 	return { app, tui, term, client };
 }
 
-test("at 160x48 a fresh workspace shows the empty editor beside the chat", async () => {
+test("at 160x48 a fresh workspace shows chat without an empty editor", async () => {
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
 		let screen = tui.getScreenLines().map(stripTerminalSequences);
@@ -546,8 +546,8 @@ test("at 160x48 a fresh workspace shows the empty editor beside the chat", async
 		for (const line of screen) assert.ok(visibleWidth(line) <= 160);
 		let joined = screen.join("\n");
 		assert.match(joined, /Ask anything/, "chat composer visible");
-		assert.match(joined, /No open files/, "the editor waits with an honest empty state");
-		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
+		assert.doesNotMatch(joined, /No open files/, "no empty editor pane");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
 		await internals(app).openWorkspacePath("src/a.ts");
 		tui.renderNow(true);
 		screen = tui.getScreenLines().map(stripTerminalSequences);
@@ -968,7 +968,7 @@ test("a fresh workspace persists the explorer open; an explicit stored false sta
 	assert.equal(internals(second.app).workspaceLayout?.explorer, undefined, "no drawer column");
 	await second.app.exit();
 
-	// An older stored document without the field parses to open.
+	// An older stored document without the field parses closed.
 	const absent = JSON.stringify({
 		version: 1,
 		byRoot: {

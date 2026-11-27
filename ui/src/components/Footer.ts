@@ -129,30 +129,33 @@ export class Footer implements Component {
 	render(width: number): string[] {
 		if (width <= 0) return [""];
 		const square = this.growthActive ? this.pulsingSquare(this.growthStart)
-			: this.workingSub ? this.pulsingSquare(this.workingStart) : theme.dim(ICONS.idleSquare);
+			: this.workingSub ? this.pulsingSquare(this.workingStart) : theme.muted(ICONS.idleSquare);
 		const status = this.status === "working"
 			? theme.accent(`${this.activity.frame(ICONS.toolActiveFrames, ACTIVITY_INTERVAL_MS)} working`)
 			: this.status === "offline" ? theme.error("offline")
 			: this.status === "awaiting_approval" ? theme.warning("awaiting approval")
 			: this.status === "cleanup_pending" ? theme.warning("cleanup pending")
-			: this.status === "stopping" ? theme.warning("stopping") : theme.dim("ready");
+			: this.status === "stopping" ? theme.warning("stopping") : theme.muted("ready");
 		const displayTokens = this.contextTokens > 0 ? this.contextTokens : this.tokens;
 		const contextSuffix =
 			this.contextTokens > 0 && this.contextPercent !== null
 				? ` (${this.contextPercent.toFixed(1)}% ctx)`
 				: "";
 		const tokens = displayTokens > 0
-			? theme.dim(
+			? theme.muted(
 					` · ${displayTokens.toLocaleString("en-US")}${
 						this.contextTokens > 0 ? " ctx tokens" : " tokens"
 					}${contextSuffix}`,
 				)
 			: "";
 		const agents = this.subagents > 0
-			? theme.dim(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`)
+			? theme.muted(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`)
 			: "";
 		const tail = `${status}${agents}${tokens}`;
-		const metadata = theme.dim(sanitizeLabelText([this.model, this.branch, this.mode].filter(Boolean).join(" · ")));
+		const metadata = [this.model, this.branch, this.mode]
+			.map((part, index) => part ? [theme.muted, theme.dim, theme.muted][index]!(sanitizeLabelText(part)) : "")
+			.filter(Boolean)
+			.join(theme.dim(" · "));
 		const core = metadata ? `${metadata} ${theme.dim("·")} ${tail}` : tail;
 		const hint = this.keyHint ? theme.accent(sanitizeLabelText(this.keyHint)) : theme.dim("? shortcuts · / commands");
 		const fit = chromeInner(width);

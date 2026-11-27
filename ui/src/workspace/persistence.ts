@@ -137,7 +137,7 @@ function sanitizeState(value: unknown): WorkspacePersistedState | undefined {
 		version: WORKSPACE_STATE_VERSION,
 		requestedMode: requestedMode === "chat" || requestedMode === "editor" ? requestedMode : "split",
 		splitRatio: clampSplitRatio(finiteNumber(value.splitRatio) ?? Number.NaN),
-		explorerRequested: value.explorerRequested === undefined ? true : value.explorerRequested === true,
+		explorerRequested: value.explorerRequested === true,
 		openUris: sanitizeUriList(value.openUris),
 	};
 	if (value.chatSide === "left" || value.chatSide === "right") state.chatSide = value.chatSide;

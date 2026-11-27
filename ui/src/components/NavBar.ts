@@ -37,7 +37,7 @@ function statusText(snapshot: NavSnapshot): { text: string; tone: (text: string)
 		case "stopping": return { text: "stopping", tone: theme.warning, glyph: "◐" };
 		case "cleanup_pending": return { text: "cleanup pending", tone: theme.warning, glyph: "◐" };
 		case "offline": return { text: "offline", tone: theme.error, glyph: "○" };
-		default: return { text: "ready", tone: theme.dim, glyph: "○" };
+		default: return { text: "ready", tone: theme.muted, glyph: "○" };
 	}
 }
 
@@ -62,7 +62,7 @@ export class NavBar implements Component {
 
 	/** Two rows on normal viewports, one on short ones. */
 	rows(): number {
-		return this.terminalRows() >= 12 ? 2 : 1;
+		return this.terminalRows() >= 16 ? 2 : 1;
 	}
 
 	render(width: number): string[] {
@@ -88,14 +88,14 @@ export class NavBar implements Component {
 			const plain = active ? `[${name}${count}]` : ` ${name}${count} `;
 			const styled = active
 				? selectionBar(plain, visibleWidth(plain))
-				: theme.text(plain);
+				: theme.muted(plain);
 			return { tab, plain, styled };
 		});
 		const brandPlain = showBrand ? " MACHINA " : "";
 		const head = showBrand ? `${brand} ${theme.border("│")} ` : "";
 		const headPlain = showBrand ? `${brandPlain} │ ` : "";
 		const keys = this.onKeys && total >= 76 ? "  Keys ? " : "";
-		const left = `${head}${tabParts.map(part => part.styled).join(" ")}${theme.muted(keys)}`;
+		const left = `${head}${tabParts.map(part => part.styled).join(" ")}${theme.secondary(keys)}`;
 		const leftPlain = `${headPlain}${tabParts.map(part => part.plain).join(" ")}${keys}`;
 		const leftWidth = visibleWidth(leftPlain);
 
@@ -108,7 +108,7 @@ export class NavBar implements Component {
 				? theme.dim(sanitizeLabelText(snap.model))
 				: "",
 			snap.project ? theme.dim(sanitizeLabelText(snap.project) + (snap.branch ? ` · ${sanitizeLabelText(snap.branch)}` : "")) : "",
-			snap.title ? theme.muted(sanitizeLabelText(snap.title)) : "",
+			snap.title ? theme.text(sanitizeLabelText(snap.title)) : "",
 		].filter(Boolean);
 		// The state chip is the one part of the right side that always
 		// survives: truncate it to the remaining room, then add context only

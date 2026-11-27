@@ -392,8 +392,8 @@ export class WorkspaceController {
 	private rootKeyValue: string | undefined;
 	private disposed = false;
 
-	// Layout intent (plan §7/§8).
-	private requestedMode: WorkspaceMode = "split";
+	// Layout intent (plan §7/§8). Chat owns the workspace until a file is opened.
+	private requestedMode: WorkspaceMode = "chat";
 	/** Mode a chat maximize restores to; only "split" | "editor" are non-chat. */
 	private restoreMode: "split" | "editor" = "split";
 	private splitRatioValue = 0.5;
@@ -712,8 +712,7 @@ export class WorkspaceController {
 			if (options.preview !== true) this.tabs.pin(existing.id);
 			this.schedulePersist();
 			if (options.focus !== false && this.requestedMode === "chat") {
-				// First file: reveal the workspace, including its tree.
-				this.explorerRequested = true;
+				// First file: reveal the editor. The tree stays an explicit drawer.
 				this.setMode("split");
 			}
 			this.requestRenderSafe();
@@ -807,8 +806,7 @@ export class WorkspaceController {
 		}
 		this.schedulePersist();
 		if (options.focus !== false && this.requestedMode === "chat") {
-			// First file: reveal the workspace, including its tree.
-			this.explorerRequested = true;
+			// First file: reveal the editor. The tree stays an explicit drawer.
 			this.setMode("split");
 		}
 		this.requestRenderSafe();
@@ -1265,9 +1263,14 @@ export class WorkspaceController {
 	/** Adopt persisted layout intent (the app decides when); no document I/O. */
 	applyRestoredLayout(state: WorkspacePersistedState): void {
 		const restoringFiles = Array.isArray(state.openUris) && state.openUris.length > 0;
-		this.requestedMode = restoringFiles ? state.requestedMode : "split";
+		const wantsExplorer = state.explorerRequested === true;
+		// Chat owns the workspace when no file is restored; the editor appears
+		// on demand. A stored split with no files must not strand the chat in
+		// half the viewport beside an empty pane. An explicit explorer request
+		// still needs the split it lives in.
+		this.requestedMode = restoringFiles ? state.requestedMode : wantsExplorer ? "split" : "chat";
 		this.splitRatioValue = clampSplitRatio(state.splitRatio);
-		this.explorerRequested = restoringFiles ? state.explorerRequested === true : false;
+		this.explorerRequested = wantsExplorer;
 		// Absent/unknown sides fall back to the default, never to the previous
 		// root's side (each stored document is self-contained).
 		this.chatSideValue = state.chatSide === "right" ? "right" : "left";

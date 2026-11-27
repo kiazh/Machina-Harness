@@ -78,9 +78,9 @@ const SKINS: Record<string, SkinDef> = {
 		art: ["  ◆──────◆", " │ AGENT  │", " │ HARNESS│", "  ◆──────◆"],
 		base: {
 			text: "#eeeeee",
-			muted: "#808080",
+			muted: "#969696",
 			dim: "#7c7c7c",
-			accent: "#fab283",
+			accent: "#dcb299",
 			secondary: "#9d7cd8",
 			success: "#7fd88f",
 			warning: "#f5a742",
@@ -226,7 +226,7 @@ const SKINS: Record<string, SkinDef> = {
 			// AA lift of CODEX_SEMANTIC_START.faint on the green-black canvas.
 			dim: "#818c84",
 			accent: CODEX_SEMANTIC_START.accent,
-			secondary: "#86a893",
+			secondary: CODEX_SEMANTIC_START.secondary,
 			success: CODEX_SEMANTIC_START.success,
 			warning: CODEX_SEMANTIC_START.warning,
 			error: CODEX_SEMANTIC_START.danger,
@@ -431,10 +431,10 @@ const SKINS: Record<string, SkinDef> = {
 		art: ["  ┌─────┐", "  │OPEN │", "  │CODE │", "  └─────┘"],
 		base: {
 			text: "#e4e4e7",
-			muted: "#8b8b94",
+			muted: "#96969e",
 			dim: "#797984",
-			accent: "#7aa2f7",
-			secondary: "#9d7cd8",
+			accent: "#91afe3",
+			secondary: "#af9ac8",
 			success: "#9ece6a",
 			warning: "#e0af68",
 			error: "#f7768e",
@@ -450,9 +450,9 @@ const SKINS: Record<string, SkinDef> = {
 			muted: "#565660",
 			dim: "#6e6e79",
 			accent: "#2f5fd0",
-			secondary: "#6a4fc7",
+			secondary: "#702e99",
 			success: "#1a7f37",
-			warning: "#976500",
+			warning: "#705000",
 			error: "#cf222e",
 			info: "#197a84",
 			neutral: "#f4f4f5",
@@ -1372,6 +1372,7 @@ const skinColors: Record<string, Record<PaletteName, Color>> = Object.fromEntrie
 		if (mutedFloor > minContrast(full.muted, surfaces)) {
 			full.muted = raiseInk(full.muted, surfaces, mutedFloor);
 		}
+		full.promptInk = full.text;
 		return [name, full];
 	}),
 );
@@ -1687,11 +1688,12 @@ export const markdownTheme: MarkdownTheme = {
 	linkUrl: fg("dim"),
 	code: fg("secondary"),
 	codeBlock: fg("text"),
-	codeBlockBorder: fg("dim"),
-	quote: fg("muted", { italic: true }),
+	codeBlockBorder: fg("muted"),
+	codeBlockIndent: "    ",
+	quote: fg("text", { italic: true }),
 	quoteBorder: fg("dim"),
-	hr: fg("dim"),
-	listBullet: fg("accent"),
+	hr: fg("border"),
+	listBullet: fg("secondary"),
 	bold: plain({ bold: true }),
 	italic: plain({ italic: true }),
 	strikethrough: plain({ strikethrough: true }),

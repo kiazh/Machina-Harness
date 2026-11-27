@@ -373,7 +373,7 @@ export class StatusPage implements Component {
 		const row = entry.row;
 		const updated = age(row.updatedAt);
 		const name = lineText(row.label);
-		const titles = wrapDisplay(name, Math.min(width, 80)).slice(0, height >= 8 ? 2 : 1);
+		const titles = wrapDisplay(name, width).slice(0, height >= 8 ? 2 : 1);
 		const lines = titles.map(title => theme.bold(theme.text(title)));
 		if (height >= 3) {
 			const state = stateStyle(row.state)(lineText(row.state ?? "unknown"));

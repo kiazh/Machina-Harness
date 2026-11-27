@@ -1215,6 +1215,7 @@ export class App implements FeatureHost {
 		this.clearImages();
 		this.editor.setText("");
 		this.transcript.clear();
+		this.transcript.addNotice("Describe a task. Machina can read, edit, and run commands in this workspace.", "plain");
 		this.footer.dispose();
 		this.footer.tokens = 0;
 		this.footer.contextTokens = 0;
@@ -4684,10 +4685,17 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
-		if (!this.turnSession.isInFlight(event.sessionId)) {
+		const approvalFrame = event.type === "needs_approval"
+			|| event.type === "permission.required"
+			|| event.type === "approval.resolved"
+			|| event.type === "permission.resolved"
+			|| event.type === "approval.resumed";
+		if (!this.turnSession.isInFlight(event.sessionId) && !approvalFrame) {
 			// A session without a local turn binding (e.g. an in-flight turn
 			// from the server side): preview it in the hidden session's tail;
-			// terminal dedupe lives in the tail itself.
+			// terminal dedupe lives in the tail itself. Approval frames pass:
+			// a delegated child has no local prompt turn, and its pause or
+			// resolution must still reach the owning card.
 			if (hidden) this.turnSession.bufferHiddenEvent(event);
 			return;
 		}
@@ -4698,7 +4706,7 @@ export class App implements FeatureHost {
 		const record = event.type === "message.start"
 			? this.turnSession.bindStart(event.sessionId, event.turnId)
 			: this.turnSession.bindEvent(event.sessionId, event);
-		if (!record) return;
+		if (!record && !approvalFrame) return;
 		// Activity updates obey the same turn binding as transcript frames.
 		if (event.type === "steering.update") {
 			this.activity.setQueue(event.sessionId, event.items as unknown as SteeringItem[]);
@@ -4967,6 +4975,10 @@ export class App implements FeatureHost {
 			transportTurnId: event.turnId,
 		};
 		if (this.turnSession.hasApprovalDialog(binding.requestId)) return;
+		// A paused delegated child keeps its run in `delegatedRunning`; a
+		// parent keeps a local in-flight turn. Anything else is a stale pause
+		// and must not take over the dock.
+		if (!this.turnSession.isRunning(event.sessionId)) return;
 		this.log.info("approval.prompt", {
 			request: binding.requestId.slice(0, 12),
 			session: binding.sessionId,
@@ -5069,12 +5081,15 @@ export class App implements FeatureHost {
 		const entry = this.turnSession.approvalDialog(requestId);
 		if (!entry) return;
 		// Revalidate immediately before dispatch: wrong-session, retired-turn
-		// and post-navigation decisions never leave this UI flow.
+		// and post-navigation decisions never leave this UI flow. A delegated
+		// child has no local prompt turn; its live `delegatedRunning` marker is
+		// the binding, and the resolve still carries the child session id.
+		const delegated = this.turnSession.delegatedRunning.has(entry.sessionId);
 		const record = this.turnSession.turnBinding(entry.sessionId);
-		const bound = record !== undefined
+		const turnBound = record !== undefined
 			&& this.turnSession.isInFlight(entry.sessionId)
-			&& entry.sessionId === this.current?.id
 			&& (record.turnId === entry.transportTurnId || (entry.originTurnId !== undefined && record.turnId === entry.originTurnId));
+		const bound = entry.sessionId === this.current?.id && (delegated || turnBound);
 		if (!bound) {
 			this.log.warn("approval.unbound", { request: requestId.slice(0, 12), session: entry.sessionId });
 			entry.close();
@@ -5154,7 +5169,7 @@ export class App implements FeatureHost {
 
 	/** Rebuild review cards retained while their session was hidden (R15). */
 	private restoreApprovals(sessionId: string): void {
-		if (!this.turnSession.isInFlight(sessionId)) return;
+		if (!this.turnSession.isRunning(sessionId)) return;
 		for (const [requestId, event] of this.turnSession.pendingApprovalEntries()) {
 			if (event.sessionId !== sessionId || this.turnSession.hasApprovalDialog(requestId)) continue;
 			void this.promptApproval(event);
@@ -5172,13 +5187,13 @@ export class App implements FeatureHost {
 	 * anything by itself.
 	 */
 	private async rehydrateApprovals(sessionId: string): Promise<void> {
-		if (this.exiting || this.current?.id !== sessionId || !this.turnSession.isInFlight(sessionId)) return;
+		if (this.exiting || this.current?.id !== sessionId || !this.turnSession.isRunning(sessionId)) return;
 		const result = await this.client
 			.request<{ approvals?: unknown }>("approvals.list", { sessionId })
 			.catch(() => undefined);
 		// Bind the answer to the session, not the moment the read started: a
 		// return that has since navigated away publishes nothing.
-		if (result === undefined || this.exiting || this.current?.id !== sessionId || !this.turnSession.isInFlight(sessionId)) return;
+		if (result === undefined || this.exiting || this.current?.id !== sessionId || !this.turnSession.isRunning(sessionId)) return;
 		const rows = Array.isArray(result.approvals) ? result.approvals : [];
 		for (const row of rows) {
 			const event = approvalRowEvent(sessionId, row);
