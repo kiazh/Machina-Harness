@@ -166,12 +166,16 @@ export class Footer implements Component {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
 				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
 				const head = (1 - Math.cos(phase * 2 * Math.PI)) / 2 * (WORK_TRACK - 1);
-				const scan = Array.from({ length: WORK_TRACK }, (_, cell) => {
-					const glow = Math.exp(-0.55 * (cell - head) ** 2);
+				const direction = Math.sin(phase * 2 * Math.PI) >= 0 ? 1 : -1;
+				const comet = Array.from({ length: WORK_TRACK }, (_, cell) => {
+					const behind = (head - cell) * direction;
+					const glow = behind >= 0
+						? Math.exp(-0.32 * behind)
+						: Math.exp(-4 * (cell - head) ** 2) * 0.35;
 					const glyph = SCAN_GLYPHS[Math.min(4, Math.floor(glow * 5))]!;
 					return theme.activity(glyph, 0.2 + 0.8 * glow, cell / (WORK_TRACK - 1));
 				}).join("");
-				activity = `${scan}  ${activity}`;
+				activity = `${comet}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
