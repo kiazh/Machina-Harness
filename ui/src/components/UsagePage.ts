@@ -13,7 +13,7 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 import type { UsageDailyPoint, UsageModelRow, UsageReportResult, UsageSkillRow } from "../protocol.ts";
-import { selectionBar, theme } from "../theme.ts";
+import { theme } from "../theme.ts";
 
 type Tab = "usage" | "skills";
 type Granularity = 0 | 1 | 2;
@@ -24,9 +24,9 @@ const TAB_LABELS: ReadonlyArray<{ id: Tab; label: string }> = [
 ];
 
 const MODES = ["Daily", "Weekly", "Cumulative"] as const;
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-const CONTENT_MAX = 92;
+const CONTENT_MAX = 84;
 const CHART_ROWS = 8;
 
 export interface UsagePageOptions {
@@ -186,7 +186,9 @@ export class UsagePage implements Component {
 	private tabs(width: number): string {
 		const parts = TAB_LABELS.map(({ id, label }, index) => {
 			const text = ` ${index + 1} ${label} `;
-			return id === this.tab ? selectionBar(text, visibleWidth(text)) : theme.dim(text);
+			return id === this.tab
+				? theme.bold(theme.toolBg(text))
+				: theme.dim(text);
 		});
 		return truncateToWidth(parts.join(" "), width);
 	}
@@ -205,7 +207,8 @@ export class UsagePage implements Component {
 		];
 		lines.push(...this.stats(report, width));
 		lines.push("");
-		lines.push(`${theme.accentBold("Token activity")}  ${theme.dim("Last 12 months")}`);
+		lines.push(theme.accentBold("Token activity"));
+		lines.push(theme.dim("Last 12 months"));
 		lines.push("");
 		lines.push(...this.activityView(report, width));
 		lines.push("");
@@ -262,7 +265,7 @@ export class UsagePage implements Component {
 
 	private monthLabels(start: Date, last: Date, visible: number, offset: number): string[] {
 		const labels = Array.from({ length: visible }, () => " ");
-		for (let month = 0; month < 12; month++) {
+		for (let month = 0; month < 13; month++) {
 			const probe = new Date(start.getFullYear(), start.getMonth() + month, 1);
 			if (probe < start || probe > last) continue;
 			const col = Math.floor(Math.floor((probe.getTime() - start.getTime()) / 86_400_000) / 7) - offset;
@@ -300,17 +303,17 @@ export class UsagePage implements Component {
 		const maximum = Math.max(1, ...values.flat());
 		const labels = this.monthLabels(start, last, visible, offset);
 
-		const out = [truncateToWidth(`    ${theme.dim(labels.join(""))}`.trimEnd(), width)];
+		const out = [truncateToWidth(`   ${theme.dim(labels.join(""))}`.trimEnd(), width)];
 		for (let row = 0; row < 7; row++) {
 			const cells = dates.map((week, col) => {
 				const day = week[row];
 				if (!day) return " ";
 				const level = intensity(values[col]![row]!, maximum);
-				return level <= 0 ? theme.dim("·") : theme.activity("■", level / 4, 0);
+				return level <= 0 ? theme.dim("▪") : theme.activity("▪", level / 4, 0);
 			});
-			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(3))} ${cells.join("")}`);
+			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`);
 		}
-		const legend = [0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0)).join(" ");
+		const legend = [0.25, 0.5, 0.75, 1].map((level) => theme.activity("▪", level, 0)).join(" ");
 		out.push(`${theme.dim("Less")} ${legend} ${theme.dim("More")}`);
 		return out;
 	}
@@ -345,7 +348,7 @@ export class UsagePage implements Component {
 			const cells = shown
 				.map((value) => {
 					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
-					return height > CHART_ROWS - row - 1 ? theme.activity("█", 0.6, 0) : " ";
+					return height > CHART_ROWS - row - 1 ? theme.activity("▪", 0.6, 0) : " ";
 				})
 				.join("");
 			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());

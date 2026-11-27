@@ -96,7 +96,7 @@ test("usage page renders stats, heatmap, models, and skills", () => {
 	assert.match(text, /Longest chat/);
 	assert.match(text, /Current streak/);
 	assert.match(text, /Token activity/);
-	assert.match(text, /Sun/);
+	assert.match(text, /Su /);
 	assert.match(text, /Activity insights/);
 	assert.match(text, /deepseek-v4\.1-flash/);
 	assert.match(text, /Skills explored/);
