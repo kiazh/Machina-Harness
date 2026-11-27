@@ -4560,6 +4560,7 @@ export class App implements FeatureHost {
 			if (!running) this.footer.status = "ready";
 			else if (!["awaiting_approval", "stopping", "cleanup_pending"].includes(this.footer.status)) this.footer.status = "working";
 		}
+		this.shell.invalidateChrome();
 	}
 
 	// ─── gateway ────────────────────────────────────────────────────────────
@@ -4827,6 +4828,7 @@ export class App implements FeatureHost {
 			if (event.sessionId !== this.current?.id) return;
 			this.transcript.suspend("cleanup_pending");
 			this.footer.status = "cleanup_pending";
+			this.shell.invalidateChrome();
 			this.transcript.addNotice(event.type === "turn.cleanup_pending"
 				? "Stopping: waiting for the running action to finish cleanup."
 				: "Turn ownership was lost; stopping the running action.", "warning");
@@ -4856,7 +4858,10 @@ export class App implements FeatureHost {
 			this.tui.requestRender();
 			return;
 		}
-		if (event.type === "message.stopping") this.footer.status = "stopping";
+		if (event.type === "message.stopping") {
+			this.footer.status = "stopping";
+			this.shell.invalidateChrome();
+		}
 		if (event.type === "message.complete") this.clearApprovals(event.sessionId);
 		const summary = this.transcript.apply(event);
 		if (event.type === "error") {
@@ -5051,6 +5056,7 @@ export class App implements FeatureHost {
 		this.shell.setDock(next?.card);
 		if (next) this.footer.status = "awaiting_approval";
 		else if (this.footer.status === "awaiting_approval") this.footer.status = this.running ? "working" : "ready";
+		this.shell.invalidateChrome();
 		// The dock owns the decision. A Quick Open list underneath would keep
 		// painting and compete for keys, so close it rather than leave it hidden.
 		if (next) this.closeQuickOpen();

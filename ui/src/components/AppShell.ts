@@ -225,18 +225,20 @@ export class AppShell {
 		// measureRows is itself keyed by the composer's draft/window state, so
 		// this stays a cheap lookup while catching draft/popup height changes.
 		const composerRows = split ? 0 : this.composer.measureRows?.(width) ?? this.composer.render(width).length;
+		const footerRows = this.footer.measureRows?.(width) ?? 1;
 		const key = [
 			width,
 			this.lastRows,
 			this.density,
 			activityRows,
 			composerRows,
+			footerRows,
 			this.dock ? (this.dockInChatColumn() ? "dock-chat" : "dock") : "nodock",
 			this.navRows(),
 		].join("|");
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
-		let rows = this.navRows() + composerRows + activityRows + 1 + this.bottomGapRows();
+		let rows = this.navRows() + composerRows + activityRows + footerRows + this.bottomGapRows();
 		if (!split) rows += this.composerGapRows();
 		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;

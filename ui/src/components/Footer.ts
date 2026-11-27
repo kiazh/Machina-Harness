@@ -80,6 +80,17 @@ export class Footer implements Component {
 		this.activity.setReducedMotion(enabled);
 	}
 
+	/** Two rows while work is live; one quiet row otherwise. */
+	measureRows(_width: number): number {
+		return this.isLive ? 2 : 1;
+	}
+
+	private get isLive(): boolean {
+		return this.currentStatus === "working"
+			|| this.currentStatus === "stopping"
+			|| this.currentStatus === "cleanup_pending";
+	}
+
 	/**
 	 * A bounded acknowledgment; frequent evidence never restarts or queues it.
 	 * Growth from non-visible sessions never reaches here (App filters).
@@ -126,8 +137,58 @@ export class Footer implements Component {
 		], ACTIVITY_INTERVAL_MS, startedAt);
 	}
 
+	private between(left: string, right: string, width: number): string {
+		const room = Math.max(0, width - visibleWidth(right) - 1);
+		const first = truncateToWidth(left, room, "…", true);
+		return truncateToWidth(`${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))} ${right}`, width);
+	}
+
+	private runningRows(width: number): string[] {
+		const fit = chromeInner(width);
+		const total = Math.max(0, width);
+		const status = this.currentStatus === "working"
+			? theme.accent("working")
+			: theme.warning(this.currentStatus === "stopping" ? "stopping" : "cleanup pending");
+		const agents = this.subagents > 0 ? theme.muted(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`) : "";
+		const elapsed = this.reducedMotion
+			? 0
+			: this.workingStart > 0
+				? Math.max(0, Math.round((Date.now() - this.workingStart) / 1000))
+				: 0;
+		const clock = theme.dim(`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`);
+		const tick = this.reducedMotion ? 0 : Number(this.activity.frame(["0", "1", "2", "3", "4", "5", "6", "7"], ACTIVITY_INTERVAL_MS, this.workingStart)) || 0;
+		const cells = fit >= 70 ? 16 : fit >= 40 ? 10 : 0;
+		const glyphs = "▁▂▃▄▅▆▇█";
+		const wave = Array.from({ length: cells }, (_, index) => {
+			const level = Math.max(0, Math.min(7, Math.round(3.5 + 3 * Math.sin((index + tick) * 0.7))));
+			const glyph = glyphs[level] ?? "▁";
+			return level >= 5 ? theme.accent(glyph) : theme.muted(glyph);
+		}).join("");
+		const left = `${wave}${wave ? " " : ""}${status}${agents} ${clock}`;
+		const stop = fit >= 46 ? theme.warning("esc×2 stop") : theme.warning("esc");
+		const top = this.between(left, stop, fit);
+		const displayTokens = this.contextTokens > 0 ? this.contextTokens : this.tokens;
+		const context = displayTokens > 0
+			? `${displayTokens.toLocaleString("en-US")} ${this.contextTokens > 0 ? "ctx" : "tokens"}${
+				this.contextTokens > 0 && this.contextPercent !== null ? ` (${this.contextPercent.toFixed(1)}%)` : ""
+			}`
+			: "context pending";
+		const right = theme.muted(context);
+		const room = Math.max(6, fit - visibleWidth(right) - 2);
+		const travel = room * 2 - 2;
+		const position = tick % Math.max(1, travel);
+		const cometPosition = position >= room ? travel - position : position;
+		const comet = `${"─".repeat(cometPosition)}${theme.accent("◆")}${"─".repeat(Math.max(0, room - cometPosition - 1))}`;
+		const bottom = this.between(`${theme.dim("  ")}${comet}`, right, fit);
+		return [
+			surfaceLine(top, total),
+			surfaceLine(bottom, total),
+		];
+	}
+
 	render(width: number): string[] {
 		if (width <= 0) return [""];
+		if (this.isLive) return this.runningRows(width);
 		const square = this.growthActive ? this.pulsingSquare(this.growthStart)
 			: this.workingSub ? this.pulsingSquare(this.workingStart) : theme.muted(ICONS.idleSquare);
 		const status = this.status === "working"

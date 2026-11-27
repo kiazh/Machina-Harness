@@ -76,18 +76,28 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	const footer = new Footer(coordinator);
 	t.after(() => { footer.dispose(); coordinator.dispose(); });
 	footer.status = "working";
-	const first = footer.render(80)[0]!;
-	assert.match(stripTerminalSequences(first), /▪$/);
+	const rows = footer.render(80).map((line) => stripTerminalSequences(line));
+	assert.equal(rows.length, 2, "live work uses two rows");
+	assert.match(rows[0]!, /working/);
+	assert.match(rows[0]!, /esc×2 stop/);
+	assert.match(rows[1]!, /ctx|tokens|context/);
 	assert.equal(coordinator.timerCount, 1);
 	t.mock.timers.tick(200);
-	const next = footer.render(80)[0]!;
+	const next = footer.render(80).map((line) => stripTerminalSequences(line));
 	assert.equal(renders(), 1, "streaming text must not strand the footer's animation");
-	assert.notEqual(next.slice(next.lastIndexOf("\x1b[", next.indexOf("▪"))), first.slice(first.lastIndexOf("\x1b[", first.indexOf("▪"))), "the corner itself changes brightness");
-	assert.match(stripTerminalSequences(next), /▪$/);
-	for (const status of ["awaiting_approval", "stopping", "cleanup_pending", "offline", "ready"] as const) {
+	assert.notEqual(next[0], rows[0], "the waveform advances");
+	for (const status of ["awaiting_approval", "offline", "ready"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
+		assert.equal(footer.render(80).length, 1);
 		assert.match(stripTerminalSequences(footer.render(80)[0]!), /□$/);
+		footer.status = "working";
+	}
+	for (const status of ["stopping", "cleanup_pending"] as const) {
+		footer.status = status;
+		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
+		assert.equal(footer.render(80).length, 2);
+		assert.match(stripTerminalSequences(footer.render(80)[0]!), new RegExp(status.replace("_", " ")));
 		footer.status = "working";
 	}
 	footer.dispose();
