@@ -1,4 +1,4 @@
-// /auth — account sign-in for ChatGPT, Grok, and GitHub Copilot, plus
+// /auth — account sign-in for ChatGPT, Grok, GitHub Copilot, and OpenCode Go, plus
 // one-click setup for the Kiro and Hermes local proxies.
 //
 // The gateway owns every browser/device flow and every token store. The UI
@@ -28,13 +28,14 @@ import type {
 import { splitSub } from "../commands.ts";
 import type { Command, FeatureHost } from "./types.ts";
 
-type Provider = "chatgpt" | "grok" | "copilot" | "kiro";
+type Provider = "chatgpt" | "grok" | "copilot" | "opencode" | "kiro";
 
 const SUBCOMMANDS: Array<[string, string]> = [
 	["status", "Show sign-in status for all providers"],
 	["chatgpt", "OpenAI account: status, sign-in, import-codex, sign-out"],
 	["grok", "Grok subscription: status, sign-in, sign-out"],
 	["copilot", "GitHub Copilot: status, sign-in, import-gh, sign-out"],
+	["opencode", "OpenCode Go: status, sign-in, sign-out"],
 	["kiro", "Kiro account: status, usage, start, stop, setup (local proxy)"],
 	["hermes", "Hermes proxy: status, setup, start, stop (one-click install + sign-in)"],
 	["sign-in", "Alias for /auth chatgpt sign-in"],
@@ -49,6 +50,7 @@ const PROVIDER_DEFAULT_MODEL: Record<Provider | "hermes", string> = {
 	chatgpt: "gpt-6.1-sol",
 	grok: "grok-4.7",
 	copilot: "gpt-6.1-sol",
+	opencode: "deepseek-v4.1-flash",
 	kiro: "auto",
 	hermes: "auto",
 };
@@ -97,6 +99,21 @@ function renderCopilotStatus(status: SubscriptionStatus): string {
 	return `GitHub Copilot: signed in (${status.accountId ?? "GitHub account"}, ${status.tokenFamily ?? "token"}).`;
 }
 
+function renderOpenCodeStatus(status: SubscriptionStatus): string {
+	if (!status.signedIn) {
+		return "OpenCode Go: not signed in. Run /auth opencode sign-in.";
+	}
+	const expiry = status.expiresAt
+		? `${formatAuthExpiry(status.expiresAt)}${status.expired ? " (expired)" : ""}`
+		: "unknown";
+	return [
+		`OpenCode Go: signed in${status.expired ? " (expired)" : ""}.`,
+		`  Email: ${status.email ?? "unknown"}`,
+		`  Organization: ${status.orgName ?? status.orgId ?? "unknown"} (${status.orgId ?? "unknown"})`,
+		`  Expires: ${expiry}`,
+	].join("\n");
+}
+
 function kiroStateLabel(status: KiroGatewayStatus): string {
 	if (status.reachable) {
 		return status.managed ? "local proxy running (managed)" : "local proxy running (external)";
@@ -132,9 +149,10 @@ async function statuses(host: FeatureHost): Promise<{
 	chatgpt: ChatGPTAuthStatus | null;
 	grok: SubscriptionStatus | null;
 	copilot: SubscriptionStatus | null;
+	opencode: SubscriptionStatus | null;
 	kiro: KiroGatewayStatus | null;
 }> {
-	const [chatgpt, grok, copilot, kiro] = await Promise.all([
+	const [chatgpt, grok, copilot, opencode, kiro] = await Promise.all([
 		host
 			.request<ChatGPTStatusResult>("auth.chatgpt.status")
 			.then((result) => result.status)
@@ -147,9 +165,13 @@ async function statuses(host: FeatureHost): Promise<{
 			.request<SubscriptionStatusResult>("auth.copilot.status")
 			.then((result) => result.status)
 			.catch(() => null),
+		host
+			.request<SubscriptionStatusResult>("auth.opencode.status")
+			.then((result) => result.status)
+			.catch(() => null),
 		kiroStatus(host),
 	]);
-	return { chatgpt, grok, copilot, kiro };
+	return { chatgpt, grok, copilot, opencode, kiro };
 }
 
 async function showStatus(host: FeatureHost, only?: Provider | "hermes"): Promise<void> {
@@ -161,11 +183,12 @@ async function showStatus(host: FeatureHost, only?: Provider | "hermes"): Promis
 	if (!only || only === "chatgpt") lines.push(result.chatgpt ? renderAuthStatus(result.chatgpt) : "ChatGPT subscription: status unavailable.");
 	if (!only || only === "grok") lines.push(result.grok ? renderGrokStatus(result.grok) : "Grok subscription: status unavailable.");
 	if (!only || only === "copilot") lines.push(result.copilot ? renderCopilotStatus(result.copilot) : "GitHub Copilot: status unavailable.");
+	if (!only || only === "opencode") lines.push(result.opencode ? renderOpenCodeStatus(result.opencode) : "OpenCode Go: status unavailable.");
 	if (!only || only === "kiro") lines.push(result.kiro ? renderKiroStatus(result.kiro) : "Kiro account: status unavailable.");
 	if (!only || only === "hermes") lines.push(hermes ? renderHermesStatus(hermes) : "Hermes proxy: status unavailable.");
 	lines.push("");
 	lines.push("Actions: /auth sign-in · /auth import-codex · /auth sign-out");
-	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth kiro · /auth hermes");
+	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth opencode · /auth kiro · /auth hermes");
 	host.print(lines.join("\n"), "plain");
 }
 
@@ -223,8 +246,9 @@ async function waitForOutcome(
  *  next turn does not keep using an API-key provider/model combination. */
 async function activateProvider(host: FeatureHost, provider: Provider | "hermes"): Promise<void> {
 	let model = PROVIDER_DEFAULT_MODEL[provider];
+	const providerId = provider === "opencode" ? "opencode-go" : provider;
 	try {
-		const catalog = await host.request<ModelsListResult>("models.list", { provider });
+		const catalog = await host.request<ModelsListResult>("models.list", { provider: providerId });
 		const first = catalog.models.find((entry) => entry.id);
 		if (first?.id) model = first.id;
 	} catch {
@@ -233,7 +257,7 @@ async function activateProvider(host: FeatureHost, provider: Provider | "hermes"
 	try {
 		const providerResult = await host.request<ConfigSetResult>("config.set", {
 			key: "provider",
-			value: provider,
+			value: providerId,
 			persist: true,
 		});
 		host.onConfig(providerResult);
@@ -245,11 +269,11 @@ async function activateProvider(host: FeatureHost, provider: Provider | "hermes"
 		host.onConfig(modelResult);
 		const session = host.session();
 		if (session) {
-			await host.request("session.setModel", { sessionId: session.id, model, provider });
+			await host.request("session.setModel", { sessionId: session.id, model, provider: providerId });
 		}
-		host.print(`Active provider: ${provider} · model: ${model}`, "success");
+		host.print(`Active provider: ${providerId} · model: ${model}`, "success");
 	} catch {
-		host.print(`Signed in. Choose a ${provider} model with /models to use the account.`, "warning");
+		host.print(`Signed in. Choose a ${providerId} model with /models to use the account.`, "warning");
 	}
 }
 
@@ -336,6 +360,32 @@ async function signInCopilot(host: FeatureHost): Promise<void> {
 	await activateProvider(host, "copilot");
 }
 
+async function signInOpenCode(host: FeatureHost): Promise<void> {
+	const started = await host.request<SubscriptionLoginResult>("auth.opencode.login", {});
+	if (started.pending) {
+		host.print("An OpenCode Go sign-in is already waiting for approval.", "plain");
+		return;
+	}
+	host.print(
+		`Open this URL to sign in to OpenCode Go:\n${started.url ?? ""}\nDevice code: ${started.userCode ?? ""}\nWaiting for approval…`,
+		"plain",
+	);
+	const outcome = await waitForOutcome(host, "opencode", async () => {
+		const result = await host.request<SubscriptionStatusResult>("auth.opencode.status");
+		return result.status;
+	});
+	if (outcome.kind === "timeout") {
+		host.print("OpenCode Go sign-in timed out. Run /auth opencode sign-in to try again.", "warning");
+		return;
+	}
+	if (outcome.kind === "failed") {
+		host.print(failureText("opencode", outcome.reason), "error");
+		return;
+	}
+	host.print(`Signed in to OpenCode Go${outcome.accountId ? ` (${outcome.accountId})` : ""}.`, "success");
+	await activateProvider(host, "opencode");
+}
+
 async function importCodex(host: FeatureHost): Promise<void> {
 	const result = await host.request<ChatGPTImportResult>("auth.chatgpt.importCodex", {});
 	if (result.imported) {
@@ -376,8 +426,9 @@ async function signOut(host: FeatureHost, provider: Provider): Promise<void> {
 		}
 		return;
 	}
-	if (result.removed) host.print(`Signed out of ${provider}.`, "success");
-	else host.print(`Already signed out of ${provider}.`, "plain");
+	const label = provider === "opencode" ? "OpenCode Go" : provider;
+	if (result.removed) host.print(`Signed out of ${label}.`, "success");
+	else host.print(`Already signed out of ${label}.`, "plain");
 }
 
 async function providerStatus(host: FeatureHost, provider: Provider): Promise<SubscriptionStatus | null> {
@@ -409,6 +460,7 @@ function providerLabel(provider: Provider, status: SubscriptionStatus | null): s
 	const state = status?.signedIn ? `signed in${status.accountId ? ` as ${status.accountId}` : ""}` : "signed out";
 	if (provider === "chatgpt") return `ChatGPT subscription — ${state}`;
 	if (provider === "grok") return `Grok subscription — ${state}`;
+	if (provider === "opencode") return `OpenCode Go — ${state}`;
 	if (provider === "kiro") return "Kiro account — local proxy";
 	return `GitHub Copilot — ${state}`;
 }
@@ -706,7 +758,9 @@ async function providerMenu(host: FeatureHost, provider: Provider): Promise<void
 	const items: Array<{ value: string; label: string; description?: string }> = [
 		{
 			value: "sign-in",
-			label: signedIn ? `Sign in again to ${provider}` : `Sign in to ${provider}`,
+			label: signedIn
+				? `Sign in again to ${provider === "opencode" ? "OpenCode Go" : provider}`
+				: `Sign in to ${provider === "opencode" ? "OpenCode Go" : provider}`,
 			description: signedIn ? "Re-run authorization and replace the stored token" : "Browser/device authorization",
 		},
 	];
@@ -730,6 +784,7 @@ async function openAuthMenu(host: FeatureHost): Promise<void> {
 		{ value: "chatgpt", label: "ChatGPT subscription", description: "OpenAI account — sign in or manage status" },
 		{ value: "grok", label: "Grok subscription", description: "xAI Grok account — sign in or manage status" },
 		{ value: "copilot", label: "GitHub Copilot", description: "GitHub Copilot seat — sign in or manage status" },
+		{ value: "opencode", label: "OpenCode Go", description: "OpenCode Go subscription — sign in or manage status" },
 		{ value: "kiro", label: "Kiro account — local proxy", description: "Kiro through a local OpenAI-compatible proxy (community interop)" },
 		{ value: "hermes", label: "Hermes proxy — local proxy", description: "Hermes local proxy (Nous Portal / xAI OAuth) — one-click setup" },
 		{ value: "status", label: "Show all sign-in statuses", description: "Fetch status for every account (may take a moment)" },
@@ -806,7 +861,8 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 	if (command === "sign-in" || command === "login") {
 		if (provider === "chatgpt") await signInChatGPT(host);
 		else if (provider === "grok") await signInGrok(host);
-		else await signInCopilot(host);
+		else if (provider === "copilot") await signInCopilot(host);
+		else await signInOpenCode(host);
 		return;
 	}
 	if (provider === "chatgpt" && command === "import-codex") {
@@ -826,8 +882,8 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 
 export const authCommand: Command = {
 	name: "auth",
-	description: "Sign in to ChatGPT, Grok, or Copilot — or set up the Kiro/Hermes local proxies",
-	argumentHint: "[chatgpt|grok|copilot|kiro|hermes] [status|sign-in|setup|start|stop]",
+	description: "Sign in to ChatGPT, Grok, Copilot, or OpenCode Go — or set up Kiro/Hermes",
+	argumentHint: "[chatgpt|grok|copilot|opencode|kiro|hermes] [status|sign-in|setup|start|stop]",
 	getArgumentCompletions: (prefix: string) => {
 		const typed = prefix.trimStart().toLowerCase();
 		if (/\s/.test(typed)) return null;
@@ -855,6 +911,9 @@ export const authCommand: Command = {
 			case "copilot":
 				await dispatch(host, "copilot", rest);
 				return;
+			case "opencode":
+				await dispatch(host, "opencode", rest);
+				return;
 			case "kiro":
 				await dispatch(host, "kiro", rest);
 				return;
@@ -874,7 +933,7 @@ export const authCommand: Command = {
 				return;
 			default:
 				throw new Error(
-					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/kiro/hermes.`,
+					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/opencode/kiro/hermes.`,
 				);
 		}
 	},

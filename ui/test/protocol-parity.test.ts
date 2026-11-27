@@ -48,6 +48,8 @@ export const TS_EVENT_TYPES = [
 	"auth.grok.failed",
 	"auth.copilot.completed",
 	"auth.copilot.failed",
+	"auth.opencode.completed",
+	"auth.opencode.failed",
 	"permission.required",
 	"permission.resolved",
 ] as const satisfies readonly GatewayEvent["type"][];

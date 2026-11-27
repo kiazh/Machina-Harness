@@ -1475,7 +1475,7 @@ test("/models filters by query and warns when nothing matches", async () => {
 	assert.ok(!host.calls.some((c) => c.method === "config.set" || c.method === "session.setModel"));
 });
 
-test("/models curated list includes the ChatGPT account and OpenCode Zen defaults", () => {
+test("/models curated list includes subscription defaults and both OpenCode providers", () => {
 	assert.ok(CURATED_MODELS.some((e) => e.provider === "openai" && e.model === "gpt-6-luna"));
 	const chatgpt = CURATED_MODELS.find((e) => e.provider === "chatgpt");
 	assert.equal(chatgpt?.model, "gpt-6-luna");
@@ -1483,6 +1483,9 @@ test("/models curated list includes the ChatGPT account and OpenCode Zen default
 	const opencode = CURATED_MODELS.find((e) => e.provider === "opencode");
 	assert.equal(opencode?.model, "big-pickle");
 	assert.match(opencode?.description ?? "", /OPENCODE_API_KEY/);
+	const opencodeGo = CURATED_MODELS.find((e) => e.provider === "opencode-go");
+	assert.equal(opencodeGo?.model, "deepseek-v4.1-flash");
+	assert.match(opencodeGo?.description ?? "", /\/auth opencode sign-in/);
 	const kiro = CURATED_MODELS.filter((e) => e.provider === "kiro");
 	assert.deepEqual(
 		kiro.map((e) => e.model),
@@ -1516,7 +1519,7 @@ test("/models curated list includes the ChatGPT account and OpenCode Zen default
 	assert.equal(kiro.find((e) => e.model === "deepseek-3.2")?.contextWindow, 164_000);
 	assert.equal(kiro.find((e) => e.model === "qwen3-coder-next")?.contextWindow, 256_000);
 	assert.deepEqual(filterCuratedModels("chatgpt").map((e) => e.provider), ["chatgpt"]);
-	assert.deepEqual(filterCuratedModels("opencode").map((e) => e.provider), ["opencode"]);
+	assert.deepEqual(filterCuratedModels("opencode").map((e) => e.provider), ["opencode-go", "opencode"]);
 	assert.ok(filterCuratedModels("kiro").every((e) => e.provider === "kiro"));
 });
 

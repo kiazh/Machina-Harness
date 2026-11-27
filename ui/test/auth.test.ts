@@ -185,7 +185,7 @@ test("/auth (bare) prints the signed-in status card with actions", async () => {
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
 	assert.deepEqual(
 		host.calls.slice(1).map((call) => call.method),
-		["auth.grok.status", "auth.copilot.status", "auth.kiro.status", "auth.hermes.status"],
+		["auth.grok.status", "auth.copilot.status", "auth.opencode.status", "auth.kiro.status", "auth.hermes.status"],
 	);
 	const text = host.text();
 	assert.match(text, /signed in via Machina token store/);
@@ -328,6 +328,7 @@ test("/auth offers completion-friendly subcommands", async () => {
 		"chatgpt",
 		"grok",
 		"copilot",
+		"opencode",
 		"kiro",
 		"hermes",
 		"sign-in",
@@ -413,6 +414,94 @@ test("/auth copilot status is shown alongside the other providers", async () => 
 	await run("/auth status", host);
 	assert.match(host.text(), /GitHub Copilot: signed in \(octocat, fine-grained\)/);
 	assert.match(host.text(), /\/auth grok/);
+});
+
+test("/auth opencode status shows organization, expiry, and sign-in hint", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.opencode.status"] = {
+		status: {
+			signedIn: true,
+			expired: false,
+			expiresAt: 1_900_000_000,
+			email: "user@example.test",
+			orgId: "org-1",
+			orgName: "Primary",
+			accountId: "account-1",
+			storagePath: "/private/auth.json",
+		},
+	};
+	await run("/auth status", host);
+	assert.match(host.text(), /OpenCode Go: signed in/);
+	assert.match(host.text(), /user@example\.test/);
+	assert.match(host.text(), /Primary \(org-1\)/);
+	assert.match(host.text(), /Expires: 2030-03-17T17:46:40Z/);
+	assert.match(host.text(), /\/auth opencode/);
+
+	const signedOut = new AuthFakeHost();
+	signedOut.responses["auth.opencode.status"] = {
+		status: {
+			signedIn: false,
+			expired: false,
+			expiresAt: null,
+			email: null,
+			orgId: null,
+			orgName: null,
+			accountId: null,
+			storagePath: "/private/auth.json",
+		},
+	};
+	await run("/auth opencode status", signedOut);
+	assert.match(signedOut.text(), /Run \/auth opencode sign-in/);
+});
+
+test("/auth opencode sign-in prints device details and activates the model", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.opencode.login"] = {
+		url: "https://opencode.ai/verify?code=ABCD-EFGH",
+		userCode: "ABCD-EFGH",
+		verificationUri: "https://opencode.ai/verify",
+		expiresIn: 300,
+	};
+	host.responses["models.list"] = { provider: "opencode-go", source: "models.dev", models: [] };
+	host.responses["config.set"] = { key: "provider", value: "opencode-go" };
+	host.responses["session.setModel"] = {
+		sessionId: SESSION.id,
+		model: "deepseek-v4.1-flash",
+		provider: "opencode-go",
+	};
+	const pending = run("/auth opencode sign-in", host);
+	await flush();
+	assert.ok(host.calls.some((call) => call.method === "auth.opencode.login"));
+	assert.match(host.text(), /https:\/\/opencode\.ai\/verify\?code=ABCD-EFGH/);
+	assert.match(host.text(), /Device code: ABCD-EFGH/);
+	host.emit({
+		protocolVersion: 2,
+		sessionId: "",
+		turnId: "",
+		type: "auth.opencode.completed",
+		account_id: "account-1",
+		expiry: 1_900_000_000,
+		org_id: "org-1",
+	});
+	await pending;
+	assert.match(host.text(), /Signed in to OpenCode Go \(account-1\)/);
+	assert.ok(host.calls.some((call) => call.method === "models.list" && call.params.provider === "opencode-go"));
+	assert.ok(host.calls.some((call) => call.method === "config.set" && call.params.value === "opencode-go"));
+	assert.ok(host.calls.some((call) => call.method === "config.set" && call.params.value === "deepseek-v4.1-flash"));
+	assert.match(host.text(), /Active provider: opencode-go/);
+	assert.match(host.text(), /model: deepseek-v4\.1-flash/);
+	assert.equal(host.handlers.size, 0);
+});
+
+test("/auth opencode sign-out calls the provider logout method", async () => {
+	const host = new AuthFakeHost();
+	host.responses["auth.opencode.logout"] = {
+		removed: true,
+		status: { signedIn: false },
+	};
+	await run("/auth opencode sign-out", host);
+	assert.deepEqual(host.calls, [{ method: "auth.opencode.logout", params: {} }]);
+	assert.match(host.text(), /Signed out of OpenCode Go/);
 });
 
 // ─── Kiro local-gateway lifecycle ───────────────────────────────────────────

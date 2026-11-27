@@ -48,6 +48,9 @@ from machina.gateway.features.auth_subscriptions import (
     auth_grok_login,
     auth_grok_logout,
     auth_grok_status,
+    auth_opencode_login,
+    auth_opencode_logout,
+    auth_opencode_status,
 )
 from machina.gateway.features.changes import (
     changes_diff,
@@ -242,6 +245,9 @@ METHODS: dict[str, Handler] = {
     "auth.copilot.login": auth_copilot_login,
     "auth.copilot.importGh": auth_copilot_import_gh,
     "auth.copilot.logout": auth_copilot_logout,
+    "auth.opencode.status": auth_opencode_status,
+    "auth.opencode.login": auth_opencode_login,
+    "auth.opencode.logout": auth_opencode_logout,
     "auth.kiro.status": auth_kiro_status,
     "auth.kiro.start": auth_kiro_start,
     "auth.kiro.stop": auth_kiro_stop,

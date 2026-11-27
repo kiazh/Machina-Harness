@@ -120,6 +120,14 @@
     },
     "auth.copilot.failed": {
       "reason": "string"
+    },
+    "auth.opencode.completed": {
+      "account_id": "string|null",
+      "expiry": "number|null",
+      "org_id": "string|null"
+    },
+    "auth.opencode.failed": {
+      "reason": "string"
     }
   }
 }

@@ -306,8 +306,9 @@ route does not guarantee authentication, capacity, or uptime. Unknown pricing
 and usage remain visible as unknown.
 
 The `opencode-go` provider uses an OpenCode Go subscription rather than an API
-key. Sign in once with `machina auth opencode login`; Machina stores and refreshes
-the device-flow credentials locally.
+key. Sign in with `/auth opencode sign-in` in the interactive UI or
+`machina auth opencode login` in the CLI; Machina stores and refreshes the
+device-flow credentials locally.
 
 ## Failure semantics
 
@@ -424,8 +425,8 @@ See [`machina/cli/`](machina/cli) for the command implementation and `machina --
 
 ### Appendix A: RPC catalog
 
-The gateway has 14 core JSON-RPC methods and 163 registered feature methods
-(177 total). This is the stdio registry; authenticated HTTP `/rpc` exposes a
+The gateway has 14 core JSON-RPC methods and 166 registered feature methods
+(180 total). This is the stdio registry; authenticated HTTP `/rpc` exposes a
 subset, with turns using the HTTP prompt stream. Names come from the
 registries in this checkout.
 
@@ -435,7 +436,7 @@ registries in this checkout.
 |---|---|
 | `agents` | `agents.list`, `agents.save`, `agents.delete`, `agents.run`, `agents.history` |
 | `approvals` | `approvals.list`, `approvals.resolve` |
-| `auth` | `auth.chatgpt.status`, `auth.chatgpt.login`, `auth.chatgpt.logout`, `auth.chatgpt.importCodex`, `auth.grok.status`, `auth.grok.login`, `auth.grok.logout`, `auth.copilot.status`, `auth.copilot.login`, `auth.copilot.importGh`, `auth.copilot.logout`, `auth.kiro.status`, `auth.kiro.start`, `auth.kiro.stop`, `auth.kiro.setup`, `auth.kiro.usage`, `auth.kiro.fallback`, `auth.hermes.status`, `auth.hermes.start`, `auth.hermes.stop`, `auth.hermes.setup` |
+| `auth` | `auth.chatgpt.status`, `auth.chatgpt.login`, `auth.chatgpt.logout`, `auth.chatgpt.importCodex`, `auth.grok.status`, `auth.grok.login`, `auth.grok.logout`, `auth.copilot.status`, `auth.copilot.login`, `auth.copilot.importGh`, `auth.copilot.logout`, `auth.opencode.status`, `auth.opencode.login`, `auth.opencode.logout`, `auth.kiro.status`, `auth.kiro.start`, `auth.kiro.stop`, `auth.kiro.setup`, `auth.kiro.usage`, `auth.kiro.fallback`, `auth.hermes.status`, `auth.hermes.start`, `auth.hermes.stop`, `auth.hermes.setup` |
 | `changes` | `changes.list`, `changes.diff` |
 | `config` | `config.get` |
 | `context` | `context.get`, `context.compress` |
@@ -493,7 +494,7 @@ The tool broker uses effect declarations and the permission policy; tool names t
 
 ### Appendix D: Protocol events
 
-The protocol is version 2 and declares 27 event names in [`machina/protocol/events.json`](machina/protocol/events.json). `?` marks optional fields.
+The protocol is version 2 and declares 29 event names in [`machina/protocol/events.json`](machina/protocol/events.json). `?` marks optional fields.
 
 | Event | Payload fields |
 |---|---|
@@ -524,6 +525,8 @@ The protocol is version 2 and declares 27 event names in [`machina/protocol/even
 | `auth.grok.failed` | `reason` |
 | `auth.copilot.completed` | `account_id`, `token_family` |
 | `auth.copilot.failed` | `reason` |
+| `auth.opencode.completed` | `account_id`, `expiry`, `org_id` |
+| `auth.opencode.failed` | `reason` |
 
 ### Appendix E: Data and implementation references
 
