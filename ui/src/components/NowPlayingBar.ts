@@ -19,7 +19,7 @@
 
 import { type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { sanitizeLabelText } from "../design/text.ts";
-import { chromeInner, surfaceLine, theme } from "../design/theme.ts";
+import { chromeInner, theme } from "../design/theme.ts";
 
 /** Equalizer frames for the "audio is playing" animation. */
 export const SOUND_FRAMES = ["▂▄▆", "▄▆▂", "▆▂▄", "▂▆▄"] as const;
@@ -217,7 +217,7 @@ export class NowPlayingBar implements PinnedBarBudget {
 			// No track: one honest line. A denied Automation permission keeps
 			// its needs-permission wording (with the actionable error), never
 			// the "Nothing playing" empty line.
-			return [surfaceLine(` ${this.compactLine(chromeInner(width) - 1)}`, width)];
+			return [` ${this.compactLine(chromeInner(width) - 1)}`];
 		}
 		if (this.rows >= 3) {
 			return [this.titleLine(width), this.metaLine(width), this.transportLine(width)];
@@ -225,7 +225,7 @@ export class NowPlayingBar implements PinnedBarBudget {
 		if (this.rows === 2) {
 			return [this.titleLine(width), this.transportLine(width)];
 		}
-		return [surfaceLine(` ${this.compactLine(chromeInner(width) - 1)}`, width)];
+		return [` ${this.compactLine(chromeInner(width) - 1)}`];
 	}
 
 	/**
