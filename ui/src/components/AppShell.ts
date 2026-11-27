@@ -215,7 +215,7 @@ export class AppShell {
 			this.density,
 			activityRows,
 			composerRows,
-			this.dock ? "dock" : "nodock",
+			this.dock ? (this.dockInChatColumn() ? "dock-chat" : "dock") : "nodock",
 			this.navRows(),
 		].join("|");
 		const cached = this.chromeCache;
@@ -228,7 +228,7 @@ export class AppShell {
 			rows += activityRows;
 			sections += 1;
 		}
-		if (this.dock) {
+		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;
 			sections += 1;
 		}
@@ -341,6 +341,12 @@ export class AppShell {
 		}
 	}
 
+	private dockInChatColumn(): boolean {
+		if (!this.dock) return false;
+		const mode = this.workspace?.layout?.effectiveMode;
+		return mode === undefined || mode === "chat" || mode === "split";
+	}
+
 	private build(density: Density): VStack {
 		const navEntries = this.navBar ? [{ component: this.navBar, shrink: 0 }] : [];
 		// Page tabs own the whole viewport: no composer, dock, activity bar or
@@ -356,6 +362,7 @@ export class AppShell {
 		// every row on transcript, composer, or status.
 		const gap = density === "full" && (!this.dock || this.lastRows >= 24) ? 1 : 0;
 		const topRow = this.workspaceRow();
+		const dockOutsideChat = Boolean(this.dock) && !this.dockInChatColumn();
 		const activity = this.activityBar;
 		const activityEntries = activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : [];
 		// Viewports consume the remaining rows. A zero basis skips intrinsic
@@ -366,7 +373,7 @@ export class AppShell {
 				[
 					...navEntries,
 					{ component: this.chatColumn(), basis: 0, grow: 1 },
-					...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
+					...(dockOutsideChat && this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 					...activityEntries,
 					{ component: this.composer, shrink: 0 },
 					{ component: this.footer, shrink: 0 },
@@ -374,14 +381,15 @@ export class AppShell {
 				{ gap },
 			);
 		}
-		// Workspace composition (plan §7 + UX-5): the panes row grows, then the
-		// optional approval dock, the pinned composer and the footer are
-		// FULL-WIDTH rows. The chat column keeps only the transcript.
+		// Workspace composition: the panes row grows. The approval card lives
+		// inside the chat column when chat is visible, so it reads as chat
+		// evidence rather than a full-width band crossing the editor. Editor-
+		// only mode keeps the full-width dock because no chat column exists.
 		return new VStack(
 			[
 				...navEntries,
 				{ component: topRow, basis: 0, grow: 1 },
-				...(this.dock ? [{ component: this.dock, shrink: 0 }] : []),
+				...(dockOutsideChat && this.dock ? [{ component: this.dock, shrink: 0 }] : []),
 				...activityEntries,
 				{ component: this.composer, shrink: 0 },
 				{ component: this.footer, shrink: 0 },
@@ -428,7 +436,8 @@ export class AppShell {
 	private chatColumn(): Component {
 		const bar = this.pinnedBar;
 		const agentBar = this.agentBar;
-		if (!bar && !agentBar) return this.transcriptScroll;
+		const dock = this.dockInChatColumn() ? this.dock : undefined;
+		if (!bar && !agentBar && !dock) return this.transcriptScroll;
 		return new VStack(
 			[
 				...(agentBar ? [{ component: agentBar, basis: "auto" as const, shrink: 0, minSize: 0, visible: () => agentBar.visible }] : []),
@@ -439,7 +448,8 @@ export class AppShell {
 					minSize: 0,
 					visible: () => bar.visible,
 				}] : []),
-				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: 1 },
+				{ component: this.transcriptScroll, basis: 0, grow: 1, minSize: dock && this.lastRows < 12 ? 0 : 1 },
+				...(dock ? [{ component: dock, shrink: 0 }] : []),
 			],
 			{ gap: 0 },
 		);

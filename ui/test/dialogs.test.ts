@@ -710,6 +710,94 @@ test("I03 approval over a form denies, closes, and restores the draft", async (t
 	assert.equal(requests.filter((method) => method === "prompt.submit").length, 1, "no accidental prompt submission");
 });
 
+test("Enter on a live approval resolves it once", async (t) => {
+	const { app, tui, type, requests, client } = await boot();
+	t.after(() => app.exit());
+	await app.submitTurn("do work");
+	const emit = (event: Record<string, unknown>) =>
+		(client as unknown as { onEvent?: (e: never) => void }).onEvent?.({
+			sessionId: "s",
+			turnId: "t",
+			...event,
+		} as never);
+	emit({ type: "message.start" });
+	emit({
+		type: "needs_approval",
+		requestId: "req-enter",
+		operation: "terminal",
+		tool: "terminal",
+		target: "host",
+		argv: ["sed", "-n", "1,120p", "portfolio-plan.md"],
+		cwd: "/tmp",
+		backend: "host",
+		capabilities: [],
+	});
+	tui.renderNow(true);
+	assert.match(tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Allow terminal · host\?/);
+	type("\r");
+	for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+	const resolves = requests.filter((method) => method === "approvals.resolve");
+	assert.equal(resolves.length, 1, "Enter dispatches exactly one decision");
+});
+
+test("a stale approval is dropped and the live pending request replaces it", async (t) => {
+	const live = {
+		request_id: "req-live",
+		session_id: "s",
+		turn_id: "t",
+		status: "pending",
+		operation: "terminal",
+		target: "host",
+		proposal: {
+			tool: "terminal",
+			argv: ["pytest"],
+			cwd: "/tmp",
+			backend: "host",
+			targets: ["host"],
+			timeout: 60,
+			capabilities: [],
+		},
+	};
+	const { app, tui, type, requests, client } = await boot(80, 24, {
+		"approvals.list": { approvals: [live] },
+	});
+	t.after(() => app.exit());
+	await app.submitTurn("do work");
+	const emit = (event: Record<string, unknown>) =>
+		(client as unknown as { onEvent?: (e: never) => void }).onEvent?.({
+			sessionId: "s",
+			turnId: "t",
+			...event,
+		} as never);
+	const original = client.request.bind(client);
+	client.request = (async (method: string, _params: Record<string, unknown>) => {
+		if (method === "approvals.resolve") {
+			requests.push(method);
+			throw new Error("approval already consumed or not permitted");
+		}
+		return original(method);
+	}) as typeof client.request;
+	emit({ type: "message.start" });
+	emit({
+		type: "needs_approval",
+		requestId: "req-stale",
+		operation: "terminal",
+		tool: "terminal",
+		target: "host",
+		argv: ["false"],
+		cwd: "/tmp",
+		backend: "host",
+		capabilities: [],
+	});
+	tui.renderNow(true);
+	type("\r");
+	for (let i = 0; i < 12; i++) await new Promise((resolve) => setImmediate(resolve));
+	tui.renderNow(true);
+	const screen = tui.getScreenLines().map(stripTerminalSequences).join("\n");
+	assert.match(screen, /request: req-live/, "the live pending request is rehydrated");
+	assert.equal(requests.filter((method) => method === "approvals.resolve").length, 1);
+});
+
 test("H02 theme preview commits on Enter and restores on Esc", async (t) => {
 	const { getSkin, setSkin } = await import("../src/theme.ts");
 	const { app, tui, type } = await boot();

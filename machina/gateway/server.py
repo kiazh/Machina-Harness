@@ -195,6 +195,13 @@ def _git_branch() -> str:
     return ""
 
 
+def _approval_event_target(
+    card: dict[str, Any], session_id: str, turn_id: str
+) -> tuple[str, str]:
+    """An approval event belongs to the session/turn that owns the pending row."""
+    return str(card.get("session_id") or session_id), str(card.get("turn_id") or turn_id)
+
+
 def _default_agent_factory(model: str, provider: str) -> StreamingAgent:
     # Sentinel identity only: Gateway._run_turn branches on
     # ``self._agent_factory is _default_agent_factory`` and builds through
@@ -1401,7 +1408,19 @@ class Gateway:
             # name with an empty target.
             from machina.protocol import approval_fields
 
-            emit("needs_approval", **approval_fields(card))
+            card_session, card_turn = _approval_event_target(card, sid, turn_id)
+            self._write(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": self.event_payload(
+                        "needs_approval",
+                        card_session,
+                        card_turn,
+                        **approval_fields(card),
+                    ),
+                }
+            )
             # AH-AUDIT-029: genuine human waits pause compute accounting
             # (tracked separately); approval timeout stays broker-bounded.
             # Renew logical ownership while waiting so a long human pause

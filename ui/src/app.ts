@@ -1299,7 +1299,9 @@ export class App implements FeatureHost {
 		this.footer.contextTokens = 0;
 		this.footer.contextPercent = null;
 		// The backend stays paused for this session's approvals; rebuild the
-		// review cards retained while it was hidden (R15).
+		// review cards retained while it was hidden (R15). Close every other
+		// session's card first so a stale child request cannot own the dock.
+		this.invalidateApprovals(session.id);
 		this.restoreApprovals(session.id);
 		// A question delivered while this session was hidden should reappear
 		// when its owning session becomes visible.
@@ -5095,9 +5097,24 @@ export class App implements FeatureHost {
 				grant: decision.grant,
 			});
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const terminal = /unknown approval|already consumed|not permitted|expired|does not belong/i.test(message);
 			this.log.warn("approval.failed", { request: requestId.slice(0, 12), error: describeError(error) });
-			entry.card.setError(error instanceof Error ? error.message : String(error));
-			this.shell.invalidateChrome(); // the error row changes the dock height
+			if (terminal) {
+				// A request that can never resolve is stale (expired, consumed
+				// elsewhere, or owned by another session). Drop the dead card so
+				// it cannot block every later pending approval behind it.
+				this.turnSession.deletePendingApproval(requestId);
+				entry.close();
+				this.transcript.addNotice(
+					`Approval ${requestId.slice(0, 8)} could not be resolved: ${message}. Reloading pending approvals.`,
+					"warning",
+				);
+				void this.rehydrateApprovals(entry.sessionId);
+			} else {
+				entry.card.setError(message);
+				this.shell.invalidateChrome(); // the error row changes the dock height
+			}
 			this.tui.requestRender();
 			return;
 		}

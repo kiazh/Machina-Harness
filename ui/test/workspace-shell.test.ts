@@ -397,7 +397,7 @@ test("the far-right grip toggles the explorer and never widens past its column",
 	}
 });
 
-test("a docking card becomes a full-width row under the panes in split mode", () => {
+test("a docking card stays inside the chat column in split mode", () => {
 	const h = buildHarness(160, 48);
 	try {
 		configure(h);
@@ -407,10 +407,11 @@ test("a docking card becomes a full-width row under the panes in split mode", ()
 		const screen = plain(h.tui.getScreenLines());
 		const dockRow = screen.findIndex((line) => line.includes("DOCK-ROW"));
 		assert.ok(dockRow >= 0, "dock card renders");
-		assert.ok(dockRow > geometry.editor!.rows - h.shell.chromeRows() - 1, "below the panes area");
-		assert.ok(screen[dockRow]!.startsWith("DOCK-ROW"), "the dock spans from the left edge");
+		const chat = geometry.chat!;
+		assert.ok(dockRow < chat.rows, "inside the chat column");
+		assert.ok(screen[dockRow]!.slice(0, chat.columns).includes("DOCK-ROW"));
+		assert.ok(!screen[dockRow]!.slice(chat.columns).includes("DOCK-ROW"), "does not cross into the editor");
 		assert.ok(screen[dockRow]!.length <= 160);
-		assert.doesNotMatch(screen[dockRow]!, /│/, "the divider never crosses a dock row");
 	} finally {
 		teardown(h);
 	}

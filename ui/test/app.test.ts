@@ -733,6 +733,28 @@ test("an approval hidden behind a dialog still lets the user browse Activity", a
 	}
 });
 
+test("switching chats retires the previous chat's approval card", async () => {
+	const { app, client, tui } = makeApp(SESSION_A);
+	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
+	await app.start();
+	try {
+		await app.submitTurn("Run the audit");
+		client.emit(ev({
+			type: "needs_approval", requestId: "req-switch", operation: "terminal", tool: "terminal",
+			target: "host", argv: ["sed"], cwd: "/tmp", backend: "host", capabilities: [],
+		}));
+		await new Promise(resolve => setImmediate(resolve));
+		assert.match(stripTerminalSequences(tui.focused!.render(100).join("\n")), /Allow terminal/);
+		app.switchTo(SESSION_B, []);
+		await new Promise(resolve => setImmediate(resolve));
+		const screen = stripTerminalSequences(tui.focused!.render(100).join("\n"));
+		assert.doesNotMatch(screen, /Allow terminal/);
+		assert.notEqual((app as unknown as { footer: { status: string } }).footer.status, "awaiting_approval");
+	} finally {
+		await app.exit();
+	}
+});
+
 test("a dialog hidden by an approval reappears when the approval resolves elsewhere", async () => {
 	const { app, client, tui } = makeApp(SESSION_A);
 	tui.terminal = { columns: 100, rows: 26 } as TUI["terminal"];
