@@ -50,8 +50,6 @@ import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import { guardSubmit } from "./commandDispatch.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type PickOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
-import { FamilyStore, listFamilySessions } from "./family.ts";
-import { agentSessionItems } from "./features/agents.ts";
 import type { GatewayClient } from "./gateway.ts";
 import { copyText as copyClipboardText } from "./clipboard.ts";
 import { clipboardImage, clipboardText, ImageDraft, imagePaths, readImageFile, type ImageAttachment } from "./images.ts";
@@ -66,7 +64,6 @@ import type {
 	InitializeResult,
 	ResumeResult,
 	SessionInfo,
-	SessionResult,
 } from "./protocol.ts";
 import { type DocumentRecord } from "./editor/model.ts";
 import { sanitizeDisplay } from "./editor/display.ts";
@@ -82,12 +79,12 @@ import {
 	type ProblemRow,
 } from "./editor/intelligence.ts";
 import { offsetToPosition, positionToOffset } from "./editor/positions.ts";
-import { tailEntries, trimSupersededHistory, type TailBlock } from "./tail.ts";
 import { TurnSessionStore } from "./turnSessionStore.ts";
 import { StatusController, type HarnessJobView } from "./app/status.ts";
 import { ChangesController } from "./app/changes.ts";
 import { ApprovalController } from "./app/approvals.ts";
-import type { ApprovalHost, StatusHost, ChangesHost } from "./app/contracts.ts";
+import { SessionController } from "./app/sessions.ts";
+import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
 
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
@@ -290,17 +287,14 @@ export class App implements FeatureHost {
 	private lastEscAt = 0;
 	private pendingAbortEscAt = 0;
 	private pendingAbortEscTimer: ReturnType<typeof setTimeout> | undefined;
-	private current: SessionInfo | undefined;
-	/** Title chosen by /new while the chat is still a client-side draft. */
-	private draftSessionTitle: string | undefined;
-	/** Shared first-message creation so two quick submits cannot make two chats. */
-	private sessionCreation: Promise<void> | undefined;
 	private readonly defaultProfile = defaultProfileId();
 	private currentProfile: string = this.defaultProfile;
 	private running = false;
 	private readonly activity = new ActivityStore();
 	private view: "chat" | "status" | "changes" = "chat";
+	private current: SessionInfo | undefined;
 	private readonly approvals: ApprovalController;
+	private readonly sessions: SessionController;
 	private readonly status: StatusController;
 	private readonly changes: ChangesController;
 	private navBar!: NavBar;
@@ -312,29 +306,12 @@ export class App implements FeatureHost {
 	/** Turn/session bindings, guards, totals, approvals and hidden tails. */
 	private readonly turnSession = new TurnSessionStore({
 		visibleSessionId: () => this.current?.id,
-		isFamilyMember: (sessionId) => this.isFamilyMember(sessionId),
+		isFamilyMember: (sessionId) => this.sessions.isFamilyMember(sessionId),
 		onSlowTurn: () => {
 			this.transcript.addNotice("Taking longer than expected; waiting for completion.", "warning");
 			this.tui.requestRender();
 		},
-		onEvicted: (sessionId) => this.pruneSideSessionState(sessionId),
-	});
-	/** Family (agent family) state and actions; App owns rendering and keys. */
-	private readonly family = new FamilyStore({
-		current: () => this.current,
-		isRunning: (sessionId) => this.turnSession.isRunning(sessionId),
-		request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params ?? {}),
-		switchTo: (session, history) => this.switchTo(session, history),
-		changed: () => {
-			this.turnSession.pruneSessionTails();
-			this.syncAgentCount();
-			this.tui.requestRender();
-		},
-		pruneSessionState: (sessionId) => this.pruneSessionState(sessionId),
-		report: (error) => {
-			this.transcript.addNotice(`Could not switch session: ${message(error)}`, "error");
-			this.tui.requestRender();
-		},
+		onEvicted: (sessionId) => this.sessions.pruneSideSessionState(sessionId),
 	});
 	/** Bounded retained tool outputs for /output inspection (all sessions). */
 	private readonly outputStore = new OutputStore();
@@ -347,9 +324,6 @@ export class App implements FeatureHost {
 	}
 	/** Gateway exit can arrive from both the error and exit events. */
 	private gatewayExitHandled = false;
-	/** Re-entrancy guard: a Down pressed while the subagent list is still
-	 *  being fetched must not stack a second picker (review round 4, F1). */
-	private agentMenuOpening = false;
 	/**
 	 * Feature-level event subscribers (e.g. /auth waiting on
 	 * auth.chatgpt.*). They observe every frame before turn bookkeeping,
@@ -412,9 +386,7 @@ export class App implements FeatureHost {
 		this.tui = tui;
 		this.client = client;
 		this.options = options;
-		this.exited = new Promise((done) => {
-			this.resolveExit = done;
-		});
+		this.exited = new Promise((done) => { this.resolveExit = done; });
 		// F-23: one shared reader for the environment (the legacy AH_ name is
 		// the documented fallback; an explicit MACHINA_ value always wins).
 		const reducedMotion = reducedMotionFromEnv(process.env);
@@ -448,6 +420,7 @@ export class App implements FeatureHost {
 		this.shell = new AppShell(tui, this.transcriptView, this.composer, this.footer);
 		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
 		this.approvals = new ApprovalController(this.approvalHost());
+		this.sessions = new SessionController(this.sessionHost());
 		this.status = new StatusController(this.statusHost());
 		this.changes = new ChangesController(this.changesHost());
 		this.navBar = new NavBar(
@@ -465,7 +438,7 @@ export class App implements FeatureHost {
 		this.shell.setAgentBar(new AgentTabBar(
 			() => this.familyRows(),
 			() => this.current?.id,
-			(sessionId) => { void this.family.open(sessionId); },
+			(sessionId) => { void this.sessions.openFamily(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
 		this.statusPage = new StatusPage(tui, () => this.status.snapshot(), (row) => {
@@ -482,7 +455,7 @@ export class App implements FeatureHost {
 				this.closeScreen();
 				return true;
 			}
-			void this.family.open(sessionId).then(() => {
+			void this.sessions.openFamily(sessionId).then(() => {
 				if (this.view !== "chat") this.closeScreen();
 			});
 			return true;
@@ -537,7 +510,7 @@ export class App implements FeatureHost {
 			askText: (options) => this.askText(options),
 			commandAction: (sessionId, jobId, action) => this.commandAction(sessionId, jobId, action),
 			flushSteering: (sessionId) => this.flushSteering(sessionId),
-			openFamily: (sessionId) => this.family.open(sessionId),
+			openFamily: (sessionId) => this.sessions.openFamily(sessionId),
 			openDialog: (create) => this.openDialog(create),
 		};
 	}
@@ -582,6 +555,38 @@ export class App implements FeatureHost {
 			pick: (title, items) => this.pick(title, items),
 			askText: (options) => this.askText(options),
 			print: (text, kind) => this.print(text, kind),
+		};
+	}
+
+	private sessionHost(): SessionHost {
+		return {
+			tui: this.tui,
+			log: this.log,
+			footer: this.footer,
+			activity: this.activity,
+			outputStore: this.outputStore,
+			turnSession: this.turnSession,
+			transcript: this.transcript,
+			composer: this.editor,
+			current: () => this.current,
+			setCurrent: (session) => { this.current = session; },
+			request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params),
+			clientRequest: <T>(method: string, params?: Record<string, unknown>) => this.client.request<T>(method, params),
+			resetChanges: () => this.changes.reset(),
+			clearImages: () => this.clearImages(),
+			invalidateContextUsage: () => { this.contextReadVersion++; },
+			setRunning: (running) => this.setRunning(running),
+			refreshContextUsage: (sessionId) => { void this.refreshContextUsage(sessionId); },
+			sessionAgent: () => this.sessionAgent(),
+			isExiting: () => this.exiting,
+			hasDialogs: () => this.dialogs.length > 0,
+			pick: (title, items) => this.pick(title, items),
+			print: (text, kind) => this.print(text, kind),
+			submitTurn: (text, images, steeringId) => this.submitTurn(text, images, steeringId),
+			invalidateApprovals: (sessionId) => this.approvals.invalidate(sessionId),
+			restoreApprovals: (sessionId) => this.approvals.restore(sessionId),
+			rehydrateApprovals: (sessionId) => this.approvals.rehydrate(sessionId),
+			flushPendingQuestions: (sessionId) => this.flushPendingQuestions(sessionId),
 		};
 	}
 
@@ -702,10 +707,8 @@ export class App implements FeatureHost {
 				// resolve AFTER the session exists so the footer and the
 				// notice below reflect the governing session, never the
 				// global default. Later switches refresh via switchTo.
-				const { mode } = await this.request<{ mode: string }>(
-					"mode.get",
-					this.current ? { sessionId: this.current.id } : {},
-				);
+				const session = this.current;
+				const { mode } = await this.request<{ mode: string }>("mode.get", session ? { sessionId: session.id } : {});
 				if (mode === "full") {
 					this.transcript.addNotice("FULL HOST mode active for this session: host operations proceed without further approval, including credential access, elevation, and destructive system ops.", "warning");
 				}
@@ -1237,175 +1240,35 @@ export class App implements FeatureHost {
 	 * untouched draft never appears in history.
 	 */
 	private showNewChat(title?: string): void {
-		this.log.debug("chat.new", { hasTitle: Boolean(title?.trim()) });
-		if (this.current) this.turnSession.saveSessionTokens(this.current.id);
-		this.current = undefined;
-		this.changes.reset();
-		this.draftSessionTitle = title?.trim() || undefined;
-		this.turnSession.resetSessionTokens();
-		this.clearImages();
-		this.editor.setText("");
-		this.transcript.clear();
-		this.transcript.addNotice("Describe a task. Machina can read, edit, and run commands in this workspace.", "plain");
-		this.footer.dispose();
-		this.footer.tokens = 0;
-		this.footer.contextTokens = 0;
-		this.footer.contextPercent = 0;
-		this.contextReadVersion++;
-		this.setRunning(false);
-		this.syncAgentCount();
-		this.tui.requestRender();
+		this.sessions.showNewChat(title);
 	}
 
 	/** Host entry point for /new and post-delete navigation. */
 	newSession(title?: string): void {
-		this.showNewChat(title);
-		this.refreshSessionMode();
+		this.sessions.newSession(title);
 	}
 
 	/** Create the durable session for a draft chat at its first message. */
 	private ensureSession(text: string): Promise<void> {
-		if (this.current) return Promise.resolve();
-		if (!this.sessionCreation) {
-			const agent = this.sessionAgent();
-			const title = this.draftSessionTitle || text.slice(0, 80);
-			this.sessionCreation = this.client
-				.request<SessionResult>("session.create", {
-					title,
-					...(agent ? { agent } : {}),
-				})
-				.then(({ session }) => {
-					this.log.info("session.create", { id: session.id, titleLength: (session.title ?? "").length });
-					this.draftSessionTitle = undefined;
-					this.current = session;
-					this.changes.reset();
-					this.flushPendingQuestions(session.id);
-					this.rememberSession(session.id);
-					this.turnSession.resetSessionTokens();
-					this.transcript.clear();
-					this.footer.tokens = 0;
-					this.footer.contextTokens = 0;
-					this.footer.contextPercent = 0;
-					this.family.reseed();
-					this.syncAgentCount();
-					this.refreshSessionMode(session.id);
-					this.tui.requestRender();
-				})
-				.finally(() => {
-					this.sessionCreation = undefined;
-				});
-		}
-		return this.sessionCreation;
+		return this.sessions.ensureSession(text);
 	}
 
 	switchTo(session: SessionInfo, history: HistoryEntry[]): void {
-		this.log.info("session.switch", { id: session.id, history: history.length });
-		if (this.current?.id === session.id) {
-			// Same-id re-resume of the visible session (`/resume <current>`,
-			// picking the current row in a session list): the fetched history
-			// cannot contain the in-flight turn, so clearing and replaying here
-			// would erase live output and strand running-tool completions
-			// (review round 4, R4-094). Refresh the metadata only.
-			this.updateSession(session);
-			this.tui.requestRender();
-			return;
-		}
-		if (this.current) this.turnSession.saveSessionTokens(this.current.id);
-		// Consume this session's hidden-session tail (buffered events that
-		// arrived while it was not visible). Merge rule (PINNED, tail.ts):
-		// the tail is the conversation suffix and WINS over the fetched
-		// history; matching trailing history entries are trimmed first so a
-		// completed turn or settled tool renders exactly once. Consuming the
-		// tail here is the documented "clear when history is fetched"
-		// boundary: the buffer only ever holds work from after the last
-		// switch, so it cannot duplicate earlier history.
-		const tail = this.turnSession.takeSessionTail(session.id)?.blocks ?? [];
-		this.updateSession(session);
-		this.rememberSession(session.id);
-		this.transcript.clear();
-		this.transcript.replay(trimSupersededHistory(history, tail));
-		this.replayTail(session, tail);
-		this.turnSession.restoreSessionTokens(session.id);
-		// Preserve the active turn's latest cumulative usage across switches
-		// without mixing turns: completed total plus this session's turn total.
-		this.footer.tokens = this.turnSession.displayTokens(session.id);
-		this.footer.contextTokens = 0;
-		this.footer.contextPercent = 0;
-		void this.refreshContextUsage(session.id);
-		// The backend stays paused for this session's approvals; rebuild the
-		// review cards retained while it was hidden (R15). Close every other
-		// session's card first so a stale child request cannot own the dock.
-		this.invalidateApprovals(session.id);
-		this.approvals.restore(session.id);
-		// A question delivered while this session was hidden should reappear
-		// when its owning session becomes visible.
-		this.flushPendingQuestions(session.id);
-		// F-30: approvals the hidden session never saw are parked only in the
-		// permission store; re-read the target session's pending rows so the
-		// turn cannot sit stranded behind a card that was never re-opened.
-		void this.approvals.rehydrate(session.id);
-		this.setRunning(this.turnSession.isRunning(session.id));
-		// Family = current.parentSessionId ?? current.id plus that root's
-		// children; refresh after the local re-seed keeps the subagent count
-		// honest.
-		this.family.reseed();
-		this.syncAgentCount();
-		this.refreshFamily();
-		// Finding 8: the footer must render the newly visible session's
-		// authority, never the previous session's (or the global default).
-		this.refreshSessionMode(session.id);
-		this.tui.requestRender();
-	}
-
-	/**
-	 * Re-query the gateway for a session's effective mode and mirror it
-	 * into the footer (via request, which syncs footer.mode on mode.get).
-	 * Best-effort: a failed refresh keeps the previous indicator rather
-	 * than blanking it, and never rejects into the switch path.
-	 */
-	private refreshSessionMode(sessionId?: string): void {
-		void this.request<{ mode: string }>("mode.get", sessionId ? { sessionId } : {}).catch(() => {});
+		this.sessions.switchTo(session, history);
 	}
 
 	updateSession(session: SessionInfo): void {
-		const switched = session.id !== this.current?.id;
-		if (switched) {
-            this.clearImages();
-            this.editor.setText("");
-			this.footer.dispose();
-			// A pending request may reopen only when the user returns to its
-			// owning session; never carry a selection into the new session.
-			this.invalidateApprovals(session.id);
-		}
-		this.current = session;
-		if (switched) this.changes.reset();
-		this.syncAgentCount();
-		this.tui.requestRender();
+		this.sessions.updateSession(session);
 	}
 
-	/** Mark a session visited; the store enforces its LRU bound and guards. */
-	private rememberSession(sessionId: string): void {
-		this.turnSession.rememberSession(sessionId);
+	/** Mark a session visited; SessionController owns the bounded LRU state. */
+	rememberSession(sessionId: string): void {
+		this.sessions.rememberSession(sessionId);
 	}
-
-	/** Drop one dormant session from every per-session store. */
-	private pruneSessionState(sessionId: string): void {
-		if (!this.turnSession.pruneSessionIfDormant(sessionId)) return;
-		this.pruneSideSessionState(sessionId);
-	}
-
-	/** Non-turn session state owned by App (activity/output/family). */
-	private pruneSideSessionState(sessionId: string): void {
-		this.activity.pruneSession(sessionId);
-		this.outputStore.pruneSession(sessionId);
-		this.family.pruneSession(sessionId);
-	}
-
-	// ─── agent family (root + delegated subagents) ──────────────────────────
 
 	/** Family rows, main first, with run/current state for menus. */
 	private familyRows(): FamilySession[] {
-		return this.family.rows();
+		return this.sessions.familyRows();
 	}
 
 	private activitySummary(): string {
@@ -1447,68 +1310,12 @@ export class App implements FeatureHost {
 		finally { this.syncWorkspaceShell(); this.tui.requestRender(); }
 	}
 
-	private async queueSteering(text: string, fromDraft = true): Promise<boolean> {
-		const session = this.current;
-		if (!session || this.turnSession.isSteeringBusy(session.id)) return false;
-		this.turnSession.setSteeringBusy(session.id, true);
-		const version = this.activity.queueVersion(session.id);
-		try {
-			const result = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId: session.id, text });
-			if (result.queued) {
-				if (this.activity.queueVersion(session.id) === version) this.activity.setQueue(session.id, result.items ?? []);
-			}
-			else this.turnSession.pushSteering(session.id, text);
-			if (fromDraft && this.current?.id === session.id && this.editor.getExpandedText().trim() === text.trim()) this.editor.setText("");
-			if (!result.queued && !this.turnSession.isInFlight(session.id)) await this.flushSteering(session.id);
-			return true;
-		} catch (error) {
-			this.print(`Could not queue steering: ${message(error)}.${fromDraft ? " Your draft is retained." : ""}`, "error");
-			return false;
-		} finally {
-			this.turnSession.setSteeringBusy(session.id, false);
-			this.tui.requestRender();
-		}
+	private queueSteering(text: string, fromDraft = true): Promise<boolean> {
+		return this.sessions.queueSteering(text, fromDraft);
 	}
 
-	private async flushSteering(sessionId: string): Promise<void> {
-		if (this.current?.id !== sessionId || this.turnSession.isInFlight(sessionId) || this.exiting
-			|| this.turnSession.isSteeringFlushing(sessionId) || this.turnSession.isInterrupted(sessionId)) return;
-		if (!this.activity.queue(sessionId).length && this.turnSession.queuedSteering(sessionId).length === 0) return;
-		this.turnSession.setSteeringFlushing(sessionId, true);
-		let accepted = false;
-		try {
-			const version = this.activity.queueVersion(sessionId);
-			const result = await this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId });
-			if (this.activity.queueVersion(sessionId) === version) this.activity.setQueue(sessionId, result.items);
-			if (this.current?.id !== sessionId || this.turnSession.isInFlight(sessionId)) return;
-			const local = this.turnSession.queuedSteering(sessionId)[0];
-			const remote = result.items[0];
-			if (local !== undefined) {
-				await this.submitTurn(local);
-				accepted = true;
-				this.turnSession.shiftSteering(sessionId);
-			} else if (remote) {
-				await this.submitTurn(remote.text, [], remote.id);
-				accepted = true;
-				this.activity.setQueue(sessionId, this.activity.queue(sessionId).filter((item) => item.id !== remote.id));
-			}
-			while (this.turnSession.isInFlight(sessionId) && this.turnSession.queuedSteering(sessionId).length > 0) {
-				const head = this.turnSession.queuedSteering(sessionId)[0]!;
-				const queueVersion = this.activity.queueVersion(sessionId);
-				const queued = await this.request<{ queued: boolean; items?: SteeringItem[] }>("prompt.steer", { sessionId, text: head });
-				if (!queued.queued) break;
-				this.turnSession.shiftSteering(sessionId);
-				if (this.activity.queueVersion(sessionId) === queueVersion) this.activity.setQueue(sessionId, queued.items ?? []);
-			}
-		} catch (error) {
-			this.print(`Steering is retained. Open /activity to retry: ${message(error)}`, "warning");
-		} finally {
-			this.turnSession.setSteeringFlushing(sessionId, false);
-			if (accepted && this.turnSession.queuedSteering(sessionId).length > 0
-				&& !this.turnSession.isInFlight(sessionId) && !this.turnSession.isInterrupted(sessionId) && !this.exiting) {
-				setTimeout(() => { void this.flushSteering(sessionId); }, 25);
-			}
-		}
+	private flushSteering(sessionId: string): Promise<void> {
+		return this.sessions.flushSteering(sessionId);
 	}
 
 	/** Open the full-page live status tab (also `/activity`). */
@@ -1552,105 +1359,31 @@ export class App implements FeatureHost {
 
 	/** FeatureHost: the current family (main first) for /agents and menus. */
 	familySessions(): FamilySession[] {
-		return this.familyRows();
+		return this.sessions.familySessions();
 	}
 
-	/**
-	 * Footer segment: the number of subagents = family rows minus the
-	 * main session (the root is not a subagent). Zero hides the segment.
-	 */
-	private syncAgentCount(): void {
-		this.footer.subagents = Math.max(0, this.familyRows().length - 1);
-	}
-
-	/**
-	 * Down on an empty composer: the same family picker as /agents sessions.
-	 * Selecting switches through FamilyStore.open (the one-resume-at-a-time
-	 * path shared with Alt+J/K); choosing the visible session is a
-	 * no-op. Listing failures are reported quietly.
-	 */
-	private async openSubagentMenu(): Promise<void> {
-		if (this.agentMenuOpening || this.dialogs.length) return;
-		const current = this.current;
-		if (!current) return;
-		this.agentMenuOpening = true;
-		try {
-			const running = new Map(this.familyRows().map((row) => [row.session.id, row.running]));
-			let family: SessionInfo[];
-			try {
-				family = await listFamilySessions(this, current);
-			} catch (error) {
-				this.transcript.addNotice(`Could not list agent sessions: ${message(error)}`, "error");
-				this.tui.requestRender();
-				return;
-			}
-			// The visible session may have changed while the list was fetched,
-			// and a dialog (e.g. help) may have opened: in either case the
-			// menu is no longer appropriate.
-			if (this.exiting || this.current?.id !== current.id || this.dialogs.length) return;
-			if (family.length <= 1) return;
-			const choice = await this.pick("Switch to an agent session", agentSessionItems(family, current, running));
-			if (!choice || choice.value === current.id) return;
-			await this.family.open(choice.value);
-		} finally {
-			this.agentMenuOpening = false;
-		}
+	/** Down on an empty composer: the same family picker as /agents sessions. */
+	private openSubagentMenu(): Promise<void> {
+		return this.sessions.openSubagentMenu();
 	}
 
 	/** Bounded, best-effort family refresh (see family.ts). */
 	private refreshFamily(): void {
-		void this.family.refresh();
+		this.sessions.refreshFamily();
 	}
 
 	/** Refresh kick for turn-start frames from ids not yet known family members. */
 	private noteUnknownSession(sessionId: string): void {
-		this.family.noteUnknown(sessionId);
+		this.sessions.noteUnknownSession(sessionId);
 	}
 
 	private isFamilyMember(sessionId: string): boolean {
-		return this.family.isMember(sessionId);
+		return this.sessions.isFamilyMember(sessionId);
 	}
 
 	/** Cycle the family; wraps around. */
 	private cycleFamily(direction: 1 | -1): Promise<void> {
-		return this.family.cycle(direction);
-	}
-
-	// ─── hidden-session live tails ──────────────────────────────────────────
-
-	/**
-	 * Replay a consumed hidden-session tail in rendered order. Historical
-	 * blocks re-enter through the resume path; ACTIVE blocks (streaming text,
-	 * a running tool) re-enter through the live event path carrying their
-	 * turn/tool identity, so the completion events that follow reconcile them
-	 * — instead of a historical copy duplicating the text and a "running…"
-	 * notice stranding a tool whose completion can no longer find its card
-	 * (review round 3, F12).
-	 */
-	private replayTail(session: SessionInfo, tail: TailBlock[]): void {
-		for (const block of tail) {
-			if (block.kind === "assistant" && !block.completed) {
-				this.transcript.apply({
-					protocolVersion: 2,
-					sessionId: session.id,
-					turnId: block.turnId,
-					type: "message.delta",
-					text: block.text,
-				});
-			} else if (block.kind === "tool" && !block.settled) {
-				this.transcript.apply({
-					protocolVersion: 2,
-					sessionId: session.id,
-					turnId: block.turnId,
-					type: "tool.start",
-					id: block.id,
-					name: block.name,
-					args: {},
-				});
-			} else {
-				this.transcript.replay(tailEntries([block]));
-			}
-		}
+		return this.sessions.cycleFamily(direction);
 	}
 
 	pick(title: string, items: SelectItem[], options?: PickOptions): Promise<SelectItem | undefined> {
@@ -1951,9 +1684,7 @@ export class App implements FeatureHost {
 				provider: fallback.provider,
 				model: fallback.model,
 			});
-			if (this.current?.id === sessionId) {
-				this.current.provider = fallback.provider;
-				this.current.model = fallback.model;
+			if (this.sessions.adoptRoute(sessionId, fallback.provider, fallback.model)) {
 				this.footer.model = fallback.model;
 			}
 			this.print(
@@ -2442,7 +2173,7 @@ export class App implements FeatureHost {
 		// remains available for word selection in the file editor.
 		const cycle = this.keybindings.matches(data, "agentNext") ? 1 : this.keybindings.matches(data, "agentPrevious") ? -1 : 0;
 		if (this.keybindings.matches(data, "agentClose")) {
-			void this.family.closeCurrent();
+			void this.sessions.closeCurrentFamily();
 			return { consume: true };
 		}
 		if (cycle !== 0 && this.activeRegion === "chat-composer" && this.familyRows().length > 1) {
@@ -3549,7 +3280,6 @@ export class App implements FeatureHost {
         if (epoch !== this.imageEpoch || this.exiting) return;
         const text = (waitingForImages ? this.editor.getExpandedText() : raw).trim();
 		if (!text) return;
-
 		// AH-031: parse FIRST, then guard only conflicting operations.
 		// Read-only / navigation commands must work during a turn; only
 		// new prompts and session-mutating commands on the in-flight
@@ -3559,13 +3289,14 @@ export class App implements FeatureHost {
             this.print("Send image attachments with a message, rather than a slash command.", "warning");
             return;
         }
-		const inFlight = this.current !== undefined && this.turnSession.isRunning(this.current.id);
-		if (!command && this.current?.parentSessionId && !this.current.isFork && !this.current.harnessPlatform) {
+		const visible = this.current;
+		const inFlight = visible !== undefined && this.turnSession.isRunning(visible.id);
+		if (!command && visible?.parentSessionId && !visible.isFork && !visible.harnessPlatform) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
 			return;
 		}
-		if (!command && inFlight && this.current) {
+		if (!command && inFlight && visible) {
 			if (this.pendingImageLoads || /\[image \d+\]/.test(text)) {
 				this.print("Queued steering currently accepts text. Keep the image for the next turn.", "info");
 				return;
@@ -3585,7 +3316,6 @@ export class App implements FeatureHost {
 			case "allow":
 				break;
 		}
-
         let draft: ReturnType<ImageDraft["prepare"]>;
         try {
             if (text === this.lastPrompt && this.current?.id === this.lastPromptSessionId && this.lastPromptImages.length) {
@@ -3663,13 +3393,14 @@ export class App implements FeatureHost {
 			if (steeringId) return;
 			await this.ensureSession(text);
 		}
-		if (!this.current) return;
-		if (this.current.parentSessionId && !this.current.isFork && !this.current.harnessPlatform) {
+		const current = this.current;
+		if (!current) return;
+		if (current.parentSessionId && !current.isFork && !current.harnessPlatform) {
 			this.transcript.addNotice("Subagent sessions are for inspection. Return to the main session to send a message.", "info");
 			this.tui.requestRender();
 			return;
 		}
-		const sessionId = this.current.id;
+		const sessionId = current.id;
 		this.log.info("turn.submit", {
 			session: sessionId,
 			chars: text.length,
@@ -3818,9 +3549,9 @@ export class App implements FeatureHost {
 			} else if (!deleted) this.turnSession.bufferHiddenEvent(complete);
 			if (event.phase === "settled") {
 				const main = this.familyRows().find((row) => row.main)?.session.id;
-				this.family.dismiss(childId);
+				this.sessions.dismissFamily(childId);
 				if (this.current?.id === childId) {
-					void this.family.open(main ?? event.sessionId).then(() => {
+					void this.sessions.openFamily(main ?? event.sessionId).then(() => {
 						if (!deleted || this.exiting) return;
 						if (this.current?.id === childId) this.newSession();
 						this.turnSession.pruneSessionState(childId);

@@ -7,9 +7,11 @@ import type { Component, OverlayHandle, SelectItem, TUI } from "@earendil-works/
 import type { ActivityStore } from "../activity.ts";
 import type { ChangesPage } from "../components/ChangesPage.ts";
 import type { Footer } from "../components/Footer.ts";
+import type { OutputStore } from "../components/OutputViewer.ts";
 import type { StatusPage } from "../components/StatusPage.ts";
 import type { AskTextOptions, FamilySession, NoticeKind } from "../features/index.ts";
-import type { SessionInfo } from "../protocol.ts";
+import type { ImageAttachment } from "../images.ts";
+import type { GatewayEvent, HistoryEntry, SessionInfo } from "../protocol.ts";
 import type { TurnSessionStore } from "../turnSessionStore.ts";
 
 /** The shell screen a command-strip tab selects. */
@@ -147,4 +149,63 @@ export interface ApprovalHost {
 	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
 	askText(options: AskTextOptions): Promise<string | undefined>;
 	print(text: string, kind?: NoticeKind): void;
+}
+
+/** The transcript operations a session switch replays. */
+export interface SessionTranscript {
+	clear(): void;
+	replay(history: HistoryEntry[]): void;
+	apply(event: GatewayEvent): void;
+	addNotice(text: string, kind?: NoticeKind): void;
+}
+
+/** The composer draft surface the session controller reads or clears. */
+export interface SessionComposer {
+	getExpandedText(): string;
+	setText(text: string): void;
+}
+
+/**
+ * Session lifecycle/family/steering controller host.
+ *
+ * Invariants:
+ * - App keeps the single visible-session field; the controller reads it via
+ *   `current()` and writes it only through `setCurrent()`. The controller
+ *   owns the draft title and the shared creation promise.
+ * - `turnSession` and `activity` stay the sole owners of turn and queue state.
+ *   The controller only orchestrates their calls in the original order.
+ * - `request` is App's validated/logged gateway path; `clientRequest` is the
+ *   raw call used by `session.create`.
+ * - Approvals, context-usage fencing and screen focusing stay App concerns and
+ *   enter through narrow callbacks; no controller holds the whole App.
+ */
+export interface SessionHost {
+	readonly tui: TUI;
+	readonly log: LogSink;
+	readonly footer: Footer;
+	readonly activity: ActivityStore;
+	readonly outputStore: OutputStore;
+	readonly turnSession: TurnSessionStore;
+	readonly transcript: SessionTranscript;
+	readonly composer: SessionComposer;
+
+	current(): SessionInfo | undefined;
+	setCurrent(session: SessionInfo | undefined): void;
+	request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
+	clientRequest<T>(method: string, params?: Record<string, unknown>): Promise<T>;
+	resetChanges(): void;
+	clearImages(): void;
+	invalidateContextUsage(): void;
+	setRunning(running: boolean): void;
+	refreshContextUsage(sessionId: string): void;
+	sessionAgent(): string | undefined;
+	isExiting(): boolean;
+	hasDialogs(): boolean;
+	pick(title: string, items: SelectItem[]): Promise<SelectItem | undefined>;
+	print(text: string, kind?: NoticeKind): void;
+	submitTurn(text: string, images?: ImageAttachment[], steeringId?: string): Promise<void>;
+	invalidateApprovals(sessionId?: string): void;
+	restoreApprovals(sessionId: string): void;
+	rehydrateApprovals(sessionId: string): Promise<void>;
+	flushPendingQuestions(sessionId: string): void;
 }
