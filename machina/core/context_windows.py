@@ -64,6 +64,10 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "deepseek-r1": 64_000,
     "deepseek-chat": 64_000,
     "deepseek-reasoner": 64_000,
+    # DeepSeek V4.1 Flash (direct API id `deepseek-flash`). The provider
+    # catalogue does not publish a window for this alias; 128k is the
+    # documented serving capacity and remains within the API limit.
+    "deepseek-flash": 128_000,
     # Qwen hosted families. qwen-max is the 32K DashScope entry; the
     # 2.5/3 families are documented at 128K.
     "qwen3.8": 131_072,

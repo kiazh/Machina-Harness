@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import subprocess
 import sys
@@ -38,8 +39,54 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(command: list[str], *, cwd: Path | None = None) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+def run(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    subprocess.run(command, cwd=cwd, check=True, env=env)
+
+
+def container_host_gateway() -> str | None:
+    """Address task containers use to reach this machine's model proxy.
+
+    Docker's ``host-gateway`` means the daemon's host. Under Lima the daemon
+    runs in a VM, so that address is the VM and the proxy on macOS is
+    unreachable. Lima publishes the real host as ``host.lima.internal``.
+    """
+    override = os.environ.get("HARNESSBENCH_HOST_GATEWAY", "").strip()
+    if override:
+        return override
+    try:
+        context = subprocess.run(
+            ["docker", "context", "show"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    if not context.startswith("lima-"):
+        return None
+    try:
+        hosts = subprocess.run(
+            ["limactl", "shell", context[len("lima-") :], "--", "getent", "hosts", "host.lima.internal"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    for token in hosts.split():
+        try:
+            ipaddress.ip_address(token)
+        except ValueError:
+            continue
+        return token
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,7 +175,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.run_root:
                 benchmark.extend(["--run-root", str(args.run_root.expanduser().resolve())])
             benchmark.extend(passthrough)
-            run(benchmark, cwd=checkout)
+            benchmark_env = os.environ.copy()
+            gateway = container_host_gateway()
+            if gateway:
+                benchmark_env["HARNESSBENCH_HOST_GATEWAY"] = gateway
+            run(benchmark, cwd=checkout, env=benchmark_env)
         finally:
             wheel_in_context.unlink(missing_ok=True)
     return 0
