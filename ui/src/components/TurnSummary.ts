@@ -45,7 +45,7 @@ export class TurnSummary implements Component {
 		const verb = this.info.cancelled ? "stopped after" : "done in";
 		return [
 			...BLOCK_GAP,
-			truncateToWidth(`${pad}${glyph} ${theme.dim(`${verb} ${parts.join(" · ")}`)}`, total),
+			truncateToWidth(`${pad}${glyph} ${theme.muted(`${verb} ${parts.join(" · ")}`)}`, total),
 		];
 	}
 
