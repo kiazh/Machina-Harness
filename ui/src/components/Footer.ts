@@ -92,7 +92,15 @@ export class Footer implements Component {
 
 	chatStatusRows(): number {
 		if (this.compact && this.status === "awaiting_approval") return 0;
-		return 1;
+		return this.compact ? 1 : 2;
+	}
+
+	/** A half-height dim strip, the smallest visible gap a terminal allows. */
+	private statusGap(width: number): string {
+		const inset = width >= 20 ? bodyIndent(width) : 0;
+		const fit = Math.max(0, width - 2 * inset);
+		const pad = " ".repeat(inset);
+		return repairFill("background", `${pad}${theme.dim("▄".repeat(fit))}${pad}`);
 	}
 
 	/**
@@ -179,7 +187,8 @@ export class Footer implements Component {
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
-		return [repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`)];
+		const row = repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`);
+		return this.compact ? [row] : [this.statusGap(width), row];
 	}
 
 	render(width: number): string[] {

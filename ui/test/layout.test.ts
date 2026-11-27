@@ -104,8 +104,9 @@ test("short transcript docks composer and footer to the bottom rows", () => {
 		assert.match(screen[0] ?? "", /hello world/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
-		assert.match(screen[20] ?? "", /Ask anything, or type \/ for commands\./);
-		assert.equal((screen[21] ?? "").trim(), "", "one padding row closes the composer");
+		assert.match(screen[19] ?? "", /Ask anything, or type \/ for commands\./);
+		assert.equal((screen[20] ?? "").trim(), "", "one padding row closes the composer");
+		assert.match(screen[21] ?? "", /^ {4}▄+ {4}$/u);
 		assert.match(screen[22] ?? "", /0 tokens \(0%\) {4}$/);
 	} finally {
 		footer.dispose();
@@ -124,7 +125,7 @@ test("long transcript follows the end above the docked composer", () => {
 		const composerRow = screen.findIndex((line) => line.includes("Ask anything"));
 		assert.ok(composerRow > 0, "composer visible");
 		assert.match(screen.slice(0, composerRow).join("\n"), /line 99/);
-		assert.match(screen[0] ?? "", /line 82/);
+		assert.match(screen[0] ?? "", /line 83/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 	} finally {
