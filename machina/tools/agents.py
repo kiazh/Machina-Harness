@@ -351,13 +351,32 @@ async def delegate_status(child_session_id: str, wait_seconds: int | None = None
     except (TypeError, ValueError):
         wait = 0
     live = _live_delegations.get(uuid.UUID(child_id))
+    pending: list[dict] = []
     if wait and live is not None and not live.done():
-        await asyncio.wait({live}, timeout=wait)
+        from machina.permissions import store as permission_store
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait
+        while not live.done():
+            try:
+                pending = await permission_store.list_pending(child_id)
+            except Exception as error:
+                record_failure("tools.delegate_status.pending", error)
+                pending = []
+            if pending:
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.wait({live}, timeout=min(0.5, remaining))
     entry = await orchestrator.latest_child_delegation(parent_session_id, uuid.UUID(child_id))
     if entry is None:
         raise ToolError("no delegated worker with that child session ID belongs to this session")
     status = entry["status"]
     response = str(entry.get("response") or "")
+    if pending and status in {"queued", "running", "pending"}:
+        status = "waiting_approval"
+        response = ""
     if status in {"queued", "running", "pending"} and not _delegation_is_live(uuid.UUID(child_id)):
         active_claim = await db.fetchval(
             """SELECT EXISTS (
@@ -395,23 +414,23 @@ async def delegate_status(child_session_id: str, wait_seconds: int | None = None
                     or "Worker stopped before completing. Resume with delegate using this child session ID."
                 )
     text = f"Worker {status}. Child session: {child_id}."
-    needs_approval: list[dict] = []
-    if status == "waiting_approval":
+    if status == "waiting_approval" and not pending:
         try:
             from machina.permissions import store as permission_store
 
-            needs_approval = await permission_store.list_pending(child_id)
+            pending = await permission_store.list_pending(child_id)
         except Exception as error:
             record_failure("tools.delegate_status.pending", error)
+    if status == "waiting_approval":
         text += "\nThe worker is paused for human approval; review its session before continuing."
-        if needs_approval:
-            requests = ", ".join(str(item.get("request_id") or "") for item in needs_approval)
+        if pending:
+            requests = ", ".join(str(item.get("request_id") or "") for item in pending)
             text += f"\nPending approval requests: {requests}"
     if status not in {"queued", "running", "pending"}:
         text += f"\n{response[:12000]}"
     result = DelegationToolResult(
         text,
-        needs_approval=needs_approval,
+        needs_approval=pending,
         tokens_used=0,
         delegation_status=status,
     )

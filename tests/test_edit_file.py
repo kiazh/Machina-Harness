@@ -60,3 +60,25 @@ def test_edit_file_approval_binds_the_replacement_diff() -> None:
     assert spec["targets"] == ["src/app.py"]
     assert "-one" in spec["content"]
     assert "+two" in spec["content"]
+    assert "count: 1" in spec["content"]
+
+
+def test_edit_file_approval_digest_binds_the_count() -> None:
+    from machina.permissions.policy import build_request
+    from machina.permissions.tools import action_for_tool
+
+    def digest(count: int) -> str:
+        spec = action_for_tool(
+            "edit_file",
+            {"path": "src/app.py", "old_text": "one", "new_text": "two", "count": count},
+        )
+        return build_request(
+            operation=spec["operation"],
+            targets=spec["targets"],
+            content=spec["content"],
+            tool="edit_file",
+            cwd="/tmp",
+            workspace="/tmp",
+        ).digest
+
+    assert digest(1) != digest(100)

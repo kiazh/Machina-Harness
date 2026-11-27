@@ -79,3 +79,46 @@ def test_delegate_status_surfaces_child_pending_approval(
     assert "Pending approval requests: req-1" in str(result)
     assert result.needs_approval[0]["request_id"] == "req-1"
     assert result.delegation_status == "waiting_approval"
+
+
+def test_delegate_status_stops_waiting_when_the_child_pauses_for_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child_id = uuid.uuid4()
+
+    async def scenario():
+        async def active_scope():
+            return "harness", uuid.uuid4()
+
+        async def latest(_parent, _child):
+            return {"status": "running", "response": ""}
+
+        async def pending(session_id):
+            assert session_id == str(child_id)
+            return [{"request_id": "req-2", "session_id": str(child_id), "proposal": {}}]
+
+        monkeypatch.setattr(agents, "active_agent_scope", active_scope)
+        monkeypatch.setattr(orch.orchestrator, "latest_child_delegation", latest)
+        monkeypatch.setattr(permission_store, "list_pending", pending)
+
+        gate = asyncio.Event()
+
+        async def worker():
+            await gate.wait()
+
+        task = asyncio.create_task(worker())
+        orch._live_delegations[child_id] = task
+        started = asyncio.get_running_loop().time()
+        try:
+            result = await agents.delegate_status(str(child_id), wait_seconds=30)
+            elapsed = asyncio.get_running_loop().time() - started
+        finally:
+            gate.set()
+            await task
+            orch._live_delegations.pop(child_id, None)
+        return result, elapsed
+
+    result, elapsed = asyncio.run(scenario())
+    assert result.delegation_status == "waiting_approval"
+    assert "Pending approval requests: req-2" in str(result)
+    assert elapsed < 2.0

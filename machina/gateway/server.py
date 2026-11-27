@@ -1467,11 +1467,21 @@ class Gateway:
 
         def _approval_resolved(card: dict) -> None:
             # R4-065: the broker expired the deadline itself (no human
-            # decision). Retire the card on the same channel as decisions.
-            emit(
-                "approval.resolved",
-                requestId=str(card.get("request_id", "")),
-                status=str(card.get("status") or "expired"),
+            # decision). Retire the card on the same channel as decisions,
+            # bound to the approval row's owning session and turn.
+            card_session, card_turn = _approval_event_target(card, sid, turn_id)
+            self._write(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": self.event_payload(
+                        "approval.resolved",
+                        card_session,
+                        card_turn,
+                        requestId=str(card.get("request_id", "")),
+                        status=str(card.get("status") or "expired"),
+                    ),
+                }
             )
 
         # The lifecycle owns approval registration, row construction, renewal,

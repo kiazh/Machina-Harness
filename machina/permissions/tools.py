@@ -73,10 +73,13 @@ def action_for_tool(name: str, args: dict) -> dict:
                 lineterm="",
             )
         )
+        body = diff or f"{old}\n---\n{new}"
         return {
             "operation": "file.write",
             "targets": [str(args.get("path", ""))],
-            "content": diff or f"{old}\n---\n{new}",
+            # The digest binds the count too: a session grant for one
+            # replacement must not authorize a different occurrence count.
+            "content": f"{body}\ncount: {count}",
             "old_text": old,
             "count": count,
         }
