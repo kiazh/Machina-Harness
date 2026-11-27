@@ -245,6 +245,101 @@ def _wake_awaiting_turn(
         record_failure("resident.approval.notify", error)
 
 
+async def resident_rsi_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.rsi.list")
+    gw.require_db()
+    from machina.resident import rsi
+
+    status = _str(params, "status", required=False, max_len=20) or None
+    if status is not None and status not in ("proposed", "active", "retired"):
+        raise RpcError(INVALID_PARAMS, "status must be proposed|active|retired")
+    return {"rules": await rsi.list_rules(status=status)}
+
+
+async def resident_rsi_propose(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.rsi.propose")
+    gw.require_db()
+    from machina.resident import rsi
+
+    rule = _str(params, "rule", max_len=2_000)
+    evidence = params.get("evidence")
+    if evidence is not None and not isinstance(evidence, dict):
+        raise RpcError(INVALID_PARAMS, "evidence must be an object")
+    try:
+        row = await rsi.propose_rule(
+            rule,
+            category=_str(params, "category", required=False, max_len=40) or "style",
+            confidence=float(params.get("confidence", 0.5)),
+            evidence=evidence,
+        )
+    except (TypeError, ValueError) as error:
+        raise RpcError(INVALID_PARAMS, str(error)) from None
+    return {"rule": row}
+
+
+async def resident_rsi_set(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.rsi.set")
+    gw.require_db()
+    from machina.resident import rsi
+
+    rule_id = _str(params, "ruleId", max_len=64)
+    status = _str(params, "status", max_len=20)
+    try:
+        row = await rsi.set_rule_status(rule_id, status, approved_by="user")
+    except ValueError as error:
+        raise RpcError(INVALID_PARAMS, str(error)) from None
+    if row is None:
+        raise RpcError(INVALID_PARAMS, "unknown rule")
+    return {"rule": row}
+
+
+async def resident_batch_create(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.batch.create")
+    gw.require_db()
+    from machina.resident import batches
+
+    items = params.get("items")
+    if not isinstance(items, list) or not items:
+        raise RpcError(INVALID_PARAMS, "items must be a non-empty list")
+    try:
+        batch = await batches.create_batch(
+            _str(params, "goal", max_len=1_000),
+            items,
+            grant_id=_str(params, "grantId", required=False, max_len=64) or None,
+            key_prefix=_str(params, "keyPrefix", required=False, max_len=80) or "",
+        )
+    except ValueError as error:
+        raise RpcError(INVALID_PARAMS, str(error)) from None
+    return {"batch": batch}
+
+
+async def resident_batch_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.batch.list")
+    gw.require_db()
+    from machina.resident import batches
+
+    return {"batches": await batches.list_batches(limit=_int(params, "limit", 50, 1, 100))}
+
+
+async def resident_batch_status(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.batch.status")
+    gw.require_db()
+    from machina.resident import batches
+
+    batch = await batches.batch_status(_str(params, "batchId", max_len=64))
+    if batch is None:
+        raise RpcError(INVALID_PARAMS, "unknown batch")
+    return {"batch": batch}
+
+
+async def resident_batch_cancel(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.batch.cancel")
+    gw.require_db()
+    from machina.resident import batches
+
+    return {"cancelled": await batches.cancel_batch(_str(params, "batchId", max_len=64))}
+
+
 async def resident_kill(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     _require_local_transport(gw, "resident.kill")
     gw.require_db()

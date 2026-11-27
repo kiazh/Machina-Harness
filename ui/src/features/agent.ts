@@ -6,7 +6,9 @@
 
 import type {
 	ResidentApprovalListResult,
+	ResidentBatchListResult,
 	ResidentGrantListResult,
+	ResidentRuleListResult,
 	ResidentMemoryResult,
 	ResidentStatusResult,
 	ResumeResult,
@@ -29,6 +31,10 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["grant", "Create a grant: /agent grant <minutes> <ops> [--sessions ...] [--targets ...] [--max N]"],
 	["revoke", "Revoke a grant: /agent revoke <grantId>"],
 	["autonomy", "Set mode: /agent autonomy ask|auto-safe|full"],
+	["rsi", "List learned rules: /agent rsi [propose <rule>|activate <id>|retire <id>]"],
+	["batches", "List durable batch work"],
+	["batch", "Show one batch: /agent batch <batchId>"],
+	["cancel-batch", "Cancel a batch: /agent cancel-batch <batchId>"],
 	["name", "Set the resident name: /agent name Machina"],
 	["kill", "Pause the resident and revoke every grant"],
 ];
@@ -214,6 +220,61 @@ export const agentCommand: Command = {
 					autonomyMode: mode,
 				});
 				host.print(`Resident autonomy: ${result.profile.autonomyMode}.`, "success");
+				return;
+			}
+			case "rsi": {
+				const [action, ...restWords] = argWords(rest);
+				if (!action || action === "list") {
+					const result = await host.request<ResidentRuleListResult>("resident.rsi.list", {});
+					host.print(
+						result.rules.length
+							? result.rules.map((rule) => `${rule.status.padEnd(8)} ${rule.id.slice(0, 8)}  ${rule.rule}  (${rule.confidence.toFixed(2)})`).join("\n")
+							: "No learned rules yet.",
+						"plain",
+					);
+					return;
+				}
+				if (action === "propose") {
+					const rule = restWords.join(" ").trim();
+					if (!rule) throw new Error("Usage: /agent rsi propose <rule>");
+					const result = await host.request<{ rule: { id: string; rule: string } }>("resident.rsi.propose", { rule });
+					host.print(`Proposed rule ${result.rule.id.slice(0, 8)}: ${result.rule.rule}`, "success");
+					return;
+				}
+				if (action === "activate" || action === "retire") {
+					const id = restWords[0];
+					if (!id) throw new Error(`Usage: /agent rsi ${action} <ruleId>`);
+					await host.request("resident.rsi.set", { ruleId: id, status: action === "activate" ? "active" : "retired" });
+					host.print(`Rule ${id.slice(0, 8)} ${action === "activate" ? "active" : "retired"}.`, "success");
+					return;
+				}
+				throw new Error("Usage: /agent rsi [list|propose <rule>|activate <id>|retire <id>]");
+			}
+			case "batches": {
+				const result = await host.request<ResidentBatchListResult>("resident.batch.list", {});
+				host.print(
+					result.batches.length
+						? result.batches.map((batch) => `${batch.id.slice(0, 8)}  ${batch.status}  ${batch.done}/${batch.total}  ${batch.goal}`).join("\n")
+						: "No batches.",
+					"plain",
+				);
+				return;
+			}
+			case "batch": {
+				const batchId = rest.trim();
+				if (!batchId) throw new Error("Usage: /agent batch <batchId>");
+				const result = await host.request<{ batch: { id: string; status: string; done: number; total: number; goal: string } }>(
+					"resident.batch.status",
+					{ batchId },
+				);
+				host.print(`${result.batch.id.slice(0, 8)}  ${result.batch.status}  ${result.batch.done}/${result.batch.total}  ${result.batch.goal}`, "plain");
+				return;
+			}
+			case "cancel-batch": {
+				const batchId = rest.trim();
+				if (!batchId) throw new Error("Usage: /agent cancel-batch <batchId>");
+				const result = await host.request<{ cancelled: boolean }>("resident.batch.cancel", { batchId });
+				host.print(result.cancelled ? "Batch cancelled." : "Batch not found or already finished.", result.cancelled ? "success" : "warning");
 				return;
 			}
 			case "name": {

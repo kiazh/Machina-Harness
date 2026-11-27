@@ -498,6 +498,34 @@ export interface ResidentApprovalListResult {
 	approvals: ResidentApprovalView[];
 }
 
+export interface ResidentRuleView {
+	id: string;
+	rule: string;
+	category: string;
+	confidence: number;
+	status: "proposed" | "active" | "retired";
+	version: number;
+	approvedBy: string;
+}
+
+export interface ResidentRuleListResult {
+	rules: ResidentRuleView[];
+}
+
+export interface ResidentBatchView {
+	id: string;
+	goal: string;
+	status: string;
+	total: number;
+	done: number;
+	failed: number;
+	createdAt: string | null;
+}
+
+export interface ResidentBatchListResult {
+	batches: ResidentBatchView[];
+}
+
 export interface ResidentGrantListResult {
 	grants: ResidentGrantView[];
 }

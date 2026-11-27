@@ -9,7 +9,7 @@ from machina.gateway.errors import RpcError
 from machina.gateway.features import resident as feature
 from machina.permissions import store as permissions
 from machina.resident import runtime as resident_runtime
-from machina.resident import store
+from machina.resident import batches, rsi, store
 
 
 def _grant(**overrides):
@@ -293,3 +293,31 @@ async def test_resident_context_records_an_event(monkeypatch) -> None:
     assert payload["recorded"] is True
     assert seen["payload"]["app"] == "Safari"
     assert seen["payload"]["selection"] == "hello"
+
+
+def test_batch_idempotency_key_is_stable_and_order_independent() -> None:
+    first = batches.idempotency_key({"to": "a@example.com", "subject": "Hi"}, prefix="e2e-")
+    second = batches.idempotency_key({"subject": "Hi", "to": "a@example.com"}, prefix="e2e-")
+    other = batches.idempotency_key({"to": "b@example.com", "subject": "Hi"}, prefix="e2e-")
+
+    assert first == second
+    assert first != other
+    assert first.startswith("e2e-")
+
+
+def test_rsi_rule_view_uses_the_wire_shape() -> None:
+    view = rsi.rule_view(
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "rule": "Prefer short emails",
+            "category": "style",
+            "confidence": 0.8,
+            "status": "active",
+            "version": 3,
+            "approved_by": "user",
+        }
+    )
+
+    assert view["approvedBy"] == "user"
+    assert view["confidence"] == 0.8
+    assert view["status"] == "active"

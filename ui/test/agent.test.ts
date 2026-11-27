@@ -123,3 +123,23 @@ test("/agent rejects an unknown option", async () => {
 	const h = host();
 	await assert.rejects(() => agentCommand.run("nonsense", h.host), /Unknown \/agent option/);
 });
+
+
+test("/agent rsi lists learned rules and batches", async () => {
+	const h = host({
+		"resident.rsi.list": () => ({
+			rules: [{ id: "11111111-1111", rule: "short emails", category: "style", confidence: 0.8, status: "active", version: 2, approvedBy: "user" }],
+		}),
+		"resident.batch.list": () => ({
+			batches: [{ id: "22222222-2222", goal: "inbox triage", status: "running", total: 10, done: 4, failed: 0, createdAt: null }],
+		}),
+	});
+
+	await agentCommand.run("rsi", h.host);
+	await agentCommand.run("batches", h.host);
+
+	const text = h.printed.join("\n");
+	assert.match(text, /short emails/);
+	assert.match(text, /inbox triage/);
+	assert.match(text, /4\/10/);
+});
