@@ -648,6 +648,7 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
 
 def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
     if name == "opencode-go":
+        from machina.core.provider import opencode_go_catalog
         from machina.core.provider.specs import PROVIDER_SPECS
 
         model = PROVIDER_SPECS[name].default_model
@@ -656,15 +657,23 @@ def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
                 model = str(config.get("model") or "").strip() or model
         except Exception:
             pass
-        return [
-            {
-                "id": model,
-                "displayName": model,
-                "description": "Configured OpenCode Go subscription model",
-                "contextWindow": 128_000,
-                "maxOutputTokens": 32_000,
-                "source": "configured",
-            }
+        configured = {
+            "id": model,
+            "displayName": model,
+            "description": "Configured OpenCode Go subscription model",
+            "contextWindow": 128_000,
+            "maxOutputTokens": 32_000,
+            "source": "configured",
+        }
+        rows = opencode_go_catalog.cached_models()
+        if not rows:
+            return [configured]
+        # The session's route leads the candidate list; the rest of the
+        # subscription library follows for routing and the picker.
+        if not any(row.get("id") == model for row in rows):
+            return [configured, *rows]
+        return [row for row in rows if row.get("id") == model] + [
+            row for row in rows if row.get("id") != model
         ]
     rows = provider_models(name)
     if rows:

@@ -137,6 +137,37 @@ async def _kiro_models(provider: str, refresh: bool, *, fast: bool = False) -> d
         )
 
 
+async def _opencode_go_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
+    """Go catalog: snapshot/cache for the picker, live on refresh."""
+    from machina.core.provider import opencode_go_catalog
+
+    if fast and not refresh:
+        rows = opencode_go_catalog.cached_models()
+        return _models_payload(
+            provider,
+            source=opencode_go_catalog.SOURCE if rows else "none",
+            models=rows,
+            fetch_error=None if rows else "no OpenCode Go catalog available",
+        )
+    try:
+        rows = await asyncio.to_thread(opencode_go_catalog.models, refresh=refresh)
+    except Exception as exc:  # bounded: the snapshot still answers
+        rows = opencode_go_catalog.cached_models()
+        if not rows:
+            return _models_payload(
+                provider,
+                source="none",
+                models=[],
+                fetch_error=str(exc) or type(exc).__name__,
+            )
+    return _models_payload(
+        provider,
+        source=opencode_go_catalog.SOURCE if rows else "none",
+        models=rows,
+        fetch_error=None if rows else "no OpenCode Go catalog available",
+    )
+
+
 async def _hermes_models(provider: str, refresh: bool, *, fast: bool = False) -> dict[str, Any]:
     """Catalog from the local Hermes proxy, starting it on explicit refresh."""
     from machina.core import hermes_proxy
@@ -258,6 +289,8 @@ async def models_list(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         return await _kiro_models(provider, refresh, fast=fast)
     if provider == "hermes":
         return await _hermes_models(provider, refresh, fast=fast)
+    if provider == "opencode-go":
+        return await _opencode_go_models(provider, refresh, fast=fast)
     if store.is_named_provider(provider):
         return await _named_models(provider, refresh, fast=fast)
     # Built-in direct families use the bundled models.dev snapshot. This is

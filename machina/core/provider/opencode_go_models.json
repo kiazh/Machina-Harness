@@ -1,0 +1,513 @@
+{
+  "fetchedAt": "2026-11-27T11:48:17.193415Z",
+  "fetched_at": 1795780097,
+  "models": [
+    {
+      "contextWindow": 1000000,
+      "description": "October 17 update of DeepSeek V4.1 Flash with improved reasoning, coding, agentic tasks, and visual understanding",
+      "displayName": "DeepSeek V4.1 Flash 1017",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "family": "deepseek-flash",
+      "id": "deepseek-v4.1-flash",
+      "maxOutputTokens": 384000,
+      "reasoning": true,
+      "releaseDate": "2026-10-17",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Flagship DeepSeek model for coding, reasoning, and agentic work",
+      "displayName": "DeepSeek V4 Pro",
+      "efforts": [
+        "high",
+        "max"
+      ],
+      "family": "deepseek-pro",
+      "id": "deepseek-v4-pro",
+      "maxOutputTokens": 384000,
+      "reasoning": true,
+      "releaseDate": "2026-04-24",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Flagship GLM model for long-horizon coding, agents, and complex project delivery",
+      "displayName": "GLM-5.3",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "family": "glm",
+      "id": "glm-5.3",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-08-14",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 500000,
+      "description": "xAI's frontier model for long-running agents, coding, knowledge work, and visual projects",
+      "displayName": "Grok 4.7",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "family": "grok",
+      "id": "grok-4.7",
+      "maxOutputTokens": 500000,
+      "reasoning": true,
+      "releaseDate": "2026-09-21",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Muse Spark 1.2 is a coding-focused update to Muse Spark 1.1 with improvements in code generation, complex debugging, codebase understanding, and end-to-end developer workflows.",
+      "displayName": "Muse Spark 1.2 Contributor",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "family": "muse-spark",
+      "id": "muse-spark-1.2-contributor",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-08-05",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Muse Spark 1.3 is a multimodal reasoning model from Meta for coding and agentic workflows.",
+      "displayName": "Muse Spark 1.3 Contributor",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "family": "muse-spark",
+      "id": "muse-spark-1.3-contributor",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-09-02",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Native multimodal GLM model for efficient coding and long-horizon agent tasks",
+      "displayName": "GLM-5.3-Flash",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "family": "glm-flash",
+      "id": "glm-5.3-flash",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-08-26",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1050000,
+      "description": "Cost-efficient GPT-5.6 model for fast, high-volume workloads",
+      "displayName": "GPT-5.6 Luna",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "family": "gpt-luna",
+      "id": "gpt-5.6-luna",
+      "maxOutputTokens": 128000,
+      "reasoning": true,
+      "releaseDate": "2026-07-09",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1050000,
+      "description": "OpenAI's most efficient model for focused, high-volume tasks",
+      "displayName": "GPT-6 Luna",
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "family": "gpt-luna",
+      "id": "gpt-6-luna",
+      "maxOutputTokens": 128000,
+      "reasoning": true,
+      "releaseDate": "2026-09-22",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Fast Claude model for responsive assistance, classification, and lightweight agents",
+      "displayName": "Claude Haiku 5.5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "family": "claude-haiku",
+      "id": "claude-haiku-5-5",
+      "maxOutputTokens": 128000,
+      "reasoning": true,
+      "releaseDate": "2026-10-07",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 256000,
+      "description": "Tencent Hy reasoning model for coding, instruction following, and agent tasks",
+      "displayName": "Hy3",
+      "efforts": [
+        "none",
+        "low",
+        "high"
+      ],
+      "family": "hy",
+      "id": "hy3",
+      "maxOutputTokens": 128000,
+      "reasoning": true,
+      "releaseDate": "2026-07-06",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "A next-generation productivity model with significantly enhanced Agent and complex task execution capabilities.",
+      "displayName": "Hy4 preview",
+      "efforts": [
+        "none",
+        "high"
+      ],
+      "family": "hy",
+      "id": "hy4-preview",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-08-28",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 262144,
+      "description": "Coding-focused Kimi model, stronger on long-horizon repo work with less overthinking",
+      "displayName": "Kimi K2.7 Code",
+      "efforts": [],
+      "family": "kimi-code",
+      "id": "kimi-k2.7-code",
+      "maxOutputTokens": 262144,
+      "reasoning": true,
+      "releaseDate": "2026-06-12",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Multimodal Kimi model with 1M context and always-on thinking for long-horizon agent work",
+      "displayName": "Kimi K3",
+      "efforts": [
+        "max"
+      ],
+      "family": "kimi",
+      "id": "kimi-k3",
+      "maxOutputTokens": 1048576,
+      "reasoning": true,
+      "releaseDate": "2026-07-16",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "MiMo Flash model for multimodal coding agents and long-context automation",
+      "displayName": "MiMo-V2.6-Flash",
+      "efforts": [],
+      "family": "mimo-flash",
+      "id": "mimo-v2.6-flash",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-09-22",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Stronger MiMo Pro tier for multimodal reasoning and coding-agent execution",
+      "displayName": "MiMo-V2.6-Pro",
+      "efforts": [],
+      "family": "mimo-pro",
+      "id": "mimo-v2.6-pro",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-09-22",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "MiniMax multimodal coding model for long-context reasoning and agent tasks",
+      "displayName": "MiniMax-M3",
+      "efforts": [],
+      "family": "minimax-m",
+      "id": "minimax-m3",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-06-01",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Frontier multimodal coding model with 1M context window and tunable thinking depth",
+      "displayName": "MiniMax M3.1 Flash",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "family": "minimax-m-flash",
+      "id": "minimax-m3.1-flash",
+      "maxOutputTokens": 512000,
+      "reasoning": true,
+      "releaseDate": "2026-10-19",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "StepFun's next-generation flagship base model for coding and professional knowledge work, with native text, image, and video input and a 1M-token context window",
+      "displayName": "Step 5 Preview",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "family": "step",
+      "id": "step-5-preview",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-09-16",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows",
+      "displayName": "Beam Free",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "family": "beam-free",
+      "id": "beam-free",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-10-05",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "2.4-trillion-parameter multimodal flagship for coding, professional work, and long-horizon agentic workflows",
+      "displayName": "Qwen3.8 Max",
+      "efforts": [
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "family": "qwen-max",
+      "id": "qwen3.8-max",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-08-03",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Qwen vision-language model for visual reasoning, documents, and agent tasks",
+      "displayName": "Qwen3.8 Flash",
+      "efforts": [
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "family": "qwen-flash",
+      "id": "qwen3.8-flash",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-08-26",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Multimodal reasoning model for visual analysis, planning, and tool use",
+      "displayName": "Qwen3.7 Plus",
+      "efforts": [],
+      "family": "qwen-plus",
+      "id": "qwen3.7-plus",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-06-02",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Multimodal Kimi model with a 1M-token context window and always-on reasoning, for coding, 3D creation and financial research",
+      "displayName": "Kimi K3.1 Pro",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "family": "kimi-pro",
+      "id": "kimi-k3.1-pro",
+      "maxOutputTokens": 1048576,
+      "reasoning": true,
+      "releaseDate": "2026-10-23",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 262144,
+      "description": "Stealth model, free for a limited time",
+      "displayName": "Iceman Contributor Free",
+      "efforts": [],
+      "family": "",
+      "id": "iceman-contributor-free",
+      "maxOutputTokens": 131072,
+      "reasoning": true,
+      "releaseDate": "2026-10-24",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Google's flagship reasoning model for complex software engineering, deep math and science, and long-horizon autonomous agents",
+      "displayName": "Gemini 4 Argon",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "family": "gemini",
+      "id": "gemini-4-argon",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-10-13",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "A next-generation multimodal productivity model with significantly enhanced Agent and complex task execution capabilities.",
+      "displayName": "Hy4",
+      "efforts": [
+        "none",
+        "high"
+      ],
+      "family": "hy",
+      "id": "hy4",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-11-04",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1048576,
+      "description": "Tencent's lower-cost Hy4 tier for everyday agent and productivity tasks, with image understanding and a 1M-token context window.",
+      "displayName": "Hy4 flash Free",
+      "efforts": [
+        "none",
+        "high"
+      ],
+      "family": "hy-flash-free",
+      "id": "hy4-flash-free",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-11-16",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Flagship multimodal model for coding, office productivity, frontend design, and complex agentic tasks",
+      "displayName": "Qwen4 Max",
+      "efforts": [
+        "low",
+        "high",
+        "xhigh"
+      ],
+      "family": "qwen-max",
+      "id": "qwen4-max",
+      "maxOutputTokens": 262144,
+      "reasoning": true,
+      "releaseDate": "2026-11-16",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Meituan's multimodal reasoning model for long-horizon coding and agent tasks, with visual understanding and a 1M-token context window",
+      "displayName": "LongCat-2.5",
+      "efforts": [],
+      "family": "longcat",
+      "id": "longcat-2.5",
+      "maxOutputTokens": 262144,
+      "reasoning": true,
+      "releaseDate": "2026-11-02",
+      "source": "opencode-go",
+      "tools": true
+    },
+    {
+      "contextWindow": 1000000,
+      "description": "Stealth reasoning model, free for a limited time",
+      "displayName": "HungerG Free",
+      "efforts": [],
+      "family": "",
+      "id": "hungerg-free",
+      "maxOutputTokens": 65536,
+      "reasoning": true,
+      "releaseDate": "2026-11-24",
+      "source": "opencode-go",
+      "tools": true
+    }
+  ],
+  "source": "https://opencode.ai/inference/go/v1/models"
+}

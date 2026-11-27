@@ -200,6 +200,13 @@ def context_window_for(
         metadata = kiro_proxy.MODEL_METADATA.get(kiro_proxy.canonical_model_id(name))
         if metadata is not None and isinstance(metadata.get("contextWindow"), int):
             return metadata["contextWindow"]
+    if provider_name == "opencode-go":
+        # The Go catalog publishes exact per-model windows (up to 1M tokens).
+        from machina.core.provider import opencode_go_catalog
+
+        window = opencode_go_catalog.context_window(name)
+        if window:
+            return window
     if provider_name and provider_name != "chatgpt":
         bundled = _bundled_windows(provider_name).get(name)
         if bundled is not None:
