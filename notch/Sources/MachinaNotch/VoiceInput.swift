@@ -2,6 +2,21 @@ import AVFoundation
 import Foundation
 import Speech
 
+/// Feeds audio buffers from CoreAudio's realtime thread into Speech. Isolated
+/// in a Sendable box so the tap closure does not inherit `VoiceInput`'s
+/// MainActor isolation (which Swift 6 checks on the audio thread and aborts).
+private final class SpeechAudioFeeder: @unchecked Sendable {
+    private let request: SFSpeechAudioBufferRecognitionRequest
+
+    init(request: SFSpeechAudioBufferRecognitionRequest) {
+        self.request = request
+    }
+
+    nonisolated func append(_ buffer: AVAudioPCMBuffer) {
+        request.append(buffer)
+    }
+}
+
 /// Push-to-talk dictation inspired by Handy: press, speak, release, and the
 /// transcript lands in the composer. Recognition is on-device by default; the
 /// microphone is never open unless the button is held.
@@ -71,8 +86,9 @@ final class VoiceInput: ObservableObject {
             error = "No usable microphone input is available."
             return
         }
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            request.append(buffer)
+        let feeder = SpeechAudioFeeder(request: request)
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { @Sendable buffer, _ in
+            feeder.append(buffer)
         }
         engine.prepare()
         do {
@@ -85,15 +101,18 @@ final class VoiceInput: ObservableObject {
         self.engine = engine
         self.request = request
         isRecording = true
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        task = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
+            let text = result?.bestTranscription.formattedString
+            let isFinal = result?.isFinal ?? false
+            let errorText = error?.localizedDescription
             Task { @MainActor in
                 guard let self else { return }
-                if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                    if result.isFinal { self.finish() }
+                if let text {
+                    self.transcript = text
+                    if isFinal { self.finish() }
                 }
-                if let error, !self.finalDelivered {
-                    self.error = error.localizedDescription
+                if let errorText, !self.finalDelivered {
+                    self.error = errorText
                     self.finish()
                 }
             }
@@ -123,7 +142,7 @@ final class VoiceInput: ObservableObject {
             return true
         case .notDetermined:
             return await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                AVCaptureDevice.requestAccess(for: .audio) { @Sendable granted in
                     continuation.resume(returning: granted)
                 }
             }
@@ -138,7 +157,7 @@ final class VoiceInput: ObservableObject {
             return true
         case .notDetermined:
             return await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { status in
+                SFSpeechRecognizer.requestAuthorization { @Sendable status in
                     continuation.resume(returning: status == .authorized)
                 }
             }

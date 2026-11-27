@@ -24,6 +24,38 @@ struct ResidentGrant: Decodable, Identifiable {
     }
 }
 
+/// Reviewable diff carried by file-write approvals.
+struct ApprovalFileDiff: Decodable, Equatable {
+    var currentPreview: String = ""
+    var diff: String = ""
+    var truncated: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case currentPreview = "current_preview"
+        case diff
+        case truncated
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        currentPreview = (try? container.decodeIfPresent(String.self, forKey: .currentPreview)) ?? ""
+        diff = (try? container.decodeIfPresent(String.self, forKey: .diff)) ?? ""
+        truncated = (try? container.decodeIfPresent(Bool.self, forKey: .truncated)) ?? false
+    }
+}
+
+/// The stored proposal includes the redacted content preview used by the
+/// approval card. `approvals.list` returns it alongside the raw record.
+struct ApprovalProposal: Decodable, Equatable {
+    var contentPreview: String?
+    var contentLength: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case contentPreview = "content_preview"
+        case contentLength = "content_length"
+    }
+}
+
 struct ResidentApproval: Decodable, Identifiable {
     var id: String { request_id }
     let request_id: String
@@ -35,6 +67,55 @@ struct ResidentApproval: Decodable, Identifiable {
     let digest: String
     let status: String
     let created_at: String?
+
+    // Rich review data is present on `approvals.list` and on
+    // `needs_approval` event cards. Both camelCase (events) and snake_case
+    // (stored records) spellings are accepted so the card works either way.
+    var fileDiff: ApprovalFileDiff? = nil
+    var file_diff: ApprovalFileDiff? = nil
+    var contentPreview: String? = nil
+    var content_preview: String? = nil
+    var proposal: ApprovalProposal? = nil
+    var display: String? = nil
+
+    /// Best available unified diff for the compact review area.
+    var diffText: String? {
+        let value = (fileDiff ?? file_diff)?.diff ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    /// Best available proposed-content preview when no unified diff exists.
+    var previewText: String? {
+        let candidates = [
+            contentPreview,
+            content_preview,
+            proposal?.contentPreview,
+            displayPreview,
+        ]
+        return candidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    var previewTruncated: Bool {
+        (fileDiff ?? file_diff)?.truncated == true
+    }
+
+    /// Older gateway builds only expose the redacted display JSON. Pull out
+    /// its content_preview without depending on the richer record fields.
+    private var displayPreview: String? {
+        guard let display,
+              let data = display.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["content_preview"] as? String
+    }
+}
+
+struct ResidentDaemon: Decodable {
+    let running: Bool
+    let intervalSeconds: Int?
+    let lastTick: String?
+    let lastError: String?
 }
 
 struct ResidentHistoryEntry: Decodable {
@@ -56,6 +137,7 @@ struct ResidentStatus: Decodable {
     let pendingApprovals: Int
     let grants: [ResidentGrant]
     let coreMemoryCount: Int
+    var daemon: ResidentDaemon? = nil
 }
 
 private struct EmptyResult: Decodable {}
@@ -140,6 +222,17 @@ struct GatewayClient {
     func approvals() async throws -> [ResidentApproval] {
         struct Payload: Decodable { let approvals: [ResidentApproval] }
         let payload: Payload = try await call("resident.approval.list")
+        return payload.approvals
+    }
+
+    /// Per-session approval records include the reviewable proposal and
+    /// `content_preview`; the resident listing is intentionally lean.
+    func richApprovals(sessionId: String) async throws -> [ResidentApproval] {
+        struct Payload: Decodable { let approvals: [ResidentApproval] }
+        let payload: Payload = try await call(
+            "approvals.list",
+            params: ["sessionId": sessionId]
+        )
         return payload.approvals
     }
 
