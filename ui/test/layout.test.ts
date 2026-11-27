@@ -106,7 +106,7 @@ test("short transcript docks composer and footer to the bottom rows", () => {
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 		assert.match(screen[20] ?? "", /Ask anything, or type \/ for commands\./);
 		assert.equal((screen[21] ?? "").trim(), "", "one padding row closes the composer");
-		assert.match(screen[22] ?? "", /0 tokens \(0%\)$/);
+		assert.match(screen[22] ?? "", /0 tokens \(0%\) {2}$/);
 	} finally {
 		footer.dispose();
 		coordinator.dispose();
