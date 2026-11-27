@@ -1,0 +1,101 @@
+{
+  "scenario": "budget-exceeded",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_start",
+        "agent_repair_token_budget"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [],
+      "condense": [
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "content_len": 145,
+          "content_sha256": "ea68c09431fddd747aeab12879332fda1c7526d7df1034fcbc6914c58d7980b4",
+          "iterations": 2,
+          "needs_approval": [],
+          "outcome": "failed",
+          "seq": 0,
+          "tokens_used": 150,
+          "tool_names": [
+            "terminal"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "a7921c08acbaa1019f0dc3591312183ae08e3de373fb7d88854cf92faddb58af"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        }
+      ],
+      "learning_reviews": 0,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "complete",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 145,
+        "content_sha256": "ea68c09431fddd747aeab12879332fda1c7526d7df1034fcbc6914c58d7980b4",
+        "iterations": 2,
+        "needs_approval": [],
+        "outcome": "failed",
+        "seq": 0,
+        "tokens_used": 150,
+        "tool_names": [
+          "terminal"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "terminal"
+          ],
+          "recorded": [
+            "terminal"
+          ],
+          "requested": [
+            "terminal"
+          ]
+        }
+      ]
+    }
+  ]
+}

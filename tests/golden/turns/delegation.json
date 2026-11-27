@@ -1,0 +1,175 @@
+{
+  "scenario": "delegation",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_stream_start",
+        "agent_run_complete"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [
+        {
+          "content_sha256": "f72fcc8d6a2ba681812677a198ed2bd9a5505085f5c941abbdea51a7f192200c",
+          "outcome": "completed",
+          "tool_calls": 1
+        }
+      ],
+      "condense": [
+        {
+          "stale_chars": null
+        },
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 0,
+          "tokens_used": 10,
+          "type": "token_usage"
+        },
+        {
+          "seq": 1,
+          "tool_args_sha256": "38a554adab84959b940f966f61ee16eab4a08aafedc91826da06bb993f01138a",
+          "tool_call_id": "call-1",
+          "tool_name": "delegate",
+          "type": "tool_call"
+        },
+        {
+          "seq": 2,
+          "tool_call_id": "call-1",
+          "tool_name": "delegate",
+          "tool_outcome": "completed",
+          "tool_result_len": 29,
+          "tool_result_sha256": "72faa4104c5df8783055cd8d19d93016c47268962c46bd50740be077c1c93ca3",
+          "type": "tool_result"
+        },
+        {
+          "seq": 3,
+          "text_len": 30,
+          "text_sha256": "f72fcc8d6a2ba681812677a198ed2bd9a5505085f5c941abbdea51a7f192200c",
+          "type": "text"
+        },
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 4,
+          "tokens_used": 5,
+          "type": "token_usage"
+        },
+        {
+          "content_len": 30,
+          "content_sha256": "f72fcc8d6a2ba681812677a198ed2bd9a5505085f5c941abbdea51a7f192200c",
+          "iterations": 2,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 5,
+          "tokens_used": 28,
+          "tool_names": [
+            "delegate"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "c2460aad27e3e24f67fe16b573e20db343a47c4b59598aa0b20adfef1c6e5b3f"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "f351424c6b63caa5bef78f61463ee42a9d1f80ab3ad93a35ed18f6738f12aadb"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 4,
+          "total_tokens": 0
+        },
+        {
+          "iterations": 1,
+          "messages": 4,
+          "tool_calls": 1,
+          "tools": 4,
+          "total_tokens": 23
+        }
+      ],
+      "learning_reviews": 1,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "stream",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 4
+        },
+        {
+          "kind": "stream",
+          "messages": 4,
+          "outcome": "ok",
+          "status": null,
+          "tools": 4
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 30,
+        "content_sha256": "f72fcc8d6a2ba681812677a198ed2bd9a5505085f5c941abbdea51a7f192200c",
+        "iterations": 2,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 5,
+        "tokens_used": 28,
+        "tool_names": [
+          "delegate"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "delegate"
+          ],
+          "recorded": [
+            "delegate"
+          ],
+          "requested": [
+            "delegate"
+          ]
+        }
+      ]
+    }
+  ]
+}

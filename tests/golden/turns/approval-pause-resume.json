@@ -1,0 +1,251 @@
+{
+  "scenario": "approval-pause-resume",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_stream_start"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [],
+      "condense": [
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 0,
+      "events": [
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 0,
+          "tokens_used": 10,
+          "type": "token_usage"
+        },
+        {
+          "seq": 1,
+          "tool_args_sha256": "cc839b623689e205f7345bda3e92b657f83142eca7dce0e9cdddd849a6480705",
+          "tool_call_id": "call-1",
+          "tool_name": "terminal",
+          "type": "tool_call"
+        },
+        {
+          "seq": 2,
+          "tool_call_id": "call-1",
+          "tool_name": "terminal",
+          "tool_outcome": "paused",
+          "tool_result_len": 0,
+          "tool_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "type": "tool_result"
+        },
+        {
+          "content_sha256": "9456bdfa12ea76959c94a3572f5d91c73d838622df0a8d9b4e815c276c6b7880",
+          "seq": 3,
+          "tool_args_sha256": "deba77b92ae43dc31b225c275879c8f8bb3772b2ea76cc5d7c43799a06c5722f",
+          "tool_call_id": "call-1",
+          "tool_name": "terminal",
+          "type": "needs_approval"
+        },
+        {
+          "content_len": 21,
+          "content_sha256": "5ce37d602fc131eb735a06880dde2e744b52cbeca3fa83741c78c167e1d3b5b8",
+          "iterations": 1,
+          "needs_approval": [
+            {
+              "operation": "tool.exec",
+              "request_id": "req-1"
+            }
+          ],
+          "outcome": "completed",
+          "seq": 4,
+          "tokens_used": 10,
+          "tool_names": [
+            "terminal"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "999d032055964adcea2ea6918b5bc8e6e3a83b1e1ec96c98879cf000b4a30833"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        }
+      ],
+      "learning_reviews": 0,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "stream",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 21,
+        "content_sha256": "5ce37d602fc131eb735a06880dde2e744b52cbeca3fa83741c78c167e1d3b5b8",
+        "iterations": 1,
+        "needs_approval": [
+          {
+            "operation": "tool.exec",
+            "request_id": "req-1"
+          }
+        ],
+        "outcome": "completed",
+        "seq": 4,
+        "tokens_used": 10,
+        "tool_names": [
+          "terminal"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "terminal"
+          ],
+          "recorded": [
+            "terminal"
+          ],
+          "requested": [
+            "terminal"
+          ]
+        }
+      ]
+    },
+    {
+      "audits": [
+        "agent_run_stream_start",
+        "agent_run_complete"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [
+        {
+          "content_sha256": "4813a576dd2ddeb7b197ffb2ed53ce8c98e26aeb20796f805309a2ecb8a37dc2",
+          "outcome": "completed",
+          "tool_calls": 0
+        }
+      ],
+      "condense": [
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "seq": 0,
+          "text_len": 30,
+          "text_sha256": "4813a576dd2ddeb7b197ffb2ed53ce8c98e26aeb20796f805309a2ecb8a37dc2",
+          "type": "text"
+        },
+        {
+          "context_tokens": 10,
+          "context_usage_percentage": 1.0,
+          "credits_used": null,
+          "seq": 1,
+          "tokens_used": 8,
+          "type": "token_usage"
+        },
+        {
+          "content_len": 30,
+          "content_sha256": "4813a576dd2ddeb7b197ffb2ed53ce8c98e26aeb20796f805309a2ecb8a37dc2",
+          "iterations": 1,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 2,
+          "tokens_used": 8,
+          "tool_names": [],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "e9e678d0264121c19d70f4eacace3cb6fa938132d768cde57f30d5621ed21ffd"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "73a9f13015c3c3d10ed6bd80c596443d8ec2ae71939dfd7bfe5331970ace4318"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        }
+      ],
+      "learning_reviews": 1,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "stream",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 30,
+        "content_sha256": "4813a576dd2ddeb7b197ffb2ed53ce8c98e26aeb20796f805309a2ecb8a37dc2",
+        "iterations": 1,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 2,
+        "tokens_used": 8,
+        "tool_names": []
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": []
+    }
+  ]
+}

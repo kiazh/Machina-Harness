@@ -1,0 +1,79 @@
+{
+  "scenario": "cancellation-mid-stream",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_stream_start"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": true,
+      "completions": [],
+      "condense": [
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 0,
+      "events": [
+        {
+          "seq": 0,
+          "text_len": 8,
+          "text_sha256": "14dfe83cd7758d08beb4bed544fbef9e3b0ff28b5c453bd6ebc4de93081dd04f",
+          "type": "text"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "46ecf15d1cf12d532613534d99efe90741c34e850d401476811434fb796b613b"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "e7ab254c296c86233839ec47e8d9987c1d6717117c11d7432f769f7b223867cc"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        }
+      ],
+      "learning_reviews": 0,
+      "markers": [
+        {
+          "chunk_type": "assistant_message",
+          "payload_sha256": "b15bb52befade671c002eb3968177d9065df78794bbe02cfb41d9c407bd45572"
+        }
+      ],
+      "provider_attempts": [
+        {
+          "kind": "stream",
+          "messages": 2,
+          "outcome": "hang",
+          "status": null,
+          "tools": 3
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": null,
+      "token_metrics": [],
+      "tool_batches": []
+    }
+  ]
+}

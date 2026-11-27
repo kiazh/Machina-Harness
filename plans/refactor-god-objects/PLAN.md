@@ -14,7 +14,7 @@ reversible, and no task mixes a code move with a behavior change.
 | Task | State | Evidence |
 |---|---|---|
 | R0.1 metrics + ratchet | done | `tools/architecture_report.py`, baseline, CI step |
-| R0.2 Python golden traces | not started | — |
+| R0.2 Python golden traces | done | `tests/test_golden_turns.py`, 12 traces in `tests/golden/turns` |
 | R0.3 UI golden traces | not started | — |
 | R0.4 ADR + seams | done | `docs/adr/0004-god-object-decomposition.md` |
 | P1.1 `agent_support.py` | done | 168-line module; `agent.py` re-exports |

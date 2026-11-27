@@ -1,0 +1,152 @@
+{
+  "scenario": "empty-response-recovery",
+  "turns": [
+    {
+      "audits": [
+        "agent_run_start",
+        "agent_empty_final_recovery",
+        "agent_run_complete"
+      ],
+      "auto_parallel_calls": 1,
+      "cancelled": false,
+      "completions": [
+        {
+          "content_sha256": "7efe1b34b8c7e96530c1a7fe554f48c7bb0983465c55296e3b661589adbf6e9b",
+          "outcome": "completed",
+          "tool_calls": 1
+        }
+      ],
+      "condense": [
+        {
+          "stale_chars": null
+        },
+        {
+          "stale_chars": null
+        }
+      ],
+      "consolidations": 1,
+      "events": [
+        {
+          "content_len": 24,
+          "content_sha256": "7efe1b34b8c7e96530c1a7fe554f48c7bb0983465c55296e3b661589adbf6e9b",
+          "iterations": 2,
+          "needs_approval": [],
+          "outcome": "completed",
+          "seq": 0,
+          "tokens_used": 31,
+          "tool_names": [
+            "terminal"
+          ],
+          "type": "terminal"
+        }
+      ],
+      "flushes": [
+        {
+          "chunk_types": {
+            "user_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "bdb9051f09dbb03a412c4102d7984f4f93678c406fe98b18756fd63a2376f3cd"
+          ]
+        },
+        {
+          "chunk_types": {
+            "assistant_message": 1
+          },
+          "chunks": 1,
+          "payload_sha256": [
+            "30ca7ee571cbd557398f805b6fc1fdb1ef588a87e1f1f3d52f566b1bcabb71a7"
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "iterations": 0,
+          "messages": 2,
+          "tool_calls": 0,
+          "tools": 3,
+          "total_tokens": 0
+        },
+        {
+          "iterations": 1,
+          "messages": 4,
+          "tool_calls": 1,
+          "tools": 3,
+          "total_tokens": 10
+        }
+      ],
+      "learning_reviews": 1,
+      "markers": [],
+      "provider_attempts": [
+        {
+          "kind": "complete",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "complete",
+          "messages": 4,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "complete",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 3
+        },
+        {
+          "kind": "complete",
+          "messages": 2,
+          "outcome": "ok",
+          "status": null,
+          "tools": 0
+        }
+      ],
+      "snapshots": [
+        "begin",
+        "end"
+      ],
+      "terminal": {
+        "content_len": 24,
+        "content_sha256": "7efe1b34b8c7e96530c1a7fe554f48c7bb0983465c55296e3b661589adbf6e9b",
+        "iterations": 2,
+        "needs_approval": [],
+        "outcome": "completed",
+        "seq": 0,
+        "tokens_used": 31,
+        "tool_names": [
+          "terminal"
+        ]
+      },
+      "token_metrics": [
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "tool_batches": [
+        {
+          "completion_order": [
+            "terminal"
+          ],
+          "recorded": [
+            "terminal"
+          ],
+          "requested": [
+            "terminal"
+          ]
+        }
+      ]
+    }
+  ]
+}
