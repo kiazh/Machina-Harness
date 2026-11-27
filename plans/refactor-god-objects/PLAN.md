@@ -15,7 +15,7 @@ reversible, and no task mixes a code move with a behavior change.
 |---|---|---|
 | R0.1 metrics + ratchet | done | `tools/architecture_report.py`, baseline, CI step |
 | R0.2 Python golden traces | done | `tests/test_golden_turns.py`, 12 traces in `tests/golden/turns` |
-| R0.3 UI golden traces | not started | — |
+| R0.3 UI golden traces | done | `ui/test/golden-ui.test.ts`, 36 frames + 14 key steps |
 | R0.4 ADR + seams | done | `docs/adr/0004-god-object-decomposition.md` |
 | P1.1 `agent_support.py` | done | 168-line module; `agent.py` re-exports |
 | P1.2 `context_prep.py` | done | 411-line preparer; `agent.py` 318-line method removed |
@@ -25,23 +25,30 @@ reversible, and no task mixes a code move with a behavior change.
 | P2.3a `tool_batch.py` | done (pure move) | 606-line executor; constants moved |
 | P2.4a `react_loop.py` | done (pure move) | 555-line loop module |
 | P2.1 `turn_state.py` | done | 188-line `TurnState`/`TurnBudget`; loop reads state; stop/counter table tests |
-| P2.3b explicit tool interface | not started | executor still bound to the facade |
+| P2.3b explicit tool interface | done | `ToolBatchHost` Protocol; 4 phase methods |
 | P2.4b phase split | not started | loop still one function |
-| U3.* / U4.* / P5.* | not started | `app.ts` unchanged |
+| U3.1 status controller | done | `ui/src/app/status.ts` (569) |
+| U3.2 changes controller | done | `ui/src/app/changes.ts` (438) |
+| U3.3/U3.4 approvals/sessions | in progress | — |
+| U4.* / P5.* | not started | — |
 
 Measured after the Python tranche:
 
 | File | Before | Now |
 |---|---:|---:|
 | `core/agent.py` | 3,067 | **698** |
-| `core/tool_batch.py` | — | 710 (606-line method) |
-| `core/react_loop.py` | — | 583 (533-line method) |
+| `core/tool_batch.py` | — | 973 (method split; `execute_stream` 68) |
+| `core/react_loop.py` | — | 583 (533-line method; phase split in progress) |
 | `core/turn_state.py` | — | 188 |
 | `core/context_prep.py` | — | 411 |
 | `core/turn_phases.py` | — | 404 |
+| `ui/src/app.ts` | 5,399 | 4,576 |
+| `ui/src/app/status.ts` | — | 569 |
+| `ui/src/app/changes.ts` | — | 438 |
 
-The safety net (R0.2/R0.3) is still the prerequisite for touching the two
-remaining large methods; the file-level seams are now in place.
+Both safety nets (R0.2/R0.3) are in place. The remaining work is method-level:
+split `react_loop` into phases, then continue the UI controllers (approvals,
+sessions, events, keyboard, commands, workspace, bootstrap).
 
 ---
 

@@ -42,7 +42,8 @@
 
 ### Changed
 
-- The turn engine is decomposed by seam: `agent.py` shrank from 3,067 to 698 lines behind new `agent_support`, `context_prep`, `llm_calls`, `tool_batch`, `tool_results`, `react_loop`, `turn_phases`, and `post_turn` modules. Behavior is unchanged; the 862-test smoke suite and the architecture ratchet pin the move.
+- The turn engine is decomposed by seam: `agent.py` shrank from 3,067 to 698 lines behind new `agent_support`, `context_prep`, `llm_calls`, `tool_batch`, `tool_results`, `react_loop`, `turn_phases`, `turn_state`, and `post_turn` modules. The tool batch is split into four phases behind a `ToolBatchHost` Protocol, and a 12-scenario golden-trace harness pins event order and terminal shapes. Behavior is unchanged.
+- The terminal UI's Activity/status and Changes/review clusters now live in `ui/src/app/status.ts` and `ui/src/app/changes.ts`; `app.ts` dropped from 5,399 to 4,576 lines. A deterministic 36-frame/14-key golden harness pins layout and navigation.
 - A persistent command strip keeps the Activity, Chat, and Changes tabs and session context visible across all three screens.
 - The composer is a framed input card now: a rounded border, the accent `❯` inside it, and an accent frame while the composer owns focus. The full-width acid rule and hairline are gone.
 - Approvals use one shared rounded-card primitive: a titled evidence card in the transcript and a matching decision card above the composer, with a padded interior, a thin border, a raised fill, and a full-width accent bar on the current choice. The hand-drawn square frame and the flat rule-based dock are gone.
