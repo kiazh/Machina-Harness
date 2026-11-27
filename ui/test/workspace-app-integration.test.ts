@@ -420,18 +420,18 @@ test("METHOD_NOT_FOUND disables the workspace quietly with one notice and never 
 
 // ─── successful open + geometry ─────────────────────────────────────────────
 
-test("a workspace opens chat-first and reveals the editor on demand", async () => {
+test("a fresh workspace opens split before any file is opened", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
 
 	const layout = internals(app).workspaceLayout;
-	assert.equal(layout?.effectiveMode, "chat", "chat owns the default layout");
-	assert.equal(layout?.editor, undefined, "no empty editor pane is composed");
+	assert.equal(layout?.effectiveMode, "split");
+	assert.ok(layout?.editor, "the editor is composed even with no open files");
 	assert.equal(internals(app).integration?.controller.phase, "ready");
 	await internals(app).openWorkspacePath("src/a.ts");
 	const split = internals(app).workspaceLayout;
-	assert.equal(split?.effectiveMode, "split", "opening a file reveals the editor");
+	assert.equal(split?.effectiveMode, "split", "opening a file keeps the default layout");
 	assert.ok((split?.editor?.columns ?? 0) >= 48, "editor column keeps its minimum at 160 cols");
 	assert.ok((split?.chat?.columns ?? 0) >= 40, "chat column keeps its minimum");
 	const opens = client.requests.filter((entry) => entry.method === "workspace.open");
@@ -538,7 +538,7 @@ async function bootFramed(columns: number, rows: number): Promise<{
 	return { app, tui, term, client };
 }
 
-test("at 160x48 a fresh workspace shows chat without an empty editor", async () => {
+test("at 160x48 a fresh workspace shows the chat and empty editor", async () => {
 	const { app, tui, client } = await bootFramed(160, 48);
 	try {
 		let screen = tui.getScreenLines().map(stripTerminalSequences);
@@ -546,8 +546,8 @@ test("at 160x48 a fresh workspace shows chat without an empty editor", async () 
 		for (const line of screen) assert.ok(visibleWidth(line) <= 160);
 		let joined = screen.join("\n");
 		assert.match(joined, /Ask anything/, "chat composer visible");
-		assert.doesNotMatch(joined, /No open files/, "no empty editor pane");
-		assert.equal(internals(app).workspaceLayout?.effectiveMode, "chat");
+		assert.match(joined, /No open files/, "the editor is available before opening a file");
+		assert.equal(internals(app).workspaceLayout?.effectiveMode, "split");
 		await internals(app).openWorkspacePath("src/a.ts");
 		tui.renderNow(true);
 		screen = tui.getScreenLines().map(stripTerminalSequences);
@@ -931,11 +931,10 @@ test("a narrow terminal refuses the explorer toggle with one honest notice", asy
 	await app.exit();
 });
 
-test("a fresh workspace persists the explorer open; an explicit stored false stays closed", async () => {
+test("a fresh split workspace starts with the explorer closed", async () => {
 	const { app, client } = makeApp();
 	await app.start();
 	await waitForWorkspace(app);
-	// The open-time intent write keeps the chat-first default (explorer closed).
 	const writes = client.requests.filter((entry) => entry.method === "config.set");
 	const last = writes.at(-1)?.params.value;
 	assert.equal(typeof last, "string");
@@ -987,7 +986,7 @@ test("a fresh workspace persists the explorer open; an explicit stored false sta
 	assert.equal(
 		internals(third.app).integration?.controller.getLayoutInput().explorerRequested,
 		false,
-		"an older empty chat state stays chat-first",
+		"an older layout without explorer state stays closed",
 	);
 	assert.equal(internals(third.app).workspaceLayout?.explorer, undefined, "no empty drawer is painted");
 	await third.app.exit();

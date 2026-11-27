@@ -48,6 +48,7 @@ import {
 import { adjustSplitRatio, clampSplitRatio } from "./layout.ts";
 import {
 	WORKSPACE_STATE_VERSION,
+	defaultWorkspacePersistedState,
 	type ChatSide,
 	type FocusRegion,
 	type LayoutInput,
@@ -392,8 +393,7 @@ export class WorkspaceController {
 	private rootKeyValue: string | undefined;
 	private disposed = false;
 
-	// Layout intent (plan §7/§8). Chat owns the workspace until a file is opened.
-	private requestedMode: WorkspaceMode = "chat";
+	private requestedMode = defaultWorkspacePersistedState().requestedMode;
 	/** Mode a chat maximize restores to; only "split" | "editor" are non-chat. */
 	private restoreMode: "split" | "editor" = "split";
 	private splitRatioValue = 0.5;
@@ -525,9 +525,6 @@ export class WorkspaceController {
 		this.currentIdentity = identity;
 		this.rootKeyValue = identity.resolvedRoot;
 		this.phaseValue = "ready";
-		// Persist the requested mode/ratio under the resolved root immediately,
-		// MERGING with any stored document: a default write here must never
-		// clobber the previous session's open files before restore() reads them.
 		await this.persistLayoutIntent(generation);
 		if (!this.isCurrent(generation)) return undefined;
 		const trustNote = identity.trusted ? "" : " (untrusted: intelligence disabled)";
@@ -1217,10 +1214,7 @@ export class WorkspaceController {
 	}
 
 	/**
-	 * Persist only the layout intent, preserving any stored document list and
-	 * cursors for this root. Used on open, before `restore()` reads the stored
-	 * state: a full `persist()` here would replace the previous session's
-	 * open-file metadata with the current (empty) tab set.
+	 * Seed a new root without replacing a saved layout or its open-file list.
 	 */
 	private async persistLayoutIntent(generation: number): Promise<void> {
 		const rootKey = this.rootKeyValue;
@@ -1229,15 +1223,8 @@ export class WorkspaceController {
 			const existing = await this.persistence.load(rootKey);
 			// A close/switch superseded the open while the stored document loaded:
 			// writing now would resurrect intent for a lifetime that no longer owns it.
-			if (!this.isCurrent(generation)) return;
-			const base = existing ?? this.buildPersistedState();
-			await this.persistence.save(rootKey, {
-				...base,
-				requestedMode: this.requestedMode,
-				splitRatio: clampSplitRatio(this.splitRatioValue),
-				explorerRequested: this.explorerRequested,
-				chatSide: this.chatSideValue,
-			});
+			if (!this.isCurrent(generation) || existing) return;
+			await this.persistence.save(rootKey, defaultWorkspacePersistedState());
 			if (!this.isCurrent(generation)) return;
 			this.persistFailureNotified = false;
 		} catch (error) {
@@ -1262,15 +1249,9 @@ export class WorkspaceController {
 
 	/** Adopt persisted layout intent (the app decides when); no document I/O. */
 	applyRestoredLayout(state: WorkspacePersistedState): void {
-		const restoringFiles = Array.isArray(state.openUris) && state.openUris.length > 0;
-		const wantsExplorer = state.explorerRequested === true;
-		// Chat owns the workspace when no file is restored; the editor appears
-		// on demand. A stored split with no files must not strand the chat in
-		// half the viewport beside an empty pane. An explicit explorer request
-		// still needs the split it lives in.
-		this.requestedMode = restoringFiles ? state.requestedMode : wantsExplorer ? "split" : "chat";
+		this.requestedMode = state.requestedMode;
 		this.splitRatioValue = clampSplitRatio(state.splitRatio);
-		this.explorerRequested = wantsExplorer;
+		this.explorerRequested = state.explorerRequested === true;
 		// Absent/unknown sides fall back to the default, never to the previous
 		// root's side (each stored document is self-contained).
 		this.chatSideValue = state.chatSide === "right" ? "right" : "left";

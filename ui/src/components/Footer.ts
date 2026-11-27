@@ -17,15 +17,9 @@ const GROWTH_DURATION_MS = 800;
 /** Growth frame cadence (ms). */
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
-const WORK_FRAMES = [
-	"⠁ ⠃ ⠇ ⠧ ⠆ ⠄ ⠄",
-	"⠁ ⠁ ⠃ ⠇ ⠧ ⠆ ⠄",
-	"⠄ ⠁ ⠁ ⠃ ⠇ ⠧ ⠆",
-	"⠆ ⠄ ⠁ ⠁ ⠃ ⠇ ⠧",
-	"⠧ ⠆ ⠄ ⠁ ⠁ ⠃ ⠇",
-	"⠇ ⠧ ⠆ ⠄ ⠁ ⠁ ⠃",
-	"⠃ ⠇ ⠧ ⠆ ⠄ ⠁ ⠁",
-];
+const WORK_INTERVAL_MS = 33;
+const WORK_CYCLE_MS = 1400;
+const WORK_CELLS = 7;
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -74,7 +68,7 @@ export class Footer implements Component {
 			// for the whole visible working phase, without restarting on deltas.
 			if (!this.workingSub) {
 				this.workingStart = Date.now();
-				this.workingSub = this.activity.subscribe("footer:working", ACTIVITY_INTERVAL_MS);
+				this.workingSub = this.activity.subscribe("footer:working", WORK_INTERVAL_MS);
 			}
 		} else {
 			this.workingSub?.stop();
@@ -167,9 +161,16 @@ export class Footer implements Component {
 		if (this.status === "working" && room >= 5) {
 			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
 			activity = theme.muted(hint);
-			if (room >= visibleWidth(WORK_FRAMES[0]) + 2 + visibleWidth(hint)) {
-				const frame = this.activity.frame(WORK_FRAMES, ACTIVITY_INTERVAL_MS, this.workingStart);
-				activity = `${theme.accent(frame)}  ${activity}`;
+			if (room >= WORK_CELLS * 2 + 1 + visibleWidth(hint)) {
+				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
+				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
+				const pulse = Array.from({ length: WORK_CELLS }, (_, column) => {
+					const tint = column / (WORK_CELLS - 1);
+					const angle = (phase - column / WORK_CELLS) * 2 * Math.PI;
+					const level = ((1 + Math.cos(angle)) / 2) ** 3;
+					return theme.activity("▪", level, tint);
+				}).join(" ");
+				activity = `${pulse}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));

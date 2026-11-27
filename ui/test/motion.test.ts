@@ -78,13 +78,13 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	footer.status = "working";
 	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(rows.length, 1);
-	assert.match(rows[0]!, /^ {4}(?:[\u2801-\u28ff] ){6}[\u2801-\u28ff] {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+	assert.match(rows[0]!, /^ {4}(?:▪ ){6}▪ {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
 	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
 	assert.equal(footer.chatStatusRows(), 1);
 	footer.contextTokens = 12_400;
 	footer.contextPercent = 6.1;
-	const lit = footer.chatStatus.render(80).map(stripTerminalSequences);
-	assert.match(lit[0]!, /12\.4K tokens \(6%\) {4}$/);
+	const [lit] = footer.chatStatus.render(80);
+	assert.match(stripTerminalSequences(lit!), /12\.4K tokens \(6%\) {4}$/);
 	for (const width of [1, 20, 40, 80, 120]) {
 		const [line] = footer.chatStatus.render(width);
 		assert.ok(visibleWidth(line!) <= width, `status row wider than ${width}`);
@@ -95,10 +95,11 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	assert.equal(footer.chatStatus.render(80).length, 1);
 	footer.compact = false;
 	assert.equal(coordinator.timerCount, 1);
-	t.mock.timers.tick(200);
-	const next = footer.chatStatus.render(80).map(stripTerminalSequences);
-	assert.equal(renders(), 1, "streaming text must not strand the footer's animation");
-	assert.notEqual(next[0], lit[0], "the activity animation advances");
+	t.mock.timers.tick(132);
+	const [next] = footer.chatStatus.render(80);
+	assert.equal(renders(), 4, "working motion redraws every 33ms");
+	assert.notEqual(next, lit, "the pulse changes color");
+	assert.equal(stripTerminalSequences(next!), stripTerminalSequences(lit!), "the pulse keeps fixed cells");
 	for (const status of ["awaiting_approval", "stopping", "cleanup_pending", "offline", "ready"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);

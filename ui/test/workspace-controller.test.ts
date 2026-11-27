@@ -479,6 +479,7 @@ test("openWorkspace merges layout intent without clobbering stored open files", 
 	const restored = await h.controller.restore("/ws");
 	assert.ok(restored);
 	assert.deepEqual(restored.openUris, stored.openUris, "restore still reads the previous session");
+	assert.equal(restored.requestedMode, "editor", "opening a root never rewrites the saved mode");
 	await h.controller.dispose();
 });
 
@@ -520,7 +521,6 @@ test("a failed workspace open notifies and leaves the controller usable", async 
 	assert.equal(identity, undefined);
 	assert.equal(h.controller.phase, "closed");
 	assert.ok(h.notices.some((notice) => notice.kind === "error" && notice.text.includes("backend offline")));
-	assert.equal(h.controller.getLayoutInput().requestedMode, "chat", "a failed open stays chat-first");
 	assert.equal((await h.controller.openUri(fileUri("a.ts"))).status, "no-workspace");
 	await h.controller.dispose();
 });

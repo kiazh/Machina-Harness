@@ -1664,6 +1664,12 @@ export const theme = {
 	muted: fg("muted"),
 	dim: fg("dim"),
 	accent: fg("accent"),
+	activity(text: string, intensity: number, tint: number): string {
+		const palette = colors();
+		const highlight = mixColors(palette.accent, palette.secondary, tint);
+		const ink = mixColors(palette.dim, highlight, intensity);
+		return styleTextWithAnsi(text, foregroundAnsi(ink, mode), undefined, {});
+	},
 	accentBold: fg("accent", { bold: true }),
 	secondary: fg("secondary"),
 	success: fg("success"),
