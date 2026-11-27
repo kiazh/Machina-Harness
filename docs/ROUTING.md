@@ -111,6 +111,12 @@ select `worker_transport=mcp`. That bridge is text-only and cannot carry
 Machina tool schemas; use the Hermes proxy for a tool-capable free-model
 backend, or a paid direct OpenCode route with `OPENCODE_API_KEY`.
 
+OpenCode Go is a separate subscription-backed provider named `opencode-go`.
+Sign in with `machina auth opencode login`; Machina refreshes its stored device
+tokens and routes through the Go inference gateway. Its default model is
+`deepseek-v4.1-flash`. OpenCode Go and OpenCode Zen use different gateways and
+credentials.
+
 ## Verification and cost
 
 - `browser_verify` runs real headless Chrome/Edge checks against a loopback URL.

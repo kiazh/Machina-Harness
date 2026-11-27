@@ -39,7 +39,7 @@ Counts below are from this checkout’s registries and checked-in files; they de
 
 | Capability | What it means |
 |---|---|
-| Providers | 18 built-in provider names, plus user-added named OpenAI-compatible providers. Availability and terms depend on the provider. |
+| Providers | 19 built-in provider names, plus user-added named OpenAI-compatible providers. Availability and terms depend on the provider. |
 | Tools | 48 built-in tools, plus tools from explicitly connected MCP servers. |
 | Skills | 77 bundled `SKILL.md` packages; task selection is catalog-first and bodies load on demand. |
 | Agents | 71 bundled ECC specialist definitions plus 3 core built-ins (74 bundled built-ins total); user definitions can add more. |
@@ -304,6 +304,10 @@ Role and task scores are policy priors. The same decision inputs produce the
 same route; inventory and remaining limits can change between runs. A listed
 route does not guarantee authentication, capacity, or uptime. Unknown pricing
 and usage remain visible as unknown.
+
+The `opencode-go` provider uses an OpenCode Go subscription rather than an API
+key. Sign in once with `machina auth opencode login`; Machina stores and refreshes
+the device-flow credentials locally.
 
 ## Failure semantics
 

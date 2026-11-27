@@ -40,11 +40,11 @@ from rich.markup import escape
 
 from machina.cli import output
 from machina.cli.output import console
-from machina.security import chatgpt_auth, copilot_auth, grok_auth
+from machina.security import chatgpt_auth, copilot_auth, grok_auth, opencode_go_auth
 
 app = typer.Typer(
     name="auth",
-    help="Sign in to subscription LLM providers (chatgpt, copilot, grok).",
+    help="Sign in to subscription LLM providers (chatgpt, copilot, grok, opencode).",
     no_args_is_help=True,
 )
 
@@ -434,6 +434,104 @@ grok_app.command("login")(grok_login)
 grok_app.command("status")(grok_status)
 grok_app.command("logout")(grok_logout)
 app.add_typer(grok_app, name="grok")
+
+
+# ─── OpenCode Go subscription (device flow) ──────────────────────────────────
+
+
+def _print_opencode_go_status(report: dict[str, Any]) -> None:
+    console.print("[bold]OpenCode Go subscription[/bold]")
+    if not report.get("signed_in"):
+        output.status_line("Status", "not signed in", "warning")
+        console.print("  Sign in with [bold]machina auth opencode login[/bold].")
+        return
+    detail = "signed in (Machina token store)"
+    if report.get("expired"):
+        detail += " — access token expired, refreshes on the next call"
+    output.status_line("Status", detail, "success")
+    output.status_line("Email", str(report.get("email") or "unknown"))
+    output.status_line(
+        "Organization", str(report.get("org_name") or report.get("org_id") or "unknown")
+    )
+    output.status_line("Account", str(report.get("account_id") or "unknown"))
+    output.status_line("Expires", _expiry_text(report.get("expires_at")))
+    output.muted(
+        f"Tokens live in {report.get('storage_path')}; the opencode-go provider uses them."
+    )
+
+
+opencode_app = typer.Typer(
+    name="opencode", help="Sign in to an OpenCode Go subscription.", no_args_is_help=True
+)
+app.add_typer(opencode_app, name="opencode")
+
+
+@opencode_app.command("login")
+def opencode_login(
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open the verification URL"),
+    timeout: float = typer.Option(
+        DEFAULT_DEVICE_TIMEOUT_SECONDS, "--timeout", help="Seconds to wait for device approval"
+    ),
+) -> None:
+    """Sign in to OpenCode Go with a device code."""
+    if timeout <= 0:
+        raise typer.BadParameter("--timeout must be a positive number of seconds")
+
+    def choose_org(orgs: list[dict[str, Any]]) -> dict[str, Any]:
+        console.print("Choose an OpenCode organization:")
+        for index, org in enumerate(orgs, start=1):
+            label = org.get("name") or org.get("org_id") or org.get("id") or "Organization"
+            console.print(f"  {index}. {escape(str(label))}")
+        while True:
+            answer = typer.prompt("Organization number", default="1")
+            try:
+                selected = int(answer)
+            except ValueError:
+                selected = 0
+            if 1 <= selected <= len(orgs):
+                return orgs[selected - 1]
+            console.print(f"[yellow]Enter a number from 1 to {len(orgs)}.[/yellow]")
+
+    try:
+        tokens = opencode_go_auth.login(
+            timeout=timeout,
+            output=lambda message: console.print(message, markup=False, highlight=False),
+            select_org=choose_org,
+            open_browser=not no_browser,
+        )
+    except opencode_go_auth.OpenCodeGoAuthError as error:
+        output.error(str(error))
+        raise typer.Exit(EXIT_FAILED) from None
+    output.success(f"Signed in to OpenCode Go ({tokens.get('org_name') or tokens.get('org_id')}).")
+    output.status_line("Expires", _expiry_text(tokens.get("expires_at")))
+    output.muted(f"Tokens live in {opencode_go_auth.auth_path()}.")
+
+
+@opencode_app.command("status")
+def opencode_status(
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable JSON output"),
+) -> None:
+    """Show OpenCode Go sign-in status; exit 0 when signed in, 1 otherwise."""
+    report = opencode_go_auth.status()
+    if json_output:
+        typer.echo(json.dumps(report, sort_keys=True))
+    else:
+        _print_opencode_go_status(report)
+    raise typer.Exit(EXIT_OK if report.get("signed_in") else EXIT_FAILED)
+
+
+@opencode_app.command("logout")
+def opencode_logout() -> None:
+    """Remove Machina's OpenCode Go token store."""
+    try:
+        removed = opencode_go_auth.logout()
+    except OSError as error:
+        output.error(f"Could not remove the Machina OpenCode Go token store ({error}).")
+        raise typer.Exit(EXIT_FAILED) from None
+    if removed:
+        output.success(f"Signed out of OpenCode Go (removed {opencode_go_auth.auth_path()}).")
+    else:
+        console.print("[yellow]Already signed out of OpenCode Go.[/yellow]")
 
 
 # ─── copilot ─────────────────────────────────────────────────────────────────

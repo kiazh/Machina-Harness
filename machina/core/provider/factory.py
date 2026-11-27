@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from copy import copy
 
 from machina.core.config import config
@@ -171,6 +172,36 @@ def get_provider(
     elif provider == "grok":
         # xAI Grok subscription tokens from the device OAuth flow.
         return GrokProvider(model=model, reasoning_effort=reasoning_effort)
+    elif provider == "opencode-go":
+        from machina.security import opencode_go_auth
+
+        try:
+            tokens = opencode_go_auth.resolve_tokens()
+        except opencode_go_auth.OpenCodeGoAuthError as error:
+            raise ValidationError(
+                f"OpenCode Go is not ready: {error}. Sign in with `machina auth opencode login`."
+            ) from None
+        org = str(tokens.get("org_id") or "")
+        if not org:
+            raise ValidationError(
+                "OpenCode Go account has no organization selected; "
+                "run `machina auth opencode login` again."
+            )
+        headers = {
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "x-org-id": org,
+            "x-opencode-session": str(uuid.uuid4()),
+            "x-opencode-project": "machina",
+            "x-opencode-request": str(uuid.uuid4()),
+            "User-Agent": "opencode/1.18.8",
+        }
+        return DirectProvider(
+            PROVIDER_SPECS["opencode-go"],
+            api_key=str(tokens["access_token"]),
+            model=model or PROVIDER_SPECS["opencode-go"].default_model,
+            reasoning_effort=reasoning_effort,
+            extra_headers=headers,
+        )
     elif provider == "hermes":
         return _hermes_provider(model, reasoning_effort)
     elif provider == "custom":

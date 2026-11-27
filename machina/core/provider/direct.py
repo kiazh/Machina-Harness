@@ -58,10 +58,13 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         api_key: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.spec = spec
         self.api_key = api_key or config.get(spec.config_key) or ""
         headers = {"Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         elif spec.requires_key:

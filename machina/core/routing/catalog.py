@@ -285,7 +285,7 @@ _TASK_PRIORS: dict[str, dict[str, float]] = {
 
 #: Families that are usually subscription/flat-rate. They can still be
 #: expensive in practice because they consume a finite quota.
-_QUOTA_SENSITIVE = frozenset({"chatgpt", "kiro", "copilot", "grok"})
+_QUOTA_SENSITIVE = frozenset({"chatgpt", "kiro", "copilot", "grok", "opencode-go"})
 
 _FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"claude-(fable|opus|sonnet|haiku)", r"claude-\1"),
@@ -556,6 +556,15 @@ def _config_value(config: Any, key: str) -> str:
 
 
 def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, str]:
+    if name == "opencode-go":
+        try:
+            from machina.security import opencode_go_auth
+
+            report = opencode_go_auth.status()
+            signed = bool(report.get("signed_in")) and not report.get("expired")
+            return signed, "account signed in" if signed else "not signed in"
+        except Exception as exc:
+            return False, f"auth unavailable: {type(exc).__name__}"
     if name in _PROVIDER_KEY:
         key = _config_value(config, _PROVIDER_KEY[name])
         return bool(key), "key configured" if key else "no API key"
@@ -638,6 +647,25 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
 
 
 def _rows_for_provider(name: str, config: Any) -> list[dict[str, Any]]:
+    if name == "opencode-go":
+        from machina.core.provider.specs import PROVIDER_SPECS
+
+        model = PROVIDER_SPECS[name].default_model
+        try:
+            if str(config.get("provider") or "").strip() == name:
+                model = str(config.get("model") or "").strip() or model
+        except Exception:
+            pass
+        return [
+            {
+                "id": model,
+                "displayName": model,
+                "description": "Configured OpenCode Go subscription model",
+                "contextWindow": 128_000,
+                "maxOutputTokens": 32_000,
+                "source": "configured",
+            }
+        ]
     rows = provider_models(name)
     if rows:
         return rows
