@@ -291,16 +291,20 @@ export class UsagePage implements Component {
 		const shown = cumulative.slice(offset);
 		const labels = this.monthLabels(start, last, visible, offset, step);
 		const out: string[] = [`   ${theme.dim(labels.join(""))}`.trimEnd()];
-		for (let row = 0; row < CHART_ROWS; row++) {
-			const axis = row === 0 ? "max" : row === CHART_ROWS - 1 ? "0" : "";
+		const barRows = CHART_ROWS - 1;
+		for (let row = 0; row < barRows; row++) {
+			const axis = row === 0 ? "max" : "";
 			const cells = shown
 				.map((value) => {
-					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
-					return height > CHART_ROWS - row - 1 ? theme.activity("██", 0.7, 0) : "  ";
+					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * barRows)) : 0;
+					return height > barRows - row ? `${theme.activity("■", 0.7, 0)} ` : "  ";
 				})
 				.join("");
 			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());
 		}
+		// A connected base band under the narrow bars, as in the reference.
+		const base = shown.map((value) => (value > 0 ? theme.activity("██", 0.7, 0) : "  ")).join("");
+		out.push(`${theme.dim("0".padEnd(3))} ${base}`.trimEnd());
 		out.push("");
 		out.push(theme.dim(`Running total · top ${compact(running)}`));
 		return out;
