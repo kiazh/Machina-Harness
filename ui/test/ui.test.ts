@@ -141,6 +141,7 @@ test("a streamed turn renders text, a tool card and a final summary", () => {
 	assert.deepEqual(summary, { tokens: 120, cancelled: false });
 	const out = plain(view);
 	assert.match(out, /read a\.py/);
+	assert.match(out, /Thought ·/);
 	assert.match(out, /Let me look\./);
 	assert.match(out, /✔ Read file a\.py/);
 	assert.match(out, /print\('hi'\)/);
@@ -292,6 +293,64 @@ test("assistant output is clean prose and respects width", async () => {
 	const banner = plain(header("0.1.0"), 80);
 	assert.match(banner, /MACHINA/);
 	assert.doesNotMatch(banner, /─/);
+});
+
+test("a long turn collapses its work and leaves the final answer visible", () => {
+	const view = new Container();
+	const transcript = new Transcript(view, new FakeSpinner());
+	transcript.addUser("ship it");
+	transcript.apply(ev({ type: "message.start" }));
+	transcript.apply(ev({ type: "message.delta", text: "Let me inspect first." }));
+	for (let index = 0; index < 3; index++) {
+		transcript.apply(ev({ type: "tool.start", id: `t${index}`, name: "terminal", args: { command: `step-${index}` } }));
+		transcript.apply(ev({ type: "tool.complete", id: `t${index}`, name: "terminal", result: `out-${index}`, isError: false }));
+	}
+	transcript.apply(ev({ type: "message.delta", text: "Everything passed." }));
+	transcript.apply(ev({
+		type: "message.complete",
+		text: "Everything passed.",
+		tokens: 5,
+		iterations: 1,
+		toolCalls: 3,
+		cancelled: false,
+	}));
+	const collapsed = plain(view, 80);
+	assert.match(collapsed, /3 commands/);
+	assert.match(collapsed, /Everything passed\./);
+	assert.doesNotMatch(collapsed, /Let me inspect first/);
+	assert.doesNotMatch(collapsed, /step-0/);
+	assert.equal(transcript.toggleLastTool(), true);
+	const expanded = plain(view, 80);
+	assert.match(expanded, /Thought/);
+	assert.match(expanded, /Let me inspect first/);
+	assert.match(expanded, /Shell step-0/);
+});
+
+test("a thought row expands and collapses on click", async () => {
+	const { AssistantTurn } = await import("../src/components/AssistantTurn.ts");
+	const { ThoughtTurn } = await import("../src/components/ThoughtTurn.ts");
+	const thought = new ThoughtTurn(new AssistantTurn("I should inspect the installer."), 1250);
+	const expanded = plain(thought, 80);
+	assert.match(expanded, /Thought · 1\.3s/);
+	assert.match(expanded, /I should inspect the installer\./);
+	assert.equal(thought.handleMouse({ type: "click", button: "left", x: 0, y: 0 } as never)?.handled, true);
+	const collapsed = plain(thought, 80);
+	assert.doesNotMatch(collapsed, /I should inspect/);
+	assert.equal(thought.handleMouse({ type: "click", button: "left", x: 0, y: 0 } as never)?.handled, true);
+	assert.match(plain(thought, 80), /I should inspect the installer\./);
+});
+
+test("a short turn keeps its tools visible instead of creating a work block", () => {
+	const view = new Container();
+	const transcript = new Transcript(view, new FakeSpinner());
+	transcript.addUser("check it");
+	transcript.apply(ev({ type: "message.start" }));
+	transcript.apply(ev({ type: "tool.start", id: "one", name: "read_file", args: { path: "a.py" } }));
+	transcript.apply(ev({ type: "tool.complete", id: "one", name: "read_file", result: "ok", isError: false }));
+	transcript.apply(ev({ type: "message.complete", text: "Looks good.", tokens: 2, iterations: 1, toolCalls: 1, cancelled: false }));
+	const out = plain(view, 80);
+	assert.match(out, /Read file a\.py/);
+	assert.doesNotMatch(out, /1 read/);
 });
 
 test("user turns are plain dim-prefixed text without boxes", async () => {

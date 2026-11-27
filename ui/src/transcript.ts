@@ -7,8 +7,10 @@ import type { Component, Container } from "@earendil-works/pi-tui";
 import { AssistantTurn } from "./components/AssistantTurn.ts";
 import { Notice } from "./components/Notice.ts";
 import { ToolTurn, type ToolOutcome } from "./components/ToolTurn.ts";
+import { ThoughtTurn } from "./components/ThoughtTurn.ts";
 import { TurnSummary as TurnSummaryLine } from "./components/TurnSummary.ts";
 import { UserTurn } from "./components/UserTurn.ts";
+import { WorkGroup } from "./components/WorkGroup.ts";
 import { ACTIVITY_INTERVAL_MS, type ActivitySource, type AnimationCoordinator, type AnimationSubscription } from "./design/motion.ts";
 import type { NoticeKind } from "./features/index.ts";
 import { uiLog } from "./debug.ts";
@@ -60,6 +62,7 @@ export class Transcript {
 	private readonly spinner: Component & { start(): void; stop(): void; setMessage?(message: string): void };
 	private readonly coordinator: AnimationCoordinator | undefined;
 	private current: AssistantTurn | undefined;
+	private currentStartedAt = 0;
 	private wroteText = false;
 	/** True while the current block is still marked streaming. */
 	private assistantStreaming = false;
@@ -72,6 +75,8 @@ export class Transcript {
 	private readonly tools = new Map<string, ToolTurn>();
 	private readonly toolSubs = new Map<string, AnimationSubscription>();
 	private lastTool: ToolTurn | undefined;
+	private work: WorkGroup | undefined;
+	private lastWork: WorkGroup | undefined;
 	private turnStartedAt = 0;
 	private turnTools = 0;
 	private assistantSub: AnimationSubscription | undefined;
@@ -117,6 +122,10 @@ export class Transcript {
 	}
 
 	toggleLastTool(): boolean {
+		if (this.lastWork && this.lastWork.toolCount >= 3) {
+			this.lastWork.toggle();
+			return true;
+		}
 		if (!this.lastTool) return false;
 		this.lastTool.toggle();
 		return true;
@@ -151,6 +160,16 @@ export class Transcript {
 		this.enforceScrollbackCap();
 	}
 
+	private retainWork(component: Component, kind: "thought" | "tool", toolName = ""): void {
+		if (!this.work) this.work = new WorkGroup();
+		if (!this.container.children.includes(this.work)) {
+			this.container.addChild(this.work);
+			this.enforceScrollbackCap();
+		}
+		this.work.add(component, kind, toolName);
+		this.lastWork = this.work;
+	}
+
 	private enforceScrollbackCap(): void {
 		const children = this.container.children;
 		if (children.length <= Transcript.MAX_BLOCKS) return;
@@ -177,12 +196,15 @@ export class Transcript {
 		this.stopTools();
 		this.container.clear();
 		this.current = undefined;
+		this.currentStartedAt = 0;
 		this.resetDisplayed();
 		this.wroteText = false;
 		this.trimNotice = undefined;
 		this.spinnerVisible = false;
 		this.tools.clear();
 		this.lastTool = undefined;
+		this.work = undefined;
+		this.lastWork = undefined;
 		this.lastCompletedTurn = undefined;
 		this.turnStartedAt = 0;
 		this.turnTools = 0;
@@ -213,17 +235,69 @@ export class Transcript {
 
 	/** Re-render a stored conversation (from session.resume). */
 	replay(history: HistoryEntry[]): void {
-		for (const entry of history) {
-			if (entry.role === "user") this.addUser(entry.content);
-			else if (entry.role === "assistant") this.retain(new AssistantTurn(entry.content));
-			else if (entry.role === "tool") {
-				// Historical text carries no typed outcome metadata: neutral
-				// recorded output, never an inferred success or failure.
-				const card = new ToolTurn(entry.tool ?? "tool", {}, this.activity);
-				card.settle({ text: entry.content, backendTruncated: false, locallyTruncated: false }, "historical");
-				this.retain(card);
-				this.lastTool = card;
-			} else this.addNotice(entry.content);
+		let index = 0;
+		const addTool = (entry: HistoryEntry): ToolTurn => {
+			const item = entry as HistoryEntry & { tool?: string; content: string };
+			const card = new ToolTurn(item.tool ?? "tool", {}, this.activity);
+			card.settle({ text: item.content, backendTruncated: false, locallyTruncated: false }, "historical");
+			this.lastTool = card;
+			return card;
+		};
+		while (index < history.length) {
+			const entry = history[index];
+			if (entry.role === "user") {
+				this.addUser(entry.content);
+				index += 1;
+				const segment: HistoryEntry[] = [];
+				while (index < history.length && history[index]?.role !== "user") {
+					segment.push(history[index]!);
+					index += 1;
+				}
+				let finalIndex = -1;
+				for (let cursor = segment.length - 1; cursor >= 0; cursor--) {
+					if (segment[cursor]?.role === "assistant") {
+						finalIndex = cursor;
+						break;
+					}
+				}
+				if (finalIndex === -1) {
+					for (const item of segment) {
+						if (item.role === "assistant") this.retain(new AssistantTurn(item.content));
+						else if (item.role === "tool") this.retain(addTool(item));
+						else this.addNotice(item.content);
+					}
+					continue;
+				}
+				const group = new WorkGroup();
+				for (const item of segment.slice(0, finalIndex)) {
+					if (item.role === "assistant") {
+						group.add(new ThoughtTurn(new AssistantTurn(item.content), 0), "thought");
+					} else if (item.role === "tool") {
+						group.add(addTool(item), "tool", item.tool ?? "tool");
+					} else {
+						this.addNotice(item.content);
+					}
+				}
+				if (group.toolCount >= 3) {
+					this.container.addChild(group);
+					group.finish(0);
+					this.lastWork = group;
+				} else {
+					for (const child of group.dissolve()) this.retain(child);
+				}
+				const final = segment[finalIndex]!;
+				if (final.role === "assistant") this.retain(new AssistantTurn(final.content));
+				for (const item of segment.slice(finalIndex + 1)) {
+					if (item.role === "assistant") this.retain(new AssistantTurn(item.content));
+					else if (item.role === "tool") this.retain(addTool(item));
+					else this.addNotice(item.content);
+				}
+				continue;
+			}
+			if (entry.role === "assistant") this.retain(new AssistantTurn(entry.content));
+			else if (entry.role === "tool") this.retain(addTool(entry));
+			else this.addNotice(entry.content);
+			index += 1;
 		}
 	}
 
@@ -233,6 +307,8 @@ export class Transcript {
 		case "message.start":
 			this.stopAssistant();
 			this.current = undefined;
+			this.currentStartedAt = 0;
+			this.work = undefined;
 			this.wroteText = false;
 			this.resetDisplayed();
 			this.lastCompletedTurn = undefined;
@@ -248,9 +324,10 @@ export class Transcript {
 			}
 			if (!this.current) {
 				this.current = new AssistantTurn("", this.activity);
+				this.currentStartedAt = Date.now();
 				this.current.setStreaming(true);
 				this.assistantStreaming = true;
-				this.retain(this.current);
+				this.retainWork(this.current, "thought");
 				this.assistantSub = this.coordinator?.subscribe("assistant:stream", ACTIVITY_INTERVAL_MS);
 			}
 			this.current.append(event.text);
@@ -267,12 +344,16 @@ export class Transcript {
 				log.warn("tool.start.invalid", { session: event.sessionId, turn: event.turnId, name: event.name });
 				return undefined;
 			}
+			if (this.current && this.work) {
+				const thought = new ThoughtTurn(this.current, Date.now() - this.currentStartedAt);
+				this.work.replace(this.current, thought);
+			}
 			this.current = undefined; // text after the tool starts a new block
 			const card = new ToolTurn(event.name, event.args, this.activity);
 			this.turnTools += 1;
 			this.tools.set(event.id, card);
 			this.lastTool = card;
-			this.retain(card);
+			this.retainWork(card, "tool", event.name);
 			if (this.coordinator) {
 				this.toolSubs.get(event.id)?.stop();
 				this.toolSubs.set(event.id, this.coordinator.subscribe(`tool:${event.id}`, ACTIVITY_INTERVAL_MS));
@@ -383,11 +464,33 @@ export class Transcript {
 					card.settle({ text: "", backendTruncated: false, locallyTruncated: false }, "outcome_unknown");
 				}
 			}
+			const elapsed = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
+			const final = this.current;
+			if (this.work) {
+				if (final) {
+					this.work.detach(final);
+					if (!this.container.children.includes(final)) this.container.addChild(final);
+				}
+				this.work.finish(elapsed);
+				if (this.work.toolCount < 3) {
+					const index = this.container.children.indexOf(this.work);
+					const children = this.work.dissolve();
+					if (index >= 0) this.container.children.splice(index, 1, ...children);
+					this.lastWork = undefined;
+					this.enforceScrollbackCap();
+				} else {
+					this.lastWork = this.work;
+				}
+				if (this.work.empty) {
+					this.container.removeChild(this.work);
+					this.lastWork = undefined;
+				}
+				this.work = undefined;
+			}
 			this.stopAssistant();
 			this.stopTools();
 			this.tools.clear();
 			this.current = undefined;
-			const elapsed = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
 			this.turnStartedAt = 0;
 			this.retain(
 				new TurnSummaryLine({
