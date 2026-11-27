@@ -346,10 +346,20 @@ class SessionManager:
         )
         await self._cache_invalidate(session_id)
 
-    async def delete(self, session_id: uuid.UUID) -> bool:
+    async def delete(self, session_id: uuid.UUID, *, claim_token: str | None = None) -> bool:
         """Permanently delete a session and its active and archived context."""
         async with db.acquire() as conn:
             async with conn.transaction():
+                if claim_token is not None and not await conn.fetchval(
+                    """
+                    SELECT 1 FROM sessions
+                    WHERE id = $1 AND claim_owner = $2 AND claim_expires_at > now()
+                    FOR UPDATE
+                    """,
+                    session_id,
+                    claim_token,
+                ):
+                    return False
                 await conn.execute("DELETE FROM context_archive WHERE session_id = $1", session_id)
                 result = await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
         await self._cache_invalidate(session_id)

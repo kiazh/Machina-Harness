@@ -128,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_embedding_space ON memories(embedding_sp
 # DDL on every CLI launch is measurable on a laptop. The marker is advanced
 # only after the whole transaction commits; bump the version whenever the
 # migration set changes.
-_RUNTIME_SCHEMA_VERSION = "2026-11-20.1"
+_RUNTIME_SCHEMA_VERSION = "2026-11-27.1"
 _SCHEMA_META_DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,

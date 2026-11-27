@@ -67,7 +67,8 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
         "block and they run in parallel up to the configured concurrency limit; "
         "additional calls queue. "
         "Use list_agents with a task keyword only when the built-in roles do not fit. "
-        "The result includes a child session id; pass it as session_id for a follow-up."
+        "The child session ID is a receipt for delegate_status. Completed worker chats are deleted; "
+        "start a new delegation for follow-up work."
     ),
     parameters={
         "type": "object",
@@ -87,7 +88,7 @@ async def active_agent_scope() -> tuple[str, uuid.UUID]:
             },
             "session_id": {
                 "type": "string",
-                "description": "Optional child session UUID from an earlier delegate result for a follow-up",
+                "description": "Optional UUID of a retained, interrupted child session to resume",
             },
             "wait_seconds": {
                 "type": "integer",
@@ -271,8 +272,7 @@ async def delegate(
                     status = entry.get("status", "running") if entry else "running"
                     receipt = DelegationToolResult(
                         f"[{agent} {status}]\nChild session: {child_id}\n"
-                        "Use delegate_status with this child session ID to check progress; "
-                        "use delegate with session_id after it finishes.",
+                        "Use delegate_status with this child session ID for progress and the final result.",
                         needs_approval=[],
                         tokens_used=0,
                         delegation_status=status,

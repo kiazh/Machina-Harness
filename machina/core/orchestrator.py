@@ -414,8 +414,7 @@ class Orchestrator:
             ):
                 raise ValueError("follow-up session is not this parent's delegated agent")
             if child.status == "archived":
-                # A completed delegated child is archived (not deleted) so its
-                # status/history survives; resuming it reactivates the session.
+                # Older runs left archived chats that are still resumable.
                 await session_manager.activate(child.id)
             if child.goal is None and parent_goal:
                 await session_manager.set_goal(child.id, parent_goal)
@@ -498,9 +497,9 @@ class Orchestrator:
         # the child session + owned provider exist — it also covers recording
         # the start row. A build failure, a DB error in ``_record_start``, or
         # cancellation during that insert closes the owned provider and
-        # archives the fresh child instead of leaking/orphaning them. The
+        # deletes the fresh child instead of orphaning it. The
         # inherited-grant copy is inside the scope too: a failure there has the
-        # same orphan risk and needs the same archive-before-raise contract.
+        # same orphan risk and needs the same cleanup.
         # ``message_id`` stays None until the child actually ran; only then is
         # the (now durable) child session kept.
         agent = None
@@ -514,6 +513,7 @@ class Orchestrator:
         ownership = None
         run_completed = False
         agent_cleaned = False
+        delete_child = False
 
         async def cleanup_agent() -> None:
             if agent is not None:
@@ -664,8 +664,7 @@ class Orchestrator:
                     payload={"agent": agent_name, "content": f"[{agent_name}] {final_content}"},
                     token_count=get_token_count(final_content),
                 )
-            if status != "waiting_approval":
-                await self._delete_finished_child(child.id, parent_session_id)
+            delete_child = status != "waiting_approval"
             return DelegationResult(
                 agent=agent_name,
                 task=task,
@@ -715,8 +714,7 @@ class Orchestrator:
                     return DelegationResult(
                         agent_name, task, detail, child.id, tokens, 0, "interrupted"
                     )
-                if not shutdown:
-                    await self._delete_finished_child(child.id, parent_session_id)
+                delete_child = not shutdown
             raise
         except Exception as e:
             if message_id is None or run_completed:
@@ -730,18 +728,11 @@ class Orchestrator:
             await self._record_end(
                 message_id, status="error", response=f"{type(e).__name__}: {detail}", tokens=tokens
             )
-            if message_id is not None:
-                await self._delete_finished_child(child.id, parent_session_id)
+            delete_child = True
             return DelegationResult(
                 agent_name, task, f"Error: {detail}", child.id, tokens, 0, "error"
             )
         finally:
-            if observer is not None and observer_started:
-                try:
-                    phase = "paused" if getattr(response, "needs_approval", None) else "settled"
-                    observer(child.id, phase, "")
-                except Exception as error:
-                    record_failure("orchestrator.child_observer", error)
             try:
                 # The remaining cleanup is bounded. Stop renewal first so its
                 # loss callback cannot cancel the owner during teardown.
@@ -758,40 +749,54 @@ class Orchestrator:
                         record_failure("orchestrator.delegate", _boundary_error)
                 if not agent_cleaned:
                     await cleanup_agent()
-                if message_id is None and created_child:
-                    await self._delete_finished_child(child.id, parent_session_id)
             finally:
                 if claim_token is not None:
                     from machina.core.runtime import runtime_services
                     from machina.core.turns import end_turn
 
-                    async def release_claim() -> None:
-                        try:
-                            await end_turn(child.id, claim_token)
-                        except Exception as release_error:
-                            record_failure("orchestrator.delegate.release_claim", release_error)
+                    token = claim_token
 
-                    release_task = asyncio.create_task(release_claim())
-                    runtime_services.track(release_task, essential=True)
-                    await asyncio.shield(release_task)
+                    async def retire_claim() -> None:
+                        deleted = False
+                        try:
+                            if delete_child or (message_id is None and created_child):
+                                deleted = await self._delete_finished_child(
+                                    child.id, parent_session_id, token
+                                )
+                        finally:
+                            try:
+                                await end_turn(child.id, token, session_deleted=deleted)
+                            except Exception as release_error:
+                                record_failure("orchestrator.delegate.release_claim", release_error)
+                            if observer is not None and observer_started:
+                                try:
+                                    phase = (
+                                        "paused"
+                                        if getattr(response, "needs_approval", None)
+                                        else "settled"
+                                    )
+                                    observer(child.id, phase, "deleted" if deleted else "")
+                                except Exception as error:
+                                    record_failure("orchestrator.child_observer", error)
+
+                    retirement = asyncio.create_task(retire_claim())
+                    runtime_services.track(retirement, essential=True)
+                    await asyncio.shield(retirement)
 
     async def _delete_finished_child(
-        self, child_id: uuid.UUID, parent_id: uuid.UUID | None = None
-    ) -> None:
-        """Retire a completed child chat after its result and usage are recorded.
-
-        Archive rather than delete: the durable ``agent_messages`` row keeps
-        the child session id (``ON DELETE SET NULL`` would erase it), and
-        ``delegate_status``/follow-up delegation can still resolve the worker.
-        """
+        self, child_id: uuid.UUID, parent_id: uuid.UUID | None, claim_token: str
+    ) -> bool:
+        """Delete the chat once the worker has handed off its result and usage."""
+        deleted = False
         try:
-            if parent_id is not None:
+            deleted = await session_manager.delete(child_id, claim_token=claim_token)
+            if deleted and parent_id is not None:
                 from machina.core.shell_jobs import shell_jobs
 
                 shell_jobs.transfer(child_id, parent_id)
-            await session_manager.archive(child_id)
         except Exception as error:
             record_failure("orchestrator.child_cleanup", error)
+        return deleted
 
     async def _settle_child_tokens(
         self,

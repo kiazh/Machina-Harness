@@ -597,7 +597,9 @@ async def try_begin_turn(
 
 
 @instrumented("turns", "release")
-async def end_turn(session_id: uuid.UUID, token: str | None) -> bool:
+async def end_turn(
+    session_id: uuid.UUID, token: str | None, *, session_deleted: bool = False
+) -> bool:
     """Release a turn claim; only the exact owner succeeds (stale-safe).
 
     AH-AUDIT-017: the local mutex is released only when the caller owns the
@@ -617,7 +619,8 @@ async def end_turn(session_id: uuid.UUID, token: str | None) -> bool:
         )
         return False
     if db.connected:
-        ok = await _db_release(session_id, token)
+        # An ownership-fenced delete already removed the durable claim.
+        ok = session_deleted or await _db_release(session_id, token)
         if ok:
             # Opportunistically clear our own local entry; a rejected
             # stale token never touches a newer owner's entry.

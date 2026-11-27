@@ -241,7 +241,7 @@ export class FamilyStore {
 		this.opening = true;
 		try {
 			const { session, history } = await this.host.request<ResumeResult>("session.resume", { sessionId });
-			this.host.switchTo(session, history);
+			if (!this.dismissed.has(sessionId)) this.host.switchTo(session, history);
 		} catch (error) {
 			this.host.report(error);
 		} finally {

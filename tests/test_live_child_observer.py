@@ -19,8 +19,8 @@ async def test_gateway_observer_receives_live_child_and_settlement(monkeypatch, 
         module.agent_registry, "get", AsyncMock(return_value=AgentDef(name="coder"))
     )
     monkeypatch.setattr(module.session_manager, "create", AsyncMock(return_value=child))
-    delete = AsyncMock(return_value=None)
-    monkeypatch.setattr(module.session_manager, "archive", delete)
+    delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(module.session_manager, "delete", delete)
     monkeypatch.setattr(
         "machina.core.session_mode.resolve_effective_mode", AsyncMock(return_value="ask")
     )
@@ -69,4 +69,7 @@ async def test_gateway_observer_receives_live_child_and_settlement(monkeypatch, 
     if pause:
         delete.assert_not_awaited()
     else:
-        delete.assert_awaited_once_with(child.id)
+        delete.assert_awaited_once()
+        assert delete.await_args.args == (child.id,)
+        assert delete.await_args.kwargs["claim_token"]
+        assert seen[-1][2] == "deleted"

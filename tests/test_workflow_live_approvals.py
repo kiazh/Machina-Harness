@@ -44,7 +44,7 @@ async def workflow(monkeypatch, tmp_path):
         sessions[child.id] = child
         return child
 
-    async def delete_session(session_id):
+    async def delete_session(session_id, *, claim_token=None):
         return sessions.pop(session_id, None) is not None
 
     async def add_chunk(**_values):

@@ -4602,18 +4602,32 @@ export class App implements FeatureHost {
 			if (this.current?.id === childId) this.transcript.apply(delta);
 			else this.turnSession.bufferHiddenEvent(delta);
 		} else if (event.phase === "settled" || event.phase === "paused") {
+			const deleted = event.phase === "settled" && event.value === "deleted";
+			if (deleted) {
+				this.clearApprovals(childId);
+				this.pendingQuestions.delete(childId);
+				this.activity.pruneSession(childId);
+				this.outputStore.pruneSession(childId);
+			}
 			const complete: GatewayEvent = {
 				protocolVersion: 2, sessionId: childId, turnId, type: "message.complete",
 				text: this.turnSession.finishDelegated(childId), tokens: 0, iterations: 0, toolCalls: 0, cancelled: false,
 			};
 			if (this.current?.id === childId) {
-				this.transcript.apply(complete);
+				if (deleted) this.transcript.clear();
+				else this.transcript.apply(complete);
 				this.setRunning(false);
-			} else this.turnSession.bufferHiddenEvent(complete);
+			} else if (!deleted) this.turnSession.bufferHiddenEvent(complete);
 			if (event.phase === "settled") {
 				const main = this.familyRows().find((row) => row.main)?.session.id;
 				this.family.dismiss(childId);
-				if (this.current?.id === childId && main) void this.family.open(main);
+				if (this.current?.id === childId) {
+					void this.family.open(main ?? event.sessionId).then(() => {
+						if (!deleted || this.exiting) return;
+						if (this.current?.id === childId) this.newSession();
+						this.turnSession.pruneSessionState(childId);
+					});
+				} else if (deleted) this.turnSession.pruneSessionState(childId);
 			}
 		}
 		this.tui.requestRender();
@@ -4665,7 +4679,8 @@ export class App implements FeatureHost {
 		}
 		if (event.type === "agent.child") {
 			const binding = this.turnSession.turnBinding(event.sessionId);
-			if (binding && (binding.retired.includes(event.turnId) || binding.turnId !== undefined && binding.turnId !== event.turnId)) return;
+			const deleted = event.phase === "settled" && event.value === "deleted";
+			if (!deleted && binding && (binding.retired.includes(event.turnId) || binding.turnId !== undefined && binding.turnId !== event.turnId)) return;
 			this.onChildEvent(event);
 			return;
 		}

@@ -509,6 +509,8 @@ test("a live child appears as a running tab and streams into its inspection view
 	const { app, tui, client, type } = await boot({ sessions: [MAIN] });
 	t.after(() => app.exit());
 	await settle();
+	client.autoTurnId = "parent-turn";
+	await app.submitTurn("Delegate a task");
 	client.sessions = [MAIN, CHILD];
 	client.emit(MAIN.id, "parent-turn", {
 		type: "agent.child", childSessionId: CHILD.id, phase: "start", value: "researcher",
@@ -530,7 +532,12 @@ test("a live child appears as a running tab and streams into its inspection view
 	assert.equal(app.session()?.id, CHILD.id);
 	assert.match(screenOf(tui), /Found the target file/);
 	client.emit(MAIN.id, "parent-turn", {
-		type: "agent.child", childSessionId: CHILD.id, phase: "settled", value: "",
+		type: "message.complete", text: "The worker is running.", tokens: 0, iterations: 1, toolCalls: 1, cancelled: false,
+	});
+	assert.equal(internals(app).inFlight.has(MAIN.id), false);
+	client.sessions = [MAIN];
+	client.emit(MAIN.id, "parent-turn", {
+		type: "agent.child", childSessionId: CHILD.id, phase: "settled", value: "deleted",
 	});
 	await settle();
 	assert.equal(app.familySessions().find((row) => row.session.id === CHILD.id), undefined,
