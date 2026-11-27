@@ -31,10 +31,9 @@ import { SkillsMenu, type SkillsCandidate, type SkillsDetailsSkill, type SkillsF
 import { ApprovalCard, type ApprovalDecision } from "./components/ApprovalCard.ts";
 import { AppShell } from "./components/AppShell.ts";
 import { AgentTabBar } from "./components/AgentTabBar.ts";
-import { ActivityBar, ActivityStore, activityEmptyGuidance, type SteeringItem, type ShellJob } from "./activity.ts";
-import { StatusPage, type StatusRow, type StatusSnapshot } from "./components/StatusPage.ts";
+import { ActivityBar, ActivityStore, type SteeringItem, type ShellJob } from "./activity.ts";
+import { StatusPage } from "./components/StatusPage.ts";
 import { ChangesPage, type ChangesDiffState, type ChangesSnapshot } from "./components/ChangesPage.ts";
-import { toolCallDisplayName } from "./mcpNames.ts";
 import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
@@ -66,9 +65,7 @@ import type {
 	ContextResult,
 	GatewayEvent,
 	HistoryEntry,
-	InteropStatusResult,
 	KiroFallback,
-	MCPServerView,
 	ProvidersListResult,
 	ReviewFindingInfo,
 	ReviewRunInfo,
@@ -76,7 +73,6 @@ import type {
 	InitializeResult,
 	ResumeResult,
 	SessionInfo,
-	SessionListResult,
 	SessionResult,
 } from "./protocol.ts";
 import { type DocumentRecord } from "./editor/model.ts";
@@ -95,6 +91,8 @@ import {
 import { offsetToPosition, positionToOffset } from "./editor/positions.ts";
 import { tailEntries, trimSupersededHistory, type TailBlock } from "./tail.ts";
 import { TurnSessionStore } from "./turnSessionStore.ts";
+import { StatusController, type HarnessJobView } from "./app/status.ts";
+import type { StatusHost } from "./app/contracts.ts";
 
 import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
@@ -257,24 +255,6 @@ function sanitizeAskTextOptions(options: AskTextOptions): AskTextOptions {
 	};
 }
 
-interface HarnessJobView {
-	id: string;
-	owner_session_id: string;
-	session_id: string;
-	platform: string;
-	task: string;
-	status: string;
-	needs_input: boolean;
-	started_at: string | null;
-	ended_at: string | null;
-	exit_code: number | null;
-	command: string[];
-	stdout: string;
-	stderr: string;
-	error: string;
-	progress: string[];
-}
-
 export class App implements FeatureHost {
 	readonly exited: Promise<void>;
 
@@ -329,11 +309,10 @@ export class App implements FeatureHost {
 	private readonly openQuestions = new Set<string>();
 	private readonly activity = new ActivityStore();
 	private view: "chat" | "status" | "changes" = "chat";
+	private readonly status: StatusController;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
-	private screenRefreshTimer: ReturnType<typeof setInterval> | undefined;
-	private statusRefreshing = false;
 	private changesTurns: ChangeTurnInfo[] = [];
 	private changesError = "";
 	private changesRefreshing = false;
@@ -347,14 +326,6 @@ export class App implements FeatureHost {
 	/** Findings already handed to the chat, keyed `turnId:fingerprint`. */
 	private readonly sentFindings = new Map<string, { turnId: string; finding: ReviewFindingInfo; cleared?: boolean; queued?: boolean }>();
 	private readonly pendingFixes = new Set<string>();
-	private statusHarnesses: StatusRow[] = [];
-	private readonly harnessJobs = new Map<string, HarnessJobView>();
-	private statusMcp: StatusRow[] = [];
-	private statusSessions: StatusRow[] = [];
-	private statusDefaultPending = false;
-	private statusSlowRefreshAt = 0;
-	private statusUpdatedAt = "";
-	private statusError = "";
 	private explorerBurstStartedAt = 0;
 	private explorerBurstCount = 0;
 	private explorerBurstKey = "";
@@ -464,7 +435,6 @@ export class App implements FeatureHost {
 		this.exited = new Promise((done) => {
 			this.resolveExit = done;
 		});
-
 		// F-23: one shared reader for the environment (the legacy AH_ name is
 		// the documented fallback; an explicit MACHINA_ value always wins).
 		const reducedMotion = reducedMotionFromEnv(process.env);
@@ -498,6 +468,7 @@ export class App implements FeatureHost {
         };
 		this.shell = new AppShell(tui, this.transcriptView, this.composer, this.footer);
 		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
+		this.status = new StatusController(this.statusHost());
 		this.navBar = new NavBar(
 			() => this.navSnapshot(),
 			(view) => this.selectNav(view),
@@ -516,14 +487,14 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.family.open(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
-		this.statusPage = new StatusPage(tui, () => this.statusSnapshot(), (row) => {
+		this.statusPage = new StatusPage(tui, () => this.status.snapshot(), (row) => {
 			const id = row.id ?? "";
 			const sessionId = id.startsWith("agent:")
 				? id.slice("agent:".length)
 				: id.startsWith("session:")
 					? id.slice("session:".length)
 					: id.startsWith("harness-job:")
-						? (this.harnessJobs.get(id.slice("harness-job:".length))?.session_id ?? "")
+						? (this.status.harnessSessionId(id.slice("harness-job:".length)) ?? "")
 						: "";
 			if (!sessionId) return false;
 			if (sessionId === this.current?.id) {
@@ -552,6 +523,43 @@ export class App implements FeatureHost {
 		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
 		this.editor.setAutocompleteMaxVisible(8);
 		this.editor.onSubmit = (text) => void this.submit(text);
+	}
+
+	private statusHost(): StatusHost {
+		return {
+			tui: this.tui,
+			log: this.log,
+			footer: this.footer,
+			activity: this.activity,
+			turnSession: this.turnSession,
+			request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params),
+			current: () => this.current,
+			familyRows: () => this.familyRows(),
+			screen: () => this.view,
+			setScreen: (view) => { this.view = view; },
+			setShellPage: (page) => this.shell.setPage(page),
+			statusPage: () => this.statusPage,
+			changesPage: () => this.changesPage,
+			changesCount: () => this.changesCount,
+			changesError: () => this.changesError,
+			setChangesError: (text) => { this.changesError = text; },
+			syncChangesSelection: () => this.changesPage.syncSelection(),
+			ensureChangesDiff: (retry?: boolean) => this.ensureChangesDiff(retry),
+			refreshChanges: () => { void this.refreshChangesData(); },
+			refreshFamily: () => this.refreshFamily(),
+			showApprovalDock: () => this.showApprovalDock(),
+			focusChat: () => this.setFocusForRegion("chat-composer"),
+			hasVisibleDialog: () => this.dialogs.some(dialog => !dialog.hidden),
+			quickOpenActive: () => Boolean(this.quickOpenPane),
+			isExiting: () => this.exiting,
+			print: (text, kind) => this.print(text, kind),
+			pickCentered: (title, items) => this.pickCentered(title, items),
+			askText: (options) => this.askText(options),
+			commandAction: (sessionId, jobId, action) => this.commandAction(sessionId, jobId, action),
+			flushSteering: (sessionId) => this.flushSteering(sessionId),
+			openFamily: (sessionId) => this.family.open(sessionId),
+			openDialog: (create) => this.openDialog(create),
+		};
 	}
 
 	async start(): Promise<void> {
@@ -1482,7 +1490,7 @@ export class App implements FeatureHost {
 
 	/** Open the full-page live status tab (also `/activity`). */
 	openStatus(): void {
-		this.openScreen("status");
+		this.status.openStatus();
 	}
 
 	/**
@@ -1491,398 +1499,24 @@ export class App implements FeatureHost {
 	 * chat's work from here would misattribute it.
 	 */
 	openChanges(): void {
-		this.openScreen("changes");
+		this.status.openChanges();
 	}
 
 	/** Command-strip click: switch screens without changing the app's key map. */
 	private selectNav(view: NavView): void {
-		if (this.quickOpenPane) return;
-		// A visible dialog owns the screen; one hidden by the dock does not.
-		if (this.dialogs.some(dialog => !dialog.hidden)) return;
-		if (view === "chat") {
-			if (this.view !== "chat") this.closeScreen();
-			if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
-			else this.setFocusForRegion("chat-composer");
-			return;
-		}
-		if (view === "activity") {
-			this.openStatus();
-			return;
-		}
-		this.openChanges();
-	}
-
-	private navActivityCount(): number {
-		const runningJobs = this.activity.allJobs().filter(({ job }) =>
-			job.status === "running" || job.status === "stopping",
-		).length;
-		const agents = this.familyRows().filter(row => !row.main && row.running).length;
-		return runningJobs + agents + this.activity.queuedCount();
+		this.status.selectNav(view);
 	}
 
 	private navSnapshot(): NavSnapshot {
-		const project = (this.footer.cwd || "")
-			.replace(/[\\/]+$/, "")
-			.split(/[\\/]/)
-			.pop() ?? "";
-		return {
-			view: this.view === "status" ? "activity" : this.view,
-			title: this.current?.title ?? "",
-			project,
-			branch: this.footer.branch,
-			model: this.footer.model,
-			status: this.footer.status,
-			activityCount: this.navActivityCount(),
-			changeCount: this.changesCount,
-		};
-	}
-
-	private statusSnapshot(): StatusSnapshot {
-		const family = this.familyRows();
-		const titles = new Map(family.map((row) => [row.session.id, row.session.title || row.session.id]));
-		if (this.current && !titles.has(this.current.id)) titles.set(this.current.id, this.current.title || this.current.id);
-		const agentIds = new Set(family.map((row) => row.session.id));
-		const agents: StatusRow[] = family.map((row) => {
-			const activeTool = this.turnSession.activeToolLabel(row.session.id);
-			const queued = this.activity.queue(row.session.id).length + this.turnSession.queuedSteering(row.session.id).length;
-			const detail = [
-				row.session.model || "",
-				activeTool ? `tool ${activeTool}` : "",
-				queued ? `${queued} queued` : "",
-			].filter(Boolean).join(" · ");
-			return {
-				id: `agent:${row.session.id}`,
-				label: row.main ? `Main · ${row.session.title || "untitled"}` : (row.session.title || "Subagent"),
-				detail,
-				state: row.running ? "running" : "idle",
-				logs: [
-					`Session: ${row.session.id}`,
-					`Title: ${row.session.title || "untitled"}`,
-					`Route: ${row.session.provider || "?"} / ${row.session.model || "?"}`,
-					`State: ${row.running ? "running" : "idle"}`,
-					`Active tool: ${activeTool || "none"}`,
-					`Queued: ${queued}`,
-				],
-			};
-		});
-		// Turns in other sessions still count as live agents even when they are
-		// outside the visible family (for example a background child session).
-		for (const sessionId of this.turnSession.inFlightSessions()) {
-			if (agentIds.has(sessionId)) continue;
-			agentIds.add(sessionId);
-			agents.push({
-				id: `agent:${sessionId}`,
-				label: `Session ${sessionId.slice(0, 8)}`,
-				detail: this.turnSession.activeToolLabel(sessionId) ? `tool ${this.turnSession.activeToolLabel(sessionId)}` : "turn in flight",
-				state: "running",
-				logs: [
-					`Session: ${sessionId}`,
-					"State: running (outside the visible family)",
-					`Active tool: ${this.turnSession.activeToolLabel(sessionId) || "none"}`,
-				],
-			});
-		}
-		const shells: StatusRow[] = this.activity.allJobs().slice(0, 24).map(({ sessionId, job }) => {
-			const title = titles.get(sessionId) ?? sessionId.slice(0, 8);
-			const output = job.output ? job.output.trimEnd().split(/\r?\n/).slice(-12) : [];
-			return {
-				id: `shell:${sessionId}:${job.id}`,
-				label: job.command || "Shell command",
-				detail: `${job.foreground ? "Foreground shell" : "Background shell"} · ${title}`,
-				state: job.status,
-				preview: output.slice(-3),
-				logs: [
-					`Session: ${title}`,
-					`Command: ${job.command}`,
-					`Status: ${job.status}`,
-					`Return code: ${job.returncode ?? "pending"}`,
-					...(output.length ? ["", "Output:", ...output] : []),
-				],
-			};
-		});
-		const tools: StatusRow[] = this.activity.allTools(24).map((tool) => {
-			const kind = tool.name.startsWith("mcp_")
-				? "MCP"
-				: tool.name.startsWith("harness_")
-					? "HARNESS"
-					: "TOOL";
-			const display = toolCallDisplayName(tool.name, tool.args) || tool.name;
-			const duration = tool.completedAt ? `${Math.max(0, tool.completedAt - tool.startedAt)}ms` : "running";
-			const result = tool.result ? tool.result.split(/\r?\n/).slice(0, 12) : [];
-			return {
-				id: `tool:${tool.sessionId}:${tool.id}`,
-				label: `${kind} · ${display}`,
-				detail: titles.get(tool.sessionId) ?? tool.sessionId.slice(0, 8),
-				state: tool.status,
-				preview: result,
-				logs: [
-					`Tool: ${tool.name}`,
-					`Session: ${titles.get(tool.sessionId) ?? tool.sessionId}`,
-					`Started: ${new Date(tool.startedAt).toLocaleTimeString()} · ${duration}`,
-					`Status: ${tool.status}`,
-					...(tool.outcome ? [`Outcome: ${tool.outcome}`] : []),
-					...(tool.args && Object.keys(tool.args).length ? [`Arguments: ${JSON.stringify(tool.args)}`] : []),
-					...(result.length ? ["", "Result:", ...result] : []),
-				],
-			};
-		});
-		const queued = this.activity.queuedCount() + family.reduce(
-			(total, row) => total + this.turnSession.queuedSteering(row.session.id).length,
-			0,
-		);
-		return {
-			agents,
-			sessions: this.statusSessions,
-			harnesses: [...this.statusHarnesses, ...this.harnessJobRows()],
-			shells,
-			tools,
-			mcp: this.statusMcp,
-			queued,
-			approvals: this.turnSession.approvalDialogCount(),
-			updatedAt: this.statusUpdatedAt,
-			error: this.statusError,
-		};
-	}
-
-	/** Background harness runs, rendered beside detected harnesses. */
-	private harnessJobRows(): StatusRow[] {
-		const visible = new Set(this.familyRows().map((row) => row.session.id));
-		if (this.current) visible.add(this.current.id);
-		return [...this.harnessJobs.values()]
-			.filter(
-				job =>
-					visible.size === 0
-					|| visible.has(job.owner_session_id)
-					|| job.session_id === this.current?.id,
-			)
-			.sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))
-			.slice(0, 24)
-			.map(job => ({
-				id: `harness-job:${job.id}`,
-				label: `${job.platform} · ${job.task.slice(0, 48)}`,
-				detail:
-					job.status === "running"
-						? (job.progress?.at(-1)?.slice(0, 80) || "background subagent")
-						: job.needs_input
-							? "needs direction"
-							: (job.command[0] ?? `${job.platform} run`),
-				state: job.needs_input && job.status !== "running" ? "needs input" : job.status,
-				updatedAt: job.ended_at ?? job.started_at ?? undefined,
-				logs: [
-					`Job: ${job.id}`,
-					`Harness: ${job.platform}`,
-					`Session: ${job.session_id}`,
-					`Owner: ${job.owner_session_id}`,
-					`Task: ${job.task}`,
-					`Status: ${job.status}`,
-					...(job.needs_input ? ["Needs input: the harness asked a question."] : []),
-					`Exit: ${job.exit_code ?? "pending"}`,
-					...(job.error ? [`Error: ${job.error}`] : []),
-					...(job.progress?.length
-						? ["", "Live output:", ...job.progress.slice(-20)]
-						: []),
-					...(job.stdout ? ["", "Output:", ...job.stdout.split(/\r?\n/).slice(0, 12)] : []),
-					...(job.stderr ? ["", "Stderr:", ...job.stderr.split(/\r?\n/).slice(0, 8)] : []),
-				],
-			}));
-	}
-
-	private async refreshStatusData(): Promise<void> {
-		if (this.view !== "status" || this.statusRefreshing) return;
-		this.statusRefreshing = true;
-		const sessionId = this.current?.id;
-		const slow = Date.now() - this.statusSlowRefreshAt >= 15_000;
-		if (slow) this.statusSlowRefreshAt = Date.now();
-		try {
-			const [interop, mcp, jobs, harnessJobs, steering, sessionsResult] = await Promise.allSettled([
-				slow ? this.request<InteropStatusResult>("interop.status") : Promise.resolve(null),
-				slow ? this.request<{ servers?: MCPServerView[] }>("mcp.list") : Promise.resolve(null),
-				sessionId
-					? this.request<{ jobs?: ShellJob[] }>("shell.jobs", { sessionId })
-					: Promise.resolve({ jobs: [] }),
-				sessionId
-					? this.request<{ jobs?: HarnessJobView[] }>("interop.jobs", { sessionId })
-					: Promise.resolve({ jobs: [] }),
-				sessionId
-					? this.request<{ items?: SteeringItem[] }>("prompt.steering", { sessionId })
-					: Promise.resolve({ items: [] }),
-				slow ? this.request<SessionListResult>("session.list", { limit: 40 }) : Promise.resolve(null),
-			]);
-			if (this.view !== "status") return;
-			if (sessionId) {
-				if (jobs.status === "fulfilled") {
-					for (const job of jobs.value.jobs ?? []) this.activity.setJob(sessionId, job);
-				}
-				if (steering.status === "fulfilled") {
-					this.activity.setQueue(sessionId, steering.value.items ?? []);
-				}
-				if (harnessJobs.status === "fulfilled") {
-					for (const job of harnessJobs.value.jobs ?? []) this.harnessJobs.set(job.id, job);
-				}
-			}
-			if (sessionsResult.status === "fulfilled" && sessionsResult.value) {
-				const live = new Set(this.turnSession.inFlightSessions());
-				const currentId = this.current?.id;
-				const defaultProject = (this.footer.cwd || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "global";
-				this.statusSessions = (sessionsResult.value.sessions ?? [])
-					.slice(0, 40)
-					.map((session) => {
-						const project = session.workspaceRoot
-							? (session.workspaceRoot.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || defaultProject)
-							: defaultProject;
-						// A persisted session's "active" status means "not archived";
-						// it is not proof that a turn is running right now. Only the
-						// in-flight turn registry can make the live dot green.
-						const running = live.has(session.id);
-						const state = running
-							? "active"
-							: session.status === "active"
-								? "inactive"
-								: session.status || "inactive";
-						return {
-							id: `session:${session.id}`,
-							label: session.title || "untitled",
-							detail: `${session.provider || "?"} / ${session.model || "?"}`,
-							state,
-							running,
-							updatedAt: session.lastActivity ?? undefined,
-							logs: [
-								`Session: ${session.id}`,
-								`Title: ${session.title || "untitled"}`,
-								`Project: ${project}`,
-								`Route: ${session.provider || "?"} / ${session.model || "?"}`,
-								`Status: ${state}`,
-								`Last activity: ${session.lastActivity || "unknown"}`,
-								...(session.parentSessionId ? [`Parent: ${session.parentSessionId}`] : []),
-							],
-						};
-					})
-					.sort((left, right) => {
-						if (left.id === `session:${currentId}`) return -1;
-						if (right.id === `session:${currentId}`) return 1;
-						return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
-					});
-				// The first refresh starts before session.list returns, so the
-				// queue summary (or a stale session list) can be selected for one
-				// frame. Once the real session list arrives after opening the tab,
-				// move the default selection to the current chat.
-				if (this.statusDefaultPending && this.view === "status") {
-					// One attempt only: a failed or empty list must not move the
-					// user's selection 15s later on the next retry.
-					this.statusDefaultPending = false;
-					if (sessionsResult.status === "fulfilled" && this.statusSessions.length) {
-						this.statusPage.selectDefault();
-					}
-				}
-			}
-			if (interop.status === "fulfilled" && interop.value) {
-				this.statusHarnesses = (interop.value.platforms ?? []).map((row) => ({
-					id: `harness:${row.platform}`,
-					label: row.label || row.platform,
-					detail: [row.version, row.scope, row.notes?.[0]].filter(Boolean).join(" · "),
-					state: row.running ? "running" : row.installed ? "installed" : "not installed",
-					logs: [
-						`Platform: ${row.platform}`,
-						`Installed: ${row.installed ? "yes" : "no"}`,
-						`Running: ${row.running ? "yes" : "no"}`,
-						`Version: ${row.version || "unknown"}`,
-						`Scope: ${row.scope || "none"}`,
-						...(row.notes?.length ? ["", "Notes:", ...row.notes] : []),
-					],
-				}));
-			}
-			if (mcp.status === "fulfilled" && mcp.value) {
-				this.statusMcp = (mcp.value.servers ?? []).map((server) => ({
-					id: `mcp:${server.id}`,
-					label: server.display_name || server.id,
-					detail: [server.transport, server.server_version, server.error].filter(Boolean).join(" · "),
-					state: server.error ? "error" : server.state,
-					logs: [
-						`ID: ${server.id}`,
-						`Transport: ${server.transport}`,
-						`State: ${server.state}`,
-						`Server: ${server.server_name || "unknown"}${server.server_version ? ` ${server.server_version}` : ""}`,
-						`Protocol: ${server.protocol_version || "unknown"}`,
-						...(server.error ? [`Error: ${server.error}`] : []),
-					],
-				}));
-			}
-			const failures = [interop, mcp].filter((result) => result.status === "rejected").length;
-			this.statusError = failures ? `Live status refresh incomplete (${failures} source${failures === 1 ? "" : "s"} unavailable).` : "";
-			this.log.debug("status.refresh", {
-				sessions: this.statusSessions.length,
-				harnesses: this.statusHarnesses.length,
-				mcp: this.statusMcp.length,
-				failures,
-			});
-			this.statusUpdatedAt = new Date().toLocaleTimeString();
-		} finally {
-			this.statusRefreshing = false;
-			this.tui.requestRender();
-		}
+		return this.status.navSnapshot();
 	}
 
 	private openScreen(screen: "status" | "changes"): void {
-		if (this.exiting) return;
-		this.log.info("screen.open", { screen, session: this.current?.id ?? null, current: this.view });
-		if (this.view === screen) {
-			if (screen === "status") void this.refreshStatusData();
-			else void this.refreshChangesData();
-			this.tui.requestRender();
-			return;
-		}
-		this.clearScreenTimer();
-		this.disposeActivePage();
-		this.view = screen;
-		const page = screen === "status" ? this.statusPage : this.changesPage;
-		this.shell.setPage(page);
-		this.tui.setFocus(page);
-		this.footer.keyHint = "";
-		if (screen === "status") {
-			this.statusDefaultPending = true;
-			this.statusUpdatedAt = "";
-			this.statusError = "";
-			this.statusSlowRefreshAt = 0;
-			this.refreshFamily();
-			void this.refreshStatusData();
-		} else {
-			this.changesError = "";
-			this.changesPage.syncSelection();
-			this.ensureChangesDiff();
-			void this.refreshChangesData();
-		}
-		this.screenRefreshTimer = setInterval(() => {
-			if (this.view === "status") void this.refreshStatusData();
-			else if (this.view === "changes") void this.refreshChangesData();
-		}, 3_000);
-		this.tui.requestRender();
+		this.status.openScreen(screen);
 	}
 
 	private closeScreen(): void {
-		if (this.view === "chat") return;
-		const previous = this.view;
-		this.log.info("screen.close", { screen: previous });
-		this.view = "chat";
-		this.clearScreenTimer();
-		if (previous === "status") this.statusPage.dispose();
-		else this.changesPage.dispose();
-		this.shell.setPage(undefined);
-		this.footer.keyHint = "";
-		// A pending decision takes focus back on return; otherwise the composer.
-		if (this.turnSession.approvalDialogCount()) this.showApprovalDock();
-		else this.setFocusForRegion("chat-composer");
-	}
-
-	private clearScreenTimer(): void {
-		if (this.screenRefreshTimer !== undefined) {
-			clearInterval(this.screenRefreshTimer);
-			this.screenRefreshTimer = undefined;
-		}
-	}
-
-	private disposeActivePage(): void {
-		if (this.view === "status") this.statusPage.dispose();
-		else if (this.view === "changes") this.changesPage.dispose();
+		this.status.closeScreen();
 	}
 
 	private changesSnapshot(): ChangesSnapshot {
@@ -2261,83 +1895,11 @@ export class App implements FeatureHost {
 	}
 
 	async inspectActivity(): Promise<void> {
-		const session = this.current;
-		if (!session) {
-			this.print(activityEmptyGuidance(false), "guidance");
-			return;
-		}
-		const queueVersion = this.activity.queueVersion(session.id);
-		try {
-			const [queued, jobs] = await Promise.all([
-				this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId: session.id }).catch(() => ({ items: this.activity.queue(session.id) })),
-				this.request<{ jobs: ShellJob[] }>("shell.jobs", { sessionId: session.id }).catch(() => ({ jobs: this.activity.listJobs(session.id) })),
-			]);
-			if (this.activity.queueVersion(session.id) === queueVersion) this.activity.setQueue(session.id, queued.items);
-			for (const job of jobs.jobs) this.activity.setJob(session.id, job);
-			if (this.current?.id !== session.id) return;
-			const items = [
-				...queued.items.map((item) => ({ label: `Queued · ${truncateToWidth(sanitizeDisplay(item.text), 80, "…")}`, value: `q:${item.id}` })),
-				...jobs.jobs.map((job) => ({ label: `${job.status} · ${truncateToWidth(sanitizeDisplay(job.command), 75, "…")}`, value: `j:${job.id}` })),
-				...this.familyRows().filter((row) => !row.main).map((row) => ({ label: `Agent ${row.running ? "working" : "idle"} · ${row.session.title}`, value: `a:${row.session.id}` })),
-			];
-			if (this.turnSession.queuedSteering(session.id).length > 0) items.unshift({ label: "Retry retained steering", value: "retry" });
-			if (!items.length) { this.print(activityEmptyGuidance(true), "guidance"); return; }
-			const selected = await this.pickCentered("Activity", items);
-			if (!selected || this.current?.id !== session.id) return;
-			if (selected.value === "retry") { this.turnSession.setInterrupted(session.id, false); await this.flushSteering(session.id); return; }
-			if (selected.value.startsWith("a:")) { await this.family.open(selected.value.slice(2)); return; }
-			if (selected.value.startsWith("q:")) {
-				const item = queued.items.find((value) => value.id === selected.value.slice(2));
-				if (!item) return;
-				const choice = await this.pickCentered("Queued steering", [
-					{ label: "Edit", value: "edit" }, { label: "Remove", value: "remove" },
-					...(!this.turnSession.isInFlight(session.id) ? [{ label: "Send queued prompts now", value: "send" }] : []),
-				]);
-				if (choice?.value === "send") { this.turnSession.setInterrupted(session.id, false); await this.flushSteering(session.id); return; }
-				if (choice?.value === "edit") {
-					const text = await this.askText({ title: "Edit queued steering", initial: item.text, maxLength: 20_000 });
-					if (!text) return;
-					await this.request("prompt.steering", { sessionId: session.id, replace: item.id, text });
-				} else if (choice?.value === "remove") await this.request("prompt.steering", { sessionId: session.id, remove: item.id });
-				const queueVersion = this.activity.queueVersion(session.id);
-				const updated = await this.request<{ items: SteeringItem[] }>("prompt.steering", { sessionId: session.id });
-				if (this.activity.queueVersion(session.id) === queueVersion) this.activity.setQueue(session.id, updated.items);
-			} else {
-				const id = selected.value.slice(2);
-				const job = jobs.jobs.find((value) => value.id === id);
-				const choice = await this.pickCentered("Command", [
-					...(job?.foreground && job.status === "running" ? [{ label: "Background", value: "background", description: "Release the agent; original deadline remains" }] : []),
-					{ label: "View live output", value: "view" },
-					...(job?.status === "running" ? [{ label: "Stop command", value: "stop" }] : []),
-				]);
-				if (choice?.value === "background") await this.commandAction(session.id, id, "background");
-				else if (choice?.value === "stop") {
-					const result = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId: session.id, jobId: id, stop: true });
-					this.activity.setJob(session.id, result.job);
-				} else if (choice?.value === "view") await this.inspectShellJob(session.id, id);
-			}
-		} catch (error) { this.print(`Could not load activity: ${message(error)}`, "error"); }
-		finally { this.tui.requestRender(); }
+		await this.status.inspectActivity();
 	}
 
-	private async inspectShellJob(sessionId: string, id: string): Promise<void> {
-		const initial = await this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId: id });
-		const record = (job: ShellJob): OutputRecord => ({ sessionId, toolId: id, name: `${job.status} · ${job.command}`, text: job.output ?? "", byteLength: Buffer.byteLength(job.output ?? ""), backendTruncated: job.truncated ?? false, locallyTruncated: false });
-		let viewer: OutputViewer | undefined;
-		let active = true, pending = false;
-		const timer = setInterval(() => {
-			if (!active || pending) return;
-			pending = true;
-			void this.request<{ job: ShellJob }>("shell.jobs", { sessionId, jobId: id }).then(({ job }) => {
-				if (!active) return;
-				viewer?.setRecord(record(job));
-				this.activity.setJob(sessionId, job);
-				if (job.status !== "running") clearInterval(timer);
-				this.tui.requestRender();
-			}).catch(() => { clearInterval(timer); }).finally(() => { pending = false; });
-		}, 750);
-		try { await this.openDialog<void>((close) => viewer = new OutputViewer(record(initial.job), { tui: this.tui, onClose: () => close() })); }
-		finally { active = false; clearInterval(timer); }
+	private inspectShellJob(sessionId: string, id: string): Promise<void> {
+		return this.status.inspectShellJob(sessionId, id);
 	}
 
 	/** FeatureHost: the current family (main first) for /agents and menus. */
@@ -2797,12 +2359,7 @@ export class App implements FeatureHost {
 		// the moment the app is leaving: it must publish nothing.
 		this.beginWorkspaceFence();
 		this.footer.dispose();
-		if (this.screenRefreshTimer !== undefined) {
-			clearInterval(this.screenRefreshTimer);
-			this.screenRefreshTimer = undefined;
-		}
-		this.statusPage.dispose();
-		this.changesPage.dispose();
+		this.status.dispose();
 		this.turnSession.clearInFlightTimers();
 		this.transcript.suspend();
 		this.invalidateApprovals();
@@ -4645,7 +4202,7 @@ export class App implements FeatureHost {
 		}
 		if (event.type === "harness.job") {
 			const job = event.job as unknown as HarnessJobView;
-			this.harnessJobs.set(job.id, job);
+			this.status.setHarnessJob(job);
 			// The child chat exists as soon as the job starts; refresh the
 			// family so Activity/agent tabs can open it.
 			if (job.session_id) this.refreshFamily();
@@ -5273,12 +4830,7 @@ export class App implements FeatureHost {
 		this.cursorBlinkSub = undefined;
 		this.footer.dispose();
 		this.clearPendingAbortEsc();
-		if (this.screenRefreshTimer !== undefined) {
-			clearInterval(this.screenRefreshTimer);
-			this.screenRefreshTimer = undefined;
-		}
-		this.statusPage.dispose();
-		this.changesPage.dispose();
+		this.status.dispose();
 		this.transcript.suspend();
 		// The gateway is gone: clear workspace timers/mirrors without RPC
 		// expectations (every teardown call is bounded and fails fast).
