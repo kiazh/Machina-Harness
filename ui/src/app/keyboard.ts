@@ -210,6 +210,11 @@ export class KeyboardRouter {
 		return this.onInput(data);
 	}
 
+	/** App/test facade for the original key-only dispatch seam. */
+	handleKey(data: string): { consume: boolean } | undefined {
+		return this.onKey(data);
+	}
+
 	/** Release the leader timer on exit/gateway teardown; idempotent. */
 	dispose(): void {
 		if (this.pendingKeyLeaderTimer !== undefined) clearTimeout(this.pendingKeyLeaderTimer);
@@ -565,7 +570,7 @@ export class KeyboardRouter {
 	 * the same dirty-guarded flow as the tab strip's ✕ (the terminal may
 	 * intercept Ctrl+W; `/editor close` is the fallback).
 	 */
-	private handleWorkspaceKey(data: string): { consume: boolean } | undefined {
+	handleWorkspaceKey(data: string): { consume: boolean } | undefined {
 		if (!this.host.hasWorkspace()) return undefined;
 		const ready = this.host.workspaceReady();
 		// Ctrl+P — Quick Open overlay (fallback: /quickopen; palette-safe).

@@ -325,6 +325,7 @@ export class App implements FeatureHost {
 	private get workspaceLayoutActive(): boolean { return this.workspaceSurface?.layoutActive ?? false; }
 	private get workspaceLayout(): LayoutResult | undefined { return this.workspaceSurface?.layout; }
 	private get workspaceGeneration(): number { return this.workspaceSurface?.currentGeneration ?? 0; }
+	get skillsMenu() { return this.commands.mountedSkillsMenu; }
 	/** v1 focus router state (plan §8): the last meaningfully focused region. */
 	private activeRegion: FocusRegion = "chat-composer";
 	private problemsOpen = false;
@@ -704,6 +705,12 @@ export class App implements FeatureHost {
 			refreshChangesBadge: (sessionId) => { void this.changes.refreshBadge(sessionId); },
 			onChildEvent: (event) => this.onChildEvent(event),
 		};
+	}
+
+	onInput(data: string): { consume: boolean } | undefined { return this.keyboard.handle(data); }
+	onKey(data: string): { consume: boolean } | undefined { return this.keyboard.handleKey(data); }
+	handleWorkspaceKey(data: string): { consume: boolean } | undefined {
+		return this.keyboard.handleWorkspaceKey(data);
 	}
 
 	async start(): Promise<void> {
