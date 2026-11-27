@@ -61,6 +61,11 @@ export class AppShell {
 		render: (width: number): string[] => [theme.border("─".repeat(Math.max(0, width)))],
 		invalidate: (): void => {},
 	};
+	/** Space between the composer and the footer so the input reads as raised. */
+	private readonly bottomSpacer: Component = {
+		render: (): string[] => Array.from({ length: this.bottomGapRows() }, () => ""),
+		invalidate: (): void => {},
+	};
 	private agentBar: (Component & { visible: boolean }) | undefined;
 	private activityBar: (Component & { visible: boolean }) | undefined;
 	/** Cached chrome row budget; invalidated by composer/dock changes. */
@@ -226,7 +231,7 @@ export class AppShell {
 		].join("|");
 		const cached = this.chromeCache;
 		if (cached && cached.key === key) return cached.rows;
-		let rows = this.navRows() + composerRows + activityRows + 1;
+		let rows = this.navRows() + composerRows + activityRows + 1 + this.bottomGapRows();
 		if (this.dock && !this.dockInChatColumn()) {
 			rows += this.dock.render(width).length;
 		}
@@ -243,6 +248,12 @@ export class AppShell {
 	private navRows(): number {
 		if (!this.navBar) return 0;
 		return Math.max(0, this.navBar.rows?.() ?? 0);
+	}
+
+	/** Breathing room under the composer; taller terminals get more of it. */
+	private bottomGapRows(): number {
+		if (this.page) return 0;
+		return this.lastRows >= 40 ? 2 : this.lastRows >= 16 ? 1 : 0;
 	}
 
 	/**
@@ -362,6 +373,7 @@ export class AppShell {
 			...(this.dock && !this.dockInChatColumn() ? [{ component: this.dock, shrink: 0 }] : []),
 			...(!split && activity ? [{ component: activity, shrink: 0, visible: () => activity.visible }] : []),
 			...(!split ? [{ component: this.composer, shrink: 0 }] : []),
+			{ component: this.bottomSpacer, shrink: 0 },
 			{ component: this.footer, shrink: 0 },
 		]);
 	}

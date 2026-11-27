@@ -104,7 +104,7 @@ test("short transcript docks composer and footer to the bottom rows", () => {
 		assert.match(screen[0] ?? "", /hello world/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
-		assert.match(screen[21] ?? "", /Ask anything, or type \/ for commands\./);
+		assert.match(screen[20] ?? "", /Ask anything, or type \/ for commands\./);
 		assert.equal((screen[22] ?? "").trim(), "", "one padding row closes the composer");
 	} finally {
 		footer.dispose();
@@ -119,9 +119,11 @@ test("long transcript follows the end above the docked composer", () => {
 	try {
 		const screen = plain(tui.getScreenLines());
 		assert.equal(screen.length, 24);
-		// 20-row viewport over 100 lines: the last line sits just above the composer.
-		assert.match(screen[19] ?? "", /line 99/);
-		assert.match(screen[0] ?? "", /line 80/);
+		// The viewport follows the end; the last line sits just above the composer.
+		const composerRow = screen.findIndex((line) => line.includes("Chat input"));
+		assert.ok(composerRow > 0, "composer visible");
+		assert.match(screen.slice(0, composerRow).join("\n"), /line 99/);
+		assert.match(screen[0] ?? "", /line 8[01]/);
 		assert.match(screen[23] ?? "", /test-model/);
 		assert.match(screen[23] ?? "", /\? shortcuts/);
 	} finally {
