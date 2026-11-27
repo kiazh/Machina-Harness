@@ -115,7 +115,7 @@ test("g cycles daily, weekly, and cumulative views", () => {
 	p.instance.handleInput("g");
 	const cumulative = p.text().join("\n");
 	assert.match(cumulative, /g Cumulative/);
-	assert.match(cumulative, /Cumulative tokens/);
+	assert.match(cumulative, /Running total/);
 	p.instance.handleInput("g");
 	assert.match(p.text().join("\n"), /g Daily/);
 });

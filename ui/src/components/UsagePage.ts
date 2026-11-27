@@ -260,7 +260,50 @@ export class UsagePage implements Component {
 	}
 
 	private activityView(report: UsageReportResult, width: number): string[] {
-		return this.mode === 0 ? this.heatmap(report, width) : this.barChart(report, width);
+		if (this.mode === 0) return this.heatmap(report, width);
+		if (this.mode === 2) return this.cumulativeChart(report, width);
+		return this.barChart(report, width);
+	}
+
+	private cumulativeChart(report: UsageReportResult, width: number): string[] {
+		const { start, last, columns, byDate } = this.weeks(report);
+		const weekly: number[] = [];
+		for (let col = 0; col < columns; col++) {
+			let total = 0;
+			for (let row = 0; row < 7; row++) {
+				const date = new Date(start);
+				date.setDate(start.getDate() + col * 7 + row);
+				if (date > last) continue;
+				total += byDate.get(dayKey(date))?.tokens ?? 0;
+			}
+			weekly.push(total);
+		}
+		const cumulative: number[] = [];
+		let running = 0;
+		for (const total of weekly) {
+			running += total;
+			cumulative.push(running);
+		}
+		const maximum = Math.max(1, running);
+		const step = 2;
+		const visible = Math.min(columns, Math.max(1, Math.floor((width - 4) / step)));
+		const offset = columns - visible;
+		const shown = cumulative.slice(offset);
+		const labels = this.monthLabels(start, last, visible, offset, step);
+		const out: string[] = [`   ${theme.dim(labels.join(""))}`.trimEnd()];
+		for (let row = 0; row < CHART_ROWS; row++) {
+			const axis = row === 0 ? "max" : row === CHART_ROWS - 1 ? "0" : "";
+			const cells = shown
+				.map((value) => {
+					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
+					return height > CHART_ROWS - row - 1 ? theme.activity("██", 0.7, 0) : "  ";
+				})
+				.join("");
+			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());
+		}
+		out.push("");
+		out.push(theme.dim(`Running total · top ${compact(running)}`));
+		return out;
 	}
 
 	private monthLabels(
@@ -318,7 +361,7 @@ export class UsagePage implements Component {
 				const day = week[row];
 				if (!day) return " ".repeat(step);
 				const level = intensity(values[col]![row]!, maximum);
-				const glyph = level <= 0 ? theme.dim("■") : theme.activity("■", level / 4, 0);
+				const glyph = level <= 0 ? theme.border("■") : theme.activity("■", level / 4, 0);
 				return `${glyph}${spacer}`;
 			});
 			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
@@ -341,13 +384,7 @@ export class UsagePage implements Component {
 			}
 			weekly.push(total);
 		}
-		const cumulative: number[] = [];
-		let running = 0;
-		for (const total of weekly) {
-			running += total;
-			cumulative.push(running);
-		}
-		const values = this.mode === 1 ? weekly : cumulative;
+		const values = weekly;
 		const maximum = Math.max(1, ...values);
 		const step = width >= 109 ? 2 : 1;
 		const visible = Math.min(columns, Math.max(1, Math.floor((width - 4) / step)));
@@ -367,11 +404,8 @@ export class UsagePage implements Component {
 				.join("");
 			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());
 		}
-		const caption = this.mode === 1
-			? `Each column = 1 week · tallest ${compact(maximum)}`
-			: `Cumulative tokens · ${compact(running)} through the last week`;
 		out.push("");
-		out.push(theme.dim(caption));
+		out.push(theme.dim(`Each column = 1 week · tallest ${compact(maximum)}`));
 		return out;
 	}
 
