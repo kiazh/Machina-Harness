@@ -77,10 +77,22 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	t.after(() => { footer.dispose(); coordinator.dispose(); });
 	footer.status = "working";
 	const rows = footer.render(80).map((line) => stripTerminalSequences(line));
-	assert.equal(rows.length, 2, "live work uses two rows");
-	assert.match(rows[0]!, /working/);
-	assert.match(rows[0]!, /esc×2 stop/);
-	assert.match(rows[1]!, /ctx|tokens|context/);
+	assert.equal(rows.length, 4, "live work uses a three-row wave plus the footer");
+	assert.match(rows[0]!, /[▁▂▃▄▅▆▇█]/);
+	assert.match(rows[2]!, /▲/);
+	assert.match(rows[2]!, /esc×2 stop/);
+	assert.match(rows[3]!, /working/);
+	assert.match(rows[3]!, /shortcuts/);
+	assert.equal(footer.measureRows(80), 4);
+	for (const width of [20, 40, 80, 120]) {
+		for (const line of footer.render(width)) {
+			assert.ok(visibleWidth(line) <= width, `wave row wider than ${width}`);
+		}
+	}
+	footer.compact = true;
+	assert.equal(footer.measureRows(80), 2, "short viewports keep one wave row");
+	assert.equal(footer.render(80).length, 2);
+	footer.compact = false;
 	assert.equal(coordinator.timerCount, 1);
 	t.mock.timers.tick(200);
 	const next = footer.render(80).map((line) => stripTerminalSequences(line));
@@ -89,6 +101,7 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	for (const status of ["awaiting_approval", "offline", "ready"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
+		assert.equal(footer.measureRows(80), 1);
 		assert.equal(footer.render(80).length, 1);
 		assert.match(stripTerminalSequences(footer.render(80)[0]!), /□$/);
 		footer.status = "working";
@@ -96,8 +109,9 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	for (const status of ["stopping", "cleanup_pending"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
-		assert.equal(footer.render(80).length, 2);
-		assert.match(stripTerminalSequences(footer.render(80)[0]!), new RegExp(status.replace("_", " ")));
+		assert.equal(footer.measureRows(80), 4);
+		assert.equal(footer.render(80).length, 4);
+		assert.match(stripTerminalSequences(footer.render(80).at(-1)!), new RegExp(status.replace("_", " ")));
 		footer.status = "working";
 	}
 	footer.dispose();

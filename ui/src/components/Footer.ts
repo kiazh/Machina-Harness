@@ -80,9 +80,10 @@ export class Footer implements Component {
 		this.activity.setReducedMotion(enabled);
 	}
 
-	/** Two rows while work is live; one quiet row otherwise. */
+	/** A pixel wave plus the normal footer while work is live. */
 	measureRows(_width: number): number {
-		return this.isLive ? 2 : 1;
+		if (!this.isLive) return 1;
+		return this.compact ? 2 : 4;
 	}
 
 	private get isLive(): boolean {
@@ -138,57 +139,88 @@ export class Footer implements Component {
 	}
 
 	private between(left: string, right: string, width: number): string {
-		const room = Math.max(0, width - visibleWidth(right) - 1);
+		const room = Math.max(0, width - visibleWidth(right) - 2);
 		const first = truncateToWidth(left, room, "…", true);
-		return truncateToWidth(`${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))} ${right}`, width);
+		return truncateToWidth(`${first}${" ".repeat(Math.max(0, room - visibleWidth(first)))}  ${right}`, width);
+	}
+
+	/** Short token counts keep the context gauge inside the footer corner. */
+	private compactTokens(value: number): string {
+		if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+		if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+		return String(value);
+	}
+
+	/**
+	 * Block waveform columns. Each column is up to `rows * 8` levels tall so
+	 * two terminal rows still read as a moving equalizer, not a flat line.
+	 */
+	private waveBody(columns: number, rows: number, tick: number): string[] {
+		if (columns <= 0 || rows <= 0) return Array.from({ length: Math.max(0, rows) }, () => "");
+		const partial = ["", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+		const out = Array.from({ length: rows }, () => [] as string[]);
+		for (let column = 0; column < columns; column += 1) {
+			const primary = Math.abs(Math.sin(column * 0.5 + tick * 0.62));
+			const secondary = Math.abs(Math.sin(column * 0.17 - tick * 0.29));
+			const envelope = 0.45 + 0.55 * Math.abs(Math.sin(column * 0.11 + tick * 0.05));
+			const strength = Math.max(0, Math.min(1, envelope * (primary * 0.72 + secondary * 0.28)));
+			let cells = Math.round(strength * rows * 8);
+			for (let row = rows - 1; row >= 0; row -= 1) {
+				const filled = Math.max(0, Math.min(8, cells));
+				const glyph = filled === 0 ? " " : filled === 8 ? "█" : partial[filled]!;
+				out[row]!.push(glyph === " " ? " " : theme.accent(glyph));
+				cells -= 8;
+			}
+		}
+		return out.map((row) => row.join(""));
 	}
 
 	private runningRows(width: number): string[] {
 		const fit = chromeInner(width);
 		const total = Math.max(0, width);
-		const status = this.currentStatus === "working"
-			? theme.accent("working")
-			: theme.warning(this.currentStatus === "stopping" ? "stopping" : "cleanup pending");
-		const agents = this.subagents > 0 ? theme.muted(` · ${this.subagents} subagent${this.subagents === 1 ? "" : "s"}`) : "";
+		const bodyRows = this.compact ? 0 : 2;
+		const waveWidth = Math.min(
+			Math.max(8, Math.floor(fit * 0.4)),
+			Math.max(8, fit - 24),
+		);
+		const tick = this.reducedMotion
+			? 0
+			: Number(this.activity.frame(["0", "1", "2", "3", "4", "5", "6", "7"], ACTIVITY_INTERVAL_MS, this.workingStart)) || 0;
+		const body = this.waveBody(waveWidth, bodyRows, tick);
 		const elapsed = this.reducedMotion
 			? 0
 			: this.workingStart > 0
 				? Math.max(0, Math.round((Date.now() - this.workingStart) / 1000))
 				: 0;
-		const clock = theme.dim(`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`);
-		const tick = this.reducedMotion ? 0 : Number(this.activity.frame(["0", "1", "2", "3", "4", "5", "6", "7"], ACTIVITY_INTERVAL_MS, this.workingStart)) || 0;
-		const cells = fit >= 70 ? 16 : fit >= 40 ? 10 : 0;
-		const glyphs = "▁▂▃▄▅▆▇█";
-		const wave = Array.from({ length: cells }, (_, index) => {
-			const level = Math.max(0, Math.min(7, Math.round(3.5 + 3 * Math.sin((index + tick) * 0.7))));
-			const glyph = glyphs[level] ?? "▁";
-			return level >= 5 ? theme.accent(glyph) : theme.muted(glyph);
-		}).join("");
-		const left = `${wave}${wave ? " " : ""}${status}${agents} ${clock}`;
-		const stop = fit >= 46 ? theme.warning("esc×2 stop") : theme.warning("esc");
-		const top = this.between(left, stop, fit);
+		const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
 		const displayTokens = this.contextTokens > 0 ? this.contextTokens : this.tokens;
 		const context = displayTokens > 0
-			? `${displayTokens.toLocaleString("en-US")} ${this.contextTokens > 0 ? "ctx" : "tokens"}${
+			? `${this.compactTokens(displayTokens)}${this.contextTokens > 0 ? " ctx" : ""}${
 				this.contextTokens > 0 && this.contextPercent !== null ? ` (${this.contextPercent.toFixed(1)}%)` : ""
 			}`
-			: "context pending";
-		const right = theme.muted(context);
-		const room = Math.max(6, fit - visibleWidth(right) - 2);
-		const travel = room * 2 - 2;
-		const position = tick % Math.max(1, travel);
-		const cometPosition = position >= room ? travel - position : position;
-		const comet = `${"─".repeat(cometPosition)}${theme.accent("◆")}${"─".repeat(Math.max(0, room - cometPosition - 1))}`;
-		const bottom = this.between(`${theme.dim("  ")}${comet}`, right, fit);
-		return [
-			surfaceLine(top, total),
-			surfaceLine(bottom, total),
-		];
+			: "";
+		const stop = fit >= 46 ? "esc×2 stop" : "esc stop";
+		const parts = [clock, context, stop].filter(Boolean);
+		const right = theme.muted(parts.join(" · "));
+		const available = Math.max(0, fit - waveWidth - 2);
+		const status = visibleWidth(right) <= available
+			? right
+			: theme.muted(available >= 12 ? (fit >= 46 ? "esc×2 stop" : "esc stop") : "esc");
+		const baselineWidth = Math.max(0, Math.min(waveWidth, fit - visibleWidth(status) - 2));
+		const marker = baselineWidth > 2
+			? this.reducedMotion
+				? Math.floor(baselineWidth / 2)
+				: (Math.floor((Date.now() - this.workingStart) / 240) % baselineWidth + baselineWidth) % baselineWidth
+			: -1;
+		const baseline = Array.from({ length: baselineWidth }, (_, index) => (
+			index === marker ? theme.accent("▲") : theme.dim("▁")
+		)).join("");
+		const rows = body.map((line) => surfaceLine(line, total));
+		rows.push(surfaceLine(this.between(baseline, status, fit), total));
+		return rows;
 	}
 
-	render(width: number): string[] {
-		if (width <= 0) return [""];
-		if (this.isLive) return this.runningRows(width);
+	private footerRow(width: number): string {
 		const square = this.growthActive ? this.pulsingSquare(this.growthStart)
 			: this.workingSub ? this.pulsingSquare(this.workingStart) : theme.muted(ICONS.idleSquare);
 		const status = this.status === "working"
@@ -237,7 +269,14 @@ export class Footer implements Component {
 			if (visibleWidth(left) + visibleWidth(withWs) + 5 <= fit) right = withWs;
 		}
 		const gap = Math.max(0, fit - visibleWidth(left) - visibleWidth(right));
-		return [surfaceLine(truncateToWidth(`${left}${" ".repeat(gap)}${right}`, fit), width)];
+		return surfaceLine(truncateToWidth(`${left}${" ".repeat(gap)}${right}`, fit), width);
+	}
+
+	render(width: number): string[] {
+		if (width <= 0) return [""];
+		const footer = this.footerRow(width);
+		if (!this.isLive) return [footer];
+		return [...this.runningRows(width), footer];
 	}
 
 	invalidate(): void {}
