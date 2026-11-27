@@ -114,7 +114,7 @@ export class WorkGroup implements Component {
 		const total = Math.max(0, width);
 		const marker = this.collapsed ? "+" : "-";
 		const line = truncateToWidth(`${marker} ${this.summary()}`, total);
-		const rows = this.collapsed ? [line] : [line, ...this.children.flatMap((child) => child.render(width))];
+		const rows = this.collapsed ? ["", line] : ["", line, ...this.children.flatMap((child) => child.render(width))];
 		if (this.collapsed && this.cached.size >= 4) this.cached.clear();
 		if (this.collapsed) this.cached.set(width, rows);
 		return rows;
@@ -122,12 +122,12 @@ export class WorkGroup implements Component {
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		if (event.y === 0) {
+		if (event.y === 1) {
 			this.toggle();
 			return { handled: true, render: true };
 		}
 		if (this.collapsed) return undefined;
-		let offset = 1;
+		let offset = 2;
 		for (const child of this.children) {
 			const height = child.render(event.width).length;
 			if (event.y >= offset && event.y < offset + height) {

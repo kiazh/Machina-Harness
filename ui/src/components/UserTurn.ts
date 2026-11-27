@@ -36,7 +36,8 @@ export class UserTurn implements Component {
 			const prefix = index === 0 ? theme.accentBold("❯ ") : "  ";
 			return `${roomy ? "  " : ""}${prefix}${ink(line)}`;
 		});
-		const out = [...BLOCK_GAP, ...rows.map((line) => {
+		const bodyRows = roomy ? ["", ...rows, ""] : rows;
+		const out = [...BLOCK_GAP, ...bodyRows.map((line) => {
 			const padded = truncateToWidth(line, column, "", opaque);
 			const painted = opaque ? repairFill("promptBg", padded) : padded;
 			return truncateToWidth(`${margin}${painted}`, total, "");
