@@ -20,7 +20,7 @@ const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 const WORK_INTERVAL_MS = 33;
 const WORK_CYCLE_MS = 1800;
 const WORK_TRACK = 13;
-const SCAN_GLYPHS = ["·", "░", "▒", "▓", "█"];
+const RIPPLE_GLYPHS = ["·", "∘", "○", "◉"];
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -165,17 +165,17 @@ export class Footer implements Component {
 			if (room >= WORK_TRACK + 2 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
 				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
-				const head = (1 - Math.cos(phase * 2 * Math.PI)) / 2 * (WORK_TRACK - 1);
-				const direction = Math.sin(phase * 2 * Math.PI) >= 0 ? 1 : -1;
-				const comet = Array.from({ length: WORK_TRACK }, (_, cell) => {
-					const behind = (head - cell) * direction;
-					const glow = behind >= 0
-						? Math.exp(-0.32 * behind)
-						: Math.exp(-4 * (cell - head) ** 2) * 0.35;
-					const glyph = SCAN_GLYPHS[Math.min(4, Math.floor(glow * 5))]!;
+				const radius = phase * (WORK_TRACK - 1) / 2;
+				const center = (WORK_TRACK - 1) / 2;
+				const ripple = Array.from({ length: WORK_TRACK }, (_, cell) => {
+					const distance = Math.abs(cell - center);
+					const ring = Math.exp(-1.4 * (distance - radius) ** 2) * (1 - phase * 0.55);
+					const core = Math.exp(-2.5 * distance ** 2) * (0.55 + 0.45 * Math.cos(phase * 2 * Math.PI));
+					const glow = Math.max(ring, core);
+					const glyph = RIPPLE_GLYPHS[Math.min(3, Math.floor(glow * 4))]!;
 					return theme.activity(glyph, 0.2 + 0.8 * glow, cell / (WORK_TRACK - 1));
 				}).join("");
-				activity = `${comet}  ${activity}`;
+				activity = `${ripple}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
