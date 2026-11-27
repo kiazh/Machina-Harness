@@ -80,7 +80,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "web_verify",
     ),
     "documents and RAG": ("index_document", "search_documents"),
-    "apple": ("apple_mail_draft",),
+    "apple": ("apple_mail_draft", "apple_calendar_agenda"),
     "memory and recall": (
         "remember",
         "recall",
