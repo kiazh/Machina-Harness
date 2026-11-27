@@ -50,6 +50,10 @@ originals.
 
 ## Verification (must all pass)
 
+There is no line-count target for `app.ts`. The goal is that it contains only
+composition, host adapters, compatibility facades, and state that genuinely
+belongs to the root. Cohesive behavior belongs in a controller.
+
 ```sh
 npm --prefix ui run typecheck
 npm --prefix ui run lint

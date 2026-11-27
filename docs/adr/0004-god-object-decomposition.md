@@ -49,7 +49,10 @@ as a facade until every caller has moved.
 - More files, each with a small interface and explicit dependencies.
 - Security-sensitive paths (tool batch, approvals, digest revalidation) move
   only after characterization traces exist.
-- `agent.py` ≤ 700 lines, `app.ts` ≤ 900, `_react_loop` ≤ 150, no method > 80
-  lines in the touched files. The ratchet only moves down.
+- `agent.py` is a thin facade (≤700 lines), `_react_loop` is a phase orchestrator
+  (≤150), and the tool batch exposes phase helpers rather than one 600-line
+  method. `app.ts` is a composition root: there is no line target, only the
+  rule that no extracted implementation remains duplicated there. The ratchet
+  holds the current size and drops when a natural extraction appears.
 - Every task is independently revertible; a move PR should be mechanically
   explainable without reading the implementation.

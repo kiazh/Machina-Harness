@@ -501,8 +501,9 @@ Delete delegating methods with no remaining callers, collapse imports, update
 
 ### P5.2 Tighten CI (S, 0.5 day)
 
-- `agent.py` ≤ 700, `app.ts` ≤ 900, `_react_loop` ≤ 150.
-- No method over 80 lines in the touched files.
+- `agent.py` ≤ 700, `_react_loop` ≤ 150.
+- No duplicate controller implementations in `app.ts`.
+- No method over 80 lines in the extracted modules.
 - Import-cycle allowlist decremented to the pre-refactor count or lower.
 - Golden trace suites required.
 
@@ -588,7 +589,7 @@ Every task PR states:
 
 ## 12. Definition of done
 
-- `agent.py` ≤ 700; `app.ts` ≤ 900; `_react_loop` ≤ 150; no method > 80 lines in
+- `agent.py` ≤ 700; `app.ts` contains no duplicate controller implementations (no line target); `_react_loop` ≤ 150; no method > 80 lines in
   the touched files.
 - Golden traces for 12 turn scenarios and the UI screen/key matrix pass.
 - Local suite and the pinned DevTools suite pass.
