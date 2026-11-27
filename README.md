@@ -1,17 +1,37 @@
 # Machina
 
-Machina is a self-hosted, local-first agent harness for developers and operators who need work to persist across turns, sessions, surfaces, and interruptions—not another chat wrapper or a single-surface coding agent. Its thesis is simple: **an agent harness is a state-management system**. The model is the only stateless part; the harness gives it a bounded, auditable, recoverable view of durable state and constrains real side effects.
+Machina is a **self-hosted, local-first agent harness** built around a specific
+idea: an agent harness is a state-management system. The model is the stateless
+part of Machina's turn contract. PostgreSQL holds the conversation, retained
+evidence, turn ownership, approvals, jobs, and usage; the Python engine decides
+what the model can see and which proposed actions are allowed to run.
 
-Machina combines a Python turn engine, PostgreSQL with pgvector, and a TypeScript terminal UI. The same engine is available through a CLI, HTTP/SSE, MCP server, ACP bridge, and external-harness interop. There is no hosted Machina service or SLA; you operate the runtime, database, and provider connections.
+If you're comparing Machina with OpenCode, Codex, or Claude Code, evaluate it
+on what happens when work is interrupted, context no longer fits, or a reviewed
+file changes before execution:
 
-## Why this exists
+- **Turns have leased, fenced ownership.** Another worker can take over an
+  expired claim; the stale token cannot release the successor's claim.
+- **Model context is a bounded projection of durable state.** Compaction
+  archives displaced history. Reducers can show a test summary, diff excerpt,
+  or log slice while a stored artifact lets the agent page the original.
+- **Memory has its own lifecycle.** Claims carry provenance and can be reviewed,
+  retrieved, or forgotten independently of the transcript.
+- **Authority is bound to the reviewed effect.** Digest v3 includes the
+  target's base revision for applicable file actions. A different revision or
+  material arguments invalidate approval; an approval can only be consumed once.
+- **Routing is deterministic for a given inventory, task profile, and policy.**
+  Machina ranks eligible connected models by role and constraints without an
+  LLM call to choose the route.
 
-- **A prompt is a view, not the database.** Turns and tool activity persist as typed records. Each request gets a budgeted context projection; compaction archives replaced history, and large outputs can remain recoverable as artifacts.
-- **Memory is a separate lifecycle.** Durable claims have sources and can be searched, corrected, approved, or forgotten. A transcript is not silently treated as truth.
-- **Approval names an action, not a tool.** The permission broker canonicalizes the proposed effect, binds approval to a versioned digest, and revalidates it before execution.
-- **Routing follows available connections.** Machina builds an inventory from configured credentials and connected local or remote models, then selects by role and constraints. It does not promise that a provider is reachable or that every route is cheaper or better.
-- **Interruptions are part of the model.** Turn ownership is leased and fenced; approvals and jobs persist. Uncertain ownership blocks protected effects instead of guessing.
-- **One engine, several transports.** The TUI, CLI, HTTP, MCP, and ACP paths share turn policy and durable state rather than implementing separate agent loops.
+One turn engine backs six access paths, including external clients calling
+Machina through MCP. The runtime, database, and provider connections are yours
+to operate. Machina has no hosted service or SLA and makes no comparative
+benchmark claim.
+
+[Get started](#get-started) · [Architecture](#architecture) ·
+[Failure semantics](#failure-semantics) · [Security](#security-model-and-limits) ·
+[Testing and evidence](#testing-and-evidence) · [Reference](#reference)
 
 ## What you get
 
@@ -19,59 +39,53 @@ Counts below are from this checkout’s registries and checked-in files; they de
 
 | Capability | What it means |
 |---|---|
-| Durable turns | PostgreSQL stores sessions, context events, tool results, approvals, jobs, usage, and other state. |
-| Context projection and compaction | Build a model-specific bounded working set; archive old chunks during compaction; retain large tool outputs as paged artifacts when storage succeeds. |
-| Memory lifecycle | Extract and retrieve durable claims with provenance, deduplication, optional review, and forgetting controls. |
-| Digest-bound approvals | Action digest v3 binds the reviewed action, including the target’s base revision; execution revalidates and consumes approval once. |
-| Connected-model routing | Inventory configured model connections and choose role-specific routes with cost/fit information and fallbacks where available. |
 | Providers | 18 built-in provider names, plus user-added named OpenAI-compatible providers. Availability and terms depend on the provider. |
 | Tools | 48 built-in tools, plus tools from explicitly connected MCP servers. |
 | Skills | 77 bundled `SKILL.md` packages; task selection is catalog-first and bodies load on demand. |
 | Agents | 71 bundled ECC specialist definitions plus 3 core built-ins (74 bundled built-ins total); user definitions can add more. |
-| Surfaces | Terminal UI, CLI, HTTP + SSE, MCP server/client, ACP, and external-harness interop. |
 | Jobs | Durable scheduled jobs, including interval/cron/heartbeat and reviewed script jobs; job execution is at-least-once. |
 | Observability | Sanitized audit events, diagnostics, operation metrics, traces, and durable usage accounting. |
 
-## Install and first run
+## Get started
 
-The installer bootstraps the checkout and runtime; `machina setup` is the first-launch configuration and database verification step. Setup can collect provider credentials, write a private `.env`, provision the supported managed local database when applicable, initialize the schema, and report whether that schema is ready. A successful install command alone is not proof that the application is ready.
+The installer bootstraps the checkout and runtime. First-launch Setup collects
+or preserves provider configuration, writes `.env`, and provisions and verifies
+the database schema on supported paths. It reports when schema setup fails.
 
 **macOS / Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.sh | bash
-machina setup
-machina doctor
-machina
 ```
 
 **Windows PowerShell (native; no WSL required)**
 
 ```powershell
 irm https://raw.githubusercontent.com/kiazh/Machina-Harness/main/install.ps1 | iex
-machina setup
-machina doctor
-machina
 ```
 
-After the installer finishes, open a new terminal so the installed launcher is
-on `PATH`. A piped macOS/Linux installer cannot change the parent shell's
-environment; it prints the exact `PATH` hint if the current shell needs it.
-
-`machina doctor` checks runtime dependencies, configured keys, and database connectivity. It does not prove that a provider will accept a request. To verify an end-to-end route, open the TUI and send a small prompt using the provider you configured.
+Open a new terminal after installation so it picks up the launcher path. The
+current installers hand off to `machina setup` for first-launch configuration;
+open the terminal UI with `machina` after Setup reports the schema is ready.
+`machina doctor` checks runtime dependencies, credentials configuration, and
+database connectivity. A prompt through the configured provider checks the
+end-to-end route.
 
 **Requirements and setup behavior**
 
 - Network access to download the checkout and dependencies. Git and Python 3.11+ are required. Node.js 22.19+ and npm are required for the terminal UI.
 - PostgreSQL 16+ with `vector` and `pg_trgm`, or a Docker-backed local database. Installers/setup provision dependencies where their platform path supports it; an existing database can be selected with `DATABASE_URL`.
-- The installer creates a Python environment, installs the Python package and UI dependencies, seeds `.env`, adds a `machina` launcher where supported, and attempts database initialization. `machina setup` then prompts for or preserves configuration and verifies schema setup. Optional integrations may still require an unavoidable provider login or consent.
-- The installer can detect/register supported external agent harnesses. Interop is best-effort; it does not make those external programs part of Machina or guarantee their availability.
+- The installer creates the Python environment, installs dependencies for the supported runtime and UI path, seeds `.env`, and attempts database initialization. External-harness registration is best-effort. Provider login or third-party consent may still be required.
 
-For manual deployment, upgrade, backups, and environment settings, see [Operations](OPERATIONS.md). This project has no hosted service, managed backups, data-recovery guarantee, or production SLA.
+For manual deployment, upgrades, backups, and configuration, see [Operations](OPERATIONS.md).
 
 ## Architecture
 
-The model receives a request and returns a response. Machina owns everything around that exchange: durable state, context selection, authority, tool execution, routing, and recovery.
+The same `TurnLifecycle` → `TurnEngine` → `ReActAgent` path drives Machina turns.
+Each access path supplies its transport and approval policy. The MCP server
+invokes the headless CLI for chat; outbound MCP calls and delegation to an
+external harness are tool effects. An external harness keeps its own runtime
+and authority when it executes a delegated task.
 
 ```mermaid
 flowchart LR
@@ -79,18 +93,21 @@ flowchart LR
     TUI[TypeScript terminal UI]
     CLI[CLI]
     HTTP[HTTP + SSE]
-    MCP[MCP server/client]
-    ACP[ACP]
-    EXT[External harnesses]
+    MCP[MCP clients]
+    ACP[ACP editors]
+    EXT[External harness clients]
   end
   subgraph EDGE[Protocol edge]
-    GW[JSON-RPC gateway]
-    REST[HTTP routes and event stream]
-    ADAPTERS[CLI / MCP / ACP adapters]
+    GW[Stdio JSON-RPC gateway]
+    REST[HTTP / SSE and embedded RPC]
+    HEADLESS[Headless CLI]
+    MCPS[MCP stdio server]
+    ACPS[ACP bridge]
   end
   subgraph ENGINE[Shared turn engine]
-    OWN[Turn lifecycle and fenced ownership]
-    LOOP[react_loop / react_phases]
+    OWN[TurnLifecycle / TurnEngine]
+    AG[ReActAgent facade]
+    LOOP[ReAct loop and phases]
     STATE[turn_state]
     POST[post_turn]
   end
@@ -99,46 +116,54 @@ flowchart LR
     MEM[Memory retrieval and consolidation]
     PERM[Permission broker and approvals]
     TOOLS[tool_batch and tool_results]
-    ROUTE[Connected-model routing and llm_calls]
+    ROUTE[Connected-model inventory and router]
+    LLM[Provider calls and usage]
   end
   DB[(PostgreSQL + pgvector)]
   PROVIDERS[Provider APIs / local model endpoints]
-  WORLD[Workspace / process / MCP effects]
+  WORLD[Workspace / process / outbound MCP effects]
 
   TUI --> GW
-  CLI --> ADAPTERS
+  CLI --> HEADLESS
   HTTP <--> REST
-  MCP --> ADAPTERS
-  ACP --> ADAPTERS
-  EXT <--> MCP
-  GW --> ENGINE
-  REST --> ENGINE
-  ADAPTERS --> ENGINE
-  OWN --> LOOP
+  MCP --> MCPS
+  EXT --> MCPS
+  MCPS --> HEADLESS
+  ACP --> ACPS
+  GW --> OWN
+  REST --> OWN
+  HEADLESS --> OWN
+  ACPS --> OWN
+  OWN <--> DB
+  OWN --> AG --> LOOP
   LOOP <--> STATE
   LOOP --> CTX
   CTX <--> MEM
   CTX --> DB
   MEM <--> DB
   LOOP --> ROUTE
-  ROUTE --> PROVIDERS
+  LOOP --> LLM --> PROVIDERS
+  LLM --> DB
   LOOP --> TOOLS
   TOOLS --> PERM
-  PERM --> WORLD
+  PERM <--> DB
+  TOOLS -->|with stamped authority| WORLD
   TOOLS --> DB
-  STATE --> DB
   POST --> DB
   LOOP --> POST
 ```
 
 ### One turn
 
+This is the interactive path: a TUI client can wait for a decision inside an
+owned turn. Only the permitted branch reaches the tool.
+
 ```mermaid
 sequenceDiagram
   actor Human
   participant Surface
   participant Edge as Protocol adapter
-  participant Engine as Turn engine
+  participant Engine as Lifecycle and turn engine
   participant Context as Context preparer
   participant Router
   participant Broker as Permission broker
@@ -148,53 +173,82 @@ sequenceDiagram
 
   Human->>Surface: submit prompt
   Surface->>Edge: turn request
-  Edge->>DB: claim session lease + fencing token
-  Edge->>Engine: run owned turn
-  Engine->>Context: prepare bounded working set
-  Context->>DB: read session, context, memory/RAG evidence
-  Context-->>Engine: messages + omission information
-  Engine->>Router: select role/model route
-  Router-->>Engine: selected provider and model
-  Engine->>Model: request / stream
-  Model-->>Engine: response or tool calls
-  Engine->>Broker: authorize canonical action
-  alt action requires review
-    Broker->>DB: persist pending approval
-    Engine-->>Surface: pause with approval request
-    Human->>Surface: resolve approval
-    Surface->>DB: record human decision
-    Engine->>Broker: revalidate digest and claim once
-  else allowed or denied
-    Broker-->>Engine: stamped execution context or denial
+  Edge->>Engine: acquire and drive turn
+  Engine->>DB: claim session lease with fresh token
+  Engine->>Context: assemble context
+  Context->>DB: read history and evidence
+  Context-->>Engine: messages and evidence disclosures
+  Engine->>DB: persist user input before the first model call
+  opt automatic planning uses connected-model routing
+    Engine->>Router: rank eligible role routes
+    Router-->>Engine: selected routes and rationale
   end
-  Engine->>Tool: execute permitted action
-  Tool->>DB: record result / artifact
-  Tool-->>Engine: bounded result
-  Engine->>Model: continue with tool result
-  Model-->>Engine: final response
-  Engine->>DB: persist response and usage; release ownership
-  Engine->>DB: schedule post-turn maintenance
-  Engine-->>Surface: completion or explicit non-success state
+  loop model step and optional tool batch
+    Engine->>Model: fit and send request
+    Model-->>Engine: answer or tool calls
+    opt tool call proposed
+      Engine->>Broker: evaluate canonical action
+      opt human review required
+        Broker->>DB: persist pending approval
+        Engine-->>Edge: request human review
+        Edge-->>Surface: show approval card
+        Human->>Surface: decide
+        Surface->>Edge: send decision
+        Edge->>Broker: resolve as human
+        Broker->>DB: record decision
+      end
+      alt action permitted
+        Broker-->>Engine: execution context after revalidation
+        Engine->>Tool: run authorized action
+        Tool-->>Engine: tool result
+        Engine->>DB: record result and retain artifact where applicable
+      else denied or unavailable
+        Broker-->>Engine: denial or failure; no tool effect
+      end
+    end
+  end
+  Engine->>DB: flush durable records; attempt fenced release
+  Engine-->>Edge: terminal outcome and cleanup status
+  Edge-->>Surface: transport-specific result
 ```
 
-The diagram is intentionally simplified: HTTP approval resume submits the original tool arguments and reconstructs the proposal before execution; it does not ask the model to recreate the approved action. A human wait does not hold a database transaction open.
+An interactive wait renews the lease without keeping a database transaction
+open. A headless turn can instead return a durable approval request and
+release ownership. To continue a reviewed action over HTTP, the client submits
+the original tool arguments; Machina reconstructs the proposal, checks it
+against the approval row, and executes the tool under a fresh fenced claim.
+That continuation does not replay the original model request.
 
 ### Deep modules and seams
 
-A **module** is defined by its **interface**—including ordering, invariants, and error behavior—not just its Python signature. A useful **seam** lets the implementation change or be tested without spreading policy into every caller. These modules are deep where one small interface owns a consequential behavior; that gives callers leverage and keeps change local.
+`ReActAgent.run()` and `run_stream()` are the facade. They wire the engine's
+internal modules and present the shared loop as a result or a stream. The
+interfaces below include event ordering, error behavior, and authority checks;
+those contracts are the seams callers and regression tests rely on.
 
-| Module | Interface / owned behavior | Why the module has depth |
+| Module | Interface and behavior | What it keeps local |
 |---|---|---|
-| [`react_loop.py`](machina/core/react_loop.py) + [`react_phases.py`](machina/core/react_phases.py) | `react_loop(...)` coordinates a turn and forwards phase events in order. Phases own preparation, model calls, tool calls, answer handling, and terminal cleanup. | The interface preserves one event/phase order; callers do not reimplement retry, cancellation, repair, or terminal policy. |
-| [`context_prep.py`](machina/core/context_prep.py) | `ContextPreparer.prepare(...)` returns a session and assembled messages; it owns context, evidence retrieval, projection, and image handling. | One seam centralizes the expensive/lossey prompt construction and its fallback behavior. |
-| [`tool_batch.py`](machina/core/tool_batch.py) | `ToolBatchExecutor` validates a batch, emits starts in request order, bounds concurrency, and records in provider order. | Authorization, ordering, bounded execution, and cancellation cleanup stay together rather than leaking to each tool caller. |
-| [`tool_results.py`](machina/core/tool_results.py) | `ToolResultRecorder` records results, artifact views, tool messages, and approval retirement. | Retention-before-publication and idempotent recording are enforced in one place. |
-| [`llm_calls.py`](machina/core/llm_calls.py) | `LLMCaller.complete/stream` own transient retry and usage settlement. | It makes the retry contract testable without constructing a whole agent; streamed output is not replayed after deltas. |
-| [`turn_state.py`](machina/core/turn_state.py) | `TurnState` and `TurnBudget` own mutable turn state, counters, budget checks, and stop precedence. | The loop uses explicit state rather than an expanding collection of loosely related locals. |
-| [`post_turn.py`](machina/core/post_turn.py) | `PostTurn` schedules and runs consolidation/learning work off the response path. | Maintenance failures are isolated from the already-decided user response. |
-| [`agent.py`](machina/core/agent.py) | `ReActAgent.run/run_stream` remains the public facade and wires the modules. | It gives callers a stable entry point while internals move; it is not where each caller rebuilds turn behavior. |
+| [`agent.py`](machina/core/agent.py) | `run` / `run_stream` wire the shared policy into the two return forms. | The entry points stay stable as internal modules change. |
+| [`react_loop.py`](machina/core/react_loop.py) / [`react_phases.py`](machina/core/react_phases.py) | `react_loop` sequences phases and forwards events. The phases prepare, call the model, handle tools and answers, and clean up. | Streaming and non-streaming adapters share repair, stop, and terminal policy. |
+| [`context_prep.py`](machina/core/context_prep.py) | `ContextPreparer.prepare` returns a session and assembled messages. | History, images, retrieval, evidence budgets, and retrieval fallback stay together. |
+| [`tool_batch.py`](machina/core/tool_batch.py) | `ToolBatchExecutor` plans and authorizes a batch, bounds concurrency, and emits starts in request order and completions as they become ready. | Authorization, cancellation, and provider-order recording rules live beside batch execution. |
+| [`tool_results.py`](machina/core/tool_results.py) | `ToolResultRecorder` builds tool messages, records results and artifact views, and retires approvals. | Result recording and artifact retention-before-publication use the same rules in ordinary execution and cleanup. |
+| [`llm_calls.py`](machina/core/llm_calls.py) | `LLMCaller.complete` / `stream` own transient retry and usage settlement. | Retry behavior can be tested without constructing an agent. |
+| [`turn_state.py`](machina/core/turn_state.py) | `TurnState` and `TurnBudget` track mutable turn progress, counters, budgets, and stop precedence. | Phases share one definition of when a turn must stop. |
+| [`post_turn.py`](machina/core/post_turn.py) | `PostTurn` schedules consolidation and learning review. | Maintenance failures are isolated from the turn response. |
 
-The deletion test is practical: deleting one of these modules should make its policy reappear across callers or erase a testable contract. If deletion only removes a pass-through, that module was not earning its keep. Current decomposition status and characterization plan are recorded in [ADR 0004](docs/adr/0004-god-object-decomposition.md) and the [decomposition plan](plans/refactor-god-objects/PLAN.md).
+**Why this shape:** apply the deletion test to `LLMCaller`: remove it and both
+call paths still need to reserve and settle usage and decide whether a failed
+request is safe to retry. Remove the tool-result seam and both ordinary and
+cancelled batches still need to record completed work without publishing a
+false artifact handle. Keeping those rules behind their interfaces gives the
+modules depth and gives maintainers locality. See [ADR 0004](docs/adr/0004-god-object-decomposition.md)
+and the [decomposition plan](plans/refactor-god-objects/PLAN.md).
+
+**UI integration is in progress.** [`App`](ui/src/app.ts) delegates Activity and
+Changes to the status and changes controllers. Bootstrap, commands, events,
+and keyboard have standalone modules under [`ui/src/app/`](ui/src/app) with
+wiring still to do in this checkout. See the [integration checklist](plans/refactor-god-objects/INTEGRATION.md).
 
 ### Engineering map
 
@@ -211,37 +265,45 @@ The deletion test is practical: deleting one of these modules should make its po
 | Terminal UI | [`ui/src/`](ui/src) |
 | Durable schema | [`machina/db/`](machina/db) |
 
-## The five hard problems
+## Context, memory, and model routing
 
-### 1. Context: preserve the archive, curate the desk
+### From stored events to one model request
 
-**Plain language:** the model has a finite desk; a durable conversation can be much larger. The system must decide what is on the desk without pretending the rest never happened.
+Session activity is stored as typed context records. Context preparation
+assembles history, skills, memory, and document evidence; the request gate
+fits messages and tool definitions to the effective model window. It can
+disclose omissions or refuse a request that cannot fit without dropping
+protected material. Compaction is a separate operation: it archives displaced
+chunks and writes a checkpoint to shorten the active history.
 
-**Mechanism:** session activity is stored as typed context records. Context preparation assembles history, skills, memory, and document evidence, measures it against an effective model window, and projects a bounded request. Omitted evidence is disclosed. Safe-boundary compaction archives replaced chunks and writes a checkpoint. Oversized tool output is stored before a reduced view is published; artifact storage can fail or hit quota, in which case Machina does not claim the original is recoverable. See [`context_prep.py`](machina/core/context_prep.py), [`projection.py`](machina/core/projection.py), [`compression.py`](machina/core/compression.py), and [`artifacts.py`](machina/core/artifacts.py).
+For eligible oversized tool output, [reducers](machina/core/reducers.py) select
+useful records from tests, diffs, logs, and structured data. The
+[artifact view](machina/core/tool_views.py) publishes a recoverable reduced
+view only after the exact output has been retained; a session-authorized
+`artifact_read` can page that output. If storage fails or quota is exhausted,
+the fallback discloses the loss. Retaining output already truncated upstream
+does not recover the missing bytes.
 
-### 2. Memory: keep claims, not an unexamined transcript
+### From transcript to durable claims
 
-**Plain language:** old conversation is evidence about what happened, not automatically a durable fact. Useful memory must stay attributable and correctable.
+[Consolidation](machina/memory/consolidator.py) extracts candidates from new
+context and scores, deduplicates, and redacts them with source provenance.
+Optional review can put candidates in a pending queue before they enter memory.
+Retrieval selects relevant claims within a prompt budget. An operator can
+inspect, forget, or add a correction without editing conversation history.
+Extraction can be wrong, and retrieval can miss evidence; see the
+[memory digest design](docs/MEMORY_DIGEST.md).
 
-**Mechanism:** consolidation extracts candidate claims from new context, applies scoring/deduplication/redaction and provenance, and can place candidates in a review queue when configured. Retrieval combines relevance signals and applies a bounded prompt budget. Memory can be inspected, changed, or forgotten. Extraction is fallible; Machina does not guarantee that every candidate is true or that every useful detail will be retrieved. See [`machina/memory/`](machina/memory) and [memory lifecycle notes](docs/MEMORY_DIGEST.md).
+### From connected inventory to a route
 
-### 3. Permissions: authorize the reviewed effect
-
-**Plain language:** approving a tool name is not the same as approving what that tool will do. Arguments, targets, bytes, workspace, and execution mode matter.
-
-**Mechanism:** policy maps a tool proposal to declared effects and canonical action material. Digest v3 covers the action identity, mode/backend, capabilities, target/argv or payload, working directory, timeout/network declarations, workspace identity, content digest, and file base revision. A human resolves a durable request; agents cannot approve their own actions. Execution reconstructs and compares the action, checks the target revision, and consumes the approval atomically once. Changed inputs or an old digest version require fresh approval.
-
-### 4. Routing: choose from connections, not a magic model name
-
-**Plain language:** one model is not equally suitable for planning, worker tasks, synthesis, and small utility calls—and credentials may change what is available.
-
-**Mechanism:** the inventory combines built-in provider adapters, configured credentials, subscription connections, local endpoints, and user-added named providers. The router scores available choices by role fit and configured cost/constraints and can report its reason and fallback. A selected route is still an external dependency: authentication, rate limits, model features, price data, and uptime are not guaranteed by Machina. Unknown usage or pricing stays unknown instead of being silently represented as zero.
-
-### 5. Interruption: make pause and recovery explicit
-
-**Plain language:** a process can exit, a person can take time to approve, or a provider can hang. Keeping a database transaction open does not solve that.
-
-**Mechanism:** turns claim a leased session with a fencing token and periodically renew ownership. Approval rows survive restart; human waits do not hold a long transaction. Resume revalidates the reviewed proposal. Cancellation retires work and flushes durable chunks through cleanup paths. Scheduled jobs survive restart but are at-least-once, not exactly-once. An external process or provider request that already began cannot always be undone.
+The [router](machina/core/routing/router.py) filters inventory by capabilities
+and policy, ranks eligible planner, supervisor, worker, or utility routes, and
+returns reasons and fallback candidates. Inputs include credentialed APIs,
+subscription connections, configured local endpoints, and named providers.
+Role and task scores are policy priors. The same decision inputs produce the
+same route; inventory and remaining limits can change between runs. A listed
+route does not guarantee authentication, capacity, or uptime. Unknown pricing
+and usage remain visible as unknown.
 
 ## Failure semantics
 
@@ -249,21 +311,21 @@ The deletion test is practical: deleting one of these modules should make its po
 |---|---|---|
 | Process crash | Durable chunks and approvals already committed remain. A turn claim can expire; a successor uses a new fencing token. | It cannot infer whether an external side effect completed immediately before the crash. |
 | Turn/tool timeout | Configured deadlines stop the owned operation where cancellation is supported; cleanup and ownership release are attempted. | Python cancellation cannot guarantee termination of resistant tasks, providers, or child processes. |
-| Provider failure | A transient call may be retried once before any stream delta; 429s and failures after emitted deltas are not blindly replayed. Failure is surfaced as a non-success result. | No provider availability or exactly-once request guarantee. |
+| Provider 429 or 5xx | The turn-level caller retries 502/503/504 once, only before a stream delta. It adds no retry to an adapter's 429 handling and does not replay a partial stream. Exhausted failures surface as non-success. | Adapter retry behavior can differ. A provider may already have received or billed a request. |
 | User cancellation | Stop is surfaced; completed tool results and pending user context use cancellation-safe persistence/cleanup paths. | Cancellation cannot reverse a side effect already performed. If cleanup/release is unconfirmed, the turn is not reported as successful. |
-| Approval wait | The request is durable and the turn pauses without holding a database transaction. Ownership is renewed; resume checks the same action digest and consumes approval once. | A changed target/action or expired/legacy approval does not get silently reused. |
-| Repeated/no-progress tool calls | Stagnation checks can stop repeated no-progress behavior; repair/task policies also have their own stop conditions. | The general ReAct loop is not globally bounded by a fixed iteration count. |
-| Database loss | Ownership or durable authorization that cannot be confirmed fails closed; writes/claims fail and cleanup uncertainty is reported. | The in-memory process is not a substitute source of truth; an in-flight external effect may already have happened. |
+| Approval wait | Interactive turns renew ownership during the wait; headless turns can return a pause with a durable request. The wait holds no database transaction, and execution revalidates the action. | A changed target or an expired or legacy approval requires fresh review. Resuming an approval is not resuming the old model stream. |
+| Repeated/no-progress tool calls | Stagnation checks can halt repeated no-progress batches; repair/task policies have separate stop conditions. | There is no universal fixed ReAct iteration limit. |
+| Database loss | Failed renewal stops owned work. When durable ownership or authority cannot be confirmed, protected effects fail closed. Failed release can emit `turn.cleanup_pending` instead of terminal success. | An in-flight effect may have happened. Recovery depends on DB restoration and the claim's state or expiry. |
 
 ## Security model and limits
 
 Machina runs agent-proposed actions on a host controlled by its operator. The default `ask` mode is an authorization policy, not a host sandbox. Read [SECURITY.md](SECURITY.md) before exposing interfaces or enabling privileged execution.
 
-- **Digest v3 and TOCTOU checks.** Approval binds the exact canonical action, session/agent/turn, workspace identity, and target base revision. Resume rebuilds the proposal from original arguments, compares it, checks current target bytes/revision, and claims the approval once. Approvals stored under earlier digest versions do not resume; they need fresh review.
+- **Digest v3 and TOCTOU checks.** The digest covers tool/operation, mode/backend, capabilities, canonical targets, argv or shell payload, working directory, timeout, network declarations, content digest, workspace identity, and applicable file base revision. The durable row separately binds session, agent, and original turn. The broker atomically claims matching approval once; the file implementation rechecks the approved revision before mutation. Regular file revisions through 8 MiB bind a content hash; larger files use size and modification time. Agents cannot resolve human approvals. Earlier digest versions need fresh review.
 - **Filesystem and process checks.** Workspace paths are canonicalized with symlink/parent traversal and file-identity defenses. Command parsing distinguishes known project workflows from opaque shell payloads; host execution still runs code with the operator’s privileges unless an actual sandbox backend is selected.
-- **Outbound fetch pinning.** Web fetch validates resolved public addresses and connects to the validated address while preserving HTTP Host/TLS hostname identity. Redirect destinations are revalidated; response size, headers, and deadlines are bounded. This is not a general egress firewall for every provider or plugin connection.
+- **SSRF defenses on pinned fetch.** The static extraction path validates resolved public addresses, pins the connection to a validated address, and preserves the HTTP Host and TLS hostname. Each redirect is revalidated; response size, headers, and deadlines are bounded. Other provider and plugin connections have their own network policy.
 - **Sandbox is explicit and fail-closed.** Selected container/WASI backends do not silently fall back to host execution when unavailable. The Compose app has no Docker CLI/socket mount, so terminal sandbox execution is unavailable in Compose by design. Isolation depends on the chosen runtime, image, mounts, and network policy.
-- **Local RPC is not automatically authenticated.** The TUI provisions a gateway token; the stdio gateway can run unauthenticated if `MACHINA_GATEWAY_TOKEN` is absent and must then remain trusted local stdio. Do not expose that gateway, PostgreSQL, or a Docker socket to untrusted clients. HTTP uses `MACHINA_API_KEY`; bind locally or use a correctly configured trusted TLS edge.
+- **Local-only RPC.** The TUI provisions a gateway token; the standalone gateway entry point mints one if missing. A directly constructed gateway without a token belongs on trusted local stdio. HTTP `/rpc` uses `MACHINA_API_KEY` and refuses `host.credentials` and `interop.run` even with a valid key. Keep PostgreSQL and Docker sockets off untrusted networks; use a trusted TLS edge for remote HTTP.
 - **Local-first is not local-only.** Providers receive the prompts/tool results sent to them. Plugins execute in-process with host privileges. Administrators can read process memory and database contents. Redaction cannot identify every unknown, encoded, or transformed secret. Protect `.env`, PostgreSQL, backups, logs, and the workspace.
 
 ## Operations
@@ -281,19 +343,22 @@ The Compose app container is read-only except for its application-home volume an
 ### Health and readiness
 
 - `GET /health` is a liveness response.
-- `GET /ready` verifies database connection and required schema tables. It does **not** verify a provider, Docker daemon, OAuth login, or external search endpoint.
+- `GET /ready` verifies database access and the presence of `sessions`, `jobs`, `audit_events`, and `llm_usage`. It does **not** verify a provider, Docker daemon, OAuth login, or external search endpoint.
 - `GET /metrics` is authenticated and exports bounded operation metrics plus durable usage aggregates.
 
 ### Retention defaults
 
 | Data | Default policy |
 |---|---|
-| Tool artifacts | 30 days; max 500/session and 2,000,000 characters/artifact by default. Quota refuses new stores rather than evicting live evidence. |
+| Tool artifacts | 30 days; max 500 live artifacts/session and 2,000,000 characters/artifact by default. Quota refuses new stores rather than evicting live evidence. |
 | Audit rows | 365 days |
 | Usage rows | 730 days |
-| Transcripts, archives, memories, approvals, jobs | Not automatically pruned by the scheduler |
+| Transcripts, archives, memories, approvals, jobs | Outside the scheduler's age-based pruner; memory has separate forgetting controls |
 
-Setting an operational retention period to `0` keeps that table indefinitely. PostgreSQL vacuum, metrics retention, and backups remain operator decisions. Artifact retention broadens at-rest retention of tool output; set it to your data policy.
+Setting an operational retention period to `0` disables that scheduler
+pruner. For new artifacts, `0` also omits the expiry timestamp. Existing
+artifacts with an expiry can still expire. Artifact retention broadens
+at-rest retention of tool output; choose limits to match your data policy.
 
 ### Backup, restore, and upgrades
 
@@ -307,18 +372,20 @@ On supported local paths, the runtime can manage the installer-owned `machina-db
 
 ## Testing and evidence
 
-Tests are evidence about specific paths, not a proof that every integration or deployment is safe.
+This checkout collected **923 pytest cases** in `tests/`. Collection is an
+inventory, not a passing run. The [CI workflow](.github/workflows/ci.yml)
+records which suites are run and how their environments are provisioned.
 
 | Evidence | What is checked | Limits |
 |---|---|---|
-| Local smoke suite | `tests/`, run in CI against pinned dependencies and a PostgreSQL/pgvector service. CI enforces `--cov-fail-under=40`. | The 40% floor is a minimum gate, not a claim of 40% behavior coverage. This worktree has no `.venv`, so a fresh local collection/pass count was not obtained for this README rewrite. |
-| Pinned DevTools suite | CI checks out `kiazh/Machina-DevTools` at `d2a0b2a9a891a16140cb023ac795d84cba6d9b09` (see [the CI workflow](.github/workflows/ci.yml)) and runs its backend regression suite against this source checkout with PostgreSQL. | It is a separately maintained suite. A green run covers its selected tests, not every external provider, host OS, or production deployment. |
-| Historical DevTools snapshot | The previous README records **6,487 passed, 27 skipped, 8 deselected (2026-10-26)**. | Historical result only; not a result for this checkout or a benchmark. |
-| Turn golden traces | 12 deterministic scenarios cover plain answer, tools/concurrency, approval pause/resume, cancellation, provider retry/failure, empty response, repair, parallel/delegation, and budget stop. Content is represented by hashes and normalized event order. | Characterization fixtures are not live-provider tests. |
-| UI golden evidence | 36 checked-in rendered frames and 14 replay checkpoints (activity/changes plus approval key traces). | The Node UI suite was not run here because `ui/node_modules` is absent; the golden files characterize selected states and sizes only. |
-| Architecture ratchet | `python tools/architecture_report.py --check` prevents tracked file/method growth past the checked-in baseline and reports import cycles. | It is a structural guard, not a quality or security proof. |
+| Repository suite | CI runs `tests/` with locked dependencies, PostgreSQL/pgvector, and a 40% coverage floor. [`test_turn_transports.py`](tests/test_turn_transports.py) exercises pause and ownership loss across gateway and HTTP; [`test_edit_base_revision.py`](tests/test_edit_base_revision.py) exercises refusals after reviewed file state changes. | Coverage is a CI gate. |
+| Pinned DevTools suite | CI runs the external backend regression suite against this source checkout with PostgreSQL; the workflow pins the suite revision and excludes `ui_integration` and `workflow_trial` in that job. | Results apply to the selected tests at that revision. |
+| [Turn golden traces](tests/test_golden_turns.py) | 12 scripted-provider scenarios compare normalized event order, content hashes, usage, and terminal outcomes for paths including concurrency, approvals, retry, and cancellation. This file passed all 16 tests in the checkout. | No live-provider calls. |
+| [UI golden frames and replay](ui/test/golden-ui.test.ts) | 36 rendered frames across chat, activity, changes, and approval states; 14 keyboard replay checkpoints for Activity, Changes, and approval. | Fixtures cover selected states and terminal sizes; wiring and live gateway behavior have separate tests. |
+| [Architecture ratchet](tools/architecture_report.py) | CI checks tracked file and method lengths against the baseline and reports import cycles. | This checkout flags two overruns: `tool_batch.py` and `agent.py::_finalize_completed_tools`. |
 
-Not covered by a single pass: every provider’s live behavior and terms, every OS/sandbox combination, arbitrary plugin code, all DNS/network policy outside the pinned fetcher, long-duration resource use, and real deployment backup/restore or alert delivery. Do not infer those from unit or golden tests.
+Live provider behavior, platform-specific isolation, alert delivery, and a
+verified restore still depend on the actual deployment.
 
 ## Reference
 
@@ -327,16 +394,16 @@ Not covered by a single pass: every provider’s live behavior and terms, every 
 | Command | Purpose |
 |---|---|
 | `machina` | Open the terminal UI |
+| `machina chat` | Run a headless turn |
 | `machina setup` | Configure first run and initialize/verify schema |
 | `machina doctor` | Check dependencies, configuration, and database connectivity |
 | `machina init` | Initialize/update the database schema |
 | `machina serve` | Run the HTTP API (loopback by default) |
 | `machina acp` | Run the ACP editor bridge |
-| `machina mode` | Inspect/set execution mode; `full` requires explicit activation/consent |
-| `machina jobs` | Inspect/manage durable scheduled jobs |
+| `machina mode` | Inspect/set the persistent default for new sessions; full host authority requires explicit session activation |
 | `machina harnesses` | Inspect/configure supported external-harness interop |
 
-See [`machina/cli/`](machina/cli) for the command implementation and `machina --help` for the installed command set.
+See [`machina/cli/`](machina/cli) for the command implementation and `machina --help` for the installed command set. Scheduled job management is available through `jobs.*` RPC methods.
 
 ### Further reading
 
@@ -353,7 +420,10 @@ See [`machina/cli/`](machina/cli) for the command implementation and `machina --
 
 ### Appendix A: RPC catalog
 
-The gateway has 14 core JSON-RPC methods and 163 registered feature methods (177 total). HTTP exposes the gateway through `/rpc` subject to its transport policy. Names below are read from the registries in this checkout.
+The gateway has 14 core JSON-RPC methods and 163 registered feature methods
+(177 total). This is the stdio registry; authenticated HTTP `/rpc` exposes a
+subset, with turns using the HTTP prompt stream. Names come from the
+registries in this checkout.
 
 **Core methods:** `initialize`, `session.create`, `session.list`, `session.family`, `session.resume`, `usage.get`, `prompt.submit`, `prompt.cancel`, `prompt.steer`, `prompt.steering`, `question.answer`, `shell.jobs`, `config.set`, `shutdown`.
 
@@ -452,6 +522,11 @@ The protocol is version 2 and declares 27 event names in [`machina/protocol/even
 | `auth.copilot.failed` | `reason` |
 
 ### Appendix E: Data and implementation references
+
+Checkout inventory: **394 Python files and 140,906 physical lines** under
+`machina/`, and **34 distinct table declarations** in `machina/db/*.sql`.
+In the turn core, `agent.py` is 641 lines, the `react_loop` function is 136
+lines (190 for its file), and `react_phases.py` is 735 lines.
 
 - SQL schema and additive migrations: [`machina/db/`](machina/db)
 - Permission policy and digest construction: [`machina/permissions/policy.py`](machina/permissions/policy.py)
