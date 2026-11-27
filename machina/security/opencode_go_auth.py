@@ -29,6 +29,7 @@ from machina.security import store_fence
 from machina.security.secrets import remember_secret_value
 
 CONSOLE_BASE_URL = "https://opencode.ai/console"
+CONSOLE_ORIGIN = "https://opencode.ai"
 DEVICE_CODE_URL = f"{CONSOLE_BASE_URL}/auth/device/code"
 TOKEN_URL = f"{CONSOLE_BASE_URL}/auth/device/token"
 USER_URL = f"{CONSOLE_BASE_URL}/api/user"
@@ -232,7 +233,23 @@ def start_device_login(
             "OpenCode device authorization response was incomplete",
             code="opencode_go_device_invalid",
         )
+    # The endpoint returns root-relative verification paths ("/console/device
+    # ?user_code=..."). Handing those to a browser or a terminal opens a local
+    # file instead of the consent page, so every caller receives absolute URLs.
+    for key in ("verification_uri", "verification_uri_complete"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            payload[key] = _absolute_verification(value)
     return payload
+
+
+def _absolute_verification(value: str) -> str:
+    text = value.strip()
+    if text.startswith("//"):
+        return "https:" + text
+    if text.startswith("/"):
+        return CONSOLE_ORIGIN + text
+    return text
 
 
 def _token_post(

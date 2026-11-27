@@ -103,6 +103,34 @@ def test_device_login_uses_verified_json_protocol_and_persists_identity(tmp_path
     assert stat.S_IMODE((tmp_path / "opencode-go.json").stat().st_mode) == 0o600
 
 
+def test_device_login_resolves_relative_verification_urls() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert urlparse(str(request.url)).path == "/console/auth/device/code"
+        return _response(
+            request,
+            {
+                "device_code": "device-code-placeholder",
+                "user_code": "ABCD-EFGH",
+                "verification_uri": "/console/device",
+                "verification_uri_complete": (
+                    "/console/device?user_code=ABCD-EFGH&client_id=opencode-cli"
+                ),
+                "expires_in": 600,
+                "interval": 5,
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        device = auth.start_device_login(client=client)
+    finally:
+        client.close()
+    assert device["verification_uri"] == "https://opencode.ai/console/device"
+    assert device["verification_uri_complete"] == (
+        "https://opencode.ai/console/device?user_code=ABCD-EFGH&client_id=opencode-cli"
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "code"),
     [

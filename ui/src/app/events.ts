@@ -4,7 +4,8 @@
 // Interface invariants:
 // - `route` is synchronous and never throws on a malformed frame. A frame
 //   without a usable session id is logged and dropped before feature
-//   subscribers or turn bookkeeping see it.
+//   subscribers or turn bookkeeping see it — except a login completion
+//   frame, which has no session by design and settles the command flow.
 // - Feature subscribers observe every valid frame first, before any turn
 //   bookkeeping; they own their own filtering and never mutate turn state.
 // - Turn frames are bound through `TurnSessionStore`. Stale and retired turns
@@ -33,6 +34,22 @@ export type QuestionPromptEvent = Extract<GatewayEvent, { type: "question.asked"
 
 /** An `agent.child` frame; observed child progress is owned by App. */
 export type AgentChildEvent = Extract<GatewayEvent, { type: "agent.child" }>;
+
+/**
+ * Login frames are emitted outside any chat turn, so they carry empty
+ * session/turn ids. They settle the command flow that started the browser or
+ * device authorization and must bypass the session gate.
+ */
+const SESSIONLESS_FEATURE_FRAMES = new Set<string>([
+	"auth.chatgpt.completed",
+	"auth.chatgpt.failed",
+	"auth.grok.completed",
+	"auth.grok.failed",
+	"auth.copilot.completed",
+	"auth.copilot.failed",
+	"auth.opencode.completed",
+	"auth.opencode.failed",
+]);
 
 /**
  * The composition-root calls one event router makes.
@@ -108,8 +125,16 @@ export class EventRouter {
 		}
 		const host = this.host;
 		if (host.isExiting()) return;
-		// Every frame is routed by session; a frame without a usable session id
-		// cannot be bound to a chat and must not reach turn or approval state.
+		// Login completions are feature-level frames with no chat identity:
+		// deliver them before the session gate so the waiting command settles
+		// instead of timing out. They never enter turn bookkeeping.
+		if (SESSIONLESS_FEATURE_FRAMES.has(event.type)) {
+			for (const handler of [...host.featureEventHandlers()]) handler(event);
+			return;
+		}
+		// Every other frame is routed by session; a frame without a usable
+		// session id cannot be bound to a chat and must not reach turn or
+		// approval state.
 		if (typeof event.sessionId !== "string" || !event.sessionId) {
 			if (host.log.enabled) host.log.warn("event.invalid_session", { type: event.type });
 			return;
@@ -159,16 +184,6 @@ export class EventRouter {
 		}
 		// Feature-level frames carry no session/turn: they settle command
 		// flows above and must not enter turn bookkeeping or hidden tails.
-		if (
-			event.type === "auth.chatgpt.completed" ||
-			event.type === "auth.chatgpt.failed" ||
-			event.type === "auth.grok.completed" ||
-			event.type === "auth.grok.failed" ||
-			event.type === "auth.copilot.completed" ||
-			event.type === "auth.copilot.failed" ||
-			event.type === "auth.opencode.completed" ||
-			event.type === "auth.opencode.failed"
-		) return;
 		if (event.type === "growth.status") {
 			// Background training lands after the turn retires (and the
 			// in-flight entry clears), so it bypasses turn tracking. Shown

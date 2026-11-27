@@ -412,6 +412,25 @@ test("a Kiro quota error asks the host for the fallback", () => {
 	assert.equal(f.running.at(-1), true);
 });
 
+test("sessionless login frames settle feature subscribers", () => {
+	const f = fixture();
+	const seen: GatewayEvent[] = [];
+	f.featureHandlers.add((event) => seen.push(event));
+
+	f.router.route({
+		protocolVersion: 2,
+		sessionId: "",
+		turnId: "",
+		type: "auth.opencode.completed",
+		account_id: "acct",
+		expiry: 1_800_000_000,
+		org_id: "org",
+	} as GatewayEvent);
+
+	assert.equal(seen.length, 1, "the login flow must observe its completion frame");
+	assert.equal(f.applied.length, 0, "login frames never enter the transcript");
+});
+
 test("malformed frames are dropped without throwing or touching bookkeeping", () => {
 	const f = fixture();
 	f.turnSession.beginTurn(SESSION);
