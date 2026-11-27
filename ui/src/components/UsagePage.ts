@@ -28,8 +28,6 @@ const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const CONTENT_MAX = 109;
 
-/** Reference empty-cell gray; dark enough to read as an empty grid. */
-const EMPTY_CELL = "\u001b[38;2;58;58;58m▄\u001b[0m";
 const CHART_ROWS = 8;
 
 export interface UsagePageOptions {
@@ -300,13 +298,13 @@ export class UsagePage implements Component {
 			const cells = shown
 				.map((value) => {
 					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * barRows)) : 0;
-					return height > barRows - row ? `${theme.warning("▄")} ` : "  ";
+					return height > barRows - row ? `${theme.activity("■", 0.7, 0)} ` : "  ";
 				})
 				.join("");
 			out.push(`${theme.dim(axis.padEnd(3))} ${cells}`.trimEnd());
 		}
 		// A connected base band under the narrow bars, as in the reference.
-		const base = shown.map((value) => (value > 0 ? theme.warning("▄▄") : "  ")).join("");
+		const base = shown.map((value) => (value > 0 ? `${theme.activity("■", 0.7, 0)} ` : "  ")).join("");
 		out.push(`${theme.dim("0".padEnd(3))} ${base}`.trimEnd());
 		out.push("");
 		out.push(theme.dim(`Running total · top ${compact(running)}`));
@@ -368,12 +366,12 @@ export class UsagePage implements Component {
 				const day = week[row];
 				if (!day) return " ".repeat(step);
 				const level = intensity(values[col]![row]!, maximum);
-				const glyph = level <= 0 ? EMPTY_CELL : theme.warning("▄");
+				const glyph = level <= 0 ? theme.border("■") : theme.activity("■", level / 4, 0);
 				return `${glyph}${spacer}`;
 			});
 			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
 		}
-		const legend = [EMPTY_CELL, theme.warning("▄"), theme.warning("▄"), theme.warning("▄"), theme.warning("▄")].join(" ");
+		const legend = [theme.border("■"), ...[0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0))].join(" ");
 		out.push("");
 		out.push(`${theme.dim("Less")} ${legend}${theme.dim(" More")}`);
 		return out;
@@ -406,7 +404,7 @@ export class UsagePage implements Component {
 			const cells = shown
 				.map((value) => {
 					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
-					const glyph = height > CHART_ROWS - row - 1 ? theme.warning("▄") : " ";
+					const glyph = height > CHART_ROWS - row - 1 ? theme.activity("■", 0.6, 0) : " ";
 					return `${glyph}${spacer}`;
 				})
 				.join("");
