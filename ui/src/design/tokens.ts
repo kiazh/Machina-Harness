@@ -12,6 +12,8 @@ export type SemanticSlotName =
 	| "faint"
 	| "accent"
 	| "accentSoft"
+	| "secondary"
+	| "secondarySoft"
 	| "success"
 	| "warning"
 	| "danger"
@@ -72,6 +74,8 @@ export const CODEX_SEMANTIC_START: SemanticPalette = {
 	faint: "#727d75",
 	accent: "#a7d3b5",
 	accentSoft: "#2c3a31",
+	secondary: "#86a893",
+	secondarySoft: "#293630",
 	success: "#9fcf9a",
 	warning: "#e4b77a",
 	danger: "#e08a80",

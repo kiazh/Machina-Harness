@@ -22,6 +22,7 @@ import {
 	SKIN_NAMES,
 	getSkin,
 	isValidTheme,
+	selectionFill,
 	semanticPalette,
 	setSkin,
 	skinBase,
@@ -119,6 +120,32 @@ test("dim text tokens clear WCAG AA and stay below muted (every skin)", () => {
 	assert.equal(checked, SKIN_NAMES.length, "every registered skin defines a checked dim token");
 	const codex = skinBase("codex")!;
 	assert.ok(contrast(codex.neutral, codex.dim) >= 4.5, "the runtime-default codex.dim clears AA");
+});
+
+test("resolved theme roles keep a visible primary/secondary/tertiary hierarchy", () => {
+	const luminance = (hex: string): number => {
+		const [r, g, b] = hex.slice(1).match(/../g)!.map((pair) => {
+			const channel = Number.parseInt(pair, 16) / 255;
+			return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+		});
+		return r! * 0.2126 + g! * 0.7152 + b! * 0.0722;
+	};
+	const contrast = (a: string, b: string): number => {
+		const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+		return (values[0]! + 0.05) / (values[1]! + 0.05);
+	};
+	for (const name of SKIN_NAMES) {
+		const palette = semanticPalette(name);
+		assert.ok(palette, `${name} has a semantic palette`);
+		const text = contrast(palette!.background, palette!.text);
+		const muted = contrast(palette!.background, palette!.muted);
+		const faint = contrast(palette!.background, palette!.faint);
+		assert.ok(text >= muted + 0.8, `${name}: text must outrank muted (${text.toFixed(2)} vs ${muted.toFixed(2)})`);
+		assert.ok(muted >= faint + 0.8, `${name}: muted must outrank faint (${muted.toFixed(2)} vs ${faint.toFixed(2)})`);
+		assert.notEqual(palette!.accent.toLowerCase(), palette!.secondary.toLowerCase(), `${name}: primary and secondary accents are distinct`);
+		assert.notEqual(palette!.accentSoft.toLowerCase(), palette!.accent.toLowerCase(), `${name}: accentSoft is a surface, not accent`);
+		assert.equal(palette!.selection.toLowerCase(), selectionFill(name).toLowerCase(), `${name}: selection uses the real fill`);
+	}
 });
 
 test("every text role clears WCAG AA on the canvas in every skin", () => {

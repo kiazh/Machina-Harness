@@ -74,7 +74,7 @@ interface SkinDef {
 
 const SKINS: Record<string, SkinDef> = {
 	default: {
-		description: "opencode theme (dark) — the house default",
+		description: "OpenCode-inspired (dark) — peach and violet accents; fallback skin",
 		art: ["  ◆──────◆", " │ AGENT  │", " │ HARNESS│", "  ◆──────◆"],
 		base: {
 			text: "#eeeeee",
@@ -1287,25 +1287,29 @@ export function isValidTheme(name: string): boolean {
 
 const MOONSTONE = { surface: "#282339", raisedSurface: "#342e47", border: "#887b9c" };
 
-/** Raw semantic hex palette for a skin (derived; no Color objects). */
+/** Raw semantic hex palette for a skin (resolved runtime roles). */
 export function semanticPalette(name: string): SemanticPalette | undefined {
 	const def = SKINS[name];
-	if (!def) return undefined;
+	const full = skinColors[name];
+	if (!def || !full) return undefined;
+	const background = full.background;
+	const soft = (color: Color) => colorToHex(mixColors(background, color, 0.2));
 	return {
-		background: def.base.neutral,
-		surface: colorToHex(mixColors(parseColor(def.base.neutral), parseColor(def.base.text), 0.035)),
-		raisedSurface: colorToHex(mixColors(parseColor(def.base.neutral), parseColor(def.base.text), 0.065)),
-		border: def.base.dim,
-		text: def.base.text,
-		muted: def.base.muted,
-		faint: def.base.dim,
-		accent: def.base.accent,
-		accentSoft: def.base.accent,
-		success: def.base.success,
-		warning: def.base.warning,
-		danger: def.base.error,
-		selection: def.base.accent,
-		...(name === "moonstone" ? MOONSTONE : {}),
+		background: colorToHex(background),
+		surface: colorToHex(full.toolBg),
+		raisedSurface: colorToHex(full.userBg),
+		border: colorToHex(full.border),
+		text: colorToHex(full.text),
+		muted: colorToHex(full.muted),
+		faint: colorToHex(full.dim),
+		accent: colorToHex(full.accent),
+		accentSoft: name === "codex" ? CODEX_SEMANTIC_START.accentSoft : soft(full.accent),
+		secondary: colorToHex(full.secondary),
+		secondarySoft: name === "codex" ? CODEX_SEMANTIC_START.secondarySoft : soft(full.secondary),
+		success: colorToHex(full.success),
+		warning: colorToHex(full.warning),
+		danger: colorToHex(full.error),
+		selection: colorToHex(selectionFillColor(name)),
 	};
 }
 
@@ -1340,16 +1344,33 @@ const skinColors: Record<string, Record<PaletteName, Color>> = Object.fromEntrie
 			full.assistantBg = full.toolBg = surface;
 			full.userBg = full.promptBg = raised;
 		}
+		if (name === "codex") {
+			const surface = parseColor(CODEX_SEMANTIC_START.surface);
+			const raised = parseColor(CODEX_SEMANTIC_START.raisedSurface);
+			full.border = parseColor(CODEX_SEMANTIC_START.border);
+			full.assistantBg = full.toolBg = surface;
+			full.userBg = full.promptBg = raised;
+		}
 		// Keep readable roles legible on canvas, overlays and tinted cards.
 		// Accent hue is retained; adjust lightness only when contrast needs it.
-		const surfaces = [neutral, mixColors(neutral, text, 0.035), full.userBg, full.assistantBg, full.toolBg, full.toolOkBg, full.toolErrBg];
+		const surfaces = [neutral, full.userBg, full.assistantBg, full.toolBg];
 		for (const role of ["text", "muted", "dim", "accent", "secondary", "success", "warning", "error", "info"] as const) {
 			full[role] = readableInk(full[role], surfaces);
 		}
-		if (name === "codex") {
-			full.border = parseColor(CODEX_SEMANTIC_START.border);
-			full.userBg = parseColor(CODEX_SEMANTIC_START.raisedSurface);
-			full.toolBg = parseColor(CODEX_SEMANTIC_START.surface);
+		const textFloor = minContrast(full.text, surfaces);
+		const dimCanvas = contrastRatio(full.dim, neutral);
+		full.text = raiseInk(
+			full.text,
+			surfaces,
+			Math.max(textFloor, 6.8, dimCanvas + 1.6)
+		);
+		const textCanvas = contrastRatio(full.text, neutral);
+		const mutedFloor = Math.max(
+			4.5,
+			Math.min(6.2, textCanvas - 0.5, Math.max(dimCanvas + 0.7, 5.2))
+		);
+		if (mutedFloor > minContrast(full.muted, surfaces)) {
+			full.muted = raiseInk(full.muted, surfaces, mutedFloor);
 		}
 		return [name, full];
 	}),
@@ -1406,18 +1427,28 @@ function contrastRatio(first: Color, second: Color): number {
 	return (high + 0.05) / (low + 0.05);
 }
 
-/** Preserve the intended hue while reaching AA on every supplied surface. */
-function readableInk(ink: Color, surfaces: Color[]): Color {
-	if (surfaces.every((surface) => contrastRatio(ink, surface) >= 4.5)) return ink;
+function minContrast(ink: Color, surfaces: Color[]): number {
+	return Math.min(...surfaces.map((surface) => contrastRatio(ink, surface)));
+}
+
+/** Mix toward the better black/white anchor until the target contrast is met. */
+function raiseInk(ink: Color, surfaces: Color[], target: number): Color {
+	const goal = Math.max(1, Math.min(21, target));
+	if (minContrast(ink, surfaces) >= goal) return ink;
 	const black = rgbColor(0, 0, 0);
 	const white = rgbColor(255, 255, 255);
 	const worst = (candidate: Color) => Math.min(...surfaces.map((surface) => contrastRatio(candidate, surface)));
-	const target = worst(black) >= worst(white) ? black : white;
+	const anchor = worst(black) >= worst(white) ? black : white;
 	for (let step = 1; step <= 100; step++) {
-		const candidate = mixColors(ink, target, step / 100);
-		if (worst(candidate) >= 4.5) return candidate;
+		const candidate = mixColors(ink, anchor, step / 100);
+		if (worst(candidate) >= goal) return candidate;
 	}
-	return target;
+	return anchor;
+}
+
+/** Preserve the intended hue while reaching AA on every supplied surface. */
+function readableInk(ink: Color, surfaces: Color[]): Color {
+	return raiseInk(ink, surfaces, 4.5);
 }
 
 /** Selected-row fill: the skin's accent; codex keeps its own selection fill. */
