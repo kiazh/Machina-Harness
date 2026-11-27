@@ -110,6 +110,8 @@ export interface FeatureHost {
 	inspectActivity?(): Promise<void>;
 	/** Open the full-page live status tab. */
 	openStatus?(): void;
+	/** Open the full-screen token/skill usage dashboard. */
+	openUsage?(): void;
 	/** Open the per-prompt Changes screen for the current chat. */
 	openChanges?(): void;
 	/** Active user profile id (preferences bucket + new-chat agent scope). */

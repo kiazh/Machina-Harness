@@ -941,8 +941,16 @@ export const settingsCommands: Command[] = [
 	},
 	{
 		name: "usage",
-		description: "Token and request usage for this session",
-		async run(_args, host) {
+		description: "Token activity, models, and skills",
+		argumentHint: "[session]",
+		async run(args, host) {
+			const sub = args.trim().toLowerCase();
+			if (sub !== "session" && sub !== "details") {
+				if (host.openUsage) {
+					host.openUsage();
+					return;
+				}
+			}
 			const session = host.session();
 			if (!session) throw new Error("No active session. Send a message to start this chat.");
 			const u = await host.request<UsageResult>("usage.get", { sessionId: session.id });

@@ -55,6 +55,7 @@ import type {
 import { sanitizeDisplay } from "./editor/display.ts";
 import { TurnSessionStore } from "./turnSessionStore.ts";
 import { StatusController } from "./app/status.ts";
+import { UsageController } from "./app/usage.ts";
 import { ChangesController } from "./app/changes.ts";
 import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
@@ -180,6 +181,7 @@ export class App implements FeatureHost {
 	private readonly sessions: SessionController;
 	private readonly status: StatusController;
 	private readonly changes: ChangesController;
+	private usage?: UsageController;
 	private readonly keyboard: KeyboardRouter;
 	private readonly commands: CommandController;
 	private readonly events: EventRouter;
@@ -1237,6 +1239,16 @@ export class App implements FeatureHost {
 	/** Open the full-page live status tab (also `/activity`). */
 	openStatus(): void {
 		this.status.openStatus();
+	}
+
+	/** Open the full-screen token/skill dashboard (also `/usage`). */
+	openUsage(): void {
+		this.usage ??= new UsageController({
+			tui: this.tui,
+			request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params),
+			openDialog: <T>(create: (close: (value?: T) => void) => Component) => this.openDialog<T>(create),
+		});
+		this.usage.open();
 	}
 
 	/**

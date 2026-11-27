@@ -198,6 +198,7 @@ from machina.gateway.features.skills import (
     skills_section,
     skills_show,
 )
+from machina.gateway.features.usage_report import usage_report
 from machina.gateway.features.workspace import (
     workspace_close,
     workspace_document_change,
@@ -345,6 +346,7 @@ METHODS: dict[str, Handler] = {
     "learning.approve": learning_approve,
     "learning.reject": learning_reject,
     "learning.revert": learning_revert,
+    "usage.report": usage_report,
     "config.get": config_get,
     "nowplaying.get": nowplaying_get,
     "nowplaying.command": nowplaying_command,

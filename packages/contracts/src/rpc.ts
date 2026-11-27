@@ -406,6 +406,58 @@ export interface UsageResult {
 	agent: UsageView;
 }
 
+/** One calendar day in the /usage heatmap (local timezone). */
+export interface UsageDailyPoint {
+	date: string;
+	tokens: number;
+}
+
+export interface UsageModelRow {
+	provider: string;
+	model: string;
+	requests: number;
+	tokens: number;
+}
+
+export interface UsageSkillRow {
+	name: string;
+	uses: number;
+	views: number;
+	sourceType: string;
+	enabled: boolean;
+}
+
+export interface UsageSkillsReport {
+	total: number;
+	enabled: number;
+	neverUsed: number;
+	explored: number;
+	uses: number;
+	views: number;
+	top: UsageSkillRow[];
+	/** Every skill, most used first (the Skills tab). */
+	items: UsageSkillRow[];
+}
+
+/** Aggregated dashboard for `/usage` (usage.report). */
+export interface UsageReportResult {
+	generatedAt: string;
+	timezone: string;
+	days: number;
+	account: { name: string; email: string | null; plan: string } | null;
+	lifetimeTokens: number;
+	peakTokens: number;
+	longestChatSeconds: number;
+	currentStreakDays: number;
+	longestStreakDays: number;
+	totalChats: number;
+	totalRequests: number;
+	activeSessions: number;
+	daily: UsageDailyPoint[];
+	models: UsageModelRow[];
+	skills: UsageSkillsReport;
+}
+
 export interface JobInfo {
 	id: string;
 	name: string;
