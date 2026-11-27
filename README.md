@@ -3000,6 +3000,7 @@ The local suite (`tests/`, 862 passed / 18 skipped at this commit) covers contra
 | Memory | `test_memory_digest.py`, `test_experience_brief.py` | Bounded multi-fact digest and experience rendering |
 | Permissions | `test_permission_python_m.py`, `test_edit_base_revision.py`, `test_approval_resume.py`, DevTools approval suites | Ask-mode classification, canonical decisions, digest-bound resume, revalidated write targets |
 | Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
+| Agent decomposition | `test_agent_decomposition.py`, `test_tool_batch_adversarial.py`, `tools/architecture_report.py` | Facade/static contracts, malformed/disallowed/exception batches, file and method ceilings |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |
 | Benchmark evidence | [Portable harness benchmark](internal/docs/verification/PORTABLE_HARNESS_BENCHMARK_2026-11-20.md), [held-out audit](internal/docs/verification/HOLDOUT_RERUN_2026-11-20.md), [long-horizon suite](internal/docs/verification/LONG_HORIZON_2026-11-20.md) | Token efficiency, exclusion decisions, and failure cases are retained |
@@ -3028,6 +3029,12 @@ The DevTools suite adds architecture ratchets (layer boundaries, file-size ceili
 | `machina/gateway/` | JSON-RPC server, feature dispatch, serializers, errors |
 | `machina/protocol/` | Event contract and TypeScript generation |
 | `machina/core/` | Turns, agent loop, assembly, context, continuity, compaction, artifacts, reducers, projection, delegation, repair, scheduling, usage, pricing |
+| `machina/core/agent.py` | Agent facade: construction, `run`/`run_stream`, thin delegates |
+| `machina/core/react_loop.py` | The single ReAct turn policy (budgets, nudges, recovery, terminal) |
+| `machina/core/turn_phases.py` | Repair nudges, empty-final recovery, completion, cancellation flush |
+| `machina/core/context_prep.py` | Session/context/memory/RAG/prompt preparation |
+| `machina/core/tool_batch.py`, `tool_results.py` | Concurrent tool execution; durable result/artifact/approval recording |
+| `machina/core/llm_calls.py`, `post_turn.py` | Provider retry/accounting; consolidation and learning review |
 | `machina/core/routing/` | Connected-model inventory, role scoring, deterministic router |
 | `machina/core/orchestration/` | Task classification, plans, parallel execution |
 | `machina/core/provider/` | Provider adapters, factory, transport, retry, rate limits, SSE, caching |
@@ -3056,7 +3063,7 @@ The DevTools suite adds architecture ratchets (layer boundaries, file-size ceili
 | `skills/` | 77 bundled `SKILL.md` packages |
 | `docs/` | Design contracts, routing, memory, MCP, operations, verification |
 | `communications/` | Gateway protocol reference |
-| `tools/`, `scripts/` | Release checks and operator scripts |
+| `tools/`, `scripts/` | Release checks, the architecture ratchet, and operator scripts |
 
 ### Appendix J: Extension points
 

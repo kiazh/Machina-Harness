@@ -773,13 +773,13 @@ class ToolBatchExecutor:
         """Compose this agent's authority overlay and publish it for children.
 
         LP-08/R-02: preserve inherited authority (max_mode, etc.) and intersect
-        its tools with this agent's definition. Note the executor-local
-        ``_authority`` lookup is preserved verbatim from the pure move.
+        its tools with this agent's definition. The authority belongs to the
+        host (agent_factory sets ``agent._authority``), not to this executor.
         """
         from machina.core.agent_factory import check_mode_cap, merge_authority
         from machina.core.agent_factory import parent_authority_var as _pav
 
-        _inherited = dict(getattr(self, "_authority", {}) or {})
+        _inherited = dict(getattr(self.agent, "_authority", {}) or {})
         _ambient = _pav.get() or {}
         if _ambient.get("max_mode") is not None:
             check_mode_cap(_inherited, _ambient["max_mode"])

@@ -412,14 +412,20 @@ class BaseReActAgent:
         self, pending, session_id, pending_chunks=None, tool_calls_made=None
     ) -> None:
         await self.tool_results.finalize_completed(
-            pending, session_id, pending_chunks, tool_calls_made or []
+            pending,
+            session_id,
+            pending_chunks,
+            tool_calls_made if tool_calls_made is not None else [],
         )
 
     async def _finalize_completed_tools_joined(
         self, pending, session_id, pending_chunks=None, tool_calls_made=None
     ) -> None:
         await self.tool_results.finalize_completed_joined(
-            pending, session_id, pending_chunks, tool_calls_made or []
+            pending,
+            session_id,
+            pending_chunks,
+            tool_calls_made if tool_calls_made is not None else [],
         )
 
     async def _flush_pending_chunks(self, pending_chunks: list[dict[str, Any]]) -> bool:

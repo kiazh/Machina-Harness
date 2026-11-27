@@ -315,3 +315,35 @@ async def test_completions_are_as_ready_but_recording_is_provider_ordered(monkey
     assert [entry["args"]["path"] for entry in made] == ["a", "b", "c"]
     assert [chunk["payload"]["args"]["path"] for chunk in pending] == ["a", "b", "c"]
     assert max_inflight == 3
+
+
+def test_authority_is_read_from_the_host_not_the_executor():
+    """The pure move must not hide the agent's inherited authority."""
+    from types import SimpleNamespace
+
+    from machina.core.agent_factory import parent_authority_var
+    from machina.core.tool_batch import ToolBatchExecutor, _ToolRun
+
+    agent = SimpleNamespace(
+        agent_id="harness",
+        delegated=False,
+        dynamic_tools=False,
+        allowed_tools=None,
+        _authority={"tools": ["read_file"]},
+    )
+    run = _ToolRun(
+        item={},
+        session_id=uuid.uuid4(),
+        tool_name="read_file",
+        tool_args={},
+        start=0.0,
+        timeout=30.0,
+    )
+    executor = ToolBatchExecutor(agent)
+    try:
+        executor._publish_authority(run)
+    finally:
+        if run.authority_token is not None:
+            parent_authority_var.reset(run.authority_token)
+
+    assert run.merged["tools"] == ["read_file"]
