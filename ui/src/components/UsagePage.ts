@@ -26,7 +26,7 @@ const TAB_LABELS: ReadonlyArray<{ id: Tab; label: string }> = [
 const MODES = ["Daily", "Weekly", "Cumulative"] as const;
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-const CONTENT_MAX = 112;
+const CONTENT_MAX = 109;
 const CHART_ROWS = 8;
 
 export interface UsagePageOptions {
@@ -367,6 +367,7 @@ export class UsagePage implements Component {
 			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
 		}
 		const legend = [theme.border("■"), ...[0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0))].join(" ");
+		out.push("");
 		out.push(`${theme.dim("Less")} ${legend}${theme.dim(" More")}`);
 		return out;
 	}
@@ -411,7 +412,7 @@ export class UsagePage implements Component {
 
 	private insightColumns(report: UsageReportResult, width: number): string[] {
 		const gap = 2;
-		const left = Math.max(24, Math.floor((width - gap) * 0.55));
+		const left = Math.max(24, Math.floor((width - gap) * 0.5));
 		const right = Math.max(12, width - left - gap);
 		const topModel = report.models[0];
 		const rows: Array<[string, string]> = [
