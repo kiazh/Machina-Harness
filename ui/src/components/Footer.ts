@@ -92,7 +92,7 @@ export class Footer implements Component {
 
 	chatStatusRows(): number {
 		if (this.compact && this.status === "awaiting_approval") return 0;
-		return 1;
+		return this.compact ? 1 : 2;
 	}
 
 	/**
@@ -179,7 +179,8 @@ export class Footer implements Component {
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));
-		return [repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`)];
+		const row = repairFill("background", `${pad}${activity}${gap}${theme.muted(usage)}${pad}`);
+		return this.compact ? [row] : [repairFill("background", " ".repeat(width)), row];
 	}
 
 	render(width: number): string[] {
