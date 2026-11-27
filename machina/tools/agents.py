@@ -395,11 +395,26 @@ async def delegate_status(child_session_id: str, wait_seconds: int | None = None
                     or "Worker stopped before completing. Resume with delegate using this child session ID."
                 )
     text = f"Worker {status}. Child session: {child_id}."
+    needs_approval: list[dict] = []
     if status == "waiting_approval":
+        try:
+            from machina.permissions import store as permission_store
+
+            needs_approval = await permission_store.list_pending(child_id)
+        except Exception as error:
+            record_failure("tools.delegate_status.pending", error)
         text += "\nThe worker is paused for human approval; review its session before continuing."
+        if needs_approval:
+            requests = ", ".join(str(item.get("request_id") or "") for item in needs_approval)
+            text += f"\nPending approval requests: {requests}"
     if status not in {"queued", "running", "pending"}:
         text += f"\n{response[:12000]}"
-    result = DelegationToolResult(text, needs_approval=[], tokens_used=0, delegation_status=status)
+    result = DelegationToolResult(
+        text,
+        needs_approval=needs_approval,
+        tokens_used=0,
+        delegation_status=status,
+    )
     result.is_error = status in {"interrupted", "error", "failed", "cancelled"}
     return result
 

@@ -91,6 +91,7 @@ async def test_fresh_child_inherits_the_parent_provider_route(monkeypatch):
         agent_id="harness",
         provider="kiro",
         model="claude-opus-4.7",
+        goal="Ship the release",
     )
     created: dict = {}
 
@@ -159,5 +160,6 @@ async def test_fresh_child_inherits_the_parent_provider_route(monkeypatch):
     )
 
     assert result.response == "Done"
+    assert created["goal"] == "Ship the release"
     assert created["provider"] == "kiro"
     assert created["model"] == "claude-opus-4.7"

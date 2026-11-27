@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 from machina.core import orchestrator as orch
+from machina.permissions import store as permission_store
 from machina.tools import agents
 
 
@@ -44,3 +45,37 @@ def test_delegate_status_waits_once_for_a_live_worker(
         assert "finished the brief" in text
     finally:
         orch._live_delegations.pop(child_id, None)
+
+
+def test_delegate_status_surfaces_child_pending_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child_id = uuid.uuid4()
+
+    async def scenario():
+        async def active_scope():
+            return "harness", uuid.uuid4()
+
+        async def latest(_parent, _child):
+            return {"status": "waiting_approval", "response": ""}
+
+        async def pending(session_id):
+            assert session_id == str(child_id)
+            return [
+                {
+                    "request_id": "req-1",
+                    "session_id": str(child_id),
+                    "display": "run the test suite",
+                    "proposal": {},
+                }
+            ]
+
+        monkeypatch.setattr(agents, "active_agent_scope", active_scope)
+        monkeypatch.setattr(orch.orchestrator, "latest_child_delegation", latest)
+        monkeypatch.setattr(permission_store, "list_pending", pending)
+        return await agents.delegate_status(str(child_id))
+
+    result = asyncio.run(scenario())
+    assert "Pending approval requests: req-1" in str(result)
+    assert result.needs_approval[0]["request_id"] == "req-1"
+    assert result.delegation_status == "waiting_approval"

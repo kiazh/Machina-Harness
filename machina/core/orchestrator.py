@@ -330,6 +330,11 @@ class Orchestrator:
                 raise AgentNotFoundError(f"no agent named {agent_name!r}")
             definition = BUILTIN_AGENTS[agent_name]
 
+        parent_goal = None
+        if parent_session_id is not None:
+            parent_record = await session_manager.get_fresh(parent_session_id)
+            if parent_record is not None:
+                parent_goal = parent_record.goal
         handoff = (
             await self._parent_context(parent_session_id)
             if parent_session_id
@@ -412,6 +417,9 @@ class Orchestrator:
                 # A completed delegated child is archived (not deleted) so its
                 # status/history survives; resuming it reactivates the session.
                 await session_manager.activate(child.id)
+            if child.goal is None and parent_goal:
+                await session_manager.set_goal(child.id, parent_goal)
+                child.goal = parent_goal
             child_authority = merge_authority(child.delegation_authority, child_authority)
         else:
             # A delegated worker must inherit the parent turn's explicit route
@@ -473,6 +481,7 @@ class Orchestrator:
             child = await session_manager.create(
                 title=f"{agent_name}: {task[:50]}",
                 agent_id=agent_name,
+                goal=parent_goal,
                 model=child_model,
                 provider=child_provider,
                 context_budget=config.get("context_budget"),
@@ -853,12 +862,18 @@ class Orchestrator:
         assembler = PromptAssembler()
         parts = []
         if parent.goal:
-            parts.append(f"Parent goal: {parent.goal}")
+            parts.append(f"## Parent Goal\n{parent.goal}")
+        state = getattr(parent, "state", None)
+        workspace = state.get("desktop_workspace_root") if isinstance(state, dict) else None
+        if isinstance(workspace, str) and workspace.strip():
+            parts.append(f"## Workspace\n{workspace.strip()}")
         text_chunks = [
             chunk
             for chunk in recent
             if chunk["type"] in {"user_message", "assistant_message"}
         ]
+        if text_chunks:
+            parts.append("## Recent Parent Work")
         for chunk in reversed(text_chunks[:4]):
             parts.append(assembler._compress_chunk(chunk, hot=True))
         results = [
@@ -868,9 +883,11 @@ class Orchestrator:
             and isinstance(chunk.get("payload"), dict)
             and chunk["payload"].get("agent")
         ]
+        if results:
+            parts.append("## Sibling Results")
         for chunk in reversed(results[:2]):
             parts.append(assembler._compress_chunk(chunk))
-        return truncate_to_tokens("\n".join(parts), 1600)
+        return truncate_to_tokens("\n\n".join(parts), 1600)
 
     async def run_sequential(
         self,

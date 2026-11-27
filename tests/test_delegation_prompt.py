@@ -29,7 +29,10 @@ def test_parent_context_prioritizes_readable_text_over_tool_noise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario() -> str:
-        parent = SimpleNamespace(goal="Build a portfolio")
+        parent = SimpleNamespace(
+            goal="Build a portfolio",
+            state={"desktop_workspace_root": "C:/Users/kiash/portfolio"},
+        )
         chunks = [
             {"type": "tool_call", "payload": {"tool": "terminal", "args": {}}, "tokens": 1},
             {
@@ -41,6 +44,11 @@ def test_parent_context_prioritizes_readable_text_over_tool_noise(
                 "type": "user_message",
                 "payload": {"content": "make a portfolio"},
                 "tokens": 5,
+            },
+            {
+                "type": "result",
+                "payload": {"agent": "researcher", "content": "[researcher] three sections"},
+                "tokens": 8,
             },
         ]
 
@@ -60,7 +68,10 @@ def test_parent_context_prioritizes_readable_text_over_tool_noise(
         return await Orchestrator()._parent_context(uuid.uuid4())
 
     text = asyncio.run(scenario())
-    assert "Parent goal: Build a portfolio" in text
+    assert "## Parent Goal\nBuild a portfolio" in text
+    assert "## Workspace\nC:/Users/kiash/portfolio" in text
     assert "make a portfolio" in text
     assert "Plan: vanilla HTML" in text
+    assert "## Sibling Results" in text
+    assert "[researcher] three sections" in text
     assert "terminal" not in text
