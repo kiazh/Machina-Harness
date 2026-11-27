@@ -158,6 +158,31 @@ def test_read_only_file_exploration_remains_unbounded() -> None:
     assert policy.stop_reason() is None
 
 
+def test_reads_between_directory_listings_reset_the_exploration_budget() -> None:
+    policy = TaskRunPolicy(CHAT)
+    read = {"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}
+    for index in range(20):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+        policy.observe([read])
+
+    assert policy.exploration_calls == 0
+    assert policy.exploration_loop is False
+    assert policy.stop_reason() is None
+
+
+def test_an_edit_between_directory_listings_resets_the_exploration_budget() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for _ in range(20):
+        for _ in range(9):
+            policy.observe([_successful_terminal("find . -maxdepth 2")])
+        policy.observe(
+            [{"tool": "write_file", "args": {"path": "app.py"}, "outcome": "completed"}]
+        )
+
+    assert policy.exploration_calls == 0
+    assert policy.exploration_loop is False
+
+
 def test_repeated_identical_search_is_guarded() -> None:
     policy = TaskRunPolicy(CHAT)
     search = {

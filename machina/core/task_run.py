@@ -441,6 +441,11 @@ class TaskRunPolicy:
             if is_edit:
                 # A real change is progress; retries after it are a new phase.
                 self._action_counts.clear()
+            # A listing budget bounds *consecutive* orientation, not the total
+            # for a long task. Reading or changing something between listings
+            # proves the agent is no longer orienting.
+            if is_edit or tool in {"read_file", "search_files", "code_intelligence"}:
+                self.exploration_calls = 0
             if tool in _RECALL_TOOLS:
                 self.recall_calls += 1
                 if self.recall_calls >= self.max_recall_calls:
