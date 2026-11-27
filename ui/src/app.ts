@@ -39,7 +39,7 @@ import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
-import { APP_BINDINGS, AppKeybindings, effectiveShortcutRows, parseBindingOverrides, platformKeyLabel, type BindingOverrides } from "./keybindings.ts";
+import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides, type BindingOverrides } from "./keybindings.ts";
 import { KeybindingsDialog } from "./components/KeybindingsDialog.ts";
 import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
 import { loadKeyRows, redactSecret } from "./features/keys.ts";
@@ -473,12 +473,6 @@ export class App implements FeatureHost {
 		this.transcript = new Transcript(this.transcriptView, new ThinkingIndicator(this.coordinator), this.coordinator);
 
 		this.composer = new ComposerBox(tui, editorTheme, { paddingX: 1 });
-		this.composer.imageShortcut = platformKeyLabel(APP_BINDINGS.pasteImageDirect.key);
-		this.composer.onPasteImage = () => {
-			if (this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane) return;
-			this.setFocusForRegion("chat-composer");
-			this.pasteFromClipboard(true);
-		};
 		this.editor = this.composer.editor;
 		// Caret blink: the composer's block obeys the shared phase, and every
 		// draft edit re-derives whether a caret is actually on screen (an empty
@@ -942,7 +936,6 @@ export class App implements FeatureHost {
 
 	private applyKeybindings(overrides: BindingOverrides): void {
 		this.keybindings.set(overrides);
-		this.composer.imageShortcut = platformKeyLabel(overrides.pasteImageDirect ?? APP_BINDINGS.pasteImageDirect.key);
 	}
 
 	async openKeysEditor(): Promise<void> {

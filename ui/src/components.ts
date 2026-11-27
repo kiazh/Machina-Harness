@@ -329,7 +329,6 @@ export class ComposerInput extends Editor {
 
 /** Muted composer placeholder (the Editor cannot render its own). */
 export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
-const COMPOSER_TITLE = "";
 
 /**
  * Docked input on a raised surface. Rendering and hit-testing share the
@@ -338,8 +337,6 @@ const COMPOSER_TITLE = "";
 export class ComposerBox extends Box {
 	readonly editor: ComposerInput;
 	placeholder = COMPOSER_PLACEHOLDER;
-	imageShortcut = "Alt+V";
-	onPasteImage?: () => void;
 	private readonly tui: TUI;
 	private degradedMode = false;
 	/** Last measured chrome height, keyed by the inputs that can change it. */
@@ -389,29 +386,16 @@ export class ComposerBox extends Box {
 		const total = Math.max(0, width);
 		const { framed, inset, outer, editorWidth: inner } = this.geometry(total);
 		const margin = " ".repeat(inset);
-		const imageKey = this.imageAction();
-		const room = imageKey ? outer - visibleWidth(imageKey) : 0;
 		const transparent = !isOpaqueBackground();
 		const paint = (line: string) => `${margin}${surfaceLine(truncateToWidth(line, outer, "…", true), outer, true)}`;
 		// Transparent canvas: a real box (corners, side rules) so the input is
 		// an object on the terminal instead of floating text.
-		const boxTop = (): string => {
-			const width = Math.max(0, outer - 4);
-			const image = imageKey ? ` ${imageKey.trim()} ` : "";
-			const fill = Math.max(0, width - visibleWidth(image));
-			const middle = truncateToWidth(
-				`${theme.border("─".repeat(fill))}${image ? theme.accent(image) : ""}`,
-				width,
-				"",
-			);
-			return `${margin}${theme.border("╭─")}${middle}${theme.border("─╮")}`;
-		};
+		const boxTop = (): string => `${margin}${theme.border(`╭${"─".repeat(Math.max(0, outer - 2))}╮`)}`;
 		const boxBottom = (): string => `${margin}${theme.border(`╰${"─".repeat(Math.max(0, outer - 2))}╯`)}`;
-		const heading = transparent ? boxTop() : paint(`${room >= 3 ? `${" ".repeat(room)}${theme.accent(imageKey)}` : ""}`);
 		const withDock = (rows: string[]): string[] =>
 			framed
 				? [
-					heading,
+					transparent ? boxTop() : paint(""),
 					...rows.map(line => paint(`  ${truncateToWidth(line, outer - 4, "…")}`)),
 					transparent ? boxBottom() : paint(""),
 				]
@@ -454,10 +438,6 @@ export class ComposerBox extends Box {
 		return { framed, inset, outer, editorWidth: Math.max(1, outer - (framed ? 6 : 2)) };
 	}
 
-	private imageAction(): string {
-		return this.onPasteImage ? `Paste image · ${this.imageShortcut}  ` : "";
-	}
-
 	private rememberMeasurement(width: number, rows: number): void {
 		this.measuredRows = {
 			width,
@@ -470,16 +450,7 @@ export class ComposerBox extends Box {
 	}
 
 	override handleMouse(event: TuiMouseEvent): ReturnType<Box["handleMouse"]> {
-		const { framed, inset, outer, editorWidth } = this.geometry(event.width);
-		const imageAction = visibleWidth(this.imageAction());
-		if (framed && this.onPasteImage && outer - COMPOSER_TITLE.length - imageAction >= 3 && event.type === "click" && event.button === "left"
-			&& event.y === 0 && event.x >= inset + outer - imageAction && event.x < inset + outer) {
-			this.onPasteImage();
-			return { handled: true, render: true, target: {
-				component: this, originX: event.screenX - event.x, originY: event.screenY - event.y,
-				width: event.width, height: event.height,
-			} };
-		}
+		const { framed, inset, editorWidth } = this.geometry(event.width);
 		const topRule = framed ? 1 : 0;
 		const xOffset = inset + (framed ? 4 : 2);
 		if (event.x < xOffset || event.x >= xOffset + editorWidth || event.y < topRule) return undefined;

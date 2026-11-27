@@ -316,7 +316,7 @@ test("plain arrows keep editing when the composer has text", async () => {
 	}
 });
 
-test("Ctrl+V, Alt+V, and clicking Paste image all attach without sending", async () => {
+test("the composer has no paste hint and Ctrl+V and Alt+V still attach without sending", async () => {
 	let reads = 0;
 	const { app, client } = makeApp(SESSION_A, {
 		readClipboardImage: async () => {
@@ -327,16 +327,13 @@ test("Ctrl+V, Alt+V, and clicking Paste image all attach without sending", async
 	await app.start();
 	try {
 		const state = app as unknown as { onInput(data: string): unknown; editor: { getText(): string }; composer: Component };
+		assert.doesNotMatch(stripTerminalSequences(state.composer.render(80).join("\n")), /Paste image|Alt\+V/i);
 		state.onInput("\x16");
 		await new Promise(resolve => setImmediate(resolve));
 		state.onInput("\x1bv");
 		await new Promise(resolve => setImmediate(resolve));
-		const x = stripTerminalSequences(state.composer.render(80)[0]!).indexOf("Paste image") + 1;
-		assert.ok(x > 0);
-		state.composer.handleMouse?.({ type: "click", button: "left", x, y: 0, width: 80, height: 3 } as never);
-		await new Promise(resolve => setImmediate(resolve));
-		assert.equal(reads, 3);
-		assert.equal(state.editor.getText(), "[image 1] [image 2] [image 3] ");
+		assert.equal(reads, 2);
+		assert.equal(state.editor.getText(), "[image 1] [image 2] ");
 		assert.ok(!client.requests.some(r => r.method === "prompt.submit"));
 	} finally {
 		await app.exit();
