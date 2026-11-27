@@ -318,14 +318,12 @@ export class UsagePage implements Component {
 				const day = week[row];
 				if (!day) return " ".repeat(step);
 				const level = intensity(values[col]![row]!, maximum);
-				const glyph = level <= 0 ? theme.dim("▪") : theme.activity("▪", level / 4, 0);
+				const glyph = level <= 0 ? theme.dim("■") : theme.activity("■", level / 4, 0);
 				return `${glyph}${spacer}`;
 			});
 			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
 		}
-		const legend = [0.25, 0.5, 0.75, 1]
-			.map((level) => `${theme.activity("▪", level, 0)}${" ".repeat(step - 1)}`)
-			.join(" ");
+		const legend = [0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0)).join(" ");
 		out.push(`${theme.dim("Less")} ${legend}${theme.dim(" More")}`);
 		return out;
 	}
@@ -363,7 +361,7 @@ export class UsagePage implements Component {
 			const cells = shown
 				.map((value) => {
 					const height = value > 0 ? Math.max(1, Math.round((value / maximum) * CHART_ROWS)) : 0;
-					const glyph = height > CHART_ROWS - row - 1 ? theme.activity("▪", 0.6, 0) : " ";
+					const glyph = height > CHART_ROWS - row - 1 ? theme.activity("■", 0.6, 0) : " ";
 					return `${glyph}${spacer}`;
 				})
 				.join("");
