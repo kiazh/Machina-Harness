@@ -316,27 +316,43 @@ async def delegate(
 
 @registry.register(
     name="delegate_status",
-    description="Check whether one of your delegated workers is queued, running, finished, or interrupted.",
+    description=(
+        "Check whether one of your delegated workers is queued, running, finished, or interrupted. "
+        "For a running worker, pass wait_seconds once instead of polling in a loop."
+    ),
     parameters={
         "type": "object",
         "properties": {
             "child_session_id": {
                 "type": "string",
                 "description": "Child session ID returned by delegate",
-            }
+            },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 300,
+                "description": "Optional bounded wait for a running worker to finish",
+            },
         },
         "required": ["child_session_id"],
     },
 )
-async def delegate_status(child_session_id: str) -> str:
+async def delegate_status(child_session_id: str, wait_seconds: int | None = None) -> str:
     """Return durable status and the result for a child owned by this session."""
-    from machina.core.orchestrator import _delegation_is_live, orchestrator
+    from machina.core.orchestrator import _delegation_is_live, _live_delegations, orchestrator
 
     _, parent_session_id = await active_agent_scope()
     try:
         child_id = str(uuid.UUID(child_session_id))
     except (ValueError, TypeError):
         raise ToolError("child_session_id must be a UUID") from None
+    try:
+        wait = max(0, min(300, int(wait_seconds or 0)))
+    except (TypeError, ValueError):
+        wait = 0
+    live = _live_delegations.get(uuid.UUID(child_id))
+    if wait and live is not None and not live.done():
+        await asyncio.wait({live}, timeout=wait)
     entry = await orchestrator.latest_child_delegation(parent_session_id, uuid.UUID(child_id))
     if entry is None:
         raise ToolError("no delegated worker with that child session ID belongs to this session")
@@ -379,6 +395,8 @@ async def delegate_status(child_session_id: str) -> str:
                     or "Worker stopped before completing. Resume with delegate using this child session ID."
                 )
     text = f"Worker {status}. Child session: {child_id}."
+    if status == "waiting_approval":
+        text += "\nThe worker is paused for human approval; review its session before continuing."
     if status not in {"queued", "running", "pending"}:
         text += f"\n{response[:12000]}"
     result = DelegationToolResult(text, needs_approval=[], tokens_used=0, delegation_status=status)
