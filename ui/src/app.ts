@@ -208,7 +208,7 @@ export class App implements FeatureHost {
 		return (this.logValue ??= uiLog.scope("app"));
 	}
 	/**
-	 * Feature-level event subscribers (e.g. /auth waiting on
+	 * Feature-level event subscribers (e.g. /login waiting on
 	 * auth.chatgpt.*). They observe every frame before turn bookkeeping,
 	 * own their own filtering, and never mutate turn state.
 	 */

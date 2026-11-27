@@ -102,20 +102,20 @@ export const CURATED_MODELS: ModelEntry[] = [
 	{ model: "gpt-6.1-sol", provider: "openai", description: "OpenAI direct flagship" },
 	{ model: "gpt-6-luna", provider: "openai", description: "OpenAI direct, efficient model" },
 	{ model: "claude-sonnet-5-5", provider: "anthropic", description: "Anthropic direct flagship" },
-	{ model: "gpt-6-luna", provider: "chatgpt", description: "ChatGPT subscription — /auth sign-in first" },
+	{ model: "gpt-6-luna", provider: "chatgpt", description: "ChatGPT subscription — /login sign-in first" },
 	{ model: "gemini-4-argon", provider: "google", description: "Google direct, 1M context" },
 	{ model: "mistral-large-4", provider: "mistral", description: "Mistral direct flagship" },
 	{ model: "qwen/qwen3.8-27b", provider: "groq", description: "Groq direct, fast inference" },
 	{ model: "deepseek-ai/DeepSeek-V4.1-Flash", provider: "together", description: "Together AI, current open model" },
 	{ model: "deepseek-v4-flash", provider: "deepseek", description: "DeepSeek direct, 1M context" },
 	{ model: "grok-4.7", provider: "xai", description: "xAI API key, current flagship" },
-	{ model: "grok-4.7", provider: "grok", description: "Grok subscription — /auth grok first" },
+	{ model: "grok-4.7", provider: "grok", description: "Grok subscription — /login grok first" },
 	{ model: "grok-4.7-build-fast", provider: "grok", description: "Grok subscription, faster build variant" },
 	{ model: "grok-4.6", provider: "grok", description: "Grok subscription, previous flagship" },
 	{ model: "grok-4.5", provider: "grok", description: "Grok subscription, stable fallback" },
 	{ model: "grok-4.3", provider: "grok", description: "Grok subscription, 1M-context option" },
 	{ model: "grok-build-0.1", provider: "grok", description: "Grok subscription, agentic coding" },
-	{ model: "deepseek-v4.1-flash", provider: "opencode-go", description: "OpenCode Go subscription — /auth opencode sign-in first" },
+	{ model: "deepseek-v4.1-flash", provider: "opencode-go", description: "OpenCode Go subscription — /login opencode sign-in first" },
 	{ model: "big-pickle", provider: "opencode", description: "OpenCode Zen gateway (set OPENCODE_API_KEY)" },
 	{ model: "kimi-for-coding", provider: "kimi", description: "Kimi Code membership (set KIMI_API_KEY)" },
 	...KIRO_CURATED_MODELS,
@@ -462,9 +462,9 @@ export async function openGroupedModelPicker(
 		hints.push(["Efforts", "OpenAI account models accept low/medium/high/xhigh/max per model — see /models catalog"]);
 	}
 	if (applied.provider === "chatgpt" || applied.provider === "grok" || applied.provider === "copilot") {
-		hints.push(["Sign-in", `Account access is managed with /auth ${applied.provider}`]);
+		hints.push(["Sign-in", `Account access is managed with /login ${applied.provider}`]);
 	} else if (applied.provider === "kiro") {
-		hints.push(["Proxy", "Manage the Kiro local gateway with /auth kiro"]);
+		hints.push(["Proxy", "Manage the Kiro local gateway with /login kiro"]);
 	} else {
 		hints.push(["Keys", "Missing provider key? See /keys"]);
 	}

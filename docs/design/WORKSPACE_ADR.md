@@ -94,7 +94,7 @@ UI:
 - Commands: `features/index.ts` `COMMANDS`/`SLASH_COMMANDS`, `commandDispatch.ts` conflict table, `commands.ts` parsing/help.
 
 Python:
-- `machina/gateway/server.py` — newline-JSON-RPC, `add_method`, `handle_line` dispatch, auth token gate, event push pattern (`features/auth_chatgpt.py`), `Gateway.close` ordering.
+- `machina/gateway/server.py` — newline-JSON-RPC, `add_method`, `handle_line` dispatch, auth token gate, event push pattern (`features/login_chatgpt.py`), `Gateway.close` ordering.
 - `machina/gateway/features/__init__.py` — `METHODS` + `register()`; add `workspace.py`.
 - `machina/protocol/events.json` — chat event schema only; workspace events are a separate hand-written family (`machina/workspace/models.py` ↔ `ui/src/workspace/protocol.ts`) that never carry turn IDs.
 - `machina/core/runtime.py` — `RuntimeServices` (lazy service getter idiom + `shutdown`) — WorkspaceService/LspManager live here.

@@ -306,7 +306,7 @@ route does not guarantee authentication, capacity, or uptime. Unknown pricing
 and usage remain visible as unknown.
 
 The `opencode-go` provider uses an OpenCode Go subscription rather than an API
-key. Sign in with `/auth opencode sign-in` in the interactive UI or
+key. Sign in with `/login opencode sign-in` in the interactive UI or
 `machina auth opencode login` in the CLI; Machina stores and refreshes the
 device-flow credentials locally.
 

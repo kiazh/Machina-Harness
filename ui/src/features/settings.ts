@@ -787,7 +787,7 @@ export const settingsCommands: Command[] = [
 			["openrouter", "OpenRouter (multi-model)"],
 			["openai", "OpenAI direct"],
 			["anthropic", "Anthropic direct"],
-			["chatgpt", "OpenAI account (sign in with /auth)"],
+			["chatgpt", "OpenAI account (sign in with /login)"],
 			["copilot", "GitHub Copilot seat (machina auth copilot)"],
 			["google", "Google direct (Gemini)"],
 			["mistral", "Mistral direct"],
@@ -823,7 +823,7 @@ export const settingsCommands: Command[] = [
 				const { config } = await host.request<ConfigGetResult>("config.get");
 				host.print(`Provider: ${config.provider}`, "plain");
 				host.print(
-					"OpenAI account models need no API key — sign in with /auth first. " +
+					"OpenAI account models need no API key — sign in with /login first. " +
 						"Open /provider to add, edit, or remove custom providers.",
 					"plain",
 				);

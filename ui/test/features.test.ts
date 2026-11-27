@@ -1479,13 +1479,13 @@ test("/models curated list includes subscription defaults and both OpenCode prov
 	assert.ok(CURATED_MODELS.some((e) => e.provider === "openai" && e.model === "gpt-6-luna"));
 	const chatgpt = CURATED_MODELS.find((e) => e.provider === "chatgpt");
 	assert.equal(chatgpt?.model, "gpt-6-luna");
-	assert.match(chatgpt?.description ?? "", /\/auth/);
+	assert.match(chatgpt?.description ?? "", /\/login/);
 	const opencode = CURATED_MODELS.find((e) => e.provider === "opencode");
 	assert.equal(opencode?.model, "big-pickle");
 	assert.match(opencode?.description ?? "", /OPENCODE_API_KEY/);
 	const opencodeGo = CURATED_MODELS.find((e) => e.provider === "opencode-go");
 	assert.equal(opencodeGo?.model, "deepseek-v4.1-flash");
-	assert.match(opencodeGo?.description ?? "", /\/auth opencode sign-in/);
+	assert.match(opencodeGo?.description ?? "", /\/login opencode sign-in/);
 	const kiro = CURATED_MODELS.filter((e) => e.provider === "kiro");
 	assert.deepEqual(
 		kiro.map((e) => e.model),

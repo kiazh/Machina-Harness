@@ -1,4 +1,4 @@
-// /auth — account sign-in for ChatGPT, Grok, GitHub Copilot, and OpenCode Go, plus
+// /login — account sign-in for ChatGPT, Grok, GitHub Copilot, and OpenCode Go, plus
 // one-click setup for the Kiro and Hermes local proxies.
 //
 // The gateway owns every browser/device flow and every token store. The UI
@@ -38,9 +38,9 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["opencode", "OpenCode Go: status, sign-in, sign-out"],
 	["kiro", "Kiro account: status, usage, start, stop, setup (local proxy)"],
 	["hermes", "Hermes proxy: status, setup, start, stop (one-click install + sign-in)"],
-	["sign-in", "Alias for /auth chatgpt sign-in"],
-	["import-codex", "Alias for /auth chatgpt import-codex"],
-	["sign-out", "Alias for /auth chatgpt sign-out"],
+	["sign-in", "Alias for /login chatgpt sign-in"],
+	["import-codex", "Alias for /login chatgpt import-codex"],
+	["sign-out", "Alias for /login chatgpt sign-out"],
 ];
 
 const LOGIN_SETTLE_MS = 310_000;
@@ -101,7 +101,7 @@ function renderCopilotStatus(status: SubscriptionStatus): string {
 
 function renderOpenCodeStatus(status: SubscriptionStatus): string {
 	if (!status.signedIn) {
-		return "OpenCode Go: not signed in. Run /auth opencode sign-in.";
+		return "OpenCode Go: not signed in. Run /login opencode sign-in.";
 	}
 	const expiry = status.expiresAt
 		? `${formatAuthExpiry(status.expiresAt)}${status.expired ? " (expired)" : ""}`
@@ -187,21 +187,21 @@ async function showStatus(host: FeatureHost, only?: Provider | "hermes"): Promis
 	if (!only || only === "kiro") lines.push(result.kiro ? renderKiroStatus(result.kiro) : "Kiro account: status unavailable.");
 	if (!only || only === "hermes") lines.push(hermes ? renderHermesStatus(hermes) : "Hermes proxy: status unavailable.");
 	lines.push("");
-	lines.push("Actions: /auth sign-in · /auth import-codex · /auth sign-out");
-	lines.push("More: /auth chatgpt · /auth grok · /auth copilot · /auth opencode · /auth kiro · /auth hermes");
+	lines.push("Actions: /login sign-in · /login import-codex · /login sign-out");
+	lines.push("More: /login chatgpt · /login grok · /login copilot · /login opencode · /login kiro · /login hermes");
 	host.print(lines.join("\n"), "plain");
 }
 
 function failureText(provider: Provider, reason: string): string {
 	if (reason === "timeout") {
 		return provider === "chatgpt"
-			? "Sign-in timed out before the browser callback arrived. Run /auth sign-in to try again."
-			: `${provider} sign-in timed out. Run /auth ${provider} sign-in to try again.`;
+			? "Sign-in timed out before the browser callback arrived. Run /login sign-in to try again."
+			: `${provider} sign-in timed out. Run /login ${provider} sign-in to try again.`;
 	}
 	if (reason === "access_denied") {
 		return provider === "chatgpt" ? "The sign-in was denied in the browser." : `The ${provider} sign-in was denied.`;
 	}
-	return `${provider} sign-in failed (${reason}). Run /auth ${provider} sign-in to try again.`;
+	return `${provider} sign-in failed (${reason}). Run /login ${provider} sign-in to try again.`;
 }
 
 async function waitForOutcome(
@@ -291,7 +291,7 @@ async function signInChatGPT(host: FeatureHost): Promise<void> {
 		};
 	});
 	if (outcome.kind === "timeout") {
-		host.print("The sign-in window closed without a callback. Run /auth chatgpt sign-in to try again.", "warning");
+		host.print("The sign-in window closed without a callback. Run /login chatgpt sign-in to try again.", "warning");
 		return;
 	}
 	if (outcome.kind === "failed") {
@@ -323,7 +323,7 @@ async function signInGrok(host: FeatureHost): Promise<void> {
 		return result.status;
 	});
 	if (outcome.kind === "timeout") {
-		host.print("Grok sign-in timed out. Run /auth grok sign-in to try again.", "warning");
+		host.print("Grok sign-in timed out. Run /login grok sign-in to try again.", "warning");
 		return;
 	}
 	if (outcome.kind === "failed") {
@@ -349,7 +349,7 @@ async function signInCopilot(host: FeatureHost): Promise<void> {
 		return result.status;
 	});
 	if (outcome.kind === "timeout") {
-		host.print("Copilot sign-in timed out. Run /auth copilot sign-in to try again.", "warning");
+		host.print("Copilot sign-in timed out. Run /login copilot sign-in to try again.", "warning");
 		return;
 	}
 	if (outcome.kind === "failed") {
@@ -375,7 +375,7 @@ async function signInOpenCode(host: FeatureHost): Promise<void> {
 		return result.status;
 	});
 	if (outcome.kind === "timeout") {
-		host.print("OpenCode Go sign-in timed out. Run /auth opencode sign-in to try again.", "warning");
+		host.print("OpenCode Go sign-in timed out. Run /login opencode sign-in to try again.", "warning");
 		return;
 	}
 	if (outcome.kind === "failed") {
@@ -393,7 +393,7 @@ async function importCodex(host: FeatureHost): Promise<void> {
 		await activateProvider(host, "chatgpt");
 		return;
 	}
-	host.print("Nothing imported: no Codex CLI credentials at ~/.codex/auth.json, or Machina already has its own tokens.", "warning");
+	host.print("Nothing imported: no Codex CLI credentials at ~/.codex/login.json, or Machina already has its own tokens.", "warning");
 }
 
 async function importCopilot(host: FeatureHost): Promise<void> {
@@ -412,7 +412,7 @@ async function signOut(host: FeatureHost, provider: Provider): Promise<void> {
 	if (provider === "chatgpt") {
 		if (result.removed) {
 			host.print(
-				"Signed out; Machina's OpenAI token store was removed. Codex CLI credentials (~/.codex/auth.json) were left untouched.",
+				"Signed out; Machina's OpenAI token store was removed. Codex CLI credentials (~/.codex/login.json) were left untouched.",
 				"success",
 			);
 		} else {
@@ -489,7 +489,7 @@ async function showKiroStatus(host: FeatureHost): Promise<void> {
 		[
 			renderKiroStatus(status),
 			"",
-			"Actions: /auth kiro start · /auth kiro stop · /auth kiro usage · /auth kiro setup",
+			"Actions: /login kiro start · /login kiro stop · /login kiro usage · /login kiro setup",
 			"Community interop only; see docs/KIRO_PROXY.md and review Kiro's terms.",
 		].join("\n"),
 		"plain",
@@ -608,7 +608,7 @@ async function setupKiro(host: FeatureHost): Promise<void> {
 		await activateProvider(host, "kiro");
 		return;
 	}
-	host.print("Kiro gateway installed, but it did not become ready yet. Run /auth kiro status.", "warning");
+	host.print("Kiro gateway installed, but it did not become ready yet. Run /login kiro status.", "warning");
 }
 
 interface HermesStatus {
@@ -778,7 +778,7 @@ async function providerMenu(host: FeatureHost, provider: Provider): Promise<void
 async function openAuthMenu(host: FeatureHost): Promise<void> {
 	// Paint instantly. Status probes (Kiro's TCP/CLI check and Hermes'
 	// `hermes proxy status` subprocess) run only after a row is chosen or
-	// for the explicit /auth status card; the main menu must never wait on
+	// for the explicit /login status card; the main menu must never wait on
 	// them.
 	const items = [
 		{ value: "chatgpt", label: "ChatGPT subscription", description: "OpenAI account — sign in or manage status" },
@@ -809,7 +809,7 @@ async function dispatchHermes(host: FeatureHost, sub: string): Promise<void> {
 	if (command === "start") return startHermes(host);
 	if (command === "stop") return stopHermes(host);
 	if (command === "status") return showStatus(host, "hermes");
-	throw new Error(`Unknown /auth hermes option "${command}". Try: status, setup, start, stop.`);
+	throw new Error(`Unknown /login hermes option "${command}". Try: status, setup, start, stop.`);
 }
 
 async function dispatch(host: FeatureHost, provider: Provider, sub: string): Promise<void> {
@@ -841,13 +841,13 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 		}
 		if (command === "sign-in" || command === "login") {
 			host.print(
-				"Kiro sign-in is handled by the official CLI, not Machina. Run `kiro-cli login`, then /auth kiro start. See /auth kiro setup.",
+				"Kiro sign-in is handled by the official CLI, not Machina. Run `kiro-cli login`, then /login kiro start. See /login kiro setup.",
 				"plain",
 			);
 			return;
 		}
 		throw new Error(
-			`Unknown /auth kiro option "${command}". Try: status, start, stop, setup.`,
+			`Unknown /login kiro option "${command}". Try: status, start, stop, setup.`,
 		);
 	}
 	if (command === "menu") {
@@ -877,11 +877,11 @@ async function dispatch(host: FeatureHost, provider: Provider, sub: string): Pro
 		await signOut(host, provider);
 		return;
 	}
-	throw new Error(`Unknown /auth ${provider} option "${command}". Try: status, sign-in, sign-out${provider === "chatgpt" ? ", import-codex" : provider === "copilot" ? ", import-gh" : ""}.`);
+	throw new Error(`Unknown /login ${provider} option "${command}". Try: status, sign-in, sign-out${provider === "chatgpt" ? ", import-codex" : provider === "copilot" ? ", import-gh" : ""}.`);
 }
 
 export const authCommand: Command = {
-	name: "auth",
+	name: "login",
 	description: "Sign in to ChatGPT, Grok, Copilot, or OpenCode Go — or set up Kiro/Hermes",
 	argumentHint: "[chatgpt|grok|copilot|opencode|kiro|hermes] [status|sign-in|setup|start|stop]",
 	getArgumentCompletions: (prefix: string) => {
@@ -933,7 +933,7 @@ export const authCommand: Command = {
 				return;
 			default:
 				throw new Error(
-					`Unknown /auth option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/opencode/kiro/hermes.`,
+					`Unknown /login option "${sub}". Try: status, sign-in, import-codex, sign-out, or chatgpt/grok/copilot/opencode/kiro/hermes.`,
 				);
 		}
 	},

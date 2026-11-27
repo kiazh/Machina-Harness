@@ -100,13 +100,13 @@ If the checkout is at `~/kiro-gateway` (or another conventional location), or
 you set `MACHINA_KIRO_GATEWAY_DIR`, Machina can manage the process for you:
 
 ```text
-/auth kiro setup      # one click: install the checkout + dependencies, then start
-/auth kiro status     # is the CLI login present? is the listener up?
-/auth kiro start      # launch the configured checkout and activate Kiro
-/auth kiro stop       # stop only a child Machina started
+/login kiro setup      # one click: install the checkout + dependencies, then start
+/login kiro status     # is the CLI login present? is the listener up?
+/login kiro start      # launch the configured checkout and activate Kiro
+/login kiro stop       # stop only a child Machina started
 ```
 
-`/auth kiro setup` provisions everything the gateway needs when it is missing:
+`/login kiro setup` provisions everything the gateway needs when it is missing:
 it clones the official `jwadow/kiro-gateway` checkout into
 `MACHINA_KIRO_GATEWAY_DIR` (default `~/kiro-gateway`), creates the checkout's
 private venv, installs `requirements.txt`, seeds `.env` from `.env.example`,
@@ -133,7 +133,7 @@ MACHINA_KIRO_AUTOSTART=false
 ### Usage and fallback
 
 ```text
-/auth kiro usage      # plan, credits used/limit, remaining, reset date
+/login kiro usage      # plan, credits used/limit, remaining, reset date
 ```
 
 The local gateway's admin endpoint reads Kiro's `GetUsageLimits` through the
@@ -223,8 +223,8 @@ not proof of entitlement. If a model fails, try `auto` or
 
 | Symptom | Check |
 |---|---|
-| `Kiro proxy unreachable at http://127.0.0.1:8000/v1` | Run `/auth kiro status`; start with `/auth kiro start` or `python main.py`, and confirm `/health` and the port. |
-| `/auth kiro start` says no launcher | Run `/auth kiro setup`; it clones the official checkout, installs its requirements, and starts it. Detection also checks `~/kiro-gateway`, common project folders, `~/Downloads/kiro-gateway*`, `~/Desktop/kiro-gateway*`, and `./kiro-gateway`, and accepts `main.py`, `server.py`, `app.py`, `run.py`, `kiro_gateway/main.py`, or `src/main.py`. |
+| `Kiro proxy unreachable at http://127.0.0.1:8000/v1` | Run `/login kiro status`; start with `/login kiro start` or `python main.py`, and confirm `/health` and the port. |
+| `/login kiro start` says no launcher | Run `/login kiro setup`; it clones the official checkout, installs its requirements, and starts it. Detection also checks `~/kiro-gateway`, common project folders, `~/Downloads/kiro-gateway*`, `~/Desktop/kiro-gateway*`, and `./kiro-gateway`, and accepts `main.py`, `server.py`, `app.py`, `run.py`, `kiro_gateway/main.py`, or `src/main.py`. |
 | Auto-start did not run | Confirm `kiro-cli login` created the credential database, a checkout is detectable, and `MACHINA_KIRO_AUTOSTART` is not `false`; check `~/.machina/logs/kiro-gateway.log`. |
 | `401` from the proxy | `KIRO_API_KEY` must equal the gateway's `PROXY_API_KEY`. The default is `dummy-local-only`. |
 | `profileArn is required for this request` | Builder ID accounts have no ARN in the CLI database. Machina injects the ARN from `%APPDATA%\Kiro\User\globalStorage\kiro.kiroagent\profile.json` when it launches the gateway. For an external gateway, set `PROFILE_ARN` in its `.env` and restart it. |

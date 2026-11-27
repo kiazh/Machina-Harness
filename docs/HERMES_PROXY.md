@@ -16,7 +16,7 @@ so `/models` shows one current Hermes group rather than a stale cached catalog.
 In the TUI:
 
 ```text
-/auth hermes
+/login hermes
 ```
 
 Choose **Set up Hermes (install + sign in + start)**. That one action:
@@ -96,7 +96,7 @@ credentials itself, so Machina sends a local placeholder unless
 
 | Symptom | Check |
 |---|---|
-| `Hermes is not installed` | Run `/auth hermes` and choose Setup (or `machina auth hermes setup`). It runs the official installer automatically; desktop shortcuts do not need `~/.local/bin` on PATH because Machina checks that location directly. |
+| `Hermes is not installed` | Run `/login hermes` and choose Setup (or `machina auth hermes setup`). It runs the official installer automatically; desktop shortcuts do not need `~/.local/bin` on PATH because Machina checks that location directly. |
 | `no proxy upstream is signed in` | Run `hermes portal` (Nous) or `hermes auth` (xAI), then `hermes proxy status`. Restart Machina or refresh models after signing in. |
 | Proxy starts but models are empty | Run `machina providers models hermes --refresh`; check `~/.machina/logs/hermes-proxy.log`. |
 | Port already in use | Another proxy is listening on 8645. Set `MACHINA_HERMES_PROXY_PORT` to a free loopback port. |

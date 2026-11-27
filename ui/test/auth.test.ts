@@ -1,4 +1,4 @@
-// /auth: the ChatGPT-account sign-in command surface. The gateway is faked;
+// /login: the ChatGPT-account sign-in command surface. The gateway is faked;
 // no network, no browser, and no token material anywhere in the flow.
 
 import assert from "node:assert/strict";
@@ -63,7 +63,7 @@ const KIRO_STOPPED: KiroGatewayStatus = {
 	baseUrl: "http://127.0.0.1:8000/v1",
 	autostart: true,
 	launchConfigured: true,
-	detail: "Kiro login detected. Start the local gateway with /auth kiro start.",
+	detail: "Kiro login detected. Start the local gateway with /login kiro start.",
 	logPath: "/x/.machina/logs/kiro-gateway.log",
 };
 
@@ -177,11 +177,11 @@ function failedEvent(reason: string): GatewayEvent {
 // ─── status card ─────────────────────────────────────────────────────────────
 
 
-test("/auth (bare) prints the signed-in status card with actions", async () => {
+test("/login (bare) prints the signed-in status card with actions", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_IN };
 	host.responses["auth.kiro.status"] = { status: KIRO_STOPPED };
-	await run("/auth status", host);
+	await run("/login status", host);
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.status");
 	assert.deepEqual(
 		host.calls.slice(1).map((call) => call.method),
@@ -193,33 +193,33 @@ test("/auth (bare) prints the signed-in status card with actions", async () => {
 	assert.match(text, /Expires:?\s+2027-01-15T08:00:00Z/);
 	assert.match(text, /Last refresh:?\s+2026-10-14T00:00:00Z/);
 	assert.match(text, /Kiro account: local proxy stopped/);
-	assert.match(text, /Actions: \/auth sign-in · \/auth import-codex · \/auth sign-out/);
+	assert.match(text, /Actions: \/login sign-in · \/login import-codex · \/login sign-out/);
 });
 
-test("/auth status reports an honest signed-out state", async () => {
+test("/login status reports an honest signed-out state", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_OUT };
-	await run("/auth status", host);
+	await run("/login status", host);
 	assert.match(host.text(), /not signed in/);
-	assert.match(host.text(), /\/auth sign-in/);
+	assert.match(host.text(), /\/login sign-in/);
 });
 
-test("/auth reports an expired token honestly", async () => {
+test("/login reports an expired token honestly", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = {
 		status: { ...SIGNED_IN, source: "codex", expired: true },
 	};
-	await run("/auth status", host);
+	await run("/login status", host);
 	assert.match(host.text(), /signed in via Codex CLI credentials \(expired — refreshes on next use\)/);
 });
 
 // ─── sign-in ─────────────────────────────────────────────────────────────────
 
 
-test("/auth sign-in prints the URL and settles on the completed event", async () => {
+test("/login sign-in prints the URL and settles on the completed event", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.login"] = { url: "https://auth.example/x?state=s", state: "s" };
-	const pending = run("/auth sign-in", host);
+	const pending = run("/login sign-in", host);
 	await flush();
 	assert.deepEqual(host.calls[0], { method: "auth.chatgpt.login", params: {} });
 	assert.match(host.text(), /Open this in your browser/);
@@ -234,10 +234,10 @@ test("/auth sign-in prints the URL and settles on the completed event", async ()
 	assert.equal(host.handlers.size, 0, "the settle subscription must be released");
 });
 
-test("/auth login is an alias with the same RPC", async () => {
+test("/login login is an alias with the same RPC", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.login"] = { url: "https://auth.example/y", state: "s" };
-	const pending = run("/auth login", host);
+	const pending = run("/login login", host);
 	await flush();
 	host.emit(completedEvent(null, null));
 	await pending;
@@ -245,10 +245,10 @@ test("/auth login is an alias with the same RPC", async () => {
 	assert.match(host.text(), /Signed in to OpenAI\./);
 });
 
-test("/auth sign-in surfaces a failed event with guidance", async () => {
+test("/login sign-in surfaces a failed event with guidance", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.login"] = { url: "https://auth.example/z", state: "s" };
-	const pending = run("/auth sign-in", host);
+	const pending = run("/login sign-in", host);
 	await flush();
 	host.emit(failedEvent("timeout"));
 	await pending;
@@ -256,10 +256,10 @@ test("/auth sign-in surfaces a failed event with guidance", async () => {
 	assert.equal(host.handlers.size, 0);
 });
 
-test("/auth sign-in matches its own events only", async () => {
+test("/login sign-in matches its own events only", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.login"] = { url: "https://auth.example/w", state: "s" };
-	const pending = run("/auth sign-in", host);
+	const pending = run("/login sign-in", host);
 	await flush();
 	host.emit({ protocolVersion: 2, sessionId: "other", turnId: "t", type: "usage", tokens: 1 });
 	host.emit({ protocolVersion: 2, sessionId: "other", turnId: "t", type: "message.delta", text: "hi" });
@@ -271,56 +271,56 @@ test("/auth sign-in matches its own events only", async () => {
 // ─── import / sign-out ───────────────────────────────────────────────────────
 
 
-test("/auth import-codex reports the import and the resulting status", async () => {
+test("/login import-codex reports the import and the resulting status", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.importCodex"] = { imported: true, status: SIGNED_IN };
-	await run("/auth import-codex", host);
+	await run("/login import-codex", host);
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.importCodex");
 	assert.equal(host.printed[0]!.kind, "success");
 	assert.match(host.text(), /Imported the Codex CLI's OpenAI credentials/);
 	assert.match(host.text(), /acct-ui/);
 });
 
-test("/auth import-codex is honest when nothing was imported", async () => {
+test("/login import-codex is honest when nothing was imported", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.importCodex"] = { imported: false, status: SIGNED_OUT };
-	await run("/auth import-codex", host);
+	await run("/login import-codex", host);
 	assert.equal(host.printed[0]!.kind, "warning");
 	assert.match(host.text(), /Nothing imported/);
 });
 
-test("/auth sign-out reports the removal and codex files left alone", async () => {
+test("/login sign-out reports the removal and codex files left alone", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.logout"] = {
 		removed: true,
 		status: { ...SIGNED_IN, source: "codex" },
 	};
-	await run("/auth sign-out", host);
+	await run("/login sign-out", host);
 	assert.deepEqual(host.calls, [{ method: "auth.chatgpt.logout", params: {} }]);
 	assert.match(host.text(), /token store was removed/);
-	assert.match(host.text(), /Codex CLI credentials \(~\/\.codex\/auth\.json\) were left untouched/);
+	assert.match(host.text(), /Codex CLI credentials \(~\/\.codex\/login\.json\) were left untouched/);
 	assert.match(host.text(), /Codex CLI credentials remain/);
 });
 
-test("/auth logout alias reports an idempotent sign-out", async () => {
+test("/login logout alias reports an idempotent sign-out", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.logout"] = { removed: false, status: SIGNED_OUT };
-	await run("/auth logout", host);
+	await run("/login logout", host);
 	assert.equal(host.calls[0]!.method, "auth.chatgpt.logout");
 	assert.match(host.text(), /Already signed out/);
 });
 
-test("unknown /auth options are rejected with the available subcommands", async () => {
+test("unknown /login options are rejected with the available subcommands", async () => {
 	const host = new AuthFakeHost();
-	await run("/auth nope", host);
-	assert.match(host.text(), /Unknown \/auth option "nope"/);
+	await run("/login nope", host);
+	assert.match(host.text(), /Unknown \/login option "nope"/);
 	assert.match(host.text(), /status, sign-in, import-codex, sign-out/);
 });
 
 // ─── completions and help wiring ─────────────────────────────────────────────
 
 
-test("/auth offers completion-friendly subcommands", async () => {
+test("/login offers completion-friendly subcommands", async () => {
 	const completions = (await authCommand.getArgumentCompletions!("")) ?? [];
 	const values = completions.map((item) => item.value);
 	assert.deepEqual(values, [
@@ -347,21 +347,21 @@ test("/auth offers completion-friendly subcommands", async () => {
 	);
 	assert.equal(await authCommand.getArgumentCompletions!("zzz"), null);
 	assert.equal(await authCommand.getArgumentCompletions!("sign-in "), null);
-	assert.ok(SLASH_COMMANDS.some((command) => command.name === "auth"));
+	assert.ok(SLASH_COMMANDS.some((command) => command.name === "login"));
 });
 
-test("/provider points OpenAI-account models at /auth", async () => {
+test("/provider points OpenAI-account models at /login", async () => {
 	const host = new AuthFakeHost();
 	host.responses["config.get"] = { config: { provider: "openrouter" }, secrets: [] };
 	await run("/provider", host);
-	assert.match(host.text(), /OpenAI account models need no API key — sign in with \/auth/);
+	assert.match(host.text(), /OpenAI account models need no API key — sign in with \/login/);
 });
 
-test("/keys list points OpenAI-account models at /auth", async () => {
+test("/keys list points OpenAI-account models at /login", async () => {
 	const host = new AuthFakeHost();
 	host.responses["secrets.list"] = { secrets: [], envFile: "/x/.env" };
 	await run("/keys list", host);
-	assert.match(host.text(), /OpenAI account models need no key — sign in with \/auth/);
+	assert.match(host.text(), /OpenAI account models need no key — sign in with \/login/);
 });
 
 // ─── pure renderers ──────────────────────────────────────────────────────────
@@ -376,7 +376,7 @@ test("renderAuthStatus and formatAuthExpiry handle unknown values", () => {
 
 // ─── Grok and Copilot subscription surfaces ────────────────────────────────
 
-test("/auth grok sign-in waits for the device-flow event and activates the provider", async () => {
+test("/login grok sign-in waits for the device-flow event and activates the provider", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
 	host.responses["auth.grok.login"] = {
@@ -388,7 +388,7 @@ test("/auth grok sign-in waits for the device-flow event and activates the provi
 	host.responses["models.list"] = { provider: "grok", source: "models.dev", models: [{ id: "grok-4.7" }] };
 	host.responses["config.set"] = { key: "provider", value: "grok" };
 	host.responses["session.setModel"] = { sessionId: SESSION.id, model: "grok-4.7", provider: "grok" };
-	const pending = run("/auth grok sign-in", host);
+	const pending = run("/login grok sign-in", host);
 	await flush();
 	assert.match(host.text(), /ABCD-EFGH/);
 	host.emit({
@@ -404,19 +404,19 @@ test("/auth grok sign-in waits for the device-flow event and activates the provi
 	assert.equal(host.handlers.size, 0);
 });
 
-test("/auth copilot status is shown alongside the other providers", async () => {
+test("/login copilot status is shown alongside the other providers", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_OUT };
 	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
 	host.responses["auth.copilot.status"] = {
 		status: { signedIn: true, source: "gh", accountId: "octocat", tokenFamily: "fine-grained" },
 	};
-	await run("/auth status", host);
+	await run("/login status", host);
 	assert.match(host.text(), /GitHub Copilot: signed in \(octocat, fine-grained\)/);
-	assert.match(host.text(), /\/auth grok/);
+	assert.match(host.text(), /\/login grok/);
 });
 
-test("/auth opencode status shows organization, expiry, and sign-in hint", async () => {
+test("/login opencode status shows organization, expiry, and sign-in hint", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.opencode.status"] = {
 		status: {
@@ -427,15 +427,15 @@ test("/auth opencode status shows organization, expiry, and sign-in hint", async
 			orgId: "org-1",
 			orgName: "Primary",
 			accountId: "account-1",
-			storagePath: "/private/auth.json",
+			storagePath: "/private/login.json",
 		},
 	};
-	await run("/auth status", host);
+	await run("/login status", host);
 	assert.match(host.text(), /OpenCode Go: signed in/);
 	assert.match(host.text(), /user@example\.test/);
 	assert.match(host.text(), /Primary \(org-1\)/);
 	assert.match(host.text(), /Expires: 2030-03-17T17:46:40Z/);
-	assert.match(host.text(), /\/auth opencode/);
+	assert.match(host.text(), /\/login opencode/);
 
 	const signedOut = new AuthFakeHost();
 	signedOut.responses["auth.opencode.status"] = {
@@ -447,14 +447,14 @@ test("/auth opencode status shows organization, expiry, and sign-in hint", async
 			orgId: null,
 			orgName: null,
 			accountId: null,
-			storagePath: "/private/auth.json",
+			storagePath: "/private/login.json",
 		},
 	};
-	await run("/auth opencode status", signedOut);
-	assert.match(signedOut.text(), /Run \/auth opencode sign-in/);
+	await run("/login opencode status", signedOut);
+	assert.match(signedOut.text(), /Run \/login opencode sign-in/);
 });
 
-test("/auth opencode sign-in prints device details and activates the model", async () => {
+test("/login opencode sign-in prints device details and activates the model", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.opencode.login"] = {
 		url: "https://opencode.ai/verify?code=ABCD-EFGH",
@@ -469,7 +469,7 @@ test("/auth opencode sign-in prints device details and activates the model", asy
 		model: "deepseek-v4.1-flash",
 		provider: "opencode-go",
 	};
-	const pending = run("/auth opencode sign-in", host);
+	const pending = run("/login opencode sign-in", host);
 	await flush();
 	assert.ok(host.calls.some((call) => call.method === "auth.opencode.login"));
 	assert.match(host.text(), /https:\/\/opencode\.ai\/verify\?code=ABCD-EFGH/);
@@ -493,32 +493,32 @@ test("/auth opencode sign-in prints device details and activates the model", asy
 	assert.equal(host.handlers.size, 0);
 });
 
-test("/auth opencode sign-out calls the provider logout method", async () => {
+test("/login opencode sign-out calls the provider logout method", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.opencode.logout"] = {
 		removed: true,
 		status: { signedIn: false },
 	};
-	await run("/auth opencode sign-out", host);
+	await run("/login opencode sign-out", host);
 	assert.deepEqual(host.calls, [{ method: "auth.opencode.logout", params: {} }]);
 	assert.match(host.text(), /Signed out of OpenCode Go/);
 });
 
 // ─── Kiro local-gateway lifecycle ───────────────────────────────────────────
 
-test("/auth kiro status is a single bounded RPC", async () => {
+test("/login kiro status is a single bounded RPC", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.kiro.status"] = { status: KIRO_STOPPED };
-	await run("/auth kiro status", host);
+	await run("/login kiro status", host);
 	assert.deepEqual(host.calls, [{ method: "auth.kiro.status", params: {} }]);
 	const text = host.text();
 	assert.match(text, /Kiro account: local proxy stopped/);
 	assert.match(text, /Endpoint: http:\/\/127\.0\.0\.1:8000\/v1/);
-	assert.match(text, /\/auth kiro start/);
+	assert.match(text, /\/login kiro start/);
 	assert.match(text, /Community interop only/);
 });
 
-test("/auth kiro start launches the proxy and activates Kiro", async () => {
+test("/login kiro start launches the proxy and activates Kiro", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.kiro.start"] = {
 		started: true,
@@ -538,7 +538,7 @@ test("/auth kiro start launches the proxy and activates Kiro", async () => {
 		provider: "kiro",
 	};
 
-	await run("/auth kiro start", host);
+	await run("/login kiro start", host);
 
 	assert.equal(host.calls[0]!.method, "auth.kiro.start");
 	assert.ok(host.calls.some((call) => call.method === "models.list"));
@@ -547,15 +547,15 @@ test("/auth kiro start launches the proxy and activates Kiro", async () => {
 	assert.match(host.text(), /model: auto/);
 });
 
-test("/auth kiro stop reports a managed stop", async () => {
+test("/login kiro stop reports a managed stop", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.kiro.stop"] = { stopped: true, status: KIRO_STOPPED };
-	await run("/auth kiro stop", host);
+	await run("/login kiro stop", host);
 	assert.equal(host.calls[0]!.method, "auth.kiro.stop");
 	assert.match(host.text(), /Kiro local proxy stopped/);
 });
 
-test("/auth kiro setup provisions and starts the gateway in one action", async () => {
+test("/login kiro setup provisions and starts the gateway in one action", async () => {
 	const setupHost = new AuthFakeHost();
 	setupHost.responses["auth.kiro.setup"] = {
 		installed: true,
@@ -563,7 +563,7 @@ test("/auth kiro setup provisions and starts the gateway in one action", async (
 		message: "",
 		result: { started: true, ready: true, status: KIRO_STOPPED },
 	};
-	await run("/auth kiro setup", setupHost);
+	await run("/login kiro setup", setupHost);
 	assert.equal(setupHost.calls[0]!.method, "auth.kiro.setup");
 	assert.match(setupHost.text(), /Kiro gateway is set up and running/);
 
@@ -574,17 +574,17 @@ test("/auth kiro setup provisions and starts the gateway in one action", async (
 		message: "Installing the Kiro gateway in the background.",
 		result: null,
 	};
-	await run("/auth kiro setup", installingHost);
+	await run("/login kiro setup", installingHost);
 	assert.match(installingHost.text(), /Installing the Kiro gateway/);
 
 	const loginHost = new AuthFakeHost();
-	await run("/auth kiro login", loginHost);
+	await run("/login kiro login", loginHost);
 	assert.equal(loginHost.calls.length, 0);
 	assert.match(loginHost.text(), /kiro-cli login/);
-	assert.match(loginHost.text(), /\/auth kiro start/);
+	assert.match(loginHost.text(), /\/login kiro start/);
 });
 
-test("/auth hermes setup is one request and starts the proxy", async () => {
+test("/login hermes setup is one request and starts the proxy", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.hermes.setup"] = {
 		started: true,
@@ -601,7 +601,7 @@ test("/auth hermes setup is one request and starts the proxy", async () => {
 			error: null,
 		},
 	};
-	await run("/auth hermes setup", host);
+	await run("/login hermes setup", host);
 	assert.equal(host.calls[0]!.method, "auth.hermes.setup");
 	assert.match(host.text(), /Hermes proxy started/);
 });
@@ -617,7 +617,7 @@ test("renderKiroStatus shows the actionable error and log path", () => {
 	assert.match(rendered, /Log: \/x\/\.machina\/logs\/kiro-gateway\.log/);
 });
 
-test("/auth kiro usage is one bounded RPC and renders credits", async () => {
+test("/login kiro usage is one bounded RPC and renders credits", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.kiro.usage"] = { usage: KIRO_USAGE };
 	host.responses["auth.kiro.fallback"] = {
@@ -626,7 +626,7 @@ test("/auth kiro usage is one bounded RPC and renders credits", async () => {
 		reason: null,
 	};
 
-	await run("/auth kiro usage", host);
+	await run("/login kiro usage", host);
 
 	assert.deepEqual(
 		host.calls.map((call) => call.method),
@@ -644,7 +644,7 @@ test("renderKiroUsage marks cached values honestly", () => {
 	assert.match(rendered, /cached; the last upstream refresh failed/);
 });
 
-test("/auth menu exposes Kiro and routes to its actions", async () => {
+test("/login menu exposes Kiro and routes to its actions", async () => {
 	const host = new AuthFakeHost();
 	host.responses["auth.chatgpt.status"] = { status: SIGNED_OUT };
 	host.responses["auth.grok.status"] = { status: { signedIn: false, source: null } };
@@ -657,10 +657,10 @@ test("/auth menu exposes Kiro and routes to its actions", async () => {
 		return items.find((item) => item.value === value) ?? items[0]!;
 	};
 
-	await run("/auth", host);
+	await run("/login", host);
 
 	assert.ok(picks >= 2);
 	assert.match(host.text(), /Kiro account: local proxy stopped/);
-	assert.match(host.text(), /\/auth kiro start/);
+	assert.match(host.text(), /\/login kiro start/);
 	assert.ok(host.calls.some((call) => call.method === "auth.kiro.status"));
 });

@@ -165,7 +165,7 @@ test("/mcp pre-registered OAuth stores a masked secret and fixed callback port",
 		"SENTINEL-client-secret",
 		"8765",
 		"",
-		'["https://www.googleapis.com/auth/drive.readonly"]',
+		'["https://www.googleapis.com/login/drive.readonly"]',
 		"{}",
 	);
 	host.responses["secrets.set"] = (params: Record<string, unknown>) => ({
