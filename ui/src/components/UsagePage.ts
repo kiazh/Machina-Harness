@@ -180,7 +180,7 @@ export class UsagePage implements Component {
 		const account = this.report?.account;
 		const plan = account?.plan ?? "Machina";
 		const email = account?.email ? ` · ${account.email}` : "";
-		return truncateToWidth(`${theme.accentBold("Usage")}${theme.dim(` · ${plan}${email}`)}`, width);
+		return truncateToWidth(`${theme.bold("Usage")}${theme.dim(` · ${plan}${email}`)}`, width);
 	}
 
 	private tabs(width: number): string {
@@ -207,7 +207,7 @@ export class UsagePage implements Component {
 		];
 		lines.push(...this.stats(report, width));
 		lines.push("");
-		lines.push(theme.accentBold("Token activity"));
+		lines.push(theme.bold("Token activity"));
 		lines.push(theme.dim("Last 12 months"));
 		lines.push("");
 		lines.push(...this.activityView(report, width));
@@ -366,7 +366,7 @@ export class UsagePage implements Component {
 			});
 			out.push(`${theme.dim(WEEKDAYS[row]!.padEnd(2))} ${cells.join("")}`.trimEnd());
 		}
-		const legend = [0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0)).join(" ");
+		const legend = [theme.border("■"), ...[0.25, 0.5, 0.75, 1].map((level) => theme.activity("■", level, 0))].join(" ");
 		out.push(`${theme.dim("Less")} ${legend}${theme.dim(" More")}`);
 		return out;
 	}
@@ -424,7 +424,7 @@ export class UsagePage implements Component {
 		const metrics = rows.map(([label, value]) => {
 			const room = Math.max(3, left - label.length - 1);
 			const shown = truncateToWidth(value, room);
-			return `${theme.dim(label)}${" ".repeat(Math.max(1, left - label.length - visibleWidth(shown)))}${theme.bold(shown)}`;
+			return `${theme.dim(label)}${" ".repeat(Math.max(1, left - label.length - visibleWidth(shown)))}${shown}`;
 		});
 		const used = [
 			...report.models.slice(0, 3).map((model) => ({
@@ -436,7 +436,10 @@ export class UsagePage implements Component {
 		const modelLines = used.map((entry) => this.usedRow(entry.label, entry.runs, right));
 		if (!modelLines.length) modelLines.push(theme.dim("No model or skill calls recorded"));
 
-		const out = [`${padRight(theme.accentBold("Activity insights"), left)}${" ".repeat(gap)}${theme.accentBold("Models & skills used")}`];
+		const out = [
+			`${padRight(theme.bold("Activity insights"), left)}${" ".repeat(gap)}${theme.bold("Models & skills used")}`,
+			"",
+		];
 		const count = Math.max(metrics.length, modelLines.length);
 		for (let index = 0; index < count; index++) {
 			out.push(`${padRight(metrics[index] ?? "", left)}${" ".repeat(gap)}${modelLines[index] ?? ""}`.trimEnd());
