@@ -18,9 +18,11 @@ const GROWTH_DURATION_MS = 800;
 const GROWTH_INTERVAL_MS = ACTIVITY_INTERVAL_MS;
 
 const WORK_INTERVAL_MS = 33;
-const WORK_CYCLE_MS = 480;
-const WORK_REELS = ["◐", "◓", "◑", "◒"];
-const WORK_REELS_WIDTH = 13;
+const WORK_CYCLE_MS = 1600;
+const WORK_WAVE_WIDTH = 13;
+// Braille encodes the two columns of its 2×4 grid in separate dot masks.
+const BRAILLE_LEFT = [0x01, 0x02, 0x04, 0x40];
+const BRAILLE_RIGHT = [0x08, 0x10, 0x20, 0x80];
 
 type FooterStatus = "ready" | "working" | "offline" | "awaiting_approval" | "stopping" | "cleanup_pending";
 
@@ -162,17 +164,18 @@ export class Footer implements Component {
 		if (this.status === "working" && room >= 5) {
 			const hint = room >= 15 ? "esc×2 interrupt" : "esc×2";
 			activity = theme.muted(hint);
-			if (room >= WORK_REELS_WIDTH + 2 + visibleWidth(hint)) {
+			if (room >= WORK_WAVE_WIDTH + 2 + visibleWidth(hint)) {
 				const elapsed = this.reducedMotion ? 0 : Date.now() - this.workingStart;
-				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS;
-				const reelCount = WORK_REELS.length;
-				const step = Math.floor(phase * reelCount);
-				const reverseStep = (reelCount - step + reelCount / 2) % reelCount;
-				const light = 0.34 * Math.cos(phase * 2 * Math.PI);
-				const left = theme.activity(WORK_REELS[step]!, 0.66 + light, 0);
-				const right = theme.activity(WORK_REELS[reverseStep]!, 0.66 - light, 1);
-				const reels = `${theme.dim("[")}   ${left}   ${right}   ${theme.dim("]")}`;
-				activity = `${reels}  ${activity}`;
+				const phase = (elapsed % WORK_CYCLE_MS) / WORK_CYCLE_MS * 2 * Math.PI;
+				const wave = Array.from({ length: WORK_WAVE_WIDTH }, (_, column) => {
+					const angle = column * 0.8 - phase;
+					const leftRow = Math.round(1.5 + 1.5 * Math.sin(angle));
+					const rightRow = Math.round(1.5 + 1.5 * Math.sin(angle + 0.4));
+					const glyph = String.fromCodePoint(0x2800 + BRAILLE_LEFT[leftRow]! + BRAILLE_RIGHT[rightRow]!);
+					const light = 0.68 + 0.32 * Math.cos(angle);
+					return theme.activity(glyph, light, column / (WORK_WAVE_WIDTH - 1));
+				}).join("");
+				activity = `${wave}  ${activity}`;
 			}
 		}
 		const gap = " ".repeat(fit - visibleWidth(usage) - visibleWidth(activity));

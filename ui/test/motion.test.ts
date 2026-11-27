@@ -78,7 +78,7 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	footer.status = "working";
 	const rows = footer.chatStatus.render(80).map(stripTerminalSequences);
 	assert.equal(rows.length, 1);
-	assert.match(rows[0]!, /^ {4}\[ {3}◐ {3}◑ {3}\] {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
+	assert.match(rows[0]!, /^ {4}[\u2801-\u28ff]{13} {2}esc×2 interrupt +0 tokens \(0%\) {4}$/u);
 	assert.match(stripTerminalSequences(footer.render(80)[0]!), /working.*shortcuts/);
 	assert.equal(footer.chatStatusRows(), 1);
 	footer.contextTokens = 12_400;
@@ -100,8 +100,8 @@ test("working footer pulses without relying on thinking or tool subscriptions", 
 	assert.equal(renders(), 4, "working motion redraws every 33ms");
 	const nextText = stripTerminalSequences(next!);
 	const litText = stripTerminalSequences(lit!);
-	assert.notEqual(nextText, litText, "the reels turn");
-	assert.equal(nextText.indexOf("esc×2"), litText.indexOf("esc×2"), "the reels keep the shortcut in place");
+	assert.notEqual(nextText, litText, "the waveform advances");
+	assert.equal(nextText.indexOf("esc×2"), litText.indexOf("esc×2"), "the waveform keeps the shortcut in place");
 	for (const status of ["awaiting_approval", "stopping", "cleanup_pending", "offline", "ready"] as const) {
 		footer.status = status;
 		assert.equal(coordinator.timerCount, 0, `${status} retires working motion`);
