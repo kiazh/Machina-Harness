@@ -263,9 +263,6 @@ class BaseReActAgent:
     def _tool_defs(self) -> list[ToolDefinition]:
         return self.tool_batch.definitions()
 
-    async def _get_rag_context(self, session_id: uuid.UUID, query: str) -> list[tuple]:
-        return await self.context_preparer.get_rag_context(session_id, query)
-
     async def _call_llm_with_retry(
         self,
         messages: list[dict[str, Any]],
@@ -292,24 +289,6 @@ class BaseReActAgent:
     ) -> AsyncGenerator[StreamEvent, None]:
         """Delegate to the turn's provider seam (retry + accounting)."""
         return self.llm_calls.stream(messages, tools, session_id)
-
-    async def _reserve_usage(
-        self,
-        session_id: uuid.UUID | None,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-    ) -> uuid.UUID | None:
-        return await self.llm_calls.reserve(session_id, messages, tools)
-
-    async def _finish_usage(
-        self,
-        reservation: uuid.UUID | None,
-        usage: dict[str, Any] | None = None,
-        *,
-        failed: bool = False,
-        model: str | None = None,
-    ) -> None:
-        await self.llm_calls.finish(reservation, usage, failed=failed, model=model)
 
     async def _prepare_context(
         self,
@@ -400,11 +379,6 @@ class BaseReActAgent:
     async def _ensure_artifact_view(self, item: dict[str, Any], session_id: uuid.UUID) -> str:
         return await self.tool_results.ensure_artifact_view(item, session_id)
 
-    async def _record_tool_action_joined(self, item, session_id, pending_chunks, tool_calls_made):
-        await self.tool_results.record_action_joined(
-            item, session_id, pending_chunks, tool_calls_made
-        )
-
     async def _retire_tool_approval(self, item, outcome: str) -> None:
         await self.tool_results.retire_approval(item, outcome)
 
@@ -412,16 +386,6 @@ class BaseReActAgent:
         self, pending, session_id, pending_chunks=None, tool_calls_made=None
     ) -> None:
         await self.tool_results.finalize_completed(
-            pending,
-            session_id,
-            pending_chunks,
-            tool_calls_made if tool_calls_made is not None else [],
-        )
-
-    async def _finalize_completed_tools_joined(
-        self, pending, session_id, pending_chunks=None, tool_calls_made=None
-    ) -> None:
-        await self.tool_results.finalize_completed_joined(
             pending,
             session_id,
             pending_chunks,
@@ -570,25 +534,8 @@ class BaseReActAgent:
     ) -> None:
         await self.turn_phases.flush_pending_cancellation_safe(pending_chunks, session_id, note)
 
-    async def _flush_pending_cancellation_joined(
-        self, pending_chunks, session_id, note="interrupted"
-    ) -> None:
-        await self.turn_phases.flush_pending_cancellation_joined(pending_chunks, session_id, note)
-
     def _schedule_memory_consolidation(self, session_id: uuid.UUID) -> None:
         self.post_turn.schedule_consolidation(session_id)
-
-    def _parse_consolidation_cursor(self, cursor: dict | None) -> tuple | None:
-        return self.post_turn.parse_cursor(cursor)
-
-    async def _read_consolidation_cursor(self, session_id: uuid.UUID) -> tuple | None:
-        return await self.post_turn.read_cursor(session_id)
-
-    async def _persist_consolidation_cursor(self, session_id: uuid.UUID, checkpoint: dict) -> None:
-        await self.post_turn.persist_cursor(session_id, checkpoint)
-
-    async def _consolidate_memories(self, session_id: uuid.UUID) -> None:
-        await self.post_turn.consolidate(session_id)
 
     def _schedule_learning_review(
         self, session_id: uuid.UUID, user_message: str, response: AgentResponse
@@ -624,11 +571,6 @@ class BaseReActAgent:
         finally:
             _rsi_choice.set(None)
             _rsi_skills.set(None)
-
-    async def _review_learning(
-        self, session_id: uuid.UUID, user_message: str, response: AgentResponse
-    ) -> None:
-        await self.post_turn.review_learning(session_id, user_message, response)
 
 
 class ReActAgent(BaseReActAgent):
