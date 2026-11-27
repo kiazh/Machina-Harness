@@ -91,6 +91,7 @@ export interface ChangesHost {
 	request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
 	current(): SessionInfo | undefined;
 	changesPage(): ChangesPage;
+	screen(): ScreenView;
 	queueSteering(text: string, fromDraft?: boolean): Promise<boolean>;
 	submitTurn(text: string): Promise<void>;
 	print(text: string, kind?: NoticeKind): void;
