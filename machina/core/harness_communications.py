@@ -161,13 +161,19 @@ class CommunicationsStore:
         self.payload_max_chars = payload_max_chars
 
     def _connect(self, *, readonly: bool = False) -> sqlite3.Connection:
-        create_store = not readonly and not self.path.exists()
         if not readonly:
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Three independent MCP writers can race the first-open schema
+        # creation: process A creates the file but has not committed the
+        # table when process B opens it. B then saw "no such table". Always
+        # issuing the idempotent DDL closes that window; the 50 ms busy
+        # timeout keeps a deliberately held lock from stalling the caller
+        # (a contended observation is dropped, never surfaced as protocol
+        # failure).
         connection = sqlite3.connect(
             self.path.resolve().as_uri() + "?mode=ro" if readonly else self.path,
             uri=readonly,
-            timeout=0.025,
+            timeout=0.05,
         )
         try:
             connection.row_factory = sqlite3.Row
@@ -176,15 +182,14 @@ class CommunicationsStore:
             if os.name != "nt":
                 self.path.chmod(0o600)
             connection.execute("PRAGMA secure_delete = ON")
-            if create_store:
-                connection.execute("PRAGMA auto_vacuum = FULL")
-                # Bound the main DB physically as well as its retained payloads.
-                connection.execute("PRAGMA max_page_count = 1280")
-                connection.execute("""CREATE TABLE IF NOT EXISTS communications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_json TEXT NOT NULL, size_bytes INTEGER NOT NULL,
-                    session_id TEXT, harness TEXT
-                )""")
+            connection.execute("PRAGMA auto_vacuum = FULL")
+            # Bound the main DB physically as well as its retained payloads.
+            connection.execute("PRAGMA max_page_count = 1280")
+            connection.execute("""CREATE TABLE IF NOT EXISTS communications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_json TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                session_id TEXT, harness TEXT
+            )""")
             return connection
         except BaseException:
             connection.close()

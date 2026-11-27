@@ -12,7 +12,7 @@ Do not expose a gateway, database, or Docker socket to untrusted clients.
 |---|---|---|
 | Human → HTTP/gateway | HTTP bearer key; local gateway token. Agent principals cannot resolve human approvals. A gateway without `MACHINA_GATEWAY_TOKEN` is explicitly unauthenticated and belongs only on trusted local stdio; the standalone `python -m machina.gateway` entrypoint mints a token and prints it to stderr when the variable is absent. | `test_api.py`, `test_approvals_ownership.py` |
 | Agent → tools | Broker evaluates declared effects and exact action; tools execute a stamped mode/backend/workspace snapshot. Durable mode reads fail closed on database failure. | `test_execution_context_boundary.py`, `test_integration_permissions.py` |
-| Tool → filesystem | Canonical workspace boundary, private path restrictions, symlink/parent traversal and hard-link defenses, identity checks on file operations. | `test_security.py`, `test_audit_remediation.py` |
+| Tool → filesystem | Canonical workspace boundary, private path restrictions, symlink/parent traversal defenses, hard-link read-only marking, identity checks on file operations. | `test_security.py`, `test_audit_remediation.py` |
 | Tool → process | Structured argv and guarded command grammar. Known project test/build/lint workflows are operator-trusted; other opaque execution requires approval; shell payloads are distinct approval material. Redirection (including `2>/dev/null` — there is no `/dev/null` allowlist), expansion, backgrounding, compound syntax and unknown commands are opaque and require review; quoted operators are data. Child environment uses an allowlist. | `test_terminal_safety.py`, `test_scheduler_scripts.py`, `test_integration_permissions.py` |
 | Tool → external web | DNS/IP validation at every redirect; connect to the validated address with correct Host/TLS identity. Aggregate deadlines and byte/header bounds apply to extraction. | `test_web_extract_pinned_fetch.py`, `test_deep_fetch_deadline.py` |
 | Workers → PostgreSQL | Conditional owner-token claims, database clock, lease renewal, token-matched release/finish. Unknown ownership blocks effects and mutations. | `test_multi_worker_fencing.py`, `test_rest_ownership_loss.py`, `test_claim_failure_boundary.py` |
@@ -30,7 +30,9 @@ update durable mode and revoke prior session grants. `full` activation issues an
 explicit session grant; routing mode alone does not replace a grant. Revocation
 returns the session to `ask`. Forks start in `ask`.
 
-`ask` and `workspace` permit routine project file reads/writes, built-in web
+`ask` and `workspace` are decision-identical in the permission kernel; the
+only difference is that `workspace` mounts the Docker workspace writable.
+Both permit routine project file reads/writes, built-in web
 search/extraction, document retrieval, local Git inspection/add/commit, and
 common project test/build/lint commands without approval. Examples include
 `pytest`, `python -m pytest`, `uv run pytest`, and `npm run build`. Project
@@ -53,9 +55,10 @@ authority inherited from a parent.
 
 ## Exact approvals and execution
 
-Action digest version 2 binds tool, operation, mode, capabilities, canonical
+Action digest version 3 binds tool, operation, mode, capabilities, canonical
 targets, argv/shell, cwd, backend, timeout, network declarations, content digest,
-and workspace identity. Approval records separately bind the session, original
+the target's base revision, and workspace identity. Approvals persisted under an
+older digest version never resume; they require fresh review. Approval records separately bind the session, original
 turn, and agent. Lookup and atomic consumption require the same session and
 agent; a resumed execution may run in a fresh turn. Display previews are
 redacted and bounded; full content length and digest preserve review identity.

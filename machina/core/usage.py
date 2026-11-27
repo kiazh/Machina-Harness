@@ -563,6 +563,10 @@ class UsageStore:
         total = (
             total if isinstance(total, int) and not isinstance(total, bool) and total >= 0 else 0
         )
+        # An exact in-process cache hit reports zero usage because no provider
+        # call happened. Zero is a known value here, not "missing": charging
+        # the reservation would make a free hit consume the session budget.
+        free_cache_hit = cache_source == "exact" and not failed
         known = (
             not failed
             and not usage.get("estimated", False)
@@ -572,9 +576,9 @@ class UsageStore:
             and isinstance(completion, int)
             and not isinstance(completion, bool)
             and completion >= 0
-            and (prompt + completion > 0 or total > 0)
+            and (prompt + completion > 0 or total > 0 or free_cache_hit)
         )
-        accounted = max(prompt + completion, total) if known else None
+        accounted = 0 if free_cache_hit else (max(prompt + completion, total) if known else None)
 
         def _token(name: str) -> int | None:
             value = usage.get(name)

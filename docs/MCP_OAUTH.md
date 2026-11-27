@@ -102,10 +102,12 @@ times out. Consequences, by design:
 
 ## Evidence
 
-- Backend: `tests/test_connectors_oauth_*.py`,
-  `tests/test_gateway_connector_oauth.py` (fake issuer + real SDK MCP;
+- Backend: the authoritative connector/OAuth suites live in the pinned
+  `kiazh/Machina-DevTools` checkout (`test_connectors_oauth_*.py`,
+  `test_gateway_connector_oauth.py`: fake issuer + real SDK MCP;
   cross-process refresh; tombstone races; 401/403/timeout side-effect
-  counters exactly one).
+  counters exactly one). This checkout keeps the catalog/management smoke
+  tests only.
 - UI: `ui/test/mcp-oauth.test.ts` (menu/overlay/cancel/link privacy plus a
   real gateway wrapper over stdio).
 - Full suite plus `npm run check`, Ruff, Bandit (zero medium/high

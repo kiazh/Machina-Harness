@@ -180,8 +180,6 @@ def test_search_files_accepts_a_file_path(monkeypatch, tmp_path) -> None:
     (root / "plan.md").write_text("accent color\nspacing\n", encoding="utf-8")
     monkeypatch.setattr(config, "workspace_root", str(root))
 
-    result = asyncio.run(
-        builtins.search_files("accent|color", "plan.md", file_glob="plan.md")
-    )
+    result = asyncio.run(builtins.search_files("accent|color", "plan.md", file_glob="plan.md"))
 
     assert "plan.md:1" in result

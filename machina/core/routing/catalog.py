@@ -620,7 +620,7 @@ def _provider_ready(name: str, config: Any, *, probe_kiro: bool) -> tuple[bool, 
         try:
             from machina.core.provider.ollama import OllamaProvider
 
-            reachable = OllamaProvider().reachable()
+            reachable = OllamaProvider.reachable()
             return bool(reachable), "daemon reachable" if reachable else "daemon unavailable"
         except Exception:
             return False, "daemon unavailable"

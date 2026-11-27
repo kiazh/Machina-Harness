@@ -68,7 +68,7 @@ This is the scalable interop direction: the external harness keeps its own plann
 1. Register the shim once: `machina harnesses enable opencode` (or `codex`).
 2. From the external orchestrator, call `machina_agents` to discover roles.
 3. Call `machina_delegate` for one child, or `machina_delegate_many` with up to 20 `{agent, task}` entries for a batch.
-4. `max_concurrency` defaults to `max_delegate_concurrency` (4), so 20 tasks run in orderly waves rather than 20 simultaneous provider calls. The external orchestrator can choose a lower value or up to 20.
+4. `max_concurrency` defaults to `max_delegate_concurrency` (8), so 20 tasks run in orderly waves rather than 20 simultaneous provider calls. The external orchestrator can choose a lower value or up to 20.
 5. A child that needs approval returns `waiting_approval` with request ids; a human resolves it in Machina. Children inherit the MCP server's execution-mode ceiling and cannot approve their own actions.
 
 The reverse direction (Machina as planner over OpenCode child sessions) is not exposed through MCP because OpenCode's subagent surface is its internal Task/session API and ACP/HTTP server, not an MCP server. `machina harnesses run opencode "<prompt>"` remains the one-shot bridge; a true reverse control plane would need an OpenCode server/ACP adapter rather than pretending the MCP registration is symmetric.

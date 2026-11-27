@@ -34,6 +34,11 @@ async def rpc_dispatch(req: RpcRequest, request: Request) -> dict[str, Any]:
     """
     if req.method in {"prompt.submit", "prompt.cancel", "shutdown"}:
         raise HTTPException(400, "use the session prompt stream for turns")
+    if req.method == "initialize":
+        # The embedded gateway is already initialized by the HTTP lifespan.
+        # Re-running the stdio handshake would mutate shared model/provider/
+        # protocol state and the process-global config for every caller.
+        raise HTTPException(400, "the HTTP gateway is initialized at startup")
     gw = getattr(request.app.state, "gateway", None)
     if gw is None:
         raise HTTPException(503, "RPC gateway not initialized")

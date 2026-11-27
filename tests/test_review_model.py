@@ -245,9 +245,7 @@ def test_a_finished_model_review_does_not_overwrite_a_newer_run(
             await release.wait()
             return _response('{"findings":[]}')
 
-        task = asyncio.create_task(
-            reviews.run_model(workspace, payload, review, complete=complete)
-        )
+        task = asyncio.create_task(reviews.run_model(workspace, payload, review, complete=complete))
         await entered.wait()
         newer = reviews.run_rules(workspace, payload, force=True)
         release.set()
@@ -260,9 +258,7 @@ def test_a_finished_model_review_does_not_overwrite_a_newer_run(
     assert stored is not None and stored["id"] == newer["id"]
 
 
-def test_model_timeout_is_a_failed_review(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_model_timeout_is_a_failed_review(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     workspace = _workspace(monkeypatch, tmp_path)
     payload = _finish(workspace, after="value = 1\n")
     review, queued = reviews.begin_model(

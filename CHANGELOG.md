@@ -6,6 +6,19 @@
 
 ### Fixed
 
+- HTTP approval resume for `edit_file` no longer raises `TypeError`; the rebuild passes only the canonical `build_request` fields, so an approved edit can actually resume.
+- Approved edits and overwrites bind the target's base revision: the digest includes a hash of the bytes the human reviewed, and execution re-hashes before writing. A file changed during the approval wait is refused instead of edited. This is digest v3; pending v2 approvals require a fresh review after upgrade.
+- `python -m <writer>` (for example `python -m ruff --fix .machina/...`) is reviewed like the writer itself; the sensitive-path classifier now unwraps `python`/`python3 -m` as well as `uv run`.
+- Local Ollama is discoverable again: routing called a nonexistent `OllamaProvider.reachable()`. The probe is a short, non-constructing TCP check.
+- Approvals resolved by another process now wake the owning turn: the gateway polls the durable row while also waiting on its local future.
+- Memory forgetting is wired: consolidation applies the configured low-importance/per-agent cap, preserving explicitly important and quarantined rows. Audit and usage rows have age-based retention (`0` keeps them forever).
+- `machina init` no longer repeats its table-wide legacy normalization and ACCESS EXCLUSIVE constraint swap on every Compose start; both run once behind a `schema_meta` marker.
+- `install.sh` now exits nonzero and refuses the success banner when `machina init` failed.
+- `host.credentials` and `interop.run` are refused on the shared HTTP gateway; the local stdio TUI keeps both.
+- A dead Python gateway triggers a bounded UI relaunch (two attempts, one-second delay) instead of a terminal offline screen.
+- Release tags are checked against `pyproject.toml` and `machina/__init__.py`, and the smoke suite runs before artifacts are signed.
+- Docs now report the real counts (177 RPC methods, 27 events, 48 tools, 146 config keys, 862 local tests), the generated contract path, and the current TUI layout.
+
 - Changes now keeps each chat's evidence separate: switching chats clears the list, late list responses cannot replace the new chat's rows, and a stale poll cannot erase a review just run from this UI.
 - A diff file omitted by the 512 KiB budget is fetched by path when selected, so it no longer reads "No textual diff recorded".
 - Fix handoffs mark a finding handled only after delivery, and a locally retained prompt reads **Queued** instead of **Sent**. Clearing handled findings never offers them again.
@@ -29,6 +42,7 @@
 
 ### Changed
 
+- The turn engine is decomposed by seam: `agent.py` shrank from 3,067 to 698 lines behind new `agent_support`, `context_prep`, `llm_calls`, `tool_batch`, `tool_results`, `react_loop`, `turn_phases`, and `post_turn` modules. Behavior is unchanged; the 862-test smoke suite and the architecture ratchet pin the move.
 - A persistent command strip keeps the Activity, Chat, and Changes tabs and session context visible across all three screens.
 - The composer is a framed input card now: a rounded border, the accent `❯` inside it, and an accent frame while the composer owns focus. The full-width acid rule and hairline are gone.
 - Approvals use one shared rounded-card primitive: a titled evidence card in the transcript and a matching decision card above the composer, with a padded interior, a thin border, a raised fill, and a full-width accent bar on the current choice. The hand-drawn square frame and the flat rule-based dock are gone.

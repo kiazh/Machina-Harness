@@ -29,9 +29,7 @@ def test_edit_file_replaces_an_exact_block_and_returns_a_diff(
     assert "+delta" in result
 
 
-def test_edit_file_rejects_a_wrong_match_count(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_edit_file_rejects_a_wrong_match_count(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     root = _workspace(monkeypatch, tmp_path)
     target = root / "src" / "app.py"
     target.write_text("same\nsame\n", encoding="utf-8")
@@ -41,9 +39,7 @@ def test_edit_file_rejects_a_wrong_match_count(
     assert target.read_text(encoding="utf-8") == "same\nsame\n"
 
 
-def test_edit_file_rejects_an_empty_block(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_edit_file_rejects_an_empty_block(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     _workspace(monkeypatch, tmp_path)
     with pytest.raises(ToolError, match="old_text must not be empty"):
         asyncio.run(file_tools.edit_file("src/app.py", "", "other"))

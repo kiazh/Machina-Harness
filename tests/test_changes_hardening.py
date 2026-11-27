@@ -68,9 +68,7 @@ def test_changes_diff_path_traversal_never_leaves_the_workspace(
         assert result["files"] == []
 
     exact = asyncio.run(
-        changes.changes_diff(
-            object(), {"snapshotId": payload["snapshot_id"], "path": "src/a.py"}
-        )
+        changes.changes_diff(object(), {"snapshotId": payload["snapshot_id"], "path": "src/a.py"})
     )
     assert [item["path"] for item in exact["files"]] == ["src/a.py"]
 
@@ -130,13 +128,9 @@ def test_changes_rpc_emits_debug_summaries(
     monkeypatch.setattr(changes, "configured_workspace", lambda: workspace)
     with caplog.at_level(logging.DEBUG, logger="machina.gateway.features.changes"):
         asyncio.run(changes.changes_list(object(), {"scope": "workspace", "limit": 10}))
+        asyncio.run(changes.changes_diff(object(), {"snapshotId": payload["snapshot_id"]}))
         asyncio.run(
-            changes.changes_diff(object(), {"snapshotId": payload["snapshot_id"]})
-        )
-        asyncio.run(
-            changes.review_start(
-                object(), {"snapshotId": payload["snapshot_id"], "force": True}
-            )
+            changes.review_start(object(), {"snapshotId": payload["snapshot_id"], "force": True})
         )
     assert "changes.list" in caplog.text
     assert "changes.diff" in caplog.text

@@ -8,9 +8,8 @@ from machina.workspace import reviews
 
 
 def _review(lines: list[str], path: str = "src/app.py") -> list[dict[str, object]]:
-    diff = (
-        f"--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n"
-        + "\n".join(f"+{line}" for line in lines)
+    diff = f"--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n" + "\n".join(
+        f"+{line}" for line in lines
     )
     return reviews.findings_from_files([{"path": path, "binary": False, "text": diff}])
 
@@ -65,25 +64,14 @@ def test_debug_prints_skip_test_paths() -> None:
 
 
 def test_added_line_numbers_follow_hunks() -> None:
-    diff = (
-        "--- a/src/a.py\n+++ b/src/a.py\n"
-        "@@ -10,2 +10,3 @@\n"
-        " context\n"
-        "+shell = True\n"
-        " context\n"
-    )
+    diff = "--- a/src/a.py\n+++ b/src/a.py\n@@ -10,2 +10,3 @@\n context\n+shell = True\n context\n"
     findings = reviews.findings_from_files([{"path": "src/a.py", "binary": False, "text": diff}])
     assert findings[0]["line"] == 11
     assert findings[0]["file"] == "src/a.py"
 
 
 def test_added_content_starting_with_plus_plus_is_not_a_file_header() -> None:
-    diff = (
-        "--- /dev/null\n+++ b/src/a.py\n"
-        "@@ -0,0 +1,2 @@\n"
-        "+++ value\n"
-        "+shell = True\n"
-    )
+    diff = "--- /dev/null\n+++ b/src/a.py\n@@ -0,0 +1,2 @@\n+++ value\n+shell = True\n"
     findings = reviews.findings_from_files([{"path": "src/a.py", "binary": False, "text": diff}])
     assert [(finding["rule"], finding["line"]) for finding in findings] == [("shell-true", 2)]
 

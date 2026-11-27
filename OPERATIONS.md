@@ -77,9 +77,10 @@ of serving traffic. The base schema still requires `machina init`: deploying cod
 references new base-schema columns without running `machina init` first fails at turn time
 (`UndefinedColumnError` on first write), not at boot — always migrate before
 starting new workers. Legacy modes migrate to `ask`; execution claims remain separate from
-session business status. Action digests are version 2 (workspace identity and the
-shell payload are bound); approvals persisted with a v1 digest never resume and
-require fresh review. Preserve provider/backend configuration separately.
+session business status. Action digests are version 3 (workspace identity, the
+shell payload, and the write target's base revision are bound); approvals
+persisted under v1/v2 digests never resume and require fresh review. Preserve
+provider/backend configuration separately.
 
 Verify `/health`, `/ready`, authenticated `/metrics`, TUI and HTTP chat, approval
 resume, memory/RAG, interval/heartbeat/cron/script jobs, and cancellation before
@@ -150,9 +151,13 @@ disk use is capped at roughly twice the limit); an oversized single record is
 still written once. If the file cannot be written, the old metrics/log-only
 behavior applies. Include the spill file in log shipping/retention and alert on
 `audit.spill.failed`, which means an event may exist only in process logs.
-Set PostgreSQL audit retention and Prometheus retention outside the application;
-include backups in the same policy. Restrict log readers and verify redaction
-with synthetic credentials before enabling external log shipping.
+The scheduler prunes operational rows hourly according to
+`audit_retention_days` (default 365), `usage_retention_days` (730), and
+`artifact_retention_days` (30); set any of them to `0` to keep that table
+forever. Transcripts, archives, memories, approvals, and jobs are never pruned
+automatically. PostgreSQL vacuum, Prometheus retention, and backups remain
+operator policy. Restrict log readers and verify redaction with synthetic
+credentials before enabling external log shipping.
 
 ## Incident recovery
 

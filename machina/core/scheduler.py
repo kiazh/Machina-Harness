@@ -580,6 +580,9 @@ class JobRunner:
                 if self._semantic_cache_active():
                     await SemanticCache().vacuum()
                 await prune_shadow_events()
+                from machina.core.retention import prune_expired
+
+                await prune_expired()
             except Exception as error:
                 record_failure("scheduler.optimization_maintenance", error)
             try:

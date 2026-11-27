@@ -48,9 +48,7 @@ async def _workspace(gw: Gateway, params: dict[str, Any]) -> Path:
     return configured_workspace()
 
 
-def _snapshot(
-    workspace: Path, params: dict[str, Any]
-) -> tuple[dict[str, Any], str]:
+def _snapshot(workspace: Path, params: dict[str, Any]) -> tuple[dict[str, Any], str]:
     snapshot_id = _str(params, "snapshotId", max_len=_MAX_SNAPSHOT_ID)
     found = snapshots.snapshot_by_id(snapshot_id, workspace=workspace)
     if found is None:
@@ -200,9 +198,7 @@ async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     if engine == "rules":
         review = reviews.run_rules(workspace, payload, force=force)
         if review.get("engine") == "rules":
-            task = _REVIEW_TASKS.get(
-                (str(workspace), str(payload.get("snapshot_id") or ""))
-            )
+            task = _REVIEW_TASKS.get((str(workspace), str(payload.get("snapshot_id") or "")))
             if task is not None and not task.done():
                 task.cancel()
     else:
@@ -210,9 +206,7 @@ async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
         try:
             from machina.core.provider import get_provider
 
-            provider = await asyncio.to_thread(
-                get_provider, provider=provider_name, model=model
-            )
+            provider = await asyncio.to_thread(get_provider, provider=provider_name, model=model)
         except Exception as error:
             review = reviews.failed_model(
                 workspace,
@@ -232,9 +226,7 @@ async def review_start(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
             )
             key = (str(workspace), str(payload.get("snapshot_id") or ""))
             task = _REVIEW_TASKS.get(key)
-            if review.get("status") in {"queued", "running"} and (
-                task is None or task.done()
-            ):
+            if review.get("status") in {"queued", "running"} and (task is None or task.done()):
                 task = asyncio.create_task(
                     _complete_model_review(workspace, payload, review, provider, model),
                     name=f"review-model-{payload.get('snapshot_id')}",

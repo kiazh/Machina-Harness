@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from machina.gateway.errors import INVALID_PARAMS, OPERATION_FAILED, RpcError
-from machina.gateway.features._common import _str
+from machina.gateway.features._common import _require_local_transport, _str
 from machina.host_setup import HostSetupError, SetupOptions
 
 if TYPE_CHECKING:
@@ -173,7 +173,8 @@ async def host_restart(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
 
 
 async def host_credentials(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
-    del gw, params
+    _require_local_transport(gw, "host.credentials")
+    del params
     try:
         return await asyncio.to_thread(_setuper().credentials)
     except HostSetupError as error:

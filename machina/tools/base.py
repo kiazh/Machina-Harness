@@ -296,10 +296,19 @@ class ToolRegistry:
                         f"Tool '{tool.name}' parameter '{param_name}' expected type "
                         f"'{expected_type}', got '{type(param_value).__name__}'"
                     )
-            if isinstance(param_value, str) and len(param_value) > _MAX_STRING_ARG_CHARS:
+            # The generic cap protects memory and prompt safety, but the file
+            # tools exist to carry file content. Their own limits are explicit
+            # and still bounded; a 20k cap silently made write_file unable to
+            # write ordinary source files.
+            limit = _MAX_STRING_ARG_CHARS
+            if tool.name == "write_file" and param_name == "content":
+                limit = 1_000_000
+            elif tool.name == "edit_file" and param_name in {"old_text", "new_text"}:
+                limit = 200_000
+            if isinstance(param_value, str) and len(param_value) > limit:
                 raise _core_symbol("machina.core.exceptions", "ValidationError")(
                     f"Tool '{tool.name}' parameter '{param_name}' is too long "
-                    f"(max {_MAX_STRING_ARG_CHARS} characters)"
+                    f"(max {limit} characters)"
                 )
 
     async def execute(self, name: str, /, **kwargs) -> Any:

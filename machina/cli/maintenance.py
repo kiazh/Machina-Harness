@@ -370,15 +370,22 @@ def setup(
         envvar="MACHINA_INTEROP",
         help="External harness MCP registration: auto|all|none (env: MACHINA_INTEROP)",
     ),
+    skip_init: bool = typer.Option(
+        False,
+        "--skip-init",
+        help="Write .env only; do not create/verify the database schema",
+    ),
 ):
-    """First-launch setup — create the .env file and configure API keys.
+    """First-launch setup — write .env, then provision and verify the schema.
 
     Creates the git-ignored ``.env`` next to the project (or at
     ``$MACHINA_ENV_FILE``) with one entry per model family you use, plus the
     default provider and model. Existing values are kept when you press
-    Enter; ``--force`` starts over. Finally detects external agent harnesses
-    (OpenCode, Codex, Hermes) and offers to register Machina's MCP server
-    with them (``--interop auto|all|none``).
+    Enter; ``--force`` starts over. Setup then runs the same managed-database
+    provisioning as ``machina init`` and fails if the schema is not ready, so
+    a successful Setup is an install that can actually start. Finally detects
+    external agent harnesses (OpenCode, Codex, Hermes) and offers to register
+    Machina's MCP server with them (``--interop auto|all|none``).
     """
     import secrets as _secrets
 
@@ -555,6 +562,14 @@ def setup(
         except (OSError, ValueError) as error:
             output.error(f"Could not write {target}: {type(error).__name__}.")
             raise typer.Exit(1) from None
+        # Make the freshly written values visible to the in-process
+        # provisioning step. A real environment value still wins.
+        for _key, _value in updates.items():
+            os.environ.setdefault(_key, _value)
+        if "DATABASE_URL" in updates:
+            from machina.db.connection import db as _db
+
+            _db.dsn = updates["DATABASE_URL"]
         changed = ", ".join(sorted(updates))
         console.print(f"\n[green]✓ Wrote {len(updates)} value(s) to .env:[/green] {changed}")
     elif overwriting:
@@ -571,8 +586,28 @@ def setup(
     # Best-effort interop step: register Machina's MCP server where chosen.
     interop_lines = _setup_interop(mode, non_interactive=non_interactive)
 
+    if not skip_init:
+        console.print()
+        console.print("[bold]Provisioning the database...[/bold]")
+        try:
+            # The same command the installer uses: managed container/database
+            # creation, schema application, and a nonzero exit on failure.
+            init(db_url=None)
+        except typer.Exit:
+            output.error(
+                "Setup wrote your keys, but the database schema is not ready. "
+                "Fix the database issue above, then run `machina init`."
+            )
+            raise
+    else:
+        console.print()
+        output.muted("Skipped schema creation (--skip-init). Run `machina init` when ready.")
+
     console.print()
-    output.muted("Next: run `machina doctor`, then `machina init` to create the database schema.")
+    if skip_init:
+        output.muted("Next: run `machina init`, then start the UI with `machina`.")
+    else:
+        output.muted("Ready. Start the UI with `machina`.")
     for line in interop_lines:
         output.muted(line)
 

@@ -8,6 +8,7 @@ the rest of the system looks them up.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -139,9 +140,15 @@ BUILTIN_AGENTS: dict[str, AgentDef] = {
 }
 
 
-def _ecc_agents() -> dict[str, AgentDef]:
-    """Ship reviewed specialist prompts offline; never execute upstream code."""
-    directory = Path(__file__).resolve().parents[1] / "bundled_agents" / "ecc"
+def _ecc_agents(directory: Path | None = None) -> dict[str, AgentDef]:
+    """Ship reviewed specialist prompts offline; never execute upstream code.
+
+    The manifest's SHA-256 is enforced at load. The files are data, not code,
+    but a tampered prompt is still an instruction-injection vector; skills
+    already verify their bundle the same way.
+    """
+    if directory is None:
+        directory = Path(__file__).resolve().parents[1] / "bundled_agents" / "ecc"
     tool_names = {
         "Read": "read_file",
         "Grep": "search_files",
@@ -154,10 +161,15 @@ def _ecc_agents() -> dict[str, AgentDef]:
     }
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     definitions = {}
-    for name in manifest["agents"]:
+    for name, entry in manifest["agents"].items():
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or name in BUILTIN_AGENTS:
             raise ValueError("invalid or conflicting bundled ECC agent name")
-        raw = (directory / f"{name}.md").read_text(encoding="utf-8")
+        raw_bytes = (directory / f"{name}.md").read_bytes()
+        expected = str(entry.get("sha256") or "")
+        actual = hashlib.sha256(raw_bytes).hexdigest()
+        if not expected or actual != expected:
+            raise ValueError(f"bundled ECC agent failed its manifest hash: {name}")
+        raw = raw_bytes.decode("utf-8")
         _, header, body = raw.split("---", 2)
         metadata = yaml.safe_load(header)
         if metadata["name"] != name or not body.strip():

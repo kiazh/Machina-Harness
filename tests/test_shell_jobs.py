@@ -329,14 +329,15 @@ async def test_foreground_approval_cannot_launch_an_unlimited_background_command
 @pytest.mark.asyncio
 async def test_background_admission_can_take_longer_than_one_second(monkeypatch, tmp_path):
     from machina.core import agent as module
+    from machina.core import tool_batch as batch_module
     from machina.core.models import LLMResponse
 
     async def slow_launch(*args, **kwargs):
         await asyncio.sleep(1.2)
         return "background job admitted"
 
-    monkeypatch.setattr(module.registry, "execute", AsyncMock(side_effect=slow_launch))
-    monkeypatch.setattr(module.plugin_registry, "dispatch", AsyncMock())
+    monkeypatch.setattr(batch_module.registry, "execute", AsyncMock(side_effect=slow_launch))
+    monkeypatch.setattr(batch_module.plugin_registry, "dispatch", AsyncMock())
     monkeypatch.setattr("machina.permissions.broker.permission_broker.guard", AsyncMock())
     monkeypatch.setattr(
         "machina.core.execution_context.resolve_execution_context",

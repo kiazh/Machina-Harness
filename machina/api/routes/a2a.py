@@ -82,6 +82,33 @@ def _message_id() -> str:
     return uuid.uuid4().hex
 
 
+async def _pending_approval(session_id: uuid.UUID) -> bool:
+    """True when the session is paused on a durable human approval.
+
+    The turn claim is renewed while a human thinks, but a restarted process
+    can lose that claim before the decision lands. The approval row is the
+    durable evidence that the task is waiting for input, not complete.
+    """
+    from machina.db.connection import db
+
+    if not getattr(db, "connected", False):
+        return False
+    try:
+        return bool(
+            await db.fetchval(
+                """
+                SELECT 1 FROM permission_approvals
+                WHERE session_id = $1 AND status = 'pending'
+                LIMIT 1
+                """,
+                session_id,
+            )
+        )
+    except Exception:
+        # Unknown state must not be reported as success.
+        return True
+
+
 async def _task_state(session_id: uuid.UUID) -> tuple[str, dict[str, Any]]:
     session = await session_manager.get_fresh(session_id)
     if session is None:
@@ -90,6 +117,8 @@ async def _task_state(session_id: uuid.UUID) -> tuple[str, dict[str, Any]]:
     marker = marker if isinstance(marker, dict) else {}
     if await turn_active(session_id):
         return "working", marker
+    if await _pending_approval(session_id):
+        return "input-required", marker
     state = str(marker.get("state") or "completed")
     # A non-blocking send stores "working" before the turn starts. Once the
     # durable claim is gone, the task is terminal; leaving the stale marker

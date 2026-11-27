@@ -223,7 +223,10 @@ class _UpdateSpinner:
         except (LookupError, UnicodeEncodeError):
             self._fancy = False
         self._color = self._fancy and not os.environ.get("NO_COLOR")
-        self._truecolor = "truecolor" in os.environ.get("COLORTERM", "").lower() or "24bit" in os.environ.get("COLORTERM", "").lower()
+        self._truecolor = (
+            "truecolor" in os.environ.get("COLORTERM", "").lower()
+            or "24bit" in os.environ.get("COLORTERM", "").lower()
+        )
 
     @staticmethod
     def _ansi_capable() -> bool:
@@ -247,12 +250,16 @@ class _UpdateSpinner:
     def _dim(self, text: str) -> str:
         return self._ink(text, (150, 156, 168), 244)
 
-    def _mix(self, start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    def _mix(
+        self, start: tuple[int, int, int], end: tuple[int, int, int], t: float
+    ) -> tuple[int, int, int]:
         return tuple(int(a + (b - a) * t) for a, b in zip(start, end))
 
     def _title(self) -> str:
         return "".join(
-            self._ink(char, self._mix(self._ACCENT, self._SECONDARY, index / max(1, len(self._TITLE) - 1)))
+            self._ink(
+                char, self._mix(self._ACCENT, self._SECONDARY, index / max(1, len(self._TITLE) - 1))
+            )
             for index, char in enumerate(self._TITLE)
         )
 
@@ -385,7 +392,15 @@ class _UpdateSpinner:
         except (LookupError, UnicodeEncodeError):
             glyph = {"success": "+", "warning": "!", "error": "x"}.get(tone, "-")
         if self._color:
-            colour = self._SUCCESS if tone == "success" else (228, 183, 122) if tone == "warning" else (224, 138, 128) if tone == "error" else self._ACCENT
+            colour = (
+                self._SUCCESS
+                if tone == "success"
+                else (228, 183, 122)
+                if tone == "warning"
+                else (224, 138, 128)
+                if tone == "error"
+                else self._ACCENT
+            )
             message = f"{self._ink(glyph, colour)} {message}"
         else:
             message = f"{glyph} {message}"
@@ -398,7 +413,12 @@ def auto_update(*, force: bool = False) -> None:
     ``force`` is for the explicit ``machina update`` command; launch-time
     auto-update stays quiet for CI and non-interactive output.
     """
-    if not force and os.environ.get("MACHINA_AUTO_UPDATE", "1").strip().lower() in {"0", "false", "no", "off"}:
+    if not force and os.environ.get("MACHINA_AUTO_UPDATE", "1").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
         return
     # One-shot guard for the process that re-execs after an update. The next
     # real launch checks again; this child must not fetch twice.
@@ -417,9 +437,7 @@ def auto_update(*, force: bool = False) -> None:
         status.clear()
 
 
-def _check_and_apply_update(
-    root: Path, status: _UpdateSpinner, *, reexec: bool = True
-) -> None:
+def _check_and_apply_update(root: Path, status: _UpdateSpinner, *, reexec: bool = True) -> None:
     fetched = _fetch_origin(root)
     if fetched is None or fetched.returncode != 0:
         message = "Could not check for updates; continuing on the local version."
@@ -476,7 +494,9 @@ def _check_and_apply_update(
         status.finish(message, "warning")
         return
 
-    status.set("Updating checkout", f"{behind} new {noun} · v{__version__} -> {remote_version or '?'}")
+    status.set(
+        "Updating checkout", f"{behind} new {noun} · v{__version__} -> {remote_version or '?'}"
+    )
     previous = _run(["git", "rev-parse", "HEAD"], cwd=root, timeout=5)
     previous_commit = (
         previous.stdout.strip() if previous is not None and previous.returncode == 0 else ""

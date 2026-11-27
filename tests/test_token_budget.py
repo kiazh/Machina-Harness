@@ -64,7 +64,8 @@ def test_pressure_is_clamped() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_stops_before_a_continuation_after_budget(monkeypatch) -> None:
-    from machina.core import agent as module
+    from machina.core import agent as agent_module
+    from machina.core import react_loop as loop_module
     from machina.core.models import LLMResponse, Session
 
     monkeypatch.setenv("MACHINA_REPAIR_TOKEN_BUDGET", "100")
@@ -87,7 +88,7 @@ async def test_agent_stops_before_a_continuation_after_budget(monkeypatch) -> No
             usage={"total_tokens": 100},
         )
 
-    monkeypatch.setattr(module, "evaluate_request", gate)
+    monkeypatch.setattr(loop_module, "evaluate_request", gate)
     agent = SimpleNamespace(
         agent_id="harness",
         provider=object(),
@@ -102,7 +103,7 @@ async def test_agent_stops_before_a_continuation_after_budget(monkeypatch) -> No
         _schedule_memory_consolidation=lambda *args: None,
     )
 
-    response = await module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
+    response = await agent_module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
 
     assert response.outcome == "failed"
     assert "token budget" in response.content.lower()

@@ -149,6 +149,8 @@ async def test_steering_during_tool_batch_preserves_the_current_action(monkeypat
 @pytest.mark.parametrize("stream", [False, True])
 async def test_steering_arriving_during_model_call_replans_before_tools(monkeypatch, stream):
     from machina.core import agent as module
+    from machina.core import context_prep as context_module
+    from machina.core import react_loop as loop_module
     from machina.core.models import AgentResponse, LLMResponse, Session, StreamEvent
     from machina.core.request_gate import RequestGate
     from machina.core.steering import steering_inbox
@@ -157,12 +159,12 @@ async def test_steering_arriving_during_model_call_replans_before_tools(monkeypa
     inbox = SteeringInbox(session.id)
     messages = [{"role": "user", "content": "work"}]
     persist = AsyncMock()
-    monkeypatch.setattr(module.context_manager, "add_chunk", persist)
+    monkeypatch.setattr(context_module.context_manager, "add_chunk", persist)
 
     async def gate(msgs, **kwargs):
         return RequestGate(messages=msgs, effective_budget=100, request_tokens=10)
 
-    monkeypatch.setattr(module, "evaluate_request", gate)
+    monkeypatch.setattr(loop_module, "evaluate_request", gate)
     calls = []
 
     async def model(**kwargs):

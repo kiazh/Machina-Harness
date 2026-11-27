@@ -94,10 +94,39 @@ jobs:
       - name: Run ruff format check
         run: python -m ruff format --check machina/ tools/ tests/ integrations/
 
+      - name: Check the architecture ratchet
+        # The god-object decomposition lowers these baselines task by task;
+        # a change may never raise them.
+        run: python tools/architecture_report.py --check
+
+      - name: Type-check hardened Python seams
+        # Ratchet, not a repo-wide claim: these modules are fully annotated
+        # and must stay that way. Imported modules are not type-checked here.
+        run: |
+          python -m mypy --follow-imports=silent --ignore-missing-imports \
+            machina/core/retention.py \
+            machina/core/approval_resume.py \
+            machina/permissions/tools.py \
+            machina/core/continuity.py \
+            machina/gateway/features/_common.py \
+            machina/core/agent_support.py \
+            machina/core/llm_calls.py \
+            machina/core/context_prep.py \
+            machina/core/post_turn.py \
+            machina/core/react_loop.py \
+            machina/core/tool_batch.py \
+            machina/core/tool_results.py \
+            machina/core/turn_phases.py
+
       - name: Run bandit security scan
         # F-16: CLI process-spawning/token code and build tooling are in scope;
         # the old command excluded machina/cli/ and skipped tools/ entirely.
         run: bandit -r machina/ tools/ -ll
+
+      - name: Check installer shell syntax
+        run: |
+          bash -n install.sh
+          bash -n tools/install-helpers.sh
 
       - name: Build distributable artifacts
         run: python -m hatchling build
@@ -130,7 +159,9 @@ jobs:
       - name: Run repository smoke suite
         env:
           MACHINA_REPO: ${{ github.workspace }}
-        run: python -m pytest tests -q -p no:cacheprovider
+        run: >-
+          python -m pytest tests -q -p no:cacheprovider
+          --cov=machina --cov-report=term --cov-fail-under=40
 
       - name: Upload distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

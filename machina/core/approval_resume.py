@@ -20,6 +20,23 @@ async def resumed_request(record: dict, arguments: dict[str, Any]):
 
         await runtime_services.get_connector_service().refresh()
     spec = action_for_tool(tool, arguments)
+    # ``action_for_tool`` may return review-only fields (edit_file's
+    # ``old_text``/``count`` already fold into ``content`` and therefore into
+    # the digest). ``build_request`` owns the canonical field set; passing
+    # these extras used to raise TypeError and made an approved edit
+    # impossible to resume over HTTP.
+    request_fields = {
+        "operation",
+        "targets",
+        "argv",
+        "shell_payload",
+        "cwd",
+        "content",
+        "capabilities",
+        "network",
+        "timeout",
+    }
+    spec = {key: value for key, value in spec.items() if key in request_fields}
     context = await resolve_execution_context(record["session_id"], tool)
     return build_request(
         **spec,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import hashlib
 import logging
 import os
 import secrets
@@ -901,6 +902,63 @@ def _write_anchored_inside(file_path: Path, content: str, display: str) -> str:
             pass
 
 
+def _approved_base_revision() -> str:
+    """Pre-write file identity captured when the action was reviewed."""
+    try:
+        from machina.permissions.broker import get_execution_context
+
+        snapshot = get_execution_context() or {}
+        return str(snapshot.get("base_revision") or "")
+    except Exception:
+        return ""
+
+
+def _verify_base_revision(file_path: Path, *, data: bytes | None = None) -> None:
+    """Refuse a write when the target changed after the human approved it.
+
+    The approval digest binds ``base_revision`` at review time. Re-hashing
+    here closes the window between review and execution, including a long
+    approval wait and a same-text edit that moved to another occurrence.
+    Direct (unbrokered) calls have no snapshot and are unchanged.
+    """
+    expected = _approved_base_revision()
+    if not expected:
+        return
+    if data is None:
+        try:
+            info = os.lstat(file_path)
+        except FileNotFoundError:
+            actual = "missing"
+        except OSError:
+            actual = "unreadable"
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                actual = "non-regular"
+            elif info.st_size > 8 * 1024 * 1024:
+                actual = f"large:{info.st_size}:{info.st_mtime_ns}"
+            else:
+                try:
+                    data = file_path.read_bytes()
+                except OSError:
+                    actual = "unreadable"
+                else:
+                    actual = f"sha256:{hashlib.sha256(data).hexdigest()}"
+    elif len(data) > 8 * 1024 * 1024:
+        try:
+            info = os.lstat(file_path)
+        except OSError:
+            actual = "unreadable"
+        else:
+            actual = f"large:{info.st_size}:{info.st_mtime_ns}"
+    else:
+        actual = f"sha256:{hashlib.sha256(data).hexdigest()}"
+    if actual != expected:
+        raise ToolError(
+            "file changed after the action was approved; read the current file "
+            "and request a fresh approval"
+        )
+
+
 @registry.register(
     name="write_file",
     description="Write content to a file. Creates the file if it doesn't exist.",
@@ -934,6 +992,7 @@ async def write_file(path: str, content: str) -> str:
     try:
 
         def _write():
+            _verify_base_revision(file_path)
             inside = file_path.is_relative_to(_base_dir())
             if inside and _dir_fd_supported():
                 # R5-B/F01: create missing parents and anchor the probe, temp
@@ -1035,9 +1094,7 @@ async def write_file(path: str, content: str) -> str:
         "required": ["path", "old_text", "new_text"],
     },
 )
-async def edit_file(
-    path: str, old_text: str, new_text: str, count: int = 1
-) -> str:
+async def edit_file(path: str, old_text: str, new_text: str, count: int = 1) -> str:
     """Replace an exact text block in a UTF-8 file."""
     if not isinstance(old_text, str) or not old_text:
         raise ToolError("old_text must not be empty")
@@ -1092,6 +1149,7 @@ async def edit_file(
             text = data.decode("utf-8")
         except UnicodeDecodeError as e:
             raise ValueError(f"file is not valid UTF-8: {e}") from e
+        _verify_base_revision(file_path, data=data)
         found = text.count(old_text)
         if found != expected:
             raise ValueError(

@@ -37,7 +37,13 @@ from typing import TYPE_CHECKING, Any
 from machina.core.execution_context import configured_workspace
 from machina.core.provider import audit_log
 from machina.gateway.errors import INVALID_PARAMS, RpcError
-from machina.gateway.features._common import _bool, _int, _str, _uuid
+from machina.gateway.features._common import (
+    _bool,
+    _int,
+    _require_local_transport,
+    _str,
+    _uuid,
+)
 from machina.interop import (
     DetectResult,
     PlatformSpec,
@@ -359,6 +365,7 @@ async def interop_run(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
     ``stderr`` and an optional ``unsupportedReason`` — with stdout/stderr
     capped and both redacted so CLI diagnostics cannot leak a credential.
     """
+    _require_local_transport(gw, "interop.run")
     spec = _platform(_str(params, "platform", max_len=32))
     prompt = _str(params, "prompt", max_len=MAX_RUN_PROMPT_CHARS)
     timeout = _run_timeout(params)

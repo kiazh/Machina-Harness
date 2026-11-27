@@ -120,6 +120,23 @@ async def prepare_continuity(
     return history_messages, summary, recent
 
 
+def _compaction_summary_text(entry: dict[str, Any]) -> str:
+    """Readable text from a live ``compression_summary`` row."""
+    payload = entry.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content
+    checkpoint = payload.get("checkpoint")
+    if checkpoint:
+        try:
+            return json.dumps(checkpoint, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return ""
+    return ""
+
+
 def make_dynamic_assembler(
     session: Any, tool_defs: list[Any], provider: Any, visual_tokens: int
 ) -> PromptAssembler:
@@ -181,11 +198,22 @@ def build_context_messages(
     # recent fallback can begin mid-turn; drop leading assistant rows.
     while history and history[0].get("role") != "user":
         history = history[1:]
-    recent_for_tail = [
-        entry
-        for entry in recent
-        if isinstance(entry, dict) and entry.get("type") != "compression_summary"
-    ]
+    # The compressor's LLM summary is a different scope from the continuity
+    # anchor: the anchor folds *evicted native turns*, while the compressor
+    # summary describes older archived chunks. Dropping every
+    # ``compression_summary`` here made the LLM summary invisible after the
+    # first continuity fold (it was only seeded into the anchor when state was
+    # empty). Keep it for the assembler's reserved ``## Compacted Context``
+    # section, unless the anchor already embeds that exact summary.
+    recent_for_tail = []
+    for entry in recent:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "compression_summary":
+            text = _compaction_summary_text(entry).strip()
+            if summary and text and (text[:200] in summary or summary[:200] in text):
+                continue
+        recent_for_tail.append(entry)
     dynamic_tail = assemble_turn_prompt(
         assembler,
         "",

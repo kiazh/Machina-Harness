@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 _discard_gateway_frame,
                 owns_db=False,
                 inherit_env_token=False,
+                local_only=False,
             )
             app.state.gateway = gateway
         except Exception as e:

@@ -30,7 +30,7 @@ Machina is built as a **state-management system** instead. The model is the only
 - **Reach it from anywhere.** `machina host` keeps the terminal UI alive in a persistent tmux session behind a token-protected browser bridge on loopback, reached over an SSH forward, Tailscale, or Cloudflare Access — the gateway itself never opens a new network port. `machina serve` exposes the HTTP API with a bearer key for remote clients and dashboards.
 - **It improves its own strategy, within bounds.** Agent "growth" and RSI adjust saved strategy guidance and retrieval policy from recorded outcomes, with revisions, feedback, and one-command rollback. This is bounded, auditable configuration — it does **not** retrain the model, change tool permissions, or grant an agent more authority.
 
-**At a glance:** ~130,000 lines of Python · 683 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 46 built-in tools · 176 RPC methods · one-command install on Windows, macOS, and Linux.
+**At a glance:** ~139,000 lines of Python · 862 focused local tests · latest external DevTools snapshot 6,487 · 18 provider types · 71 agent definitions · 77 skill packages · 48 built-in tools · 177 RPC methods · one-command install on Windows, macOS, and Linux.
 
 ![Machina terminal UI with chat, editor, and file explorer](docs/ImagePub.png)
 
@@ -62,7 +62,7 @@ See [Get started](#get-started) for manual setup, options, and Docker.
 
 > **How to read this README.** The [technical overview](#technical-overview) explains the problems a harness has to solve and the design position Machina takes. The [architecture](#architecture-in-one-chart) is the complete system map. [One session, end to end](#one-session-end-to-end) shows the system in motion. The [deep dives](#deep-dive-1-context-management) explain the mechanisms, failure modes, and design reasoning. The [conceptual blueprint](#conceptual-blueprint) describes how to build the same system without prescribing an implementation. The [reference](#reference) covers installation, commands, and operations; the [appendices](#appendices) hold the complete RPC, tool, schema, configuration, event, route, command, failure, test, and module catalogs.
 
-**Release status:** **2.4.2 open-source feature release.** `main` adds background harness subagents and Activity navigation on top of the 2.1 one-click setup and tool-loading fixes in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.4.2 release notes](internal/docs/verification/RELEASE_2.4.2.md). There is no hosted service, data-recovery guarantee, or production SLA.
+**Release status:** **2.4.2 plus unreleased hardening.** `main` adds the per-prompt Changes screen, review runs, approval/layout fixes, and the verification fixes in the [changelog](CHANGELOG.md). Self-hosted, bring your own model/provider keys; integrations may still change. See [2.4.2 release notes](internal/docs/verification/RELEASE_2.4.2.md). There is no hosted service, data-recovery guarantee, or production SLA.
 
 ## Contents
 
@@ -119,7 +119,7 @@ flowchart TB
     subgraph EDGE["Edge protocol"]
         direction LR
         GW["Gateway<br/>JSON-RPC 2.0 over stdio"]
-        FEATURES["162 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
+        FEATURES["163 feature methods<br/>memory, skills, MCP<br/>auth, workspace"]
         REST["REST + event stream<br/>sessions, jobs<br/>approvals"]
     end
 
@@ -152,7 +152,7 @@ flowchart TB
 
     subgraph PERM["Permission kernel"]
         direction LR
-        POLICY["Canonical policy<br/>effects, modes<br/>SHA-256 v2 digest"]
+        POLICY["Canonical policy<br/>effects, modes<br/>SHA-256 v3 digest"]
         BROKER["Broker<br/>allow, deny, review"]
         APPROVALS["Durable approvals<br/>human principal<br/>one-time use"]
         EXECCTX["Execution context<br/>digest revalidation"]
@@ -160,7 +160,7 @@ flowchart TB
 
     subgraph TOOLS["Tools and integrations"]
         direction LR
-        TOOLREG["Tool registry<br/>46 built-in tools"]
+        TOOLREG["Tool registry<br/>48 built-in tools"]
         WORKSPACE["Workspace + LSP<br/>files, completion<br/>diagnostics"]
         RAG["Documents + RAG<br/>ingest, embed<br/>search, rerank"]
         SKILLS["Skills<br/>77 packages<br/>catalog-first"]
@@ -355,19 +355,19 @@ Both systems share the same discipline: **store the original, project a bounded 
 | **ML / inference infrastructure** | [Context](#deep-dive-1-context-management), [memory](#deep-dive-2-memory-management), [routing](#connected-model-routing), [usage ledger](docs/TOKEN_EFFICIENCY.md) | Bounded prompts with honest recovery, hybrid retrieval, role-aware model selection, token accounting that distinguishes missing data from zero |
 | **Security / systems** | [Permission kernel](#deep-dive-3-the-permission-kernel), [SECURITY.md](SECURITY.md) | TOCTOU-resistant approvals, canonical digests, confused-deputy resistance, redaction boundaries |
 | **Product / UX** | [Surfaces](#surfaces), [workspace](docs/design/WORKSPACE.md) | The same semantics across a terminal UI, a CLI, HTTP/SSE, and an MCP server |
-| **Testing / rigor** | [Reliability](#reliability-and-testing) | 6,400+ backend tests, real-PostgreSQL suites, architecture ratchets, and performance gates |
+| **Testing / rigor** | [Reliability](#reliability-and-testing) | 800+ local smoke tests; 6,400+ authoritative backend tests, real-PostgreSQL suites, architecture ratchets, and performance gates in the pinned DevTools suite |
 
 ### At a glance
 
 | Metric | This checkout |
 |---|---|
-| Python backend | ~130,239 lines across 363 files |
-| Backend tests | 683 passed, 18 skipped in this checkout; 1,266 UI tests (1,260 passed, 6 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
+| Python backend | ~139,000 lines across 383 files |
+| Backend tests | 862 passed, 18 skipped in this checkout; 1,357 UI tests (1,351 passed, 6 skipped); latest recorded DevTools snapshot 6,487 passed / 27 skipped / 8 deselected (2026-10-26, real PostgreSQL) |
 | Providers | 18 built-in connection types, plus user-added OpenAI-compatible providers |
 | Agents and skills | 71 built-in agent definitions; 77 bundled `SKILL.md` packages |
-| Tools and commands | 46 built-in tools; 62 top-level CLI commands (47 one-shot + 15 groups); 53 slash commands |
-| Protocol and API | 176 RPC methods (14 core + 162 feature); 35 functional REST routes (38 with docs); 25 protocol events |
-| Configuration | 134 keys with defaults (Appendix D) |
+| Tools and commands | 48 built-in tools; 62 top-level CLI commands (47 one-shot + 15 groups); 53 slash commands |
+| Protocol and API | 177 RPC methods (14 core + 163 feature); 35 functional REST routes (38 with docs); 27 protocol events |
+| Configuration | 146 keys with defaults (Appendix D) |
 | Storage | PostgreSQL 16 + pgvector, 32 tables |
 | Surfaces | Terminal UI, CLI, HTTP API + SSE, MCP server/client, external harness interop |
 | CLI cold start | `machina --version` measured at ~0.12 s; `machina --help` at ~0.24 s on this checkout with a warm filesystem cache; first run after install is slower |
@@ -784,7 +784,7 @@ The broker is a reference monitor: every effect goes through it, it sees the exa
 ```mermaid
 flowchart LR
     A[Tool call] --> B[Normalize action]
-    B --> C[Canonical v2 digest]
+    B --> C[Canonical v3 digest]
     C --> D{Mode policy}
     D -- allow --> E[Execute with bound context]
     D -- deny --> F[Structured denial]
@@ -798,7 +798,7 @@ flowchart LR
 
 ### What an approval binds
 
-An approval is not a tool name. It is a capability token for **one canonical action**. The v2 digest is a length-prefixed SHA-256 over every material field:
+An approval is not a tool name. It is a capability token for **one canonical action**. The v3 digest is a length-prefixed SHA-256 over every material field:
 
 - mode and execution backend
 - operation and concrete tool name
@@ -806,7 +806,7 @@ An approval is not a tool name. It is a capability token for **one canonical act
 - exact argv (never a bare shell string when argv is available)
 - shell payload, when applicable
 - canonical working directory and targets
-- content digest for writes
+- content digest and base revision for writes
 - network declarations, including the opaque-network flag
 - timeout
 - workspace identity
@@ -2200,11 +2200,11 @@ These appendices are reference material. Catalogs and counts were checked agains
 
 | Appendix | Contents |
 |---|---|
-| [A](#appendix-a-rpc-method-catalog) | 176 RPC methods |
-| [B](#appendix-b-tool-catalog) | 46 tools and their effects |
+| [A](#appendix-a-rpc-method-catalog) | 177 RPC methods |
+| [B](#appendix-b-tool-catalog) | 48 tools and their effects |
 | [C](#appendix-c-database-catalog) | 32 tables and two ER diagrams |
-| [D](#appendix-d-configuration-reference) | 134 configuration keys |
-| [E](#appendix-e-protocol-events) | 25 protocol events |
+| [D](#appendix-d-configuration-reference) | 146 configuration keys |
+| [E](#appendix-e-protocol-events) | 27 protocol events |
 | [F](#appendix-f-wire-examples) | JSON-RPC, SSE, and approval examples |
 | [G](#appendix-g-failure-semantics) | Failure and degradation matrix |
 | [H](#appendix-h-verification-map) | Test coverage by area |
@@ -2216,7 +2216,7 @@ These appendices are reference material. Catalogs and counts were checked agains
 
 ### Appendix A: RPC method catalog
 
-The gateway exposes **176** JSON-RPC methods: **14 core** methods handled directly by `gateway/server.py` and **162 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
+The gateway exposes **177** JSON-RPC methods: **14 core** methods handled directly by `gateway/server.py` and **163 feature** methods registered from `gateway/features/`. The same dispatch surface is reachable through `POST /rpc` on the HTTP API; `prompt.submit`, `prompt.cancel`, and `shutdown` are blocked there, and turns use the session prompt stream.
 
 **Core methods**
 
@@ -2243,11 +2243,13 @@ The gateway exposes **176** JSON-RPC methods: **14 core** methods handled direct
 |---|---|
 | **agents** (5) | `agents.delete`, `agents.history`, `agents.list`, `agents.run`, `agents.save` |
 | **approvals** (2) | `approvals.list`, `approvals.resolve` |
-| **auth** (16) | `auth.chatgpt.importCodex`, `auth.chatgpt.login`, `auth.chatgpt.logout`, `auth.chatgpt.status`, `auth.copilot.importGh`, `auth.copilot.login`, `auth.copilot.logout`, `auth.copilot.status`, `auth.grok.login`, `auth.grok.logout`, `auth.grok.status`, `auth.kiro.fallback`, `auth.kiro.start`, `auth.kiro.status`, `auth.kiro.stop`, `auth.kiro.usage` |
+| **auth** (21) | `auth.chatgpt.importCodex`, `auth.chatgpt.login`, `auth.chatgpt.logout`, `auth.chatgpt.status`, `auth.copilot.importGh`, `auth.copilot.login`, `auth.copilot.logout`, `auth.copilot.status`, `auth.grok.login`, `auth.grok.logout`, `auth.grok.status`, `auth.hermes.setup`, `auth.hermes.start`, `auth.hermes.status`, `auth.hermes.stop`, `auth.kiro.fallback`, `auth.kiro.setup`, `auth.kiro.start`, `auth.kiro.status`, `auth.kiro.stop`, `auth.kiro.usage` |
+| **changes** (2) | `changes.diff`, `changes.list` |
 | **config** (1) | `config.get` |
 | **context** (2) | `context.compress`, `context.get` |
 | **growth** (6) | `growth.feedback`, `growth.forget`, `growth.get`, `growth.installPolicy`, `growth.rollback`, `growth.teach` |
-| **interop** (6) | `interop.communications`, `interop.disable`, `interop.enable`, `interop.list`, `interop.run`, `interop.status` |
+| **host** (14) | `host.addKey`, `host.credentials`, `host.instructions`, `host.openUrl`, `host.plan`, `host.restart`, `host.setup`, `host.setup.cancel`, `host.setup.resume`, `host.setup.start`, `host.setup.status`, `host.start`, `host.status`, `host.stop` |
+| **interop** (7) | `interop.communications`, `interop.disable`, `interop.enable`, `interop.jobs`, `interop.list`, `interop.run`, `interop.status` |
 | **jobs** (5) | `jobs.create`, `jobs.delete`, `jobs.list`, `jobs.resume`, `jobs.setEnabled` |
 | **learning** (4) | `learning.approve`, `learning.list`, `learning.reject`, `learning.revert` |
 | **mcp** (17) | `mcp.catalog`, `mcp.config`, `mcp.configure`, `mcp.connect`, `mcp.disconnect`, `mcp.list`, `mcp.oauth.cancel`, `mcp.oauth.forget`, `mcp.oauth.open`, `mcp.oauth.preview`, `mcp.oauth.start`, `mcp.oauth.status`, `mcp.oauth.url`, `mcp.preview`, `mcp.remove`, `mcp.status`, `mcp.tools` |
@@ -2260,6 +2262,7 @@ The gateway exposes **176** JSON-RPC methods: **14 core** methods handled direct
 | **operations** (3) | `operations.cancel`, `operations.get`, `operations.start` |
 | **profile** (3) | `profile.get`, `profile.list`, `profile.set` |
 | **providers** (3) | `providers.add`, `providers.list`, `providers.remove` |
+| **review** (3) | `review.cancel`, `review.get`, `review.start` |
 | **runtime** (2) | `runtime.capabilities`, `runtime.selectWorkspace` |
 | **secrets** (3) | `secrets.clear`, `secrets.list`, `secrets.set` |
 | **session** (10) | `session.delete`, `session.export`, `session.fork`, `session.history`, `session.recall`, `session.recall.window`, `session.rename`, `session.search`, `session.setGoal`, `session.setModel` |
@@ -2631,10 +2634,10 @@ erDiagram
 
 ### Appendix D: Configuration reference
 
-**134** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys. `temp` is a legacy compatibility alias for `temperature`.
+**146** keys are defined in `DEFAULTS` (`machina/core/config.py`). Precedence is explicit override, environment (`MACHINA_<KEY>`), saved configuration, then default. Secrets resolve separately and are never read from YAML. The table below is the complete default set; the main reference explains the operationally important keys. `temp` is a legacy compatibility alias for `temperature`.
 
 <details>
-<summary>All 134 keys and defaults</summary>
+<summary>All 146 keys and defaults</summary>
 
 #### Model, routing, and identity
 
@@ -2684,6 +2687,8 @@ erDiagram
 | `artifact_max_chars` | `2000000` |
 | `artifact_max_per_session` | `500` |
 | `artifact_retention_days` | `30` |
+| `audit_retention_days` | `365` |
+| `usage_retention_days` | `730` |
 | `eviction_max_tokens` | `0` |
 | `rag_enabled` | `true` |
 | `skills_disclosure_planner` | `true` |
@@ -2695,6 +2700,10 @@ erDiagram
 | `memory_enabled` | `true` |
 | `memory_approval_enabled` | `false` |
 | `memory_consolidation_enabled` | `true` |
+| `memory_forgetting_enabled` | `true` |
+| `memory_eviction_threshold` | `0.05` |
+| `memory_max_per_agent` | `5000` |
+| `memory_rerank_enabled` | `false` |
 | `memory_digest_enabled` | `true` |
 | `memory_digest_candidates` | `16` |
 | `memory_digest_max_chars` | `1200` |
@@ -2982,14 +2991,14 @@ Every optional subsystem has a defined degraded mode. The table consolidates the
 
 ### Appendix H: Verification map
 
-The local suite (`tests/`, 683 passed / 18 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`.
+The local suite (`tests/`, 862 passed / 18 skipped at this commit) covers contracts and fast regression paths; the larger backend suite runs from [Machina-DevTools](https://github.com/kiazh/Machina-DevTools) against real PostgreSQL. The UI suite lives in `ui/test/`. CI enforces a 40% coverage floor on the local smoke suite and a mypy ratchet over the fully annotated hardened modules.
 
 | Area | Representative coverage | What it proves |
 |---|---|---|
 | Routing and plans | `test_model_routing.py`, `test_orchestration_plan.py`, `test_gateway_routing.py` | Deterministic role selection, cost tiers, dependency-aware plans |
 | Context and tokens | `test_token_budget.py`, `test_prompt_token_pressure.py`, `test_archive_ordering.py`, `test_context_window_catalog.py` | Budgets, compaction ordering, window resolution |
 | Memory | `test_memory_digest.py`, `test_experience_brief.py` | Bounded multi-fact digest and experience rendering |
-| Permissions | `test_permission_ask_room.py`, DevTools approval suites | Ask-mode classification, canonical decisions, resume |
+| Permissions | `test_permission_python_m.py`, `test_edit_base_revision.py`, `test_approval_resume.py`, DevTools approval suites | Ask-mode classification, canonical decisions, digest-bound resume, revalidated write targets |
 | Turn control | `test_steering.py`, `test_questions.py`, `test_shell_jobs.py`, `test_empty_final_recovery.py` | Steering delivery, structured questions, background jobs, empty-final recovery |
 | Delegation | `test_subagent_efficiency.py`, `test_subagent_followup.py`, `test_live_child_observer.py` | Child accounting, follow-up, live observation |
 | Repair controller | `test_task_run.py`, `test_task_descriptor.py`, `test_repair_gate.py`, `test_swe_repair_protocol.py` | Phase tracking, caps, verification gate |

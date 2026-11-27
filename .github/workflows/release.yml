@@ -40,6 +40,33 @@ jobs:
           uv export --frozen --extra dev --group build --no-hashes --no-emit-project -o /tmp/requirements.txt
           python -m pip install -r /tmp/requirements.txt
 
+      - name: Verify the tag matches the package version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+          import tomllib
+
+          tag = os.environ["TAG"].lstrip("v")
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = project["project"]["version"]
+          init = pathlib.Path("machina/__init__.py").read_text(encoding="utf-8")
+          problems = []
+          if tag != version:
+              problems.append(f"tag {os.environ['TAG']!r} != pyproject version {version!r}")
+          if f'__version__ = "{version}"' not in init and f"__version__ = '{version}'" not in init:
+              problems.append("machina/__init__.py does not declare the pyproject version")
+          if problems:
+              sys.exit("; ".join(problems))
+          print(f"release version {version} matches the tag")
+          PY
+
+      - name: Run the repository smoke suite
+        run: python -m pytest tests -q -p no:cacheprovider
+
       - name: Build wheel and source distribution
         run: |
           python -m hatchling build

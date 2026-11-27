@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -39,6 +41,26 @@ class OllamaProvider(LLMProvider, RateLimitBinding):
     """Local Ollama provider — free, self-hosted."""
 
     owns_usage_reservation = True
+
+    @staticmethod
+    def reachable(base_url: str = "http://localhost:11434", timeout: float = 0.5) -> bool:
+        """Return True when something is listening on the Ollama endpoint.
+
+        Routing probes readiness synchronously while it builds the model
+        inventory. Constructing a provider (and its AsyncClient) just to ask
+        this question leaked a client and, because no ``reachable`` method
+        existed, made local Ollama permanently absent from auto-routing.
+        A short TCP connect is enough to distinguish a running daemon from a
+        stopped one without issuing a model call.
+        """
+        parsed = urlparse(base_url or "http://localhost:11434")
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 11434)
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
 
     def __init__(
         self,

@@ -188,6 +188,7 @@ async def _search_web_results(query: str, limit: int = 5) -> list[tuple[str, str
                 f"{str(searxng_url).rstrip('/')}/search",
                 params={"q": query, "format": "json"},
                 timeout=10,
+                follow_redirects=False,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -211,6 +212,7 @@ async def _search_web_results(query: str, limit: int = 5) -> list[tuple[str, str
             "https://html.duckduckgo.com/html/",
             params={"q": query},
             timeout=10,
+            follow_redirects=False,
             headers={"User-Agent": "Machina/0.1"},
         )
         if resp.status_code == 200:
@@ -229,6 +231,7 @@ async def _search_web_results(query: str, limit: int = 5) -> list[tuple[str, str
             "https://www.bing.com/search",
             params={"q": query},
             timeout=10,
+            follow_redirects=False,
             headers={"User-Agent": "Mozilla/5.0"},
         )
         if resp.status_code == 200:

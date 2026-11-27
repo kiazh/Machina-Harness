@@ -74,6 +74,7 @@ async def test_auto_parallel_synthesis_is_presented_consistently(monkeypatch) ->
 async def test_run_and_run_stream_share_terminal_accounting(monkeypatch) -> None:
     """One model turn terminates identically through either adapter."""
     from machina.core import agent as module
+    from machina.core import react_loop as loop_module
     from machina.core.request_gate import RequestGate
 
     session = Session(id=uuid4(), agent_id="harness")
@@ -113,7 +114,7 @@ async def test_run_and_run_stream_share_terminal_accounting(monkeypatch) -> None
             outcome=outcome,
         )
 
-    monkeypatch.setattr(module, "evaluate_request", gate)
+    monkeypatch.setattr(loop_module, "evaluate_request", gate)
     agent = _fake_agent(
         session,
         messages,

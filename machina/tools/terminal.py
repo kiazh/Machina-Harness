@@ -535,6 +535,24 @@ async def terminal(
     elif use_docker:
         import uuid as _uuid
 
+        # SECURITY.md promises that an unavailable container backend refuses
+        # execution. The mode check alone only proved the *setting*; probe the
+        # daemon once per call before building a command that would fail
+        # opaquely (or, worse, be mistaken for an executed command).
+        try:
+            preflight = subprocess.run(
+                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                capture_output=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise ValidationError(
+                "container backend unavailable: Docker is not installed or not running"
+            ) from None
+        if preflight.returncode != 0:
+            raise ValidationError("container backend unavailable: Docker daemon is not reachable")
+
         # Identifiable handle retained for stop/remove on cancellation,
         # timeout, or lease loss (AH-AUDIT-023). --rm removes it on stop.
         container_name = f"machina-term-{_uuid.uuid4().hex[:12]}"

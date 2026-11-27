@@ -36,7 +36,8 @@ tools and prepends a short integration note to each selected role's prompt:
 | Read | read_file |
 | Grep | search_files |
 | Glob | list_files |
-| Write, Edit | write_file |
+| Write | write_file |
+| Edit | edit_file |
 | Bash | terminal |
 | WebSearch | web_search |
 | WebFetch | web_extract |
@@ -72,7 +73,8 @@ expectations, inspect source changes and optional tool requirements, then verify
 both the checkout and built wheel. Do not re-vendor the skills bundle to update
 subagents: it has a separate pin and scope.
 
-Tests in `tests/test_ecc_agents.py` cover the complete pinned inventory,
+The authoritative ECC suite (`tests/test_ecc_agents.py` in the pinned
+`kiazh/Machina-DevTools` checkout) covers the complete pinned inventory,
 checksums/license, real registered tool scopes, independent custom directory,
 gateway catalog, selected prompt/model construction, parent authority, and an
 existing-orchestrator delegation using a real dedicated test database and a

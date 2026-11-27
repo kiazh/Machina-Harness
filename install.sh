@@ -606,6 +606,18 @@ fi
 log "Checking setup (machina doctor; DB/key warnings are OK, see hints above)"
 "$MACHINA_BIN" doctor || true
 
+# The install is not complete until the database schema actually exists.
+# Previously this script warned about a failed `machina init` and still
+# printed a success banner with exit 0, which contradicted the one-click
+# contract: a reported success must have passed its own health check.
+if [ "$INIT_STATE" = "failed" ]; then
+  printf '\n' >&2
+  warn "Machina files are installed, but the database schema was NOT created."
+  warn "Fix the database problem shown above, then run: machina init"
+  warn "Re-running this installer is safe and will retry provisioning."
+  exit 1
+fi
+
 # --- PATH persistence ----------------------------------------------------------
 # A piped `curl | bash` runs in a subshell, so `export PATH=...` would die with
 # it. Instead we persist ~/.local/bin into the shell rc file (idempotent) and,

@@ -176,9 +176,7 @@ def save(workspace: Path, review: dict[str, Any]) -> dict[str, Any]:
     target = _path(workspace, str(review.get("snapshotId") or ""))
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(review, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(review, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(target)
     return review
 
@@ -198,9 +196,7 @@ def compact(review: dict[str, Any], limit: int = 12) -> dict[str, Any]:
     }
 
 
-def list_for(
-    workspace: Path, snapshot_ids: list[str] | None = None
-) -> dict[str, dict[str, Any]]:
+def list_for(workspace: Path, snapshot_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
     """Latest review per snapshot, bounded to the requested ids."""
     wanted = set(snapshot_ids) if snapshot_ids is not None else None
     found: dict[str, dict[str, Any]] = {}
@@ -329,7 +325,11 @@ def findings_from_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     )
                     break
             if not comment:
-                if "pdb.set_trace()" in lowered or "breakpoint()" in lowered or lowered.startswith("debugger"):
+                if (
+                    "pdb.set_trace()" in lowered
+                    or "breakpoint()" in lowered
+                    or lowered.startswith("debugger")
+                ):
                     add(
                         shown_path,
                         line_number,
@@ -339,8 +339,7 @@ def findings_from_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "Remove the breakpoint; it stops or freezes the program outside a debugger.",
                     )
                 if (
-                    "console.log(" in lowered
-                    or lowered.startswith("print(")
+                    "console.log(" in lowered or lowered.startswith("print(")
                 ) and not _is_test_path(shown_path):
                     add(
                         shown_path,
@@ -486,11 +485,7 @@ def _summary(findings: list[dict[str, Any]], engine: str = "rules") -> str:
     for finding in findings:
         severity = str(finding.get("severity") or "info")
         counts[severity] = counts.get(severity, 0) + 1
-    parts = [
-        f"{counts[severity]} {severity}"
-        for severity in SEVERITIES
-        if counts.get(severity)
-    ]
+    parts = [f"{counts[severity]} {severity}" for severity in SEVERITIES if counts.get(severity)]
     return f"{len(findings)} finding{'s' if len(findings) != 1 else ''}: " + ", ".join(parts)
 
 
@@ -569,8 +564,7 @@ def _model_prompt(
             continue
         file_truncated = file_truncated or bool(item.get("truncated"))
         blocks.append(
-            f"=== FILE: {path} ({item.get('change') or 'modified'}) ===\n"
-            + "\n".join(numbered)
+            f"=== FILE: {path} ({item.get('change') or 'modified'}) ===\n" + "\n".join(numbered)
         )
         line_map[path] = lines
     coverage = {
@@ -676,9 +670,9 @@ def _model_findings(
         if not title:
             invalid += 1
             continue
-        body = str(
-            item.get("body") or item.get("description") or item.get("impact") or ""
-        ).strip()[:2000]
+        body = str(item.get("body") or item.get("description") or item.get("impact") or "").strip()[
+            :2000
+        ]
         severity = str(item.get("severity") or "medium").strip().casefold()
         if severity not in SEVERITIES:
             severity = "medium"
@@ -803,9 +797,7 @@ async def run_model(
     coverage: dict[str, Any] | None = None
     try:
         nonce = secrets.token_hex(8)
-        messages, line_map, coverage = await asyncio.to_thread(
-            _model_prompt, snapshot, nonce
-        )
+        messages, line_map, coverage = await asyncio.to_thread(_model_prompt, snapshot, nonce)
         if not line_map:
             current["findings"] = []
             current["summary"] = "No textual changes to review."
@@ -842,9 +834,7 @@ async def run_model(
                     "outside the reviewed diff and were omitted."
                 )
             if coverage["truncated"]:
-                current["summary"] += (
-                    " The diff was truncated; later changes were not reviewed."
-                )
+                current["summary"] += " The diff was truncated; later changes were not reviewed."
             current["coverage"] = coverage
             current["status"] = "complete"
     except asyncio.CancelledError:
@@ -902,11 +892,16 @@ def run_rules(
 ) -> dict[str, Any]:
     snapshot_id = str(snapshot.get("snapshot_id") or "")
     existing = load(workspace, snapshot_id) if _SNAPSHOT_ID_RE.fullmatch(snapshot_id) else None
-    if existing is not None and not force and existing.get("status") in {
-        "queued",
-        "running",
-        "complete",
-    }:
+    if (
+        existing is not None
+        and not force
+        and existing.get("status")
+        in {
+            "queued",
+            "running",
+            "complete",
+        }
+    ):
         return existing
 
     started = _now()

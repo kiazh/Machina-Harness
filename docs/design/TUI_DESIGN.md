@@ -24,8 +24,9 @@ interaction states and the theme contract. Behaviour is enforced by the suite in
 - Tool activity is one unframed outcome-marked line (`✔`/`✖`/`●`/…) with a
   right-aligned status, capped at 108 columns. Results appear beneath it as `⎿`
   plus at most two preview rows; diff lines keep add/remove colors.
-- The composer is an inset, raised **Message** dock. Its label picks up the
-  focus color, and **Paste image** sits above the draft when it fits. Draft
+- The composer is an inset, raised, framed input card with an accent `❯`
+  inside it; the frame picks up the focus color. There is no separate
+  "Message" label. **Paste image** sits above the draft when it fits. Draft
   wrapping and click targets use the visible input width. Below 12 rows it
   becomes a plain input line.
 - Notices and thinking use the same gutter. Thinking reads
@@ -43,9 +44,9 @@ interaction states and the theme contract. Behaviour is enforced by the suite in
 
 ## Command strip
 
-- Two rows at normal heights, one on short viewports. It is present on chat,
-  Activity and Changes, so the three screens are real tabs rather than
-  full-viewport replacements.
+- Exactly one row at every height. It is present on chat, Activity and
+  Changes, so the three screens are real tabs rather than full-viewport
+  replacements.
 - Left: the `MACHINA` wordmark and tabs. Counts appear only when nonzero. The
   active tab uses fill and brackets. At wider widths, click **Keys** for the
   shortcut guide.
@@ -82,9 +83,9 @@ interaction states and the theme contract. Behaviour is enforced by the suite in
 - A pinned now-playing bar sits above the transcript in the chat column, as a
   sibling of the retained `ScrollView`, so it never scrolls away or rebuilds
   scroll state. It shows **what is playing on this computer**, not a library of
-  its own. Three rows: title, artist/source, transport. Two rows: title and
-  transport. One row: `title — artist · elapsed`. Compact and degraded
-  densities hide it. A click toggles playback when the source accepts commands.
+  its own. One row: `title — artist · elapsed` (or an honest "Nothing playing"
+  line). Compact and degraded densities hide it. A click toggles playback
+  when the source accepts commands.
 - Detection is a gateway concern (`nowplaying.get`, `nowplaying.command`):
   local-only and layered from system media APIs to nowplaying-cli, Spotify or
   Music, then a front browser tab. Automation denial is reported with its

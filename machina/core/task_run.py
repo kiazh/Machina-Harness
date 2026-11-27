@@ -268,9 +268,7 @@ def _is_exploration(entry: dict[str, Any]) -> bool:
     """Directory-listing calls (the orientation-loop shape)."""
     if entry.get("tool") == "list_files":
         return True
-    return entry.get("tool") == "terminal" and bool(
-        _EXPLORATION_COMMAND_RE.search(_command(entry))
-    )
+    return entry.get("tool") == "terminal" and bool(_EXPLORATION_COMMAND_RE.search(_command(entry)))
 
 
 def _failed(entry: dict[str, Any]) -> bool:

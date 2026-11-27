@@ -28,19 +28,30 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_activity TIMESTAMPTZ DEFAULT now()
 );
 
--- Migration for existing databases: allow 'running' for cross-process turn fencing (AH-010/AH-017).
-ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_status_check;
-ALTER TABLE sessions ADD CONSTRAINT sessions_status_check CHECK (status IN ('active', 'idle', 'archived', 'running'));
-
 -- 5.3 corrective: separate execution claims from business status. Status
 -- returns to business-only values; live ownership lives in claim_* columns
 -- with owner-matched release and expiry recovery (crash-safe).
+--
+-- The destructive part (normalizing legacy 'running' rows and narrowing the
+-- CHECK) runs exactly once. `machina init` is replayed by every Compose
+-- start; re-running a table-wide UPDATE and an ACCESS EXCLUSIVE
+-- DROP/ADD CONSTRAINT on each boot was unnecessary lock pressure.
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS claim_owner TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS claim_kind TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
-UPDATE sessions SET status = 'active' WHERE status = 'running';
-ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_status_check;
-ALTER TABLE sessions ADD CONSTRAINT sessions_status_check CHECK (status IN ('active', 'idle', 'archived'));
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM schema_meta WHERE key = 'maintenance:session_claim_status_v1'
+    ) THEN
+        UPDATE sessions SET status = 'active' WHERE status = 'running';
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_status_check;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_status_check
+            CHECK (status IN ('active', 'idle', 'archived'));
+        INSERT INTO schema_meta(key, value)
+            VALUES ('maintenance:session_claim_status_v1', 'done')
+            ON CONFLICT (key) DO NOTHING;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_sessions_claim ON sessions(claim_expires_at) WHERE claim_owner IS NOT NULL;
 
 -- Persist routing independently of live permission grants. Legacy sessions
@@ -726,17 +737,24 @@ CREATE TABLE IF NOT EXISTS memory_provenance (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DELETE FROM memory_provenance p WHERE NOT EXISTS (
-    SELECT 1 FROM memories m WHERE m.id = p.memory_id
-);
 DO $$ BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conrelid = 'memory_provenance'::regclass
-          AND confrelid = 'memories'::regclass AND contype = 'f'
+        SELECT 1 FROM schema_meta WHERE key = 'maintenance:memory_provenance_fk_v1'
     ) THEN
-        ALTER TABLE memory_provenance ADD CONSTRAINT memory_provenance_memory_fk
-            FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE;
+        DELETE FROM memory_provenance p WHERE NOT EXISTS (
+            SELECT 1 FROM memories m WHERE m.id = p.memory_id
+        );
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'memory_provenance'::regclass
+              AND confrelid = 'memories'::regclass AND contype = 'f'
+        ) THEN
+            ALTER TABLE memory_provenance ADD CONSTRAINT memory_provenance_memory_fk
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE;
+        END IF;
+        INSERT INTO schema_meta(key, value)
+            VALUES ('maintenance:memory_provenance_fk_v1', 'done')
+            ON CONFLICT (key) DO NOTHING;
     END IF;
 END $$;
 

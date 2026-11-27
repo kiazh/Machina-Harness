@@ -31,7 +31,7 @@ Written at T0/W1; T11 verifies the listed tests actually exist and pass.
 | T1 | Path traversal write/read | `..`, absolute, encoded separators in rel paths | realpath containment + fd-verified opens + O_NOFOLLOW walk (T5) |
 | T2 | Symlink escape | File or parent dir symlinked outside root | Ancestor-symlink rejection; entries flagged; no following out of root (T5) |
 | T3 | TOCTOU on save | Disk changed between read and replace | Expected-revision recheck immediately before commit; per-path coordinator; conflict result, never overwrite (T5) |
-| T4 | Hardlink pivot | Target hardlinked to outside file | Refuse `st_nlink > 1` targets (T5) |
+| T4 | Hardlink pivot | Target hardlinked to outside file | Writes refuse `st_nlink > 1`; reads mark such files read-only (T5) |
 | T5 | Silent dirty-buffer overwrite | Agent write / reload while unsaved edits exist | Structured conflict or versioned staged proposal; never silent replace (T5 backend, T10 agent path, T9 staged edits) |
 | T6 | Malformed LSP framing | Split frames, oversized headers, negative lengths | Byte-exact framing parser with bounds (16 KiB header / 8 MiB body), typed errors per-connection only (T7) |
 | R1 | Unattributed edits | Multi-file rename without origin trace | Workspace edits staged with origin URI/version + preview before apply (T9) |

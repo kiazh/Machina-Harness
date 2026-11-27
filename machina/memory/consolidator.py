@@ -181,6 +181,7 @@ class MemoryConsolidator:
                 session_id, agent_id, since, cursor_reader=cursor_reader
             )
             await self._commit_checkpoint(result, checkpoint_writer)
+            await self._evict_weak_memories(agent_id)
             return result
 
         entered_impl = False
@@ -200,6 +201,7 @@ class MemoryConsolidator:
                     session_id, agent_id, since, cursor_reader=cursor_reader
                 )
                 await self._commit_checkpoint(result, checkpoint_writer)
+                await self._evict_weak_memories(agent_id)
                 return result
         except Exception as e:
             if entered_impl:
@@ -209,7 +211,34 @@ class MemoryConsolidator:
                 session_id, agent_id, since, cursor_reader=cursor_reader
             )
             await self._commit_checkpoint(result, checkpoint_writer)
+            await self._evict_weak_memories(agent_id)
             return result
+
+    async def _evict_weak_memories(self, agent_id: str) -> None:
+        """Apply the forgetting model after a successful consolidation.
+
+        Eviction is best-effort and never changes the consolidation result.
+        Only rows below the configured strength threshold are removed after
+        the per-agent cap is exceeded; ``explicitly_important`` and
+        quarantined rows are preserved by the store's SQL.
+        """
+        try:
+            from machina.core.config import config
+
+            if not bool(config.get("memory_forgetting_enabled")):
+                return
+            threshold = float(config.get("memory_eviction_threshold"))
+            cap = int(config.get("memory_max_per_agent"))
+            removed = await self.store.evict_weak_memories(
+                threshold=threshold,
+                agent_id=agent_id,
+                max_memories=cap if cap > 0 else None,
+            )
+            if removed:
+                logger.info("evicted %s weak memories for agent %s", removed, agent_id)
+        except Exception as error:
+            # Forgetting is maintenance, not part of the write contract.
+            record_failure("memory.eviction", error)
 
     @staticmethod
     async def _commit_checkpoint(

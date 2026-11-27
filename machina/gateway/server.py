@@ -195,11 +195,39 @@ def _git_branch() -> str:
     return ""
 
 
-def _approval_event_target(
-    card: dict[str, Any], session_id: str, turn_id: str
-) -> tuple[str, str]:
+def _approval_event_target(card: dict[str, Any], session_id: str, turn_id: str) -> tuple[str, str]:
     """An approval event belongs to the session/turn that owns the pending row."""
     return str(card.get("session_id") or session_id), str(card.get("turn_id") or turn_id)
+
+
+async def _await_approval_decision(
+    fut: asyncio.Future[str],
+    request_id: str,
+    *,
+    poll_interval: float = 0.5,
+) -> str:
+    """Wait for a local resolve or a decision recorded by another process.
+
+    The stdio gateway owns the turn, but ``approvals.resolve`` may arrive on
+    the HTTP API (or another gateway). Only the in-process future is woken by
+    a local resolve, so the durable row is polled as well. With
+    ``approval_timeout=0`` this wait is intentionally unbounded; the caller's
+    cancellation still retires the card.
+    """
+    while True:
+        done, _pending = await asyncio.wait({fut}, timeout=poll_interval)
+        if done:
+            return fut.result()
+        try:
+            from machina.permissions import store as _approval_store
+
+            record = await _approval_store.get_approval(request_id)
+        except Exception:
+            # A database hiccup must not resolve or deny a human decision.
+            continue
+        status = str((record or {}).get("status") or "")
+        if status in {"approved", "denied", "expired", "cancelled"}:
+            return status
 
 
 def _default_agent_factory(model: str, provider: str) -> StreamingAgent:
@@ -230,8 +258,13 @@ class Gateway:
         *,
         runtime: RuntimeServices | None = None,
         inherit_env_token: bool = True,
+        local_only: bool = True,
     ) -> None:
         self._write = write
+        # True only for the TUI's stdio channel. The embedded HTTP gateway
+        # sets False so local-only capabilities (host credentials, external
+        # harness execution) are not reachable through POST /rpc.
+        self._local_only = local_only
         self.protocol_version = 1
         self._agent_factory = agent_factory
         self._owns_db = owns_db
@@ -1433,7 +1466,7 @@ class Gateway:
                 record_failure("server.approval_renew", exc)
                 _renew_token = None
             try:
-                return await fut
+                return await _await_approval_decision(fut, card["request_id"])
             finally:
                 self._pending_approvals.pop(card["request_id"], None)
                 try:

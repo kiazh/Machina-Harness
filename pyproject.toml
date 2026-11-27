@@ -62,6 +62,7 @@ dev = [
     "hypothesis>=6.0.0",
     "ruff==0.16.9",
     "bandit>=1.7.0",
+    "mypy>=1.11,<2",
 ]
 
 [project.scripts]

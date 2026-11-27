@@ -10,9 +10,9 @@ app (``machina interop ...`` still works).
 
 Status-surface decision (interop wave, 2026-10-14): this feature is
 deliberately NOT folded into ``services.format_status_lines`` or the
-``machina status`` rendering. The shared (label, value) subset is pinned by
-``tests/test_mcp_server.py`` as a stability contract for two consumers (CLI +
-MCP shim), and detection spawns platform CLIs — a cost that does not belong in
+``machina status`` rendering. The shared (label, value) subset is a stability
+contract for two consumers (CLI + MCP shim), exercised by the pinned DevTools
+MCP suite; detection spawns platform CLIs — a cost that does not belong in
 the general status path. ``machina harnesses status`` is the interop surface.
 
 Exit codes: 0 ok, 1 action failed, 2 usage / unknown platform / unsupported run.

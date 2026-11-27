@@ -104,11 +104,12 @@ machina --mode workspace chat --provider deepseek --model deepseek-v4-pro \
 
 ## OpenCode free models
 
-OpenCode free Zen models are available inside the OpenCode harness, but the
-local session API is text-only and cannot carry Machina tool schemas. Machina
-does not expose that bridge as a provider. Use the Hermes proxy for a
-tool-capable free-model backend, or configure the direct OpenCode Zen provider
-with OPENCODE_API_KEY.
+OpenCode Zen is exposed as an `opencode` provider (OpenAI-compatible). Free
+Zen models are tagged `free` and mapped to the `mcp` worker transport; the
+default router allows `native` and `proxy` only, so free routes appear when you
+select `worker_transport=mcp`. That bridge is text-only and cannot carry
+Machina tool schemas; use the Hermes proxy for a tool-capable free-model
+backend, or a paid direct OpenCode route with `OPENCODE_API_KEY`.
 
 ## Verification and cost
 

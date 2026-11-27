@@ -121,6 +121,12 @@ export class GatewayClient {
 	onWorkspaceEvent?: (event: WorkspaceEvent) => void;
 	/** Called once if the gateway process exits on its own. */
 	onExit?: (code: number | null, stderrTail: string[]) => void;
+	/**
+	 * Called after onExit for an unexpected death. The process supervisor uses
+	 * this to relaunch the UI with backoff; App keeps its in-place offline
+	 * state for the same exit, so either path is safe.
+	 */
+	onUnexpectedExit?: (code: number | null, stderrTail: string[]) => void;
 
 	private readonly options: GatewayClientOptions;
 	private proc: ChildProcess | undefined;
@@ -170,12 +176,18 @@ export class GatewayClient {
 		proc.on("error", (error) => {
 			log.error("spawn.failed", { error: describeError(error) });
 			channel.close(new Error(`could not start the gateway (${this.options.python}): ${error.message}`));
-			if (!this.stopping) this.onExit?.(null, this.stderr());
+			if (!this.stopping) {
+				this.onExit?.(null, this.stderr());
+				this.onUnexpectedExit?.(null, this.stderr());
+			}
 		});
 		proc.on("exit", (code) => {
 			log.warn("exit", { code, stopping: this.stopping, tail: this.stderr().slice(-5) });
 			channel.close(new Error(`gateway exited (code ${code})`));
-			if (!this.stopping) this.onExit?.(code, this.stderr());
+			if (!this.stopping) {
+				this.onExit?.(code, this.stderr());
+				this.onUnexpectedExit?.(code, this.stderr());
+			}
 		});
 	}
 

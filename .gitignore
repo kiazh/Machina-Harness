@@ -122,3 +122,6 @@ playwright-report/
 
 # Machine-specific MCP registration (create via: opencode mcp add machina -- <python> -m machina.mcp_server)
 opencode.json
+
+# Exported conversation transcripts are local artifacts, not source.
+/session-*.md

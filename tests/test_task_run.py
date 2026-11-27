@@ -108,11 +108,9 @@ def _successful_terminal(command: str, workdir: str = "C:/work") -> dict:
 def test_repeated_successful_terminal_action_stops_even_for_chat() -> None:
     policy = TaskRunPolicy(CHAT)
     for _ in range(3):
-        policy.observe([
-            _successful_terminal(
-                "python -c \"import os; print(os.listdir('C:/work/src'))\""
-            )
-        ])
+        policy.observe(
+            [_successful_terminal("python -c \"import os; print(os.listdir('C:/work/src'))\"")]
+        )
 
     assert policy.repeated_action is True
     assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
@@ -122,11 +120,13 @@ def test_cycling_terminal_listings_still_hit_the_repeat_guard() -> None:
     policy = TaskRunPolicy(CHAT)
     for _ in range(3):
         for path in ("src", "gui", "tests"):
-            policy.observe([
-                _successful_terminal(
-                    f"python -c \"import os; print(os.listdir('C:/work/{path}'))\""
-                )
-            ])
+            policy.observe(
+                [
+                    _successful_terminal(
+                        f"python -c \"import os; print(os.listdir('C:/work/{path}'))\""
+                    )
+                ]
+            )
 
     assert policy.repeated_action is True
     assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
@@ -135,11 +135,13 @@ def test_cycling_terminal_listings_still_hit_the_repeat_guard() -> None:
 def test_directory_exploration_budget_stops_a_listing_loop() -> None:
     policy = TaskRunPolicy(CHAT)
     for index in range(10):
-        policy.observe([
-            _successful_terminal(
-                f"python -c \"import os; print(os.listdir('C:/work/d{index}'))\""
-            )
-        ])
+        policy.observe(
+            [
+                _successful_terminal(
+                    f"python -c \"import os; print(os.listdir('C:/work/d{index}'))\""
+                )
+            ]
+        )
 
     assert policy.exploration_calls == 10
     assert policy.exploration_loop is True
@@ -175,13 +177,15 @@ def test_an_edit_resets_the_action_repeat_counter() -> None:
     command = _successful_terminal("python -c \"print('probe')\"")
     for _ in range(2):
         policy.observe([command])
-    policy.observe([
-        {
-            "tool": "write_file",
-            "args": {"path": "app.py", "content": "changed"},
-            "outcome": "completed",
-        }
-    ])
+    policy.observe(
+        [
+            {
+                "tool": "write_file",
+                "args": {"path": "app.py", "content": "changed"},
+                "outcome": "completed",
+            }
+        ]
+    )
     for _ in range(2):
         policy.observe([command])
 
@@ -192,13 +196,15 @@ def test_an_edit_resets_the_action_repeat_counter() -> None:
 def test_recall_budget_stops_a_recall_loop() -> None:
     policy = TaskRunPolicy(CHAT)
     for index in range(12):
-        policy.observe([
-            {
-                "tool": "session_recall",
-                "args": {"query": f"past evidence {index}"},
-                "outcome": "completed",
-            }
-        ])
+        policy.observe(
+            [
+                {
+                    "tool": "session_recall",
+                    "args": {"query": f"past evidence {index}"},
+                    "outcome": "completed",
+                }
+            ]
+        )
 
     assert policy.recall_calls == 12
     assert policy.recall_loop is True
@@ -434,7 +440,8 @@ def test_environment_limits_are_configurable(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
-    from machina.core import agent as module
+    from machina.core import agent as agent_module
+    from machina.core import react_loop as loop_module
     from machina.core.models import LLMResponse, Session
 
     monkeypatch.setenv("MACHINA_TASK_RUN_MAX_TURNS", "1")
@@ -456,7 +463,7 @@ async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
             ],
         )
 
-    monkeypatch.setattr(module, "evaluate_request", gate)
+    monkeypatch.setattr(loop_module, "evaluate_request", gate)
     agent = SimpleNamespace(
         agent_id="harness",
         provider=object(),
@@ -471,7 +478,7 @@ async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
         _schedule_memory_consolidation=lambda *args: None,
     )
 
-    response = await module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
+    response = await agent_module.ReActAgent.run.__wrapped__(agent, session.id, REPAIR, False)
 
     assert response.outcome == "failed"
     assert "turn limit" in response.content.lower()
@@ -480,7 +487,8 @@ async def test_agent_stops_at_the_task_run_turn_limit(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_agent_stops_a_repeated_successful_terminal_loop(monkeypatch) -> None:
-    from machina.core import agent as module
+    from machina.core import agent as agent_module
+    from machina.core import react_loop as loop_module
     from machina.core.models import LLMResponse, Session
 
     session = Session(id=uuid4(), agent_id="harness")
@@ -516,7 +524,7 @@ async def test_agent_stops_a_repeated_successful_terminal_loop(monkeypatch) -> N
             }
         )
 
-    monkeypatch.setattr(module, "evaluate_request", gate)
+    monkeypatch.setattr(loop_module, "evaluate_request", gate)
     agent = SimpleNamespace(
         agent_id="harness",
         provider=object(),
@@ -531,7 +539,7 @@ async def test_agent_stops_a_repeated_successful_terminal_loop(monkeypatch) -> N
         _schedule_memory_consolidation=lambda *args: None,
     )
 
-    response = await module.ReActAgent.run.__wrapped__(agent, session.id, CHAT, False)
+    response = await agent_module.ReActAgent.run.__wrapped__(agent, session.id, CHAT, False)
 
     assert response.outcome == "failed"
     assert "repeated identical tool action" in response.content.lower()

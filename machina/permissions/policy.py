@@ -12,6 +12,7 @@ import hashlib
 import importlib
 import os
 import re
+import stat
 import uuid
 from dataclasses import dataclass, field
 from itertools import islice
@@ -46,6 +47,10 @@ class ActionRequest:
     cwd: str = ""
     targets: list[str] = field(default_factory=list)
     content_digest: str = ""
+    # Identity of the file the write/edit will replace, captured at review
+    # time. Execution re-hashes the target and refuses when it changed, so an
+    # approved edit cannot land on bytes the human never saw.
+    base_revision: str = ""
     network: list[str] = field(default_factory=list)
     opaque_network: bool = False
     timeout: int = 60
@@ -72,7 +77,7 @@ class Decision:
     request: ActionRequest | None = None
 
 
-DIGEST_VERSION = "v2"
+DIGEST_VERSION = "v3"
 
 
 def _digest_of(*parts: str) -> str:
@@ -771,6 +776,11 @@ def _sensitive_capabilities(req: ActionRequest) -> list[str]:
     argv = req.argv
     while len(argv) > 2 and executable_name(argv[0]) == "uv" and argv[1] == "run":
         argv = argv[2:]
+    # ``python -m ruff`` reaches the same writer as ``ruff``. Without
+    # unwrapping, ``first`` stayed "python" and the protected-path write
+    # review was skipped for e.g. ``python -m ruff --fix .machina/...``.
+    while len(argv) > 2 and executable_name(argv[0]) in {"python", "python3"} and argv[1] == "-m":
+        argv = argv[2:]
     first = executable_name(argv[0]) if argv else ""
     root = Path(req.workspace_root).resolve() if req.workspace_root else workspace_root()
     if req.shell_payload:
@@ -880,6 +890,46 @@ REVIEW_CAPABILITIES = frozenset(
 )
 
 
+_BASE_REVISION_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _file_base_revision(path: str) -> str:
+    """Content identity of an existing write target (never follows symlinks).
+
+    Missing targets are a valid state for creation; unreadable/non-regular
+    targets get a distinct label so the digest still changes when the object
+    identity changes. Read errors never fail authorization — the write
+    backend applies its own secure open at execution.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return "unreadable"
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return "non-regular"
+        if info.st_size > _BASE_REVISION_MAX_BYTES:
+            # Never read a multi-gigabyte target to authorize a write. Size
+            # and mtime still change when the file is replaced; the execution
+            # check uses the same marker.
+            return f"large:{info.st_size}:{info.st_mtime_ns}"
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 65_536)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return f"sha256:{digest.hexdigest()}"
+    except OSError:
+        return "unreadable"
+    finally:
+        os.close(fd)
+
+
 def normalize_request(req: ActionRequest) -> ActionRequest:
     """Canonicalize paths/cwd/digest; separate validation from authorization.
 
@@ -909,6 +959,8 @@ def normalize_request(req: ActionRequest) -> ActionRequest:
         except (OSError, ValueError) as error:
             raise ValueError("invalid execution target") from error
     req.targets = canon_targets
+    if req.operation == "file.write" and len(canon_targets) == 1:
+        req.base_revision = _file_base_revision(canon_targets[0])
     # AH-AUDIT-008: every material authorization field is bound with
     # array-boundary-preserving encoding (no separator joins). Tool
     # identity, sorted capabilities, and timeout are included: changing any
@@ -924,6 +976,7 @@ def normalize_request(req: ActionRequest) -> ActionRequest:
         req.cwd,
         _canonical_list(req.targets),
         req.content_digest,
+        req.base_revision,
         _canonical_list(req.network),
         str(req.timeout),
         str(req.opaque_network),

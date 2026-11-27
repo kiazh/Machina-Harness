@@ -135,7 +135,7 @@ def test_repair_deadline_is_opt_out_and_repair_only(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_agent_guard_appends_nudge_and_persists_content(monkeypatch) -> None:
-    from machina.core import agent as module
+    from machina.core import turn_phases as module
 
     monkeypatch.setattr(module, "should_nudge_repair", lambda *args, **kwargs: True)
     append = AsyncMock()
@@ -145,11 +145,13 @@ async def test_agent_guard_appends_nudge_and_persists_content(monkeypatch) -> No
         _append_assistant_content=append,
         _flush_pending_chunks=flush,
     )
-    agent._append_repair_nudge = MethodType(module.BaseReActAgent._append_repair_nudge, agent)
+    agent.turn_phases = module.TurnPhases(agent)
+    agent._append_repair_nudge = MethodType(
+        module.TurnPhases.append_repair_nudge, agent.turn_phases
+    )
     messages: list[dict[str, str]] = []
 
-    continued = await module.BaseReActAgent._maybe_continue_unchanged_repair(
-        agent,
+    continued = await agent.turn_phases.maybe_continue_unchanged_repair(
         session_id=uuid.uuid4(),
         user_message="Fix the failing test",
         content="No change needed.",

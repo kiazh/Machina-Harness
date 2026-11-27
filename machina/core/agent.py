@@ -3,45 +3,33 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
-from contextlib import nullcontext
-from contextvars import ContextVar
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from functools import wraps
 from typing import Any
 
 from rich.console import Console
 
-from machina.core.assembler import get_token_count
-from machina.core.background_tasks import consolidation_inflight as _consolidation_inflight
-from machina.core.background_tasks import joined_teardown
-from machina.core.background_tasks import pending_learning_reviews as _pending_learning_reviews
+from machina.core.agent_support import (
+    LoopTerminal as _LoopTerminal,
+)
+from machina.core.agent_support import (
+    add_growth_listener,
+    instrument_run,
+    instrument_stream,
+    remove_growth_listener,
+)
+from machina.core.agent_support import (
+    notify_growth as _notify_growth,
+)
 from machina.core.config import config
 from machina.core.context import context_manager
-from machina.core.continuity import (
-    build_context_messages,
-    finish_usage,
-    make_dynamic_assembler,
-    prepare_continuity,
-)
-from machina.core.exceptions import (
-    DatabaseError,
-    DelegationAccountingError,
-    SessionNotFoundError,
-    UsageBudgetExceededError,
-)
-from machina.core.images import IMAGE_TOKEN_RESERVE, validate_images
-from machina.core.metrics import metrics
+from machina.core.context_prep import ContextPreparer
+from machina.core.llm_calls import LLMCaller
 from machina.core.models import AgentResponse, LLMResponse, StreamEvent, ToolDefinition
-from machina.core.projection import project_retrieved
+from machina.core.post_turn import PostTurn
 from machina.core.prompt import (
     _effective_turn_budget,
-    _ensure_tool_call_id,
     _request_context_tokens,
     _stale_tool_preview,
     _turn_model,
@@ -49,58 +37,32 @@ from machina.core.prompt import (
     assemble_turn_prompt,
     build_capability_section,
     build_persona_section,
-    build_project_instruction_section,
     build_skill_section,
     build_system_prompt,
     build_turn_messages,
     condense_history,
     prompt_section_tokens,
     stale_tool_preview,
-    swe_repair_protocol,
     tool_message_limit,
 )
-from machina.core.provider import LLMProvider, audit_log, get_provider
-from machina.core.repair_gate import (
-    REPAIR_DEADLINE_TEXT,
-    REPAIR_NUDGE,
-    VERIFICATION_NUDGE,
-    repair_deadline_exceeded,
-    repair_deadline_seconds,
-    should_nudge_repair,
-    should_nudge_verification,
-)
-from machina.core.request_gate import evaluate_request
-from machina.core.session import Session, session_manager
-from machina.core.session_mode import turn_scope
-from machina.core.task_run import TaskRunPolicy
-from machina.core.token_budget import (
-    REPAIR_TOKEN_BUDGET_TEXT,
-    repair_token_budget,
-    repair_token_budget_exceeded,
-    stale_tool_result_chars,
-)
+from machina.core.provider import LLMProvider, get_provider
+from machina.core.react_loop import react_loop as _react_loop
+from machina.core.rsi_context import growth_episode as _growth_episode
+from machina.core.rsi_context import rsi_choice as _rsi_choice
+from machina.core.rsi_context import rsi_skills as _rsi_skills
+from machina.core.session import Session
+from machina.core.tool_batch import ToolBatchExecutor
+from machina.core.tool_results import ToolResultRecorder
 from machina.core.tool_views import (
-    ensure_item_artifact_view,
     flush_pending_chunks,
-    mark_turn_accepted,
 )
-from machina.core.turn_flow import (
-    collect_pauses,
-    pause_response,
-    provider_failure_response,
-    stagnation_step,
-    stopped_response,
-)
-from machina.core.usage import provider_identity, usage_store
+from machina.core.turn_phases import TurnPhases
 from machina.db.lazy import LazyDb
 from machina.memory.consolidator import MemoryConsolidator
 from machina.memory.retriever import MemoryRetriever
 from machina.memory.store import memory_store
 from machina.observability.diagnostics import record_failure
-from machina.observability.tracing import span
-from machina.plugins.registry import plugin_registry
 from machina.rag.pipeline import RAGPipeline
-from machina.skills import query_expansion
 from machina.tools.base import registry
 
 __all__ = [
@@ -110,6 +72,8 @@ __all__ = [
     "MAX_PENDING_LEARNING_REVIEWS",
     "instrument_run",
     "instrument_stream",
+    "add_growth_listener",
+    "remove_growth_listener",
     # Re-exported from machina.core.prompt (moves-only extraction compat).
     "_stale_tool_preview",
     "_turn_model",
@@ -128,64 +92,8 @@ __all__ = [
     "tool_message_limit",
 ]
 logger = logging.getLogger(__name__)
-_growth_episode: ContextVar[uuid.UUID | None] = ContextVar("growth_episode", default=None)
-_rsi_choice: ContextVar[dict | None] = ContextVar("rsi_choice", default=None)
-_rsi_skills: ContextVar[list[str] | None] = ContextVar("rsi_skills", default=None)
 
 console = Console()
-
-
-def instrument_run(func):
-    @wraps(func)
-    async def wrapper(self, session_id, user_message, verbose=True, **kwargs):
-        start = time.monotonic()
-        with span("agent.run", agent_id=self.agent_id, session_id=str(session_id)):
-            try:
-                # S3.1(a) BEGIN turn-scope (revert: delete this block; diagnostics-free cost seam, no verdict change)
-                with turn_scope():
-                    response = await func(self, session_id, user_message, verbose, **kwargs)
-                # S3.1(a) END turn-scope
-            except Exception:
-                metrics.record_error("agent.run")
-                raise
-        if not response.needs_approval:
-            await self._complete_growth(response, session_id=session_id)
-        metrics.record_latency("agent.run", (time.monotonic() - start) * 1000)
-        metrics.increment_counter("agent.run.calls")
-        session = await session_manager.get(session_id)
-        await plugin_registry.dispatch("post_agent_run", session, response)
-        return response
-
-    return wrapper
-
-
-def instrument_stream(func):
-    @wraps(func)
-    async def wrapper(self, session_id, user_message, verbose=True, **kwargs):
-        start = time.monotonic()
-        # R4-010/R4-064: the turn scope and the OTel stream span are owned by
-        # the stream's driving transport (see TurnEngine.stream). Drivers that
-        # pull each `__anext__` in its own task need both set before those
-        # tasks are created: a contextvar/span entered inside this generator
-        # would neither survive across steps nor detach in its own context.
-        try:
-            async with joined_teardown(
-                stream=func(self, session_id, user_message, verbose, **kwargs)
-            ) as events:
-                async for event in events:
-                    if event.type == "done":
-                        if event.response is not None and not event.response.needs_approval:
-                            await self._complete_growth(event.response, session_id=session_id)
-                        metrics.record_latency("agent.run", (time.monotonic() - start) * 1000)
-                        metrics.increment_counter("agent.run.calls")
-                        session = await session_manager.get(session_id)
-                        await plugin_registry.dispatch("post_agent_run", session, event.response)
-                    yield event
-        except Exception:
-            metrics.record_error("agent.run")
-            raise
-
-    return wrapper
 
 
 SYSTEM_PROMPT = """You are Machina, a self-hosted AI agent with tools and persistent PostgreSQL context.
@@ -230,35 +138,10 @@ _GrowthListener = Callable[[str, str, str], None]
 _growth_listeners: list[_GrowthListener] = []
 
 
-def add_growth_listener(fn: _GrowthListener) -> None:
-    """Register a growth-progress callback (transports unregister per turn)."""
-    _growth_listeners.append(fn)
-
-
-def remove_growth_listener(fn: _GrowthListener) -> None:
-    """Unregister a growth-progress callback."""
-    try:
-        _growth_listeners.remove(fn)
-    except ValueError:
-        pass
-
-
-def _notify_growth(session_id: uuid.UUID | str, stage: str, detail: str = "") -> None:
-    """Fan out one growth-progress notice; never raises."""
-    for fn in list(_growth_listeners):
-        try:
-            fn(str(session_id), stage, detail)
-        except Exception as _boundary_error:
-            record_failure("agent.growth.notify", _boundary_error)
-
-
 # Prompt-section assembly (stale previews, turn capacity, message shaping,
 # system-prompt builders) lives in machina.core.prompt (moves-only extraction);
 # the underscore aliases above are re-exported here so existing import paths
 # (``from machina.core.agent import _request_context_tokens`` etc.) keep working.
-# Retained evidence is separate from short previews assembled into prompts.
-_STORED_TOOL_RESULT_CHARS = 65536
-
 # C1: ambiguous batch acknowledgements are verified by chunk id before the
 # pending queue clears. LazyDb delegates to the shared asyncpg singleton.
 _context_db = LazyDb()
@@ -270,86 +153,8 @@ MAX_PENDING_LEARNING_REVIEWS = 16
 # Per-tool execution timeouts. Delegation-style and network tools fan out and
 # legitimately run long; the default must exceed the slowest legitimate tool —
 # a 1s cap aborted healthy network tools and cost another LLM call to react.
-_TOOL_TIMEOUTS: dict[str, float] = {
-    "share_memory": 60.0,
-    "web_search": 45.0,
-    "web_extract": 45.0,
-    "web_research": 120.0,
-    "web_crawl": 120.0,
-    "browser_verify": 140.0,
-    "web_verify": 140.0,
-    "search_files": 120.0,
-    "delegate_status": 320.0,
-    "index_document": 120.0,
-    "terminal": 60.0,
-    # N6 (final pass): a cold scan of a large repo can exceed the 30s default;
-    # 120s matches the other "legitimately slow read" tools above.
-    "learn_directory": 120.0,
-    # A question waits for a human, not for a provider or tool. The broker's
-    # own timeout is the upper bound; this keeps the wrapper from cancelling
-    # the question first.
-    "ask_user": 620.0,
-}
-_TOOL_TIMEOUT_DEFAULT = 30.0
-_TERMINAL_CAP = 300.0  # R4-019: terminal's schema max (1..300); tools/terminal.py.
-
-# Independent tool calls in one assistant message run concurrently, capped so a
-# model that emits a large batch cannot spawn unbounded subprocesses / queries.
-_MAX_PARALLEL_TOOLS = 8
-
-
 # S3 wiring helpers live in machina/controller/wiring.py (stdlib-only module level; all machina imports deferred).
 # Each hook below imports them in a guarded try/except so any import failure skips silently and turns proceed.
-
-
-def _is_rate_limit_error(exc: BaseException) -> bool:
-    """True for HTTP 429 failures (duck-typed so no httpx import is needed).
-
-    The provider layer already retried these with backoff, so the agent
-    layer must not retry them again.
-    """
-    return getattr(getattr(exc, "response", None), "status_code", None) == 429
-
-
-def _is_transient_error(exc: BaseException) -> bool:
-    """True for HTTP 502, 503, 504 failures (transient server errors)."""
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    return status in (502, 503, 504)
-
-
-def _tool_outcome(item: dict[str, Any]) -> str:
-    """Truthful per-call outcome label: a needs-approval pause is ``"paused"``."""
-    preview = str(item.get("result") or "")
-    if item.get("_needs_approval") or item.get("_needs_approvals"):
-        return "paused"
-    if item.get("_delegation_status") == "waiting_approval":
-        return "paused"
-    if item.get("_delegation_status") in {"queued", "running", "interrupted", "pending"}:
-        return item["_delegation_status"]
-    if item.get("_denied") or preview.startswith("Permission denied:"):
-        return "denied"
-    if item.get("_outcome_unknown"):
-        return "outcome_unknown"
-    if item.get("_failed") or preview.startswith("Error:"):
-        return "failed"
-    return "completed"
-
-
-def _assistant_chunk(
-    session_id: uuid.UUID, agent_id: str, content: str, *, interrupted: bool = False
-) -> dict[str, Any]:
-    """Pending-chunk record for one assistant message (all loops)."""
-    payload: dict[str, Any] = {"content": content}
-    if interrupted:
-        payload["interrupted"] = True
-    return {
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "agent_id": agent_id,
-        "chunk_type": "assistant_message",
-        "payload": payload,
-        "token_count": get_token_count(content),
-    }
 
 
 class BaseReActAgent:
@@ -377,6 +182,10 @@ class BaseReActAgent:
         # Unbounded tool calls: the ReAct loop runs until the model stops
         # calling tools (or context/usage budgets stop the turn).
         self.agent_id = agent_id
+        self.llm_calls = LLMCaller(self.provider, self.agent_id)
+        self.tool_batch = ToolBatchExecutor(self)
+        self.tool_results = ToolResultRecorder(self)
+        self.turn_phases = TurnPhases(self)
         self.delegated = delegated
         self.dynamic_tools = dynamic_tools
         self.system_prompt = (
@@ -400,6 +209,15 @@ class BaseReActAgent:
             self.soul_spec.persona = SoulSpec.Persona(name=agent_id)
         self.soul_spec.persona.system_prompt = self.system_prompt
         self.memory_retriever = memory_retriever or MemoryRetriever(store=memory_store)
+        if (
+            bool(config.get("memory_rerank_enabled"))
+            and getattr(self.memory_retriever, "llm", None) is None
+        ):
+            # The factory may have built the retriever before the turn's
+            # provider existed. Attach it here so the opt-in rerank uses the
+            # same route (and usage ledger) as the turn.
+            self.memory_retriever.llm = getattr(self, "provider", None)
+        self.context_preparer = ContextPreparer(self)
         self.memory_consolidator = memory_consolidator
         self.rag_pipeline = rag_pipeline
         # An explicit child allow-list enforces the same boundary at execution,
@@ -433,65 +251,20 @@ class BaseReActAgent:
         # bug).  A done-callback discards each task once it finishes.
         self._consolidation_tasks: set[asyncio.Task] = set()
         self._learning_tasks: set[asyncio.Task] = set()
+        self.post_turn = PostTurn(
+            agent_id=self.agent_id,
+            consolidator=self.memory_consolidator,
+            provider=self.provider,
+            delegated=self.delegated,
+            consolidation_tasks=self._consolidation_tasks,
+            learning_tasks=self._learning_tasks,
+        )
 
     def _tool_defs(self) -> list[ToolDefinition]:
-        """Tool definitions offered to the model, honoring the allow-list."""
-        defs = registry.get_tool_definitions()
-        if self.delegated:
-            defs = [
-                definition
-                for definition in defs
-                if definition.name
-                not in {"learn_personality", "delegate", "delegate_status", "list_agents"}
-            ]
-        elif not config.get("personality_growth_enabled") or not config.get("memory_enabled"):
-            defs = [d for d in defs if d.name != "learn_personality"]
-        if self.allowed_tools is not None:
-            allowed = set(self.allowed_tools)
-            defs = [d for d in defs if d.name in allowed]
-        from machina.memory.rsi import enabled
+        return self.tool_batch.definitions()
 
-        weights = (_rsi_choice.get() or {}).get("tool_weights", {}) if enabled() else {}
-        ordered = sorted(
-            defs,
-            key=lambda tool: -max(0.8, min(1.2, weights.get(tool.name, 1))),
-        )
-        from machina.core.tool_projection import (
-            active_tool_definitions,
-            compact_tool_definitions,
-            set_dynamic_allowed_tools,
-        )
-
-        if getattr(self, "dynamic_tools", False):
-            set_dynamic_allowed_tools(self.allowed_tools)
-            ordered = active_tool_definitions(ordered)
-        return compact_tool_definitions(ordered)
-
-    async def _get_rag_context(
-        self,
-        session_id: uuid.UUID,
-        query: str,
-    ) -> list[tuple]:
-        """Retrieve RAG context for the query if a RAG pipeline is configured.
-
-        Returns a list of (ContextChunk, score) tuples for prompt assembly.
-        """
-        if self.rag_pipeline is None:
-            # Test-observed diagnostic: last RAG retrieval mode (no production reader).
-            self._last_rag_mode = getattr(self, "_last_rag_mode", "disabled")
-            return []
-
-        try:
-            results = await asyncio.wait_for(
-                self.rag_pipeline.search(query=query, session_id=session_id, top_k=5, rerank=True),
-                timeout=15,
-            )
-            self._last_rag_mode = "ready" if results else "empty-index"
-            return [(r.chunk, r.score) for r in results]
-        except Exception as e:
-            self._last_rag_mode = "unavailable"
-            logger.warning("RAG retrieval failed: %s", e)
-            return []
+    async def _get_rag_context(self, session_id: uuid.UUID, query: str) -> list[tuple]:
+        return await self.context_preparer.get_rag_context(session_id, query)
 
     async def _call_llm_with_retry(
         self,
@@ -502,141 +275,23 @@ class BaseReActAgent:
         max_tokens: int | None = None,
         temperature: float | None = None,
     ):
-        """Call provider.complete() with exponential backoff retry.
+        """Delegate to the turn's provider seam (retry + accounting)."""
+        return await self.llm_calls.complete(
+            messages,
+            tools,
+            session_id,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
-        Retries once on transient errors (502, 503, 504) with a 1s delay.
-        Optional limits let the deterministic planner make one bounded call
-        without changing the main loop's configured budget.
-        """
-        # S3.1(b) BEGIN section-token log (revert: delete block; diagnostics only)
-        try:
-            from machina.controller import wiring as _s3w
-
-            _s3w.log_section_tokens(messages, tools)
-        except Exception:
-            pass
-        # S3.1(b) END section-token log
-        last_exception: Exception | None = None
-        for attempt in range(2):  # 1 initial + 1 retry
-            try:
-                return await usage_store.complete_call(
-                    self.provider,
-                    session_id,
-                    self.agent_id,
-                    messages,
-                    tools=tools,
-                    max_tokens=int(
-                        max_tokens if max_tokens is not None else config.get("max_tokens")
-                    ),
-                    temperature=float(
-                        temperature if temperature is not None else config.get("temperature")
-                    ),
-                )
-            except (UsageBudgetExceededError, DatabaseError):
-                raise
-            except Exception as e:
-                last_exception = e
-                if _is_rate_limit_error(e):
-                    # Provider already retried 429s with backoff — re-raising
-                    # here avoids amplifying one rate limit into many requests.
-                    raise
-                if not _is_transient_error(e):
-                    raise
-                if attempt < 1:
-                    delay = 2**attempt  # 1s
-                    logger.warning(
-                        "LLM call failed (attempt %d/%d): %s — retrying in %ds",
-                        attempt + 1,
-                        2,
-                        e,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "LLM call failed after %d attempts: %s",
-                        attempt + 1,
-                        e,
-                    )
-        raise last_exception  # type: ignore[misc]
-
-    async def _stream_llm_with_retry(
+    def _stream_llm_with_retry(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         session_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Call provider.stream_complete() with exponential backoff retry.
-
-        Yields StreamEvent objects as they arrive from the provider.
-        Retries once on transient errors (502, 503, 504) with a 1s delay.
-        """
-        # S3.1(b) BEGIN stream section-token log (revert: delete block; diagnostics only)
-        try:
-            from machina.controller import wiring as _s3w
-
-            _s3w.log_section_tokens(messages, tools)
-        except Exception:
-            pass
-        # S3.1(b) END stream section-token log
-        messages = await usage_store.prepare_stream(self, session_id, messages, tools)
-        last_exception: Exception | None = None
-        for attempt in range(2):  # 1 initial + 1 retry
-            emitted = False
-            try:
-                reservation = await self._reserve_usage(session_id, messages, tools)
-                usage = None
-                actual_model = None
-                completed = False
-                async with joined_teardown(
-                    stream=self.provider.stream_complete(
-                        messages=messages,
-                        tools=tools,
-                        max_tokens=int(config.get("max_tokens")),
-                        temperature=float(config.get("temperature")),
-                    ),
-                    cleanup=lambda: self._finish_usage(
-                        reservation, usage, failed=not completed, model=actual_model
-                    ),
-                ) as events:
-                    async for event in events:
-                        emitted = True
-                        if event.type == "done" and event.response is not None:
-                            usage = event.response.usage
-                            actual_model = event.response.model
-                            completed = True
-                        yield event
-                return
-            except (UsageBudgetExceededError, DatabaseError):
-                raise
-            except Exception as e:
-                last_exception = e
-                # Once a delta reached the caller, replaying the request would
-                # duplicate text (and could repeat a tool call).
-                if emitted:
-                    raise
-                if _is_rate_limit_error(e):
-                    # Provider already retried 429s with backoff — don't amplify.
-                    raise
-                if not _is_transient_error(e):
-                    raise
-                if attempt < 1:
-                    delay = 2**attempt  # 1s
-                    logger.warning(
-                        "LLM stream failed (attempt %d/%d): %s — retrying in %ds",
-                        attempt + 1,
-                        2,
-                        e,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "LLM stream failed after %d attempts: %s",
-                        attempt + 1,
-                        e,
-                    )
-        raise last_exception  # type: ignore[misc]
+        """Delegate to the turn's provider seam (retry + accounting)."""
+        return self.llm_calls.stream(messages, tools, session_id)
 
     async def _reserve_usage(
         self,
@@ -644,28 +299,7 @@ class BaseReActAgent:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> uuid.UUID | None:
-        if session_id is None:
-            return None
-        model = str(getattr(self.provider, "model", "unknown"))
-        provider_name = provider_identity(self.provider)
-        max_tokens = int(config.get("max_tokens"))
-        output_limit = getattr(type(self.provider), "reservation_max_tokens", None)
-        if callable(output_limit):
-            max_tokens = output_limit(self.provider, max_tokens)
-        try:
-            return await usage_store.reserve(
-                session_id,
-                self.agent_id,
-                provider_name,
-                model,
-                messages,
-                tools,
-                max_tokens,
-            )
-        except UsageBudgetExceededError:
-            raise
-        except Exception as e:
-            raise DatabaseError("usage accounting unavailable") from e
+        return await self.llm_calls.reserve(session_id, messages, tools)
 
     async def _finish_usage(
         self,
@@ -675,7 +309,7 @@ class BaseReActAgent:
         failed: bool = False,
         model: str | None = None,
     ) -> None:
-        await finish_usage(reservation, usage, failed=failed, model=model)
+        await self.llm_calls.finish(reservation, usage, failed=failed, model=model)
 
     async def _prepare_context(
         self,
@@ -685,316 +319,14 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]] | None = None,
         images: list[dict[str, str]] | None = None,
     ) -> tuple[Session, list[dict[str, Any]]]:
-        """Prepare session, context, and prompt messages.
-
-        Handles session retrieval, user message storage, recent context retrieval,
-        memory retrieval (optional), RAG retrieval, and prompt assembly.
-
-        Args:
-            session_id: The session ID.
-            user_message: The user's message.
-            include_memory: Whether to include memory retrieval. Defaults to True.
-            pending_chunks: If provided, chunks are accumulated here instead of
-                being inserted immediately. The caller is responsible for flushing.
-
-        Returns:
-            A tuple of (Session, messages list).
-
-        Raises:
-            ValueError: If the session is not found.
-        """
-        if getattr(self, "dynamic_tools", False):
-            from machina.core.tool_projection import reset_dynamic_tool_state
-
-            reset_dynamic_tool_state()
-        images = validate_images(images or [])
-        submitted_visual_tokens = len(images) * IMAGE_TOKEN_RESERVE
-        payload = {"content": user_message}
-        if images:
-            payload["images"] = images
-        session = await session_manager.get(session_id)
-        if session is None:
-            raise SessionNotFoundError(f"Session {session_id} not found")
-        if session.agent_id != self.agent_id:
-            raise PermissionError("Session does not belong to the running agent")
-        resolver = getattr(type(self.provider), "context_window", None)
-        turn_model = _turn_model(session, self.provider)
-        if resolver is not None:
-            session.context_window = await resolver(self.provider, turn_model)
-        else:
-            session.context_window = _effective_turn_budget(session, self.provider)
-        session.context_window_model = turn_model
-        session.context_budget = session.context_window
-        _growth_episode.set(None)
-        _rsi_choice.set(None)
-        _rsi_skills.set([])
-
-        await plugin_registry.dispatch("pre_agent_run", session, user_message)
-
-        if not images:
-            images = await context_manager.get_latest_images(session_id, self.agent_id)
-        visual_tokens = len(images) * IMAGE_TOKEN_RESERVE
-
-        # The dynamic tail is bounded because active history is native; it
-        # carries only hot tool activity, retrieved context, goal, and query.
-        assembler = make_dynamic_assembler(session, self._tool_defs(), self.provider, visual_tokens)
-
-        # Fetch continuity before appending the live user message, so the
-        # current query is rendered once rather than duplicated in history.
-        history_messages, summary, recent = await prepare_continuity(
+        """Delegate to the turn's context seam."""
+        return await self.context_preparer.prepare(
             session_id,
-            session,
-            context=context_manager,
-            sessions=session_manager,
-        )
-        if pending_chunks is not None:
-            pending_chunks.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "session_id": session_id,
-                    "agent_id": self.agent_id,
-                    "chunk_type": "user_message",
-                    "payload": payload,
-                    "token_count": get_token_count(user_message) + submitted_visual_tokens,
-                }
-            )
-        else:
-            await context_manager.add_chunk(
-                session_id=session_id,
-                agent_id=self.agent_id,
-                chunk_type="user_message",
-                payload=payload,
-                token_count=get_token_count(user_message) + submitted_visual_tokens,
-            )
-        retrieved_chunks: list[tuple] = []
-
-        # Retrieve relevant long-term memories (optional). memory_enabled
-        # gates auto-retrieval; explicit remember/recall tools stay available
-        # when disabled.
-        memory_enabled = True
-        try:
-            memory_enabled = bool(config.get("memory_enabled"))
-        except Exception as _boundary_error:
-            # Optional fallback preserves the primary outcome; report no payload.
-            record_failure("agent._prepare_context", _boundary_error)
-        growth_enabled = (
-            not self.delegated
-            and include_memory
-            and memory_enabled
-            and config.get("personality_growth_enabled")
-        )
-        growth_notes = None
-        growth_state = "skipped"
-        retrieve_memory = True
-        if growth_enabled:
-            growth_state = "unavailable"
-            try:
-                from machina.memory.growth import growth_store
-
-                decision = await asyncio.wait_for(
-                    growth_store.begin(
-                        self.agent_id, session_id, user_message, session.context_budget
-                    ),
-                    2,
-                )
-                growth_notes = decision.get("notes")
-                if growth_notes is None:
-                    growth_notes = (await asyncio.wait_for(growth_store.get(self.agent_id), 2))[
-                        "notes"
-                    ]
-                _growth_episode.set(decision["id"])
-                _rsi_choice.set(decision.get("rsi", {}))
-                growth_state = "active"
-                retrieve_memory = decision["action"] == "retrieve"
-            except Exception as exc:
-                record_failure("agent.growth.prepare", exc)
-        if include_memory and memory_enabled and retrieve_memory:
-            try:
-                from machina.memory.embeddings import embed_query
-
-                query_embedding = await embed_query(user_message)
-                digest = None
-                digest_enabled = False
-                try:
-                    digest_enabled = bool(config.get("memory_digest_enabled"))
-                except Exception as _boundary_error:
-                    record_failure("agent.memory_digest.config", _boundary_error)
-                retrieve_digest = getattr(self.memory_retriever, "retrieve_digest", None)
-                if digest_enabled and callable(retrieve_digest):
-                    try:
-                        digest = await retrieve_digest(
-                            query=user_message,
-                            agent_id=self.agent_id,
-                            session_id=session_id,
-                            emotion=None if self.delegated else session.state.get("emotion"),
-                            persona_enabled=False if self.delegated else None,
-                            query_embedding=query_embedding,
-                            max_items=max(1, int(config.get("memory_digest_max_facts"))),
-                            max_chars=max(200, int(config.get("memory_digest_max_chars"))),
-                            candidate_limit=max(1, int(config.get("memory_digest_candidates"))),
-                        )
-                    except Exception as exc:
-                        record_failure("agent.memory_digest", exc)
-                        digest = None
-
-                from machina.core.models import ContextChunk
-
-                if digest is not None:
-                    if digest.selected:
-                        chunk = ContextChunk(
-                            id=uuid.uuid4(),
-                            session_id=session_id,
-                            agent_id=self.agent_id,
-                            chunk_type="memory",
-                            payload={
-                                "content": digest.text,
-                                "importance": max(
-                                    item.memory.importance for item in digest.selected
-                                ),
-                                "category": "digest",
-                                "persona_interpretation": None,
-                            },
-                            token_count=get_token_count(digest.text),
-                        )
-                        retrieved_chunks.append(
-                            (chunk, max(item.score for item in digest.selected))
-                        )
-                        audit_log(
-                            "memory_digest",
-                            session_id=str(session_id),
-                            candidates=len(digest.selected) + digest.omitted,
-                            selected=len(digest.selected),
-                            omitted=digest.omitted,
-                            chars=digest.char_count,
-                        )
-                else:
-                    retrieved_memories = await self.memory_retriever.retrieve(
-                        query=user_message,
-                        agent_id=self.agent_id,
-                        session_id=session_id,
-                        emotion=None if self.delegated else session.state.get("emotion"),
-                        persona_enabled=False if self.delegated else None,
-                        query_embedding=query_embedding,
-                    )
-                    for rm in retrieved_memories:
-                        m = rm.memory
-                        chunk = ContextChunk(
-                            id=m.id,
-                            session_id=session_id,
-                            agent_id=self.agent_id,
-                            chunk_type="memory",
-                            payload={
-                                "content": m.content,
-                                "importance": m.importance,
-                                "category": m.category,
-                                "persona_interpretation": None
-                                if self.delegated
-                                else rm.persona_interpretation,
-                            },
-                            token_count=get_token_count(m.content),
-                        )
-                        retrieved_chunks.append((chunk, rm.score))
-            except Exception as e:
-                logger.warning("Memory retrieval failed: %s", e)
-
-        # Retrieve RAG context if enabled AND material exists. Never scans or
-        # uploads host files implicitly — only previously indexed session docs.
-        rag_enabled = True
-        try:
-            rag_enabled = bool(config.get("rag_enabled"))
-        except Exception as _boundary_error:
-            # Optional fallback preserves the primary outcome; report no payload.
-            record_failure("agent._prepare_context", _boundary_error)
-        if rag_enabled and not self.delegated:
-            rag_chunks = await self._get_rag_context(session_id, user_message)
-        else:
-            rag_chunks = []
-            self._last_rag_mode = "disabled"
-        retrieved_chunks.extend(rag_chunks)
-
-        if not self.delegated:
-            try:
-                _archive_hits = context_manager.search_archive_text(session_id, user_message)
-                retrieved_chunks.extend(await asyncio.wait_for(_archive_hits, timeout=5))
-            except Exception as e:
-                logger.warning("Archived context retrieval failed: %s", e)
-
-        # T5 evidence projection (dedup + budget) with prompt disclosure.
-        retrieved_chunks, omitted_evidence = project_retrieved(retrieved_chunks)
-
-        # Prompt sections assemble in machina.core.prompt (moves-only): the
-        # composition order below matches the previous inline version exactly,
-        # so the assembled text is byte-identical.
-        meta_route_hint: str | None = None
-        if not self.delegated:
-            try:
-                if bool(config.get("meta_harness_enabled")):
-                    from machina.core.meta_harness import route_prompt
-
-                    triage = getattr(self, "_last_triage", None)
-                    meta_route = route_prompt(
-                        user_message,
-                        task_state=session.state,
-                        recent=recent,
-                        goal=session.goal,
-                        task_class=None if triage == "ambiguous" else triage,
-                    )
-                    self._last_meta_route = meta_route
-                    if meta_route.mode == "external":
-                        audit_log(
-                            "meta_harness_route",
-                            session_id=str(session_id),
-                            task_class=meta_route.task_class,
-                            primary=meta_route.primary,
-                            confidence=round(meta_route.confidence, 3),
-                            steps=len(meta_route.steps),
-                        )
-                    can_delegate_harness = (
-                        self.allowed_tools is None or "harness_delegate" in self.allowed_tools
-                    )
-                    if bool(config.get("meta_harness_hint")) and can_delegate_harness:
-                        meta_route_hint = meta_route.prompt_hint() or None
-            except Exception as _boundary_error:
-                record_failure("agent.meta_harness.prepare", _boundary_error)
-        if self.delegated:
-            system_prompt = self.system_prompt
-        else:
-            await query_expansion.prepare_turn(user_message)
-            _project_role, project_instructions = build_project_instruction_section(session)
-            system_prompt = build_system_prompt(
-                self.soul_spec,
-                self.allowed_tools,
-                session,
-                user_message,
-                recent,
-                growth_notes,
-                growth_state,
-                _rsi_choice.get() or {},
-                _rsi_skills.get(),
-                {tool.name for tool in self._tool_defs()},
-                triage=getattr(self, "_last_triage", None),  # advisory; None = unchanged
-                meta_route=meta_route_hint,
-                project_instructions=project_instructions,
-                include_repair=False,
-            )
-        # Keep the task-critical repair protocol outside the truncatable system
-        # prefix. A long persona/skill section must not silently remove it.
-        required_tail = "" if self.delegated else swe_repair_protocol(user_message)
-        messages = build_context_messages(
-            system_prompt,
-            summary,
-            history_messages,
-            assembler,
-            session.goal,
-            recent,
-            retrieved_chunks,
             user_message,
-            omitted_evidence,
-            images,
-            session.context_budget,
-            required_tail=required_tail,
+            include_memory=include_memory,
+            pending_chunks=pending_chunks,
+            images=images,
         )
-        return session, messages
 
     def _append_tool_messages(
         self,
@@ -1003,12 +335,7 @@ class BaseReActAgent:
         tc: dict[str, Any],
         content: str,
     ) -> None:
-        """Append one assistant batch followed by each of its tool results.
-
-        Thin wrapper over :func:`machina.core.prompt.append_tool_messages`
-        (the moved implementation) so the method seam stays on the agent.
-        """
-        append_tool_messages(messages, response, tc, content)
+        self.tool_results.append_tool_messages(messages, response, tc, content)
 
     @staticmethod
     def _condense_history(
@@ -1034,32 +361,18 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]] | None = None,
         allowed_tool_names: set[str] | None = None,
     ) -> None:
-        """Execute tool calls for the non-streaming loop.
+        executor = getattr(self, "tool_batch", None) or ToolBatchExecutor(self)
+        await executor.execute(
+            response,
+            messages,
+            tool_calls_made,
+            session_id,
+            verbose,
+            pending_chunks,
+            allowed_tool_names,
+        )
 
-        Thin wrapper over :meth:`_execute_tool_calls_stream` (the single
-        implementation) that prints progress when *verbose* is set.
-        """
-        async with joined_teardown(
-            stream=self._execute_tool_calls_stream(
-                response,
-                messages,
-                tool_calls_made,
-                session_id,
-                pending_chunks,
-                allowed_tool_names=allowed_tool_names,
-            )
-        ) as events:
-            async for event in events:
-                if not verbose:
-                    continue
-                if event.type == "tool_call":
-                    args_preview = json.dumps(event.tool_args, default=str)[:80]
-                    console.print(f"[yellow]  → {event.tool_name}({args_preview})[/yellow]")
-                elif event.type == "tool_result":
-                    preview = event.tool_result[:200].replace("\n", " ")
-                    console.print(f"[green]  ← {preview}[/green]")
-
-    async def _execute_tool_calls_stream(
+    def _execute_tool_calls_stream(
         self,
         response: LLMResponse,
         messages: list[dict[str, Any]],
@@ -1068,747 +381,46 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]] | None = None,
         allowed_tool_names: set[str] | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Execute tool calls from an LLM response, yielding StreamEvents.
-
-        Shared by ``run()`` and ``run_stream()``. Handles missing tool names,
-        invalid JSON arguments, execution with timing, audit logging, context
-        storage, and message updates. Modifies *messages* and
-        *tool_calls_made* in place.
-
-        Independent tool calls in one assistant message run **concurrently**
-        (bounded by ``_MAX_PARALLEL_TOOLS``, or the configured delegate limit
-        for delegation) instead of one after another, so a
-        batch of N reads costs roughly max(latency) rather than sum(latency).
-        Every ``tool_call`` event is emitted up front, then results are
-        replayed in the original order so the transcript stays deterministic.
-
-        If *pending_chunks* is provided, tool_call chunks are accumulated there
-        instead of being inserted immediately. The caller is responsible for
-        flushing them via ``context_manager.add_chunks_batch``.
-        """
-        # S3.3 BEGIN tool-trace hook (revert: delete 4-line block; observe-only)
-        try:
-            from machina.controller import wiring as _s3trace
-        except Exception:
-            _s3trace = None
-        # S3.3 END tool-trace hook
-        # ── Phase A: parse and validate the whole batch ─────────────────────
-        planned: list[dict[str, Any]] = []
-        for tc in response.tool_calls:
-            function_data = tc.get("function", {})
-            tool_name = function_data.get("name")
-            call_id = _ensure_tool_call_id(tc)
-            if not tool_name:
-                logger.warning("Tool call missing 'name' field: %s", tc)
-                audit_log(
-                    "tool_call_invalid",
-                    session_id=str(session_id),
-                    error="missing_name",
-                )
-                planned.append(
-                    {
-                        "tc": tc,
-                        "name": None,
-                        "args": {},
-                        "result": "Error: tool call missing 'name' field",
-                        "call_id": call_id,
-                    }
-                )
-                continue
-
-            raw_args = function_data.get("arguments") or "{}"
-            try:
-                tool_args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
-                if not isinstance(tool_args, dict):
-                    raise ValueError("tool arguments must be an object")
-            except (TypeError, ValueError) as e:
-                # L-03: raw tool arguments can carry credentials; log a
-                # bounded, secret-redacted preview instead of the payload.
-                try:
-                    from machina.memory.redaction import redact_secrets
-
-                    raw_preview = redact_secrets(str(raw_args)[:500]).text
-                except Exception:
-                    raw_preview = "<unavailable>"
-                logger.error(
-                    "Failed to parse tool arguments for '%s': %s (raw preview: %s)",
-                    tool_name,
-                    e,
-                    raw_preview,
-                )
-                audit_log(
-                    "tool_call_invalid_args",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    error=str(e),
-                )
-                planned.append(
-                    {
-                        "tc": tc,
-                        "name": None,
-                        "args": {},
-                        "result": f"Error: invalid tool arguments: {e}",
-                        "call_id": call_id,
-                    }
-                )
-                continue
-
-            if self.allowed_tools is not None and tool_name not in self.allowed_tools:
-                result_str = f"Error: tool '{tool_name}' is not allowed for agent '{self.agent_id}'"
-                audit_log(
-                    "tool_call_denied",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    agent_id=self.agent_id,
-                )
-                planned.append(
-                    {
-                        "tc": tc,
-                        "name": tool_name,
-                        "args": tool_args,
-                        "result": result_str,
-                        "call_id": call_id,
-                    }
-                )
-                continue
-
-            # A model can retain a schema loaded earlier in the turn (for
-            # example via tool_load) after the current step has narrowed the
-            # surface. Enforce the schema actually advertised for this step,
-            # not just the agent's static allow-list.
-            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
-                result_str = (
-                    f"Error: tool '{tool_name}' is not in the current tool surface. "
-                    "Use only tools advertised for this step."
-                )
-                audit_log(
-                    "tool_call_denied",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    agent_id=self.agent_id,
-                    reason="not_in_tool_surface",
-                )
-                planned.append(
-                    {
-                        "tc": tc,
-                        "name": tool_name,
-                        "args": tool_args,
-                        "result": result_str,
-                        "call_id": call_id,
-                    }
-                )
-                continue
-
-            planned.append(
-                {"tc": tc, "name": tool_name, "args": tool_args, "result": None, "call_id": call_id}
-            )
-
-        # ── Phase B: emit starts BEFORE execution (AH-020) ────────────────
-        # Long-running tools must appear as running while executing, not only
-        # after gather() finishes. Starts are emitted in request order with
-        # stable call IDs; completions follow as each finishes.
-        for item in planned:
-            if item["name"] is None:
-                continue
-            # Denied tools (result already set) still get start+complete for
-            # UI consistency — they complete immediately below.
-            yield StreamEvent(
-                type="tool_call",
-                tool_name=item["name"],
-                tool_args=item["args"],
-                tool_call_id=item["call_id"],
-            )
-
-        # ── Phase C: execute concurrently, yielding completions as they finish
-        async def _run_one(item: dict[str, Any]) -> None:
-            tool_name = item["name"]
-            tool_args = item["args"]
-            audit_log("tool_call_start", session_id=str(session_id), tool_name=tool_name)
-            start = time.monotonic()
-            tool_timeout = _TOOL_TIMEOUTS.get(tool_name, _TOOL_TIMEOUT_DEFAULT)
-            try:
-                with span("agent.tool", tool_name=tool_name, session_id=str(session_id)):
-                    await plugin_registry.dispatch("on_tool_call", tool_name, tool_args)
-                    # AH-018: bind caller scope around EVERY tool (not just a
-                    # subset) so RAG tools and future tools see the active
-                    # session/agent. Tokens always reset in finally.
-                    from machina.tools.agents import current_agent_id, current_session_id
-
-                    token = current_session_id.set(session_id)
-                    agent_token = current_agent_id.set(self.agent_id)
-                    # LP-08: publish this agent's authority for delegation
-                    # children (restored afterwards like all caller scope).
-                    try:
-                        from machina.core.agent_factory import check_mode_cap, merge_authority
-                        from machina.core.agent_factory import parent_authority_var as _pav
-
-                        # R-02: Preserve inherited authority (max_mode, etc.)
-                        # and intersect its tools with this agent's definition.
-                        _inherited = dict(getattr(self, "_authority", {}) or {})
-                        _ambient = _pav.get() or {}
-                        if _ambient.get("max_mode") is not None:
-                            check_mode_cap(_inherited, _ambient["max_mode"])
-                        _merged = merge_authority(_inherited, _ambient)
-                        _parent_tools = _merged.get("tools")
-                        # Terminal authority includes observing/stopping its
-                        # own session jobs; this adds no launch capability.
-                        if (
-                            _parent_tools is not None
-                            and "terminal" in _parent_tools
-                            and "terminal_job" not in _parent_tools
-                        ):
-                            _parent_tools = [*_parent_tools, "terminal_job"]
-                        if _parent_tools is None:
-                            _merged["tools"] = self.allowed_tools
-                        elif self.allowed_tools is None:
-                            _merged["tools"] = list(_parent_tools)
-                        else:
-                            _merged["tools"] = [t for t in self.allowed_tools if t in _parent_tools]
-                        authority_token = _pav.set(_merged)
-                    except Exception:
-                        current_agent_id.reset(agent_token)
-                        current_session_id.reset(token)
-                        raise
-                    try:
-                        # Permission broker gates every tool path.
-                        # Validation errors stay distinct from authorization:
-                        # malformed actions fail here before any approval.
-                        from machina.permissions import tools as _perm_tools
-                        from machina.permissions.broker import (
-                            ApprovalDenied as _Denied,
-                        )
-                        from machina.permissions.broker import NeedsApproval as _Needs
-                        from machina.permissions.broker import permission_broker as _broker
-                        from machina.permissions.policy import build_request as _build_req
-
-                        if tool_name in {"mcp_call", "mcp_list", "mcp_describe"}:
-                            from machina.core.runtime import runtime_services
-
-                            await runtime_services.get_connector_service().refresh()
-                        _spec = _perm_tools.action_for_tool(tool_name, tool_args)
-                        if tool_name in {"mcp_call", "mcp_connect", "mcp_disconnect"}:
-                            tool_timeout = int(_spec.get("timeout", 60)) + 1
-                        elif tool_name == "terminal":
-                            # Background authorization has no execution deadline;
-                            # admission still gets a normal startup window.
-                            tool_timeout = (
-                                60
-                                if tool_args.get("background") is True
-                                else min(max(int(_spec.get("timeout", 60)), 1), _TERMINAL_CAP)
-                            )
-                        from machina.core.execution_context import resolve_execution_context
-
-                        _context = await resolve_execution_context(str(session_id), tool_name)
-                        _mode, _backend = _context.mode, _context.backend
-                        # Children inherit the parent's current execution mode,
-                        # including sandbox isolation, rather than a global default.
-                        check_mode_cap(_merged, _mode)
-                        _merged["max_mode"] = _mode
-                        if tool_name == "terminal" and _merged.get("terminal_backend") == "sandbox":
-                            _backend = "sandbox"
-                        if _mode == "sandbox" or _backend == "sandbox":
-                            _merged["terminal_backend"] = "sandbox"
-                        _pav.set(_merged)
-                        _req = _build_req(
-                            operation=_spec.get("operation", f"tool.{tool_name}"),
-                            targets=_spec.get("targets"),
-                            argv=_spec.get("argv"),
-                            shell_payload=_spec.get("shell_payload", ""),
-                            cwd=_spec.get("cwd", "."),
-                            content=_spec.get("content", ""),
-                            mode=_mode,
-                            backend=_backend,
-                            workspace=str(_context.workspace),
-                            agent_id=self.agent_id,
-                            session_id=str(session_id),
-                            capabilities=_spec.get("capabilities"),
-                            network=_spec.get("network"),
-                            tool=tool_name,
-                            # AH-AUDIT-005/008: timeout is authorization-
-                            # relevant and bound into the approved digest.
-                            timeout=int(_spec.get("timeout", 60)),
-                        )
-                        try:
-                            await _broker.guard(_req)
-                            item["_approval_id"] = _req.approval_id or ""
-                        except _Needs as _need:
-                            _ap = _need.approval
-                            result = (
-                                f"Needs approval ({_ap.get('request_id')}:{_ap.get('operation')} "
-                                f"{_ap.get('target')}). The action was NOT executed. "
-                                "Ask the user to approve it (approvals list/resolve), "
-                                "or choose another path."
-                            )
-                            item["result"] = str(result)
-                            # AH-AUDIT-022: typed pause outcome travels with
-                            # the tool item into AgentResponse.needs_approval.
-                            # Schedulers/transports read this — never prose.
-                            item["_needs_approval"] = {
-                                "request_id": _ap.get("request_id", ""),
-                                "session_id": _ap.get("session_id", ""),
-                                "agent_id": _ap.get("agent_id", self.agent_id),
-                                "turn_id": _ap.get("turn_id", ""),
-                                "operation": _ap.get("operation", ""),
-                                "target": _ap.get("target", ""),
-                                "status": _ap.get("status", "pending"),
-                                # Epoch creation time: lets the trace layer
-                                # measure the real human wait at re-pause and
-                                # at approval resume.
-                                "created_at": _ap.get("created_at"),
-                            }
-                            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                            return
-                        except _Denied as _den:
-                            result = (
-                                f"Permission denied: {_den.reason}. The action was NOT executed."
-                            )
-                            item["result"] = str(result)
-                            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                            return
-                        try:
-                            from machina.core.background_tasks import (
-                                CompletedOnCancellation,
-                                await_joined,
-                            )
-
-                            def save_result(completed):
-                                item["result"] = str(completed)
-                                item["_failed"] = bool(
-                                    getattr(completed, "is_error", False)
-                                ) or str(completed).startswith("Error:")
-                                item["elapsed_ms"] = (time.monotonic() - start) * 1000
-                                item["_delegation_status"] = getattr(
-                                    completed, "delegation_status", ""
-                                )
-                                if getattr(completed, "outcome_unknown", False):
-                                    item["_outcome_unknown"] = True
-                                from machina.tools.agents import DelegationToolResult
-
-                                if isinstance(completed, DelegationToolResult):
-                                    item["_needs_approvals"] = completed.needs_approval
-                                    item["_delegated_tokens"] = completed.tokens_used
-
-                            async def execute():
-                                try:
-                                    completed = await registry.execute(tool_name, **tool_args)
-                                except CompletedOnCancellation as cancellation:
-                                    save_result(cancellation.result)
-                                    raise
-                                save_result(completed)
-                                return completed
-
-                            execution = asyncio.create_task(execute())
-                            result = (
-                                await execution
-                                if tool_name == "delegate"
-                                else await asyncio.wait_for(execution, timeout=tool_timeout)
-                            )
-                        except asyncio.CancelledError:
-
-                            async def finish_execution():
-                                outcomes = await asyncio.gather(execution, return_exceptions=True)
-                                for error in outcomes:
-                                    if isinstance(error, Exception):
-                                        record_failure("agent.cancelled_execution", error)
-                                if "elapsed_ms" not in item:
-                                    _aid = item.get("_approval_id", "")
-                                    if _aid:
-                                        item["_cancelled"] = True
-                                        await self._retire_tool_approval(item, "cancelled")
-
-                            await await_joined(finish_execution())
-                            raise
-                    finally:
-                        try:
-                            # AH-AUDIT-002: end the guard+execute window so a
-                            # later tool call cannot inherit this approval's
-                            # snapshot.
-                            from machina.permissions.broker import (
-                                clear_execution_context as _clear_ctx,
-                            )
-
-                            _clear_ctx()
-                        except Exception as _boundary_error:
-                            # Optional fallback preserves the primary outcome; report no payload.
-                            record_failure("agent._execute_tool_calls_stream", _boundary_error)
-                        try:
-                            if authority_token is not None:
-                                from machina.core.agent_factory import parent_authority_var as _pav2
-
-                                _pav2.reset(authority_token)
-                        except Exception as _boundary_error:
-                            # Optional fallback preserves the primary outcome; report no payload.
-                            record_failure("agent._execute_tool_calls_stream", _boundary_error)
-                        current_agent_id.reset(agent_token)
-                        current_session_id.reset(token)
-            except DelegationAccountingError:
-                # Unknown child spend is fatal for this turn, not a recoverable
-                # tool failure that permits another provider call.
-                raise
-            except Exception as e:
-                if isinstance(e, asyncio.TimeoutError) and "elapsed_ms" in item:
-                    return
-                if isinstance(e, asyncio.TimeoutError):
-                    # R4-019: wait_for raises a message-less TimeoutError; type it.
-                    e = f"tool '{tool_name}' timed out after {tool_timeout:g}s"
-                logger.exception("Tool execution failed for '%s'", tool_name)
-                audit_log(
-                    "tool_call_error",
-                    session_id=str(session_id),
-                    tool_name=tool_name,
-                    error=str(e),
-                    duration_ms=int((time.monotonic() - start) * 1000),
-                )
-                result = f"Error: {e}"
-            item["_failed"] = bool(getattr(result, "is_error", False)) or str(result).startswith(
-                "Error:"
-            )
-            if (
-                tool_name == "skill_read"
-                and not item["_failed"]
-                and str(result).startswith("Skill ")
-                and _rsi_skills.get() is not None
-                and len(_rsi_skills.get()) < 200
-            ):
-                _rsi_skills.get().append(tool_args.get("skill_name", ""))
-            item["result"] = str(result)
-            item["elapsed_ms"] = (time.monotonic() - start) * 1000
-
-        # Mark denied items so _run_one skips execution but Phase D still emits.
-        for item in planned:
-            if item["name"] is not None and item["result"] is not None:
-                item["_denied"] = True
-
-        runnable = [
-            item for item in planned if item["name"] is not None and not item.get("_denied")
-        ]
-        completion_order: list[dict[str, Any]] = []
-        if runnable:
-            semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
-            try:
-                delegate_limit = int(config.get("max_delegate_concurrency") or 8)
-            except (TypeError, ValueError):
-                delegate_limit = 8
-            delegate_semaphore = asyncio.Semaphore(max(1, min(delegate_limit, 64)))
-
-            async def _bounded(item: dict[str, Any]) -> dict[str, Any]:
-                slots = delegate_semaphore if item["name"] == "delegate" else semaphore
-                async with slots:
-                    with _s3trace.trace_tool_call(item) if _s3trace else nullcontext() as _trace:
-                        await _run_one(item)
-                        if _trace is not None:
-                            _trace.finish(_tool_outcome(item))
-                return item
-
-            tasks = [asyncio.create_task(_bounded(item)) for item in runnable]
-            # MCH-010: Phase C finalization exists for EXCEPTIONAL exits only
-            # (cancellation/error). On the normal path Phase D must prepare the
-            # artifact handle BEFORE publishing the durable tool chunk; recording
-            # here first would freeze a payload without the handle.
-            finalize_on_exit = True
-            try:
-                for coro in asyncio.as_completed(tasks):
-                    try:
-                        finished = await coro
-                    except DelegationAccountingError:
-                        raise
-                    except Exception:
-                        continue
-                    completion_order.append(finished)
-                    # Yield completion immediately (out-of-order OK — call ID
-                    # pairs it with its start). Metrics + persistence happen
-                    # in Phase D in provider-required original order.
-                    tool_name = finished["name"]
-                    result_str = finished["result"]
-                    if "elapsed_ms" in finished:
-                        metrics.record_latency(f"tool.{tool_name}", finished["elapsed_ms"])
-                        metrics.increment_counter(f"tool.{tool_name}.calls")
-                        if result_str.startswith("Error:"):
-                            metrics.record_error(f"tool.{tool_name}")
-                    yield StreamEvent(
-                        type="tool_result",
-                        tool_name=tool_name,
-                        tool_result=result_str,
-                        tool_call_id=finished["call_id"],
-                        tool_outcome=_tool_outcome(finished),
-                    )
-                    # AH-AUDIT-030: typed pause alongside the result so live
-                    # consumers need not wait for the terminal response.
-                    _pauses_c = finished.get("_needs_approvals") or [
-                        finished.get("_needs_approval")
-                    ]
-                    for _pause_c in _pauses_c:
-                        if not isinstance(_pause_c, dict) or not _pause_c.get("request_id"):
-                            continue
-                        if _s3trace is not None:
-                            _s3trace.record_approval_pause(_pause_c)
-                        yield StreamEvent(
-                            type="needs_approval",
-                            content=str(_pause_c.get("request_id", "")),
-                            tool_name=tool_name,
-                            tool_args={
-                                "requestId": str(_pause_c.get("request_id", "")),
-                                "sessionId": str(_pause_c.get("session_id", "")),
-                                "operation": str(_pause_c.get("operation", "")),
-                                "target": str(_pause_c.get("target", "")),
-                                "status": str(_pause_c.get("status", "pending")),
-                            },
-                            tool_call_id=finished["call_id"],
-                        )
-                finalize_on_exit = False
-            finally:
-                # Ensure no task leaks on cancellation.
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
-                # Cancellation is complete only when children retire their
-                # claims, reservations, and owned providers.
-                from machina.core.background_tasks import await_joined
-
-                if finalize_on_exit:
-
-                    async def finish_batch():
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                        await self._finalize_completed_tools(
-                            planned, session_id, pending_chunks, tool_calls_made
-                        )
-
-                    await await_joined(finish_batch())
-
-        # ── Phase D: metrics for denied + persistence in provider order ───
-        # Provider message order must follow the original tool_calls order
-        # (OpenAI requires tool replies in order), even though UI completions
-        # above may have arrived out of order. A cancellation here still
-        # finalizes any completed-but-unrecorded action (F02).
-        try:
-            for item in planned:
-                tool_name = item["name"]
-                result_str = item["result"]
-                tc = item["tc"]
-
-                if tool_name is None:
-                    # Missing name / unparsable args: no events, just the reply.
-                    self._append_tool_messages(messages, response, tc, result_str)
-                    continue
-
-                if item.get("_denied"):
-                    metrics.increment_counter(f"tool.{tool_name}.calls")
-                    metrics.record_error(f"tool.{tool_name}")
-                    await plugin_registry.dispatch("on_tool_result", tool_name, result_str)
-                    audit_log(
-                        "tool_call_complete",
-                        session_id=str(session_id),
-                        tool_name=tool_name,
-                        duration_ms=0,
-                    )
-                    # Denied completions were not yielded in Phase C (no
-                    # execution); emit them now in order.
-                    yield StreamEvent(
-                        type="tool_result",
-                        tool_name=tool_name,
-                        tool_result=result_str,
-                        tool_call_id=item["call_id"],
-                        tool_outcome=_tool_outcome(item),
-                    )
-                    # AH-AUDIT-030: typed pause event on the stream (not just in
-                    # the terminal done response) so SSE/transports can pause
-                    # mid-turn with request binding instead of parsing prose.
-                    _pause = item.get("_needs_approval")
-                    if isinstance(_pause, dict) and _pause.get("request_id"):
-                        yield StreamEvent(
-                            type="needs_approval",
-                            content=str(_pause.get("request_id", "")),
-                            tool_name=tool_name,
-                            tool_args={
-                                "requestId": str(_pause.get("request_id", "")),
-                                "sessionId": str(_pause.get("session_id", "")),
-                                "operation": str(_pause.get("operation", "")),
-                                "target": str(_pause.get("target", "")),
-                                "status": str(_pause.get("status", "pending")),
-                            },
-                            tool_call_id=item["call_id"],
-                        )
-                else:
-                    # Executed tools: metrics already recorded at completion time;
-                    # still dispatch result hooks + audit once (idempotent).
-                    if "elapsed_ms" in item and not item.get("_hooked"):
-                        # Phase C recorded latency/counters; dispatch hooks here
-                        # once in original order for determinism.
-                        await plugin_registry.dispatch("on_tool_result", tool_name, result_str)
-                        audit_log(
-                            "tool_call_complete",
-                            session_id=str(session_id),
-                            tool_name=tool_name,
-                            duration_ms=int(item["elapsed_ms"]),
-                        )
-                        item["_hooked"] = True
-
-                # T2/T3: retain the original once and append the cached view.
-                # The helper makes the same retention decision the recorder
-                # uses, so the durable chunk carries the handle (MCH-010).
-                view = await self._ensure_artifact_view(item, session_id)
-                # Durably record the action exactly once (chunk + approval
-                # retirement + tool_calls_made entry; shared with cancellation).
-                await self._record_tool_action(item, session_id, pending_chunks, tool_calls_made)
-                self._append_tool_messages(messages, response, tc, view)
-        finally:
-            await self._finalize_completed_tools(
-                planned, session_id, pending_chunks, tool_calls_made
-            )
+        executor = getattr(self, "tool_batch", None) or ToolBatchExecutor(self)
+        return executor.execute_stream(
+            response,
+            messages,
+            tool_calls_made,
+            session_id,
+            pending_chunks,
+            allowed_tool_names,
+        )
 
     def _tool_entry(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Build the ``tool_calls_made`` entry for one finished tool action."""
-        result_str = item["result"]
-        entry: dict[str, Any] = {
-            "tool": item["name"],
-            "args": item["args"],
-            "result_preview": result_str[:200],
-            "outcome": _tool_outcome(item),
-        }
-        returncode = getattr(result_str, "returncode", None)
-        if isinstance(returncode, int):
-            entry["returncode"] = returncode
-        # AH-AUDIT-022: typed pause marker travels with the entry so
-        # schedulers/transports never parse prose to detect pauses.
-        if item.get("_needs_approval"):
-            entry["needs_approval"] = item["_needs_approval"]
-        if item.get("_needs_approvals"):
-            entry["needs_approvals"] = item["_needs_approvals"]
-            entry["needs_approval"] = item["_needs_approvals"][0]
-        if item.get("_delegated_tokens"):
-            entry["delegated_tokens"] = item["_delegated_tokens"]
-        return entry
+        return self.tool_results.tool_entry(item)
 
-    async def _record_tool_action(
-        self,
-        item: dict[str, Any],
-        session_id: uuid.UUID,
-        pending_chunks: list[dict[str, Any]] | None,
-        tool_calls_made: list[dict[str, Any]],
-    ) -> None:
-        """Durably record one finished action exactly once (F02).
-
-        Writes the ``tool_call`` context chunk, retires the action's approval
-        (claimed → completed/failed), and appends its ``tool_calls_made`` entry.
-        Called from Phase D in provider order on the normal path and from
-        ``_finalize_completed_tools`` for completed-but-unrecorded items when a
-        batch is cancelled. Provider-message assembly stays with the caller
-        (order-sensitive). Idempotent via ``item['_recorded']``.
-        """
-        from machina.core.background_tasks import await_joined
-
-        await await_joined(
-            self._record_tool_action_joined(item, session_id, pending_chunks, tool_calls_made)
-        )
+    async def _record_tool_action(self, item, session_id, pending_chunks, tool_calls_made) -> None:
+        await self.tool_results.record_action(item, session_id, pending_chunks, tool_calls_made)
 
     async def _ensure_artifact_view(self, item: dict[str, Any], session_id: uuid.UUID) -> str:
-        """Retain the original once; cache view + handle before recording (MCH-010)."""
-        return await ensure_item_artifact_view(
-            item, session_id, self.agent_id, status=_tool_outcome(item)
-        )
+        return await self.tool_results.ensure_artifact_view(item, session_id)
 
-    async def _record_tool_action_joined(
-        self, item, session_id, pending_chunks, tool_calls_made
-    ) -> None:
-        result_str = item["result"]
-        outcome = (
-            "failed" if item.get("_failed") or result_str.startswith("Error:") else "completed"
+    async def _record_tool_action_joined(self, item, session_id, pending_chunks, tool_calls_made):
+        await self.tool_results.record_action_joined(
+            item, session_id, pending_chunks, tool_calls_made
         )
-        await self._retire_tool_approval(item, outcome)
-        if item.get("_recorded"):
-            return
-        # MCH-010: retention/handle must exist BEFORE the payload is published.
-        # Cancellation finalization and Phase D share this single decision, so
-        # a completed oversized execution never persists a handle-less record.
-        if item.get("_artifact_view") is None and "elapsed_ms" in item:
-            await self._ensure_artifact_view(item, session_id)
-        payload = {
-            "tool": item["name"],
-            "args": item["args"],
-            "result_preview": result_str[:500],
-            "result": result_str[:_STORED_TOOL_RESULT_CHARS],
-            "result_truncated": len(result_str) > _STORED_TOOL_RESULT_CHARS,
-        }
-        # When the full result was retained as an artifact, the durable chunk
-        # points at it so later sessions/turns can recover the exact original
-        # beyond the chunk copy's 65k cap.
-        if item.get("_artifact_handle"):
-            payload["artifact_handle"] = item["_artifact_handle"]
-        if pending_chunks is not None:
-            pending_chunks.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "session_id": session_id,
-                    "agent_id": self.agent_id,
-                    "chunk_type": "tool_call",
-                    "payload": payload,
-                    "token_count": get_token_count(result_str),
-                }
-            )
-        else:
-            await context_manager.add_chunk(
-                session_id=session_id,
-                agent_id=self.agent_id,
-                chunk_type="tool_call",
-                payload=payload,
-                token_count=get_token_count(result_str),
-            )
-        tool_calls_made.append(self._tool_entry(item))
-        item["_recorded"] = True
 
     async def _retire_tool_approval(self, item, outcome: str) -> None:
-        approval_id = item.get("_approval_id", "")
-        if not approval_id or item.get("_approval_done"):
-            return
-        try:
-            from machina.permissions.broker import permission_broker
-
-            if await permission_broker.complete(approval_id, outcome):
-                item["_approval_done"] = True
-            else:
-                logger.warning("Tool approval retirement was not confirmed")
-        except Exception as error:
-            record_failure("agent._retire_tool_approval", error)
+        await self.tool_results.retire_approval(item, outcome)
 
     async def _finalize_completed_tools(
-        self,
-        planned: list[dict[str, Any]],
-        session_id: uuid.UUID,
-        pending_chunks: list[dict[str, Any]] | None,
-        tool_calls_made: list[dict[str, Any]],
+        self, pending, session_id, pending_chunks=None, tool_calls_made=None
     ) -> None:
-        """Record completed actions and retry unfinished approval retirements."""
-        from machina.core.background_tasks import await_joined
-
-        await await_joined(
-            self._finalize_completed_tools_joined(
-                planned, session_id, pending_chunks, tool_calls_made
-            )
+        await self.tool_results.finalize_completed(
+            pending, session_id, pending_chunks, tool_calls_made or []
         )
 
     async def _finalize_completed_tools_joined(
-        self, planned, session_id, pending_chunks, tool_calls_made
+        self, pending, session_id, pending_chunks=None, tool_calls_made=None
     ) -> None:
-        for item in planned:
-            if item["name"] is None:
-                continue
-            if item.get("_recorded") and (
-                not item.get("_approval_id") or item.get("_approval_done")
-            ):
-                continue
-            try:
-                if item.get("_cancelled"):
-                    await self._retire_tool_approval(item, "cancelled")
-                elif item.get("_denied") or "elapsed_ms" in item:
-                    # Denied items were announced to the client in Phase B but
-                    # only recorded by Phase D's shared tail; a batch cancelled
-                    # before Phase D reached them must still land their chunk
-                    # and tool_calls_made entry.
-                    await self._record_tool_action(
-                        item, session_id, pending_chunks, tool_calls_made
-                    )
-            except Exception as exc:
-                logger.warning("cancellation finalize failed for %s: %s", item["name"], exc)
+        await self.tool_results.finalize_completed_joined(
+            pending, session_id, pending_chunks, tool_calls_made or []
+        )
 
     async def _flush_pending_chunks(self, pending_chunks: list[dict[str, Any]]) -> bool:
         """Single batch insert; fail-open retention + C1 identity checks (tool_views)."""
@@ -1824,21 +436,14 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]],
         event: str,
     ) -> None:
-        """Persist a repaired-turn continuation before exposing it to the model."""
-        await self._append_assistant_content(session_id, content, pending_chunks)
-        pending_chunks.append(
-            {
-                "id": str(uuid.uuid4()),
-                "session_id": session_id,
-                "agent_id": self.agent_id,
-                "chunk_type": "user_message",
-                "payload": {"content": text},
-                "token_count": get_token_count(text),
-            }
+        await self.turn_phases.append_repair_nudge(
+            session_id=session_id,
+            content=content,
+            text=text,
+            messages=messages,
+            pending_chunks=pending_chunks,
+            event=event,
         )
-        await self._flush_pending_chunks(pending_chunks)
-        messages.append({"role": "user", "content": text})
-        audit_log(event, session_id=str(session_id), agent_id=self.agent_id)
 
     async def _append_task_run_nudge(
         self,
@@ -1849,20 +454,13 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]],
         event: str = "agent_task_run_nudge",
     ) -> None:
-        """Persist one controller nudge before the next model call."""
-        pending_chunks.append(
-            {
-                "id": str(uuid.uuid4()),
-                "session_id": session_id,
-                "agent_id": self.agent_id,
-                "chunk_type": "user_message",
-                "payload": {"content": text},
-                "token_count": get_token_count(text),
-            }
+        await self.turn_phases.append_task_run_nudge(
+            session_id=session_id,
+            text=text,
+            messages=messages,
+            pending_chunks=pending_chunks,
+            event=event,
         )
-        await self._flush_pending_chunks(pending_chunks)
-        messages.append({"role": "user", "content": text})
-        audit_log(event, session_id=str(session_id), agent_id=self.agent_id)
 
     async def _maybe_continue_unchanged_repair(
         self,
@@ -1874,29 +472,14 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]],
         nudges: int,
     ) -> bool:
-        """Give one continuation when a repair task finishes with a clean tree."""
-        from machina.core.execution_context import resolve_execution_context
-
-        try:
-            workspace = (await resolve_execution_context(str(session_id), "agent")).workspace
-        except Exception:
-            workspace = None
-        if not await asyncio.to_thread(
-            should_nudge_repair,
-            user_message,
-            workspace=workspace,
-            nudges=nudges,
-        ):
-            return False
-        await self._append_repair_nudge(
+        return await self.turn_phases.maybe_continue_unchanged_repair(
             session_id=session_id,
+            user_message=user_message,
             content=content,
-            text=REPAIR_NUDGE,
             messages=messages,
             pending_chunks=pending_chunks,
-            event="agent_repair_nudge",
+            nudges=nudges,
         )
-        return True
 
     async def _maybe_continue_unverified_repair(
         self,
@@ -1909,36 +492,19 @@ class BaseReActAgent:
         tool_calls_made: list[dict[str, Any]],
         nudges: int,
     ) -> bool:
-        """Give one continuation when a changed tree has no verification evidence."""
-        if not await asyncio.to_thread(
-            should_nudge_verification,
-            user_message,
-            tool_calls_made,
-            nudges=nudges,
-        ):
-            return False
-        await self._append_repair_nudge(
+        return await self.turn_phases.maybe_continue_unverified_repair(
             session_id=session_id,
+            user_message=user_message,
             content=content,
-            text=VERIFICATION_NUDGE,
             messages=messages,
             pending_chunks=pending_chunks,
-            event="agent_verification_nudge",
+            tool_calls_made=tool_calls_made,
+            nudges=nudges,
         )
-        return True
 
     @staticmethod
     def _fallback_final_content(tool_calls_made: list[dict[str, Any]]) -> str:
-        names = []
-        for entry in tool_calls_made:
-            name = str(entry.get("tool") or "")
-            if name and name not in names:
-                names.append(name)
-        label = ", ".join(names[:6]) or "tool"
-        return (
-            f"Completed {len(tool_calls_made)} tool call(s) using {label}. "
-            "Review the tool results above for the exact output."
-        )
+        return TurnPhases.fallback_final_content(tool_calls_made)
 
     async def _continue_after_empty_tool_turn(
         self,
@@ -1946,129 +512,18 @@ class BaseReActAgent:
         user_message: str,
         tool_calls_made: list[dict[str, Any]],
         tools: list[Any],
-    ) -> tuple[LLMResponse | None, list[dict[str, Any]], int]:
-        """Restart a provider's empty post-tool turn with a fresh continuation.
-
-        The model can often continue from a compact task + tool-result summary
-        even when replaying the full tool transcript produces an empty message.
-        Keep the tool schema available so the model can make the next call;
-        the caller decides whether to execute it or accept final content.
-        """
-        result_lines = []
-        for entry in tool_calls_made[-8:]:
-            tool = str(entry.get("tool") or "tool")
-            args = entry.get("args") or {}
-            try:
-                args_text = json.dumps(args, ensure_ascii=False, default=str)[:240]
-            except Exception:
-                args_text = "{}"
-            preview = " ".join(str(entry.get("result_preview") or "").split())[:400]
-            result_lines.append(f"- {tool}({args_text}): {preview or '(completed)'}")
-        recovery_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Continue the task after completed tool work. Use the provided "
-                    "tools if more work remains; otherwise write the final response. "
-                    "Do not repeat a tool action that already succeeded. Do not page "
-                    "or search an artifact for a result already shown; act on its "
-                    "failure details. If web verification failed, fix the failed "
-                    "checks and rerun web_verify."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"The task was:\n{user_message[:4000]}\n\n"
-                    "Tool results so far:\n" + "\n".join(result_lines) + "\n\nContinue the task."
-                ),
-            },
-        ]
-        try:
-            response = await self._call_llm_with_retry(
-                recovery_messages, tools=tools, session_id=session_id
-            )
-            tokens = int((response.usage or {}).get("total_tokens", 0) or 0)
-            return response, recovery_messages, tokens
-        except Exception as exc:
-            logger.warning("Empty-tool continuation recovery failed: %s", exc)
-            return None, recovery_messages, 0
+    ):
+        return await self.turn_phases.continue_after_empty_tool_turn(
+            session_id, user_message, tool_calls_made, tools
+        )
 
     async def _recover_empty_final(
         self,
         session_id: uuid.UUID,
         user_message: str,
         tool_calls_made: list[dict[str, Any]],
-    ) -> tuple[str, int]:
-        """Recover a provider's empty post-tool completion with a fresh summary.
-
-        Some OpenAI-compatible model routes return an empty assistant message
-        after a tool result even when the tool ran successfully. Replaying the
-        full tool transcript can reproduce the empty response, so ask for one
-        bounded, tool-free summary from a fresh context and fall back to a
-        deterministic report if the route still returns nothing.
-        """
-        result_lines = []
-        for entry in tool_calls_made[-8:]:
-            tool = str(entry.get("tool") or "tool")
-            preview = " ".join(str(entry.get("result_preview") or "").split())[:300]
-            result_lines.append(f"- {tool}: {preview or '(completed)'}")
-        if tool_calls_made:
-            recovery_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "Write the final response after completed tool work. "
-                        "Do not call tools. Be concise and factual."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"The task was:\n{user_message[:4000]}\n\n"
-                        "The tool results were:\n"
-                        + "\n".join(result_lines)
-                        + "\n\nWrite a concise final response summarizing what was "
-                        "completed, any files changed, and verification. "
-                        "Do not call tools."
-                    ),
-                },
-            ]
-        else:
-            recovery_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "The previous model completion was empty. Answer the user's "
-                        "task directly. Do not call tools."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": user_message[:8000],
-                },
-            ]
-        recovered = ""
-        tokens = 0
-        try:
-            response = await self._call_llm_with_retry(
-                recovery_messages, tools=[], session_id=session_id
-            )
-            recovered = (response.content or "").strip()
-            tokens = int((response.usage or {}).get("total_tokens", 0) or 0)
-        except Exception as exc:
-            logger.warning("Empty-final summary recovery failed: %s", exc)
-        used_fallback = not recovered
-        if used_fallback and tool_calls_made:
-            recovered = self._fallback_final_content(tool_calls_made)
-        audit_log(
-            "agent_empty_final_recovery",
-            session_id=str(session_id),
-            recovered=bool(recovered and not used_fallback),
-            fallback=used_fallback,
-            tokens=tokens,
-        )
-        return recovered, tokens
+    ):
+        return await self.turn_phases.recover_empty_final(session_id, user_message, tool_calls_made)
 
     async def _finish_turn_completion(
         self,
@@ -2081,36 +536,17 @@ class BaseReActAgent:
         pending_chunks: list[dict[str, Any]],
         *,
         outcome: str = "completed",
-    ) -> AgentResponse:
-        """Persist and attribute one accepted, tool-free completion.
-
-        ``run`` and ``run_stream`` shared this whole block; only the terminal
-        event shape differs at the call sites.
-        """
-        pending_chunks.append(_assistant_chunk(session_id, self.agent_id, content))
-        await self._flush_pending_chunks(pending_chunks)
-        await session_manager.update_activity(session_id)
-        audit_log(
-            "agent_run_complete",
-            session_id=str(session_id),
-            iterations=iterations,
-            total_tokens=total_tokens,
-            tool_calls_count=len(tool_calls_made),
-        )
-        self._schedule_memory_consolidation(session_id)
-        completed = AgentResponse(
-            content=content,
-            tool_calls=tool_calls_made,
-            tokens_used=total_tokens,
-            iterations=iterations,
+    ):
+        return await self.turn_phases.finish_turn_completion(
+            session_id,
+            user_message,
+            content,
+            tool_calls_made,
+            total_tokens,
+            iterations,
+            pending_chunks,
             outcome=outcome,
         )
-        self._schedule_learning_review(session_id, user_message, completed)
-        if outcome == "completed":
-            # T0: attribute the accepted completion for cost views. A paused
-            # turn is not accepted until the approval is resolved.
-            await mark_turn_accepted(session_id, self.agent_id, usage_store)
-        return completed
 
     async def _append_assistant_content(
         self,
@@ -2118,15 +554,7 @@ class BaseReActAgent:
         content: str,
         pending_chunks: list[dict[str, Any]],
     ) -> None:
-        """Queue one non-empty assistant message and flush it safely."""
-        if not content:
-            return
-        pending_chunks.append(_assistant_chunk(session_id, self.agent_id, content))
-        try:
-            await self._flush_pending_chunks(pending_chunks)
-        except asyncio.CancelledError:
-            await self._flush_pending_cancellation_safe(pending_chunks, session_id)
-            raise
+        await self.turn_phases.append_assistant_content(session_id, content, pending_chunks)
 
     async def _flush_pending_cancellation_safe(
         self,
@@ -2134,249 +562,32 @@ class BaseReActAgent:
         session_id: uuid.UUID,
         note: str = "interrupted",
     ) -> None:
-        """Flush pending history on cancellation without losing writes (AH-015).
+        await self.turn_phases.flush_pending_cancellation_safe(pending_chunks, session_id, note)
 
-        Uses a shielded, bounded flush so CancelledError during a turn does
-        not drop the user message or completed tool records. The pending list
-        is cleared only on a CONFIRMED flush: a failed flush keeps the chunks
-        retained instead of clearing a batch it never persisted (code_review
-        #6). Appends an explicit interruption marker instead of misrepresenting
-        partial effects as complete.
-        """
-        from machina.core.background_tasks import await_joined
-
-        await await_joined(
-            self._flush_pending_cancellation_joined(pending_chunks, session_id, note)
-        )
-
-    async def _flush_pending_cancellation_joined(self, pending_chunks, session_id, note) -> None:
-        if pending_chunks:
-            try:
-                flushed = await asyncio.wait_for(
-                    self._flush_pending_chunks(pending_chunks), timeout=10.0
-                )
-                if not flushed:
-                    logger.warning(
-                        "Cancellation-safe flush did not persist %d pending chunk(s); "
-                        "chunks retained",
-                        len(pending_chunks),
-                    )
-            except Exception as e:
-                logger.warning("Cancellation-safe flush failed: %s", e)
-        try:
-            await asyncio.wait_for(
-                context_manager.add_chunk(
-                    session_id=session_id,
-                    agent_id=self.agent_id,
-                    chunk_type="assistant_message",
-                    payload={
-                        "content": f"[{note}] Turn interrupted; partial effects above are retained."
-                    },
-                    token_count=20,
-                ),
-                timeout=10.0,
-            )
-        except Exception as e:
-            logger.warning("Could not record interruption marker: %s", e)
+    async def _flush_pending_cancellation_joined(
+        self, pending_chunks, session_id, note="interrupted"
+    ) -> None:
+        await self.turn_phases.flush_pending_cancellation_joined(pending_chunks, session_id, note)
 
     def _schedule_memory_consolidation(self, session_id: uuid.UUID) -> None:
-        """Schedule memory consolidation as a bounded background task.
-
-        Bounded and shared: one consolidation per SESSION across all agent
-        instances (LP-14); skipped when memory or consolidation is disabled.
-        Watermark cursor (see _consolidate_memories) keeps repeated runs
-        idempotent.
-        """
-        if not self.memory_consolidator:
-            return
-        try:
-            if not config.get("memory_consolidation_enabled"):
-                return
-        except Exception as _boundary_error:
-            # Optional fallback preserves the primary outcome; report no payload.
-            record_failure("agent._schedule_memory_consolidation", _boundary_error)
-        key = str(session_id)
-        running = _consolidation_inflight.get(key)
-        if running is not None and not running.done():
-            logger.debug("consolidation already running for session, skipping duplicate")
-            return
-        task = asyncio.create_task(self._consolidate_memories(session_id))
-        _consolidation_inflight[key] = task
-        self._consolidation_tasks.add(task)
-        task.add_done_callback(self._consolidation_tasks.discard)
-
-        def _drop(_t: asyncio.Task) -> None:
-            if _consolidation_inflight.get(key) is _t:
-                _consolidation_inflight.pop(key, None)
-
-        task.add_done_callback(_drop)
+        self.post_turn.schedule_consolidation(session_id)
 
     def _parse_consolidation_cursor(self, cursor: dict | None) -> tuple | None:
-        """Parse a stored ``mem_consolidated_up_to`` dict into a cursor tuple.
-
-        Returns ``(created_at, id)`` for a legacy cursor (no ordinal) and
-        ``(created_at, event_seq, id)`` when the stored cursor carries ``seq``
-        (HELD-55 F1), or ``None``. The legacy 2-tuple shape is preserved so a
-        pre-ordinal cursor is unpacked exactly as before; an unparseable cursor
-        is diagnosed (W7) and falls back to a full cursorless scan rather than
-        raising into the consolidation turn.
-        """
-        if not (cursor and cursor.get("id")):
-            return None
-        try:
-            since_time = cursor.get("at")
-            if isinstance(since_time, str):
-                text = since_time[:-1] + "+00:00" if since_time.endswith("Z") else since_time
-                since_time = datetime.fromisoformat(text)
-                if since_time.tzinfo is None:
-                    since_time = since_time.replace(tzinfo=UTC)
-            since_id = uuid.UUID(str(cursor["id"]))
-            since_seq = cursor.get("seq")
-            if since_seq is None:
-                return (since_time, since_id)
-            return (since_time, int(since_seq), since_id)
-        except Exception as exc:
-            record_failure("agent.consolidation_cursor", exc)
-            return None
+        return self.post_turn.parse_cursor(cursor)
 
     async def _read_consolidation_cursor(self, session_id: uuid.UUID) -> tuple | None:
-        """Resolve the durable watermark as a ``(created_at, [event_seq,] id)`` cursor.
-
-        Prefers ``get_fresh`` (AH-AUDIT-019) so a worker's up-to-60s cached
-        session snapshot cannot pin a stale cursor; the built-in consolidator
-        invokes this while holding its cross-process advisory lock, making the
-        read the authoritative lower bound of the extraction window.
-        """
-        getter = getattr(session_manager, "get_fresh", None) or session_manager.get
-        session = await getter(session_id)
-        cursor = (session.state or {}).get("mem_consolidated_up_to") if session else None
-        return self._parse_consolidation_cursor(cursor)
+        return await self.post_turn.read_cursor(session_id)
 
     async def _persist_consolidation_cursor(self, session_id: uuid.UUID, checkpoint: dict) -> None:
-        """Durably advance the watermark from a fully-processed checkpoint.
-
-        Called by the built-in consolidator while its advisory lock is held, so
-        the advance cannot interleave with another worker's read/advance.
-        Merged transactionally so concurrent state writes survive; a persist
-        failure is logged and leaves the range retryable.
-        """
-        try:
-            stored_cursor: dict = {
-                "id": str(checkpoint["id"]),
-                "at": checkpoint["at"],
-            }
-            # Additive optional ordinal (HELD-55 F1): persisted only when the
-            # checkpoint carries one, so a stored cursor without seq keeps the
-            # legacy 2-key predicate path.
-            if checkpoint.get("seq") is not None:
-                stored_cursor["seq"] = int(checkpoint["seq"])
-            await session_manager.update_state_fields(
-                session_id,
-                {"mem_consolidated_up_to": stored_cursor},
-            )
-        except Exception as e:
-            logger.debug("consolidation cursor persist failed: %s", e)
+        await self.post_turn.persist_cursor(session_id, checkpoint)
 
     async def _consolidate_memories(self, session_id: uuid.UUID) -> None:
-        """Consolidate new session context into long-term memories.
-
-        Cursor-filtered (LP-14): only chunks newer than
-        ``mem_consolidated_up_to`` are extracted; the cursor advances past a
-        range only after its writes succeed, so failed ranges retry instead
-        of being skipped or duplicated.
-
-        Cursor scope (R5-F1): with the built-in ``MemoryConsolidator`` the
-        cursor read and the checkpoint advance both happen inside its
-        cross-process advisory lock — one serialized read+extract+commit — so
-        two workers cannot read a shared stale cursor and then publish
-        out-of-order checkpoints. Duck-typed consolidators (test doubles or
-        embedders) keep the caller-managed cursor contract.
-        """
-        try:
-            if isinstance(self.memory_consolidator, MemoryConsolidator):
-                result = await self.memory_consolidator.consolidate_session(
-                    session_id=session_id,
-                    agent_id=self.agent_id,
-                    cursor_reader=lambda: self._read_consolidation_cursor(session_id),
-                    checkpoint_writer=lambda checkpoint: self._persist_consolidation_cursor(
-                        session_id, checkpoint
-                    ),
-                )
-            else:
-                session = await session_manager.get(session_id)
-                cursor = (session.state or {}).get("mem_consolidated_up_to") if session else None
-                since = self._parse_consolidation_cursor(cursor)
-                try:
-                    newest = await context_manager.get_chunks(
-                        session_id, limit=1, include_embedding=False
-                    )
-                except Exception as exc:
-                    record_failure("agent.consolidation_cursor", exc)
-                    newest = []
-                if since is not None:
-                    try:
-                        pending_kwargs: dict = {
-                            "since_time": since[0],
-                            "since_id": since[-1],
-                            "limit": 1,
-                        }
-                        if len(since) >= 3 and since[1] is not None:
-                            pending_kwargs["since_seq"] = since[1]
-                        pending = await context_manager.get_chunks_since(
-                            session_id,
-                            **pending_kwargs,
-                        )
-                        if not pending:
-                            logger.debug("consolidation cursor unchanged, skipping")
-                            return
-                    except Exception as _boundary_error:
-                        # Optional fallback preserves the primary outcome; report no payload.
-                        record_failure("agent._consolidate_memories", _boundary_error)
-                elif cursor and newest and str(newest[0].id) == str(cursor.get("id")):
-                    logger.debug("consolidation cursor unchanged, skipping")
-                    return
-                result = await self.memory_consolidator.consolidate_session(
-                    session_id=session_id,
-                    agent_id=self.agent_id,
-                    since=since,
-                )
-                # AH-AUDIT-037: the durable watermark advances ONLY from the
-                # typed checkpoint (fully processed contiguous input). Failed
-                # extraction and partial persistence leave failed ranges
-                # retryable; successful empty extraction advances (nothing was
-                # skipped).
-                checkpoint = getattr(result, "checkpoint", None)
-                if checkpoint:
-                    await self._persist_consolidation_cursor(session_id, checkpoint)
-            new_memories = result.entries if hasattr(result, "entries") else (result or [])
-            if new_memories:
-                logger.info(
-                    "Consolidated %d new memories for session %s",
-                    len(new_memories),
-                    session_id,
-                )
-                _notify_growth(
-                    session_id, "consolidation_done", f"{len(new_memories)} new memories"
-                )
-        except Exception as e:
-            logger.warning("Memory consolidation failed for session %s: %s", session_id, e)
+        await self.post_turn.consolidate(session_id)
 
     def _schedule_learning_review(
         self, session_id: uuid.UUID, user_message: str, response: AgentResponse
     ) -> None:
-        """Review successful turns in the background when explicitly enabled."""
-        if self.delegated:
-            return
-        if not config.get("learning_review_enabled"):
-            return
-        if len(_pending_learning_reviews) >= MAX_PENDING_LEARNING_REVIEWS:
-            logger.warning("Skipping learning review: process-wide review limit reached")
-            return
-        task = asyncio.create_task(self._review_learning(session_id, user_message, response))
-        self._learning_tasks.add(task)
-        _pending_learning_reviews.add(task)
-        task.add_done_callback(self._learning_tasks.discard)
-        task.add_done_callback(_pending_learning_reviews.discard)
+        self.post_turn.schedule_learning_review(session_id, user_message, response)
 
     async def _complete_growth(
         self, response: AgentResponse | None = None, *, session_id: uuid.UUID | None = None
@@ -2411,592 +622,7 @@ class BaseReActAgent:
     async def _review_learning(
         self, session_id: uuid.UUID, user_message: str, response: AgentResponse
     ) -> None:
-        from machina.skills.learning import learning_reviewer
-
-        try:
-            staged = await learning_reviewer.review_turn(
-                session_id,
-                self.agent_id,
-                user_message,
-                response.content,
-                self.provider,
-                tool_calls=response.tool_calls,
-            )
-            if staged:
-                if staged.get("autoApplied") and staged.get("status") == "approved":
-                    # Auto-apply publishes immediately; report it as applied
-                    # (with the skill name) rather than as a pending suggestion.
-                    _notify_growth(
-                        session_id, "review_done", f"applied learned skill {staged.get('name')}"
-                    )
-                else:
-                    _notify_growth(session_id, "review_done", "suggested a learning skill")
-        except Exception as exc:
-            logger.warning("Learning review failed for session %s: %s", session_id, exc)
-
-
-@dataclass(slots=True)
-class _LoopTerminal:
-    """Terminal event from the shared ReAct loop (not a transport event)."""
-
-    response: AgentResponse
-
-
-async def _react_loop(
-    agent: BaseReActAgent,
-    session_id: uuid.UUID,
-    user_message: str,
-    *,
-    verbose: bool,
-    images: list[dict[str, str]] | None,
-    stream: bool,
-) -> AsyncGenerator[StreamEvent | _LoopTerminal, None]:
-    """Run one turn of the ReAct policy loop.
-
-    This is the only copy of the turn policy: pending chunks, auto-parallel
-    planning, repair and task-run budgets, iteration counters, nudges,
-    empty-response recovery, tool execution, consolidation scheduling, and
-    terminal construction. ``stream`` selects the LLM/tool transport only;
-    both transports emit the same text/token/tool events and terminate with a
-    :class:`_LoopTerminal`, which the ``run``/``run_stream`` adapters present.
-    """
-    audit_log(
-        "agent_run_stream_start" if stream else "agent_run_start",
-        session_id=str(session_id),
-        agent_id=agent.agent_id,
-    )
-    # S3.1(c)+S3.2 BEGIN turn-start advisory (revert: delete block; recorded/logged only, never breaks turn)
-    try:
-        from machina.controller import wiring as _s3w
-
-        _s3w.record_triage(agent, user_message)
-        _s3w.log_complexity(agent, user_message)
-    except Exception:
-        pass
-    # S3.1(c)+S3.2 END turn-start advisory
-    pending_chunks: list[dict[str, Any]] = []
-    repair_started = time.monotonic()
-    repair_deadline = repair_deadline_seconds()
-    token_budget = repair_token_budget()
-    task_run = TaskRunPolicy(user_message)
-    from machina.core.task_run import set_repair_network_blocked
-
-    set_repair_network_blocked(task_run.active and task_run.lean_tools)
-    turn_snapshot = None
-
-    def _finish_turn() -> None:
-        from machina.workspace.snapshots import end_turn
-
-        end_turn(turn_snapshot)
-        return agent._flush_pending_chunks(pending_chunks)
-
-    async with joined_teardown(cleanup=_finish_turn):
-        try:
-            session, messages = await agent._prepare_context(
-                session_id,
-                user_message,
-                include_memory=True,
-                pending_chunks=pending_chunks,
-                images=images,
-            )
-            try:
-                from machina.core.execution_context import resolve_execution_context
-                from machina.workspace.snapshots import begin_turn
-
-                context = await resolve_execution_context(str(session_id), "terminal")
-                turn_snapshot = begin_turn(
-                    session_id=str(session_id),
-                    workspace=context.workspace,
-                    prompt=user_message,
-                    provider=str(getattr(session, "provider", "") or ""),
-                    model=str(getattr(session, "model", "") or ""),
-                )
-            except Exception as snapshot_error:
-                # Snapshot support is additive; a failed store must not fail
-                # the turn. The file tool remains authoritative.
-                turn_snapshot = None
-                audit_log(
-                    "agent_snapshot_error",
-                    session_id=str(session_id),
-                    error=str(snapshot_error),
-                )
-            # AH-015: persist the user message immediately so cancellation during
-            # the first LLM call cannot lose it. Wrapped like the stream path (F3):
-            # a CancelledError during this DB write must still persist the user
-            # message with an interruption marker rather than dropping the batch.
-            try:
-                await agent._flush_pending_chunks(pending_chunks)
-            except asyncio.CancelledError:
-                await agent._flush_pending_cancellation_safe(pending_chunks, session_id)
-                raise
-
-            # Explicit parallel requests are harness-owned in multi-model
-            # mode: the plan is structured, validated, and executed in the
-            # first wave without relying on the model to emit N delegate
-            # tool calls. A failure here falls back to the normal loop.
-            try:
-                from machina.core.orchestration.auto import maybe_auto_parallel
-
-                auto_response = await maybe_auto_parallel(
-                    agent,
-                    session,
-                    session_id,
-                    user_message,
-                    pending_chunks,
-                )
-                if auto_response is not None:
-                    # Report the synthesis once as a text event. run() ignores
-                    # intermediate events and returns the terminal response.
-                    if auto_response.content:
-                        yield StreamEvent(type="text", content=auto_response.content)
-                    yield StreamEvent(
-                        type="token_usage",
-                        tokens_used=auto_response.tokens_used,
-                    )
-                    yield _LoopTerminal(auto_response)
-                    return
-            except asyncio.CancelledError:
-                raise
-            except Exception as _auto_error:
-                record_failure(
-                    "agent.auto_parallel_stream" if stream else "agent.auto_parallel",
-                    _auto_error,
-                )
-
-            total_tokens = 0
-            tool_calls_made = []
-
-            iteration = 0
-            repair_nudges = 0
-            verification_nudges = 0
-            empty_recoveries = 0
-            repair_guard = getattr(agent, "_maybe_continue_unchanged_repair", None)
-            repair_verify_guard = getattr(agent, "_maybe_continue_unverified_repair", None)
-            # S3.1(d) BEGIN progress history (revert: delete 2 lines; unbounded loop unchanged)
-            _s3_progress_history: list = []
-            # S3.1(d) END progress history
-            while True:
-                from machina.core.shell_jobs import apply_job_updates
-                from machina.core.steering import apply_steering, pending_steering
-
-                apply_job_updates(session_id, messages)
-                await apply_steering(session_id, agent.agent_id, messages)
-                if repair_deadline > 0 and repair_deadline_exceeded(repair_started, user_message):
-                    audit_log(
-                        "agent_repair_deadline",
-                        session_id=str(session_id),
-                        deadline_seconds=repair_deadline,
-                    )
-                    await agent._flush_pending_chunks(pending_chunks)
-                    agent._schedule_memory_consolidation(session_id)
-                    yield _LoopTerminal(
-                        stopped_response(
-                            REPAIR_DEADLINE_TEXT,
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                        )
-                    )
-                    return
-                if token_budget > 0 and repair_token_budget_exceeded(
-                    total_tokens,
-                    user_message,
-                    budget=token_budget,
-                ):
-                    audit_log(
-                        "agent_repair_token_budget",
-                        session_id=str(session_id),
-                        token_budget=token_budget,
-                        total_tokens=total_tokens,
-                    )
-                    await agent._flush_pending_chunks(pending_chunks)
-                    agent._schedule_memory_consolidation(session_id)
-                    yield _LoopTerminal(
-                        stopped_response(
-                            REPAIR_TOKEN_BUDGET_TEXT,
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                        )
-                    )
-                    return
-                task_stop = task_run.stop_reason(
-                    turns=iteration,
-                    tool_calls=len(tool_calls_made),
-                )
-                if task_stop is not None:
-                    audit_log(
-                        "agent_task_run_stop",
-                        session_id=str(session_id),
-                        phase=task_run.phase,
-                        turns=iteration,
-                        tool_calls=len(tool_calls_made),
-                        reason=str(task_stop)[:240],
-                    )
-                    await agent._flush_pending_chunks(pending_chunks)
-                    agent._schedule_memory_consolidation(session_id)
-                    yield _LoopTerminal(
-                        stopped_response(
-                            task_stop,
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                        )
-                    )
-                    return
-                if verbose:
-                    console.print(f"[dim]Iteration {iteration + 1}[/dim]")
-
-                # Capacity applies to this request, never cumulative billed usage.
-                stale_chars = stale_tool_result_chars(
-                    total_tokens,
-                    user_message,
-                    budget=token_budget,
-                )
-                if stale_chars is None:
-                    agent._condense_history(messages)
-                else:
-                    agent._condense_history(messages, stale_chars=stale_chars)
-                # Once a repair has both an edit and passing verification
-                # evidence, force the answer step: exposing tools again lets a
-                # model keep rerunning tests or inspecting the diff, which
-                # costs a full provider round trip without adding evidence.
-                tool_defs = (
-                    []
-                    if task_run.active and task_run.edited and task_run.verified
-                    else task_run.filter_tool_defs(agent._tool_defs())
-                )
-                # Keep the dynamic loader inside the lean repair surface too.
-                # Otherwise tool_load can add web/network tools after the schema
-                # filter has already run, and the stale schema can still be
-                # executed from the model's context.
-                from machina.core.tool_projection import set_dynamic_allowed_tools
-
-                if task_run.active and task_run.lean_tools:
-                    set_dynamic_allowed_tools(sorted(task_run.allowed_tool_names()))
-                else:
-                    set_dynamic_allowed_tools(None)
-                gate = await evaluate_request(
-                    messages,
-                    session=session,
-                    provider=agent.provider,
-                    tool_defs=tool_defs,
-                    session_id=session_id,
-                    agent_id=agent.agent_id,
-                    user_message=user_message,
-                    total_tokens=total_tokens,
-                    iterations=iteration,
-                    tool_calls_made=tool_calls_made,
-                )
-                if gate.failure is not None:
-                    await agent._flush_pending_chunks(pending_chunks)
-                    agent._schedule_memory_consolidation(session_id)
-                    yield _LoopTerminal(gate.failure)
-                    return
-
-                if stream:
-                    streamed_text: list[str] = []
-                    try:
-                        final_response = None
-                        async with joined_teardown(
-                            stream=agent._stream_llm_with_retry(
-                                messages=gate.messages,
-                                tools=tool_defs,
-                                session_id=session_id,
-                            )
-                        ) as events:
-                            async for event in events:
-                                if event.type == "text":
-                                    streamed_text.append(event.content or "")
-                                    yield StreamEvent(type="text", content=event.content)
-                                elif event.type == "done":
-                                    final_response = event.response
-                                    usage = event.response.usage
-                                    total_tokens += usage.get("total_tokens", 0)
-                                    prompt_tokens = usage.get("prompt_tokens", 0) or 0
-                                    completion_tokens = usage.get("completion_tokens", 0) or 0
-                                    metrics.record_tokens(
-                                        str(session_id), prompt_tokens, completion_tokens
-                                    )
-                                    context_tokens = int(usage.get("context_tokens", 0) or 0)
-                                    if not context_tokens:
-                                        context_tokens = (
-                                            prompt_tokens + completion_tokens
-                                            if prompt_tokens
-                                            else gate.request_tokens
-                                        )
-                                    context_percent = usage.get("context_usage_percentage")
-                                    if not isinstance(context_percent, (int, float)) or isinstance(
-                                        context_percent, bool
-                                    ):
-                                        context_percent = (
-                                            100 * context_tokens / gate.effective_budget
-                                            if gate.effective_budget > 0
-                                            else None
-                                        )
-                                    yield StreamEvent(
-                                        type="token_usage",
-                                        tokens_used=usage.get("total_tokens", 0),
-                                        context_tokens=context_tokens,
-                                        context_usage_percentage=context_percent,
-                                        credits_used=(
-                                            float(event.response.usage["credits_used"])
-                                            if isinstance(
-                                                event.response.usage.get("credits_used"),
-                                                (int, float),
-                                            )
-                                            and not isinstance(
-                                                event.response.usage.get("credits_used"), bool
-                                            )
-                                            else None
-                                        ),
-                                    )
-
-                        if final_response is None:
-                            raise RuntimeError("Stream completed without a final response")
-
-                    except asyncio.CancelledError:
-                        if streamed_text:
-                            content = "".join(streamed_text)
-                            pending_chunks.append(
-                                _assistant_chunk(
-                                    session_id, agent.agent_id, content, interrupted=True
-                                )
-                            )
-                        await agent._flush_pending_cancellation_safe(pending_chunks, session_id)
-                        raise
-                    except UsageBudgetExceededError as e:
-                        await agent._flush_pending_chunks(pending_chunks)
-                        audit_log(
-                            "agent_run_budget_exceeded", session_id=str(session_id), error=str(e)
-                        )
-                        yield _LoopTerminal(
-                            AgentResponse(
-                                content=str(e),
-                                outcome="failed",
-                                tool_calls=tool_calls_made,
-                                tokens_used=total_tokens,
-                                iterations=iteration,
-                            )
-                        )
-                        return
-                    except Exception as e:
-                        response = await provider_failure_response(
-                            agent,
-                            e,
-                            session_id=session_id,
-                            pending_chunks=pending_chunks,
-                            tool_calls=tool_calls_made,
-                            tokens=total_tokens,
-                            iterations=iteration,
-                            audit=audit_log,
-                            label="LLM stream ultimately failed",
-                        )
-                        yield _LoopTerminal(response)
-                        return
-
-                    response = final_response
-                else:
-                    try:
-                        response = await agent._call_llm_with_retry(
-                            messages=gate.messages,
-                            tools=tool_defs,
-                            session_id=session_id,
-                        )
-                    except UsageBudgetExceededError as e:
-                        await agent._flush_pending_chunks(pending_chunks)
-                        audit_log(
-                            "agent_run_budget_exceeded", session_id=str(session_id), error=str(e)
-                        )
-                        yield _LoopTerminal(
-                            AgentResponse(
-                                content=str(e),
-                                outcome="failed",
-                                tool_calls=tool_calls_made,
-                                tokens_used=total_tokens,
-                                iterations=iteration,
-                            )
-                        )
-                        return
-                    except Exception as e:
-                        response = await provider_failure_response(
-                            agent,
-                            e,
-                            session_id=session_id,
-                            pending_chunks=pending_chunks,
-                            tool_calls=tool_calls_made,
-                            tokens=total_tokens,
-                            iterations=iteration,
-                            audit=audit_log,
-                            label="LLM call ultimately failed",
-                        )
-                        yield _LoopTerminal(response)
-                        return
-
-                    total_tokens += response.usage.get("total_tokens", 0)
-                    metrics.record_tokens(
-                        str(session_id),
-                        response.usage.get("prompt_tokens", 0),
-                        response.usage.get("completion_tokens", 0),
-                    )
-
-                if pending_steering(session_id) and response.content:
-                    await agent._append_assistant_content(
-                        session_id, response.content, pending_chunks
-                    )
-                    await agent._flush_pending_chunks(pending_chunks)
-                if await apply_steering(session_id, agent.agent_id, messages):
-                    iteration += 1
-                    continue
-                if not response.tool_calls:
-                    content = response.content or ""
-                    if not content and tool_calls_made and empty_recoveries < 8:
-                        (
-                            recovery,
-                            recovery_messages,
-                            recovery_tokens,
-                        ) = await agent._continue_after_empty_tool_turn(
-                            session_id, user_message, tool_calls_made, tool_defs
-                        )
-                        empty_recoveries += 1
-                        total_tokens += recovery_tokens
-                        if recovery is not None:
-                            response = recovery
-                            content = response.content or ""
-                            if response.tool_calls:
-                                messages = recovery_messages
-                                audit_log(
-                                    "agent_empty_tool_recovery",
-                                    session_id=str(session_id),
-                                    tool_calls=len(response.tool_calls),
-                                )
-                    if not response.tool_calls:
-                        if repair_guard is not None and await repair_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=content,
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            nudges=repair_nudges,
-                        ):
-                            repair_nudges += 1
-                            iteration += 1
-                            continue
-                        if repair_verify_guard is not None and await repair_verify_guard(
-                            session_id=session_id,
-                            user_message=user_message,
-                            content=content,
-                            messages=messages,
-                            pending_chunks=pending_chunks,
-                            tool_calls_made=tool_calls_made,
-                            nudges=verification_nudges,
-                        ):
-                            verification_nudges += 1
-                            iteration += 1
-                            continue
-                        outcome = "completed"
-                        if not content:
-                            content, recovery_tokens = await agent._recover_empty_final(
-                                session_id, user_message, tool_calls_made
-                            )
-                            total_tokens += recovery_tokens
-                        if not content:
-                            content = (
-                                "The model provider returned an empty response; "
-                                "no work was performed. Retry the turn."
-                            )
-                            outcome = "failed"
-                        completed = await agent._finish_turn_completion(
-                            session_id,
-                            user_message,
-                            content,
-                            tool_calls_made,
-                            total_tokens,
-                            iteration + 1,
-                            pending_chunks,
-                            outcome=outcome,
-                        )
-                        yield _LoopTerminal(completed)
-                        return
-
-                await agent._append_assistant_content(session_id, response.content, pending_chunks)
-                batch_start = len(tool_calls_made)
-                advertised_tool_names = {
-                    name for tool in tool_defs if (name := getattr(tool, "name", None)) is not None
-                }
-                # AH-015: flush incrementally and, on cancellation, persist what
-                # completed with an explicit interruption marker. (run_stream
-                # previously held all history in pending until the final done
-                # event, so a CancelledError dropped user/tool records.)
-                try:
-                    if stream:
-                        async with joined_teardown(
-                            stream=agent._execute_tool_calls_stream(
-                                response,
-                                messages,
-                                tool_calls_made,
-                                session_id,
-                                pending_chunks,
-                                allowed_tool_names=advertised_tool_names,
-                            )
-                        ) as events:
-                            async for event in events:
-                                yield event
-                    else:
-                        await agent._execute_tool_calls(
-                            response,
-                            messages,
-                            tool_calls_made,
-                            session_id,
-                            verbose,
-                            pending_chunks,
-                            allowed_tool_names=advertised_tool_names,
-                        )
-                    await agent._flush_pending_chunks(pending_chunks)
-                except BaseException:
-                    await agent._flush_pending_cancellation_safe(pending_chunks, session_id)
-                    raise
-                batch = tool_calls_made[batch_start:]
-                total_tokens += sum(entry.get("delegated_tokens", 0) for entry in batch)
-                pauses = collect_pauses(batch)
-                if pauses:
-                    yield _LoopTerminal(
-                        pause_response(tool_calls_made, total_tokens, iteration + 1, pauses)
-                    )
-                    return
-                # S3.1(d stagnation hook: shared batch tail (turn_flow owns the
-                # guarded wiring access; stagnation-only, never a cap).
-                _s3_progress_history, _s3_text = await stagnation_step(
-                    _s3_progress_history,
-                    batch,
-                    tool_calls_made,
-                    session_id=session_id,
-                    session_manager=session_manager,
-                    audit=audit_log,
-                    flush=lambda: agent._flush_pending_chunks(pending_chunks),
-                )
-                if _s3_text is not None:
-                    agent._schedule_memory_consolidation(session_id)
-                    yield _LoopTerminal(
-                        stopped_response(_s3_text, tool_calls_made, total_tokens, iteration + 1)
-                    )
-                    return
-                task_run.observe(batch)
-                task_nudge = task_run.take_nudge()
-                if task_nudge is not None:
-                    await agent._append_task_run_nudge(
-                        session_id=session_id,
-                        text=task_nudge,
-                        messages=messages,
-                        pending_chunks=pending_chunks,
-                    )
-                    iteration += 1
-                    continue
-                iteration += 1
-        except BaseException:
-            if pending_chunks:
-                await agent._flush_pending_cancellation_safe(pending_chunks, session_id)
-            raise
+        await self.post_turn.review_learning(session_id, user_message, response)
 
 
 class ReActAgent(BaseReActAgent):

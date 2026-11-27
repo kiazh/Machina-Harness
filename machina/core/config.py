@@ -501,6 +501,21 @@ DEFAULTS: dict[str, Any] = {
     # Default OFF preserves direct durable writes.
     "memory_approval_enabled": False,
     "memory_consolidation_enabled": True,
+    # Forgetting was implemented but never scheduled, so `memories` grew
+    # without bound. Eviction runs after consolidation, preserves explicitly
+    # important and quarantined rows, and deletes only rows below the strength
+    # threshold once the per-agent cap is exceeded.
+    "memory_forgetting_enabled": True,
+    "memory_eviction_threshold": 0.05,
+    "memory_max_per_agent": 5000,
+    # Optional model re-rank of fused memory candidates. Off by default: it
+    # adds a provider call to every retrieval and keyword fusion is the
+    # measured default. When on, the turn's provider is used with a 10s cap.
+    "memory_rerank_enabled": False,
+    # Operational retention (days; 0 keeps forever). The transcript, archive,
+    # memories, approvals, and jobs are product state and are never pruned.
+    "audit_retention_days": 365,
+    "usage_retention_days": 730,
     "auto_compaction_enabled": True,
     "eviction_max_tokens": 0,
     # Versioned workspace UI state (plan §21): one JSON string document
@@ -718,6 +733,9 @@ def _check_int_bounds(key: str, val: int) -> None:
         "max_tokens": (1, MAX_TOKENS),
         "max_delegate_concurrency": (1, 64),
         "worker_count": (0, 64),
+        "memory_max_per_agent": (0, None),
+        "audit_retention_days": (0, 3650),
+        "usage_retention_days": (0, 3650),
         "max_worker_routes": (1, 8),
         "delegate_inline_wait_seconds": (0, 3600),
         # 0 disables throttling (AsyncTokenBucket.acquire short-circuits);
@@ -771,6 +789,8 @@ def _check_float_bounds(key: str, val: float) -> None:
         raise ValueError(f"{key} must be in range 0.0<..1.0, got {val}")
     if key == "reranker_timeout" and not 1.0 <= val <= 120.0:
         raise ValueError(f"reranker_timeout must be in range 1..120, got {val}")
+    if key == "memory_eviction_threshold" and not 0.0 <= val <= 1.0:
+        raise ValueError(f"memory_eviction_threshold must be in range 0..1, got {val}")
     if key in ("rrf_keyword_weight", "rrf_dense_weight") and not 0.0 <= val <= 10.0:
         raise ValueError(f"{key} must be in range 0..10, got {val}")
 
@@ -947,6 +967,12 @@ class Config:
     # pending_memories (approve/reject via CLI/gateway); OFF writes directly.
     memory_approval_enabled: bool = False
     memory_consolidation_enabled: bool = True
+    memory_forgetting_enabled: bool = True
+    memory_eviction_threshold: float = 0.05
+    memory_max_per_agent: int = 5000
+    memory_rerank_enabled: bool = False
+    audit_retention_days: int = 365
+    usage_retention_days: int = 730
     auto_compaction_enabled: bool = True
     eviction_max_tokens: int = 0
     # Pinned now-playing bar: show what is playing on this computer.

@@ -6,9 +6,24 @@ import uuid
 from typing import Any
 
 from machina.core.config import DEFAULTS, SECRET_KEYS, config
-from machina.gateway.errors import INVALID_PARAMS, RpcError
+from machina.gateway.errors import INVALID_PARAMS, UNAUTHORIZED, RpcError
 
 MEMORY_CATEGORIES = ("preference", "decision", "fact", "event", "transient")
+
+
+def _require_local_transport(gw: Any, method: str) -> None:
+    """Refuse a local-only capability on the shared HTTP gateway.
+
+    The API key authenticates the HTTP surface, but it is not the human at
+    the terminal: host browser credentials and external-harness execution
+    must not be reachable through ``POST /rpc``. The stdio transport (the
+    TUI's own channel) remains allowed.
+    """
+    if not bool(getattr(gw, "_local_only", True)):
+        raise RpcError(
+            UNAUTHORIZED,
+            f"{method} is available only on the local terminal channel",
+        )
 
 
 def _str(params: dict[str, Any], key: str, *, required: bool = True, max_len: int = 10_000) -> str:

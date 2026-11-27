@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -134,9 +135,7 @@ def _count_lines(text: str) -> int:
 
 def _diff_counts(before: str, after: str) -> tuple[int, int]:
     additions = deletions = 0
-    for line in difflib.unified_diff(
-        before.splitlines(), after.splitlines(), lineterm=""
-    ):
+    for line in difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm=""):
         if line.startswith("+") and not line.startswith("+++"):
             additions += 1
         elif line.startswith("-") and not line.startswith("---"):
@@ -309,11 +308,67 @@ def _manifest_path(snapshot: TurnSnapshot) -> Path:
     return snapshot.root / "manifest.json"
 
 
+def _secure_dir(path: Path) -> None:
+    """Create a snapshot directory private to the owner (0700)."""
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
+def _write_private(path: Path, data: bytes, mode: int = 0o600) -> None:
+    """Write a snapshot file 0600 (pre-write bytes may contain secrets)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def _restore_private(backup: Path, target: Path) -> None:
+    """Restore bytes without following a swapped backup symlink.
+
+    ``copy2`` follows both the backup and the destination pathname, leaving a
+    symlink-swap window the hardened writer avoids. Read the backup through
+    ``O_NOFOLLOW``, then write a sibling temp file and rename it into place.
+    """
+    fd = os.open(backup, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("snapshot backup is not a regular file")
+        data = b""
+        while True:
+            chunk = os.read(fd, 65_536)
+            if not chunk:
+                break
+            data += chunk
+        mode = stat.S_IMODE(info.st_mode) or 0o600
+    finally:
+        os.close(fd)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.restore")
+    try:
+        _write_private(temporary, data, mode)
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
 def _write_manifest(snapshot: TurnSnapshot) -> None:
-    snapshot.root.mkdir(parents=True, exist_ok=True)
+    _secure_dir(snapshot.root)
     payload = snapshot.to_dict()
     temporary = _manifest_path(snapshot).with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    _write_private(temporary, json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"))
     temporary.replace(_manifest_path(snapshot))
     _invalidate_manifest_paths()
 
@@ -458,9 +513,9 @@ class TurnSnapshot:
     def _backup_bytes(self, resolved: Path, payload: bytes) -> str | None:
         try:
             backup_dir = self.root / "files"
-            backup_dir.mkdir(parents=True, exist_ok=True)
+            _secure_dir(backup_dir)
             backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
-            backup.write_bytes(payload)
+            _write_private(backup, payload)
             return str(backup)
         except OSError:
             return None
@@ -468,9 +523,9 @@ class TurnSnapshot:
     def _after_backup_bytes(self, resolved: Path, payload: bytes, index: int) -> str | None:
         try:
             backup_dir = self.root / "files"
-            backup_dir.mkdir(parents=True, exist_ok=True)
+            _secure_dir(backup_dir)
             backup = backup_dir / f"{index:04d}-after-{resolved.name}"
-            backup.write_bytes(payload)
+            _write_private(backup, payload)
             return str(backup)
         except OSError:
             return None
@@ -533,9 +588,9 @@ class TurnSnapshot:
                     else:
                         item.before_sha = _sha256(resolved)
                         backup_dir = self.root / "files"
-                        backup_dir.mkdir(parents=True, exist_ok=True)
+                        _secure_dir(backup_dir)
                         backup = backup_dir / f"{len(self.files):04d}-{resolved.name}"
-                        shutil.copy2(resolved, backup)
+                        _write_private(backup, resolved.read_bytes())
                         item.backup = str(backup)
                 else:
                     item.before_sha = None
@@ -1118,7 +1173,7 @@ def undo_snapshot(
             if backup is None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backup, target)
+            _restore_private(backup, target)
         elif target.exists():
             target.unlink()
         restored.append(str(target))

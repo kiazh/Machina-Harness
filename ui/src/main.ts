@@ -2,6 +2,7 @@
 // Normally started by `machina` (machina/cli/launcher.py), which sets MACHINA_PYTHON.
 
 import { parseArgs } from "node:util";
+import { spawn } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
@@ -95,6 +96,61 @@ const tui = new TuiAltScreen(new ThemedTerminal(), undefined, undefined, {
 	wheelScrollLines: 3,
 });
 const app = new App(tui, client, { model: values.model, provider: values.provider, sessionId: values.session, mode: values.mode });
+
+// A dead gateway is not recoverable in place: the Python process owns the
+// turn, its leases, and every RPC channel. Rather than leaving an offline
+// screen that only Ctrl+C can escape, restore the terminal and relaunch the
+// UI with bounded backoff. The durable session is what makes this safe — the
+// interrupted turn is recovered from PostgreSQL, not from Node state.
+const RELAUNCH_LIMIT = 2;
+let relaunching = false;
+const healthy = setTimeout(() => {
+	// A long-lived UI earns a fresh budget for a later unrelated crash.
+	process.env.MACHINA_UI_RELAUNCH = "0";
+}, 60_000);
+healthy.unref();
+client.onUnexpectedExit = (code, stderrTail) => {
+	const attempt = Number(process.env.MACHINA_UI_RELAUNCH ?? "0");
+	mainLog.warn("gateway.unexpected_exit", { code, attempt, tail: stderrTail.slice(-3) });
+	if (relaunching || attempt >= RELAUNCH_LIMIT) return;
+	relaunching = true;
+	setTimeout(() => {
+		try {
+			tui.stop();
+		} catch {
+			// the terminal may already be restored
+		}
+		try {
+			// Re-enter through the Python launcher, not Node directly: it owns
+			// the managed-database TUI lease, the gateway token, and the
+			// Node/UI checks. Multiple leases may coexist, so the old launcher
+			// releasing after this process exits cannot stop the container.
+			const python = process.env.MACHINA_PYTHON ?? (process.platform === "win32" ? "python" : "python3");
+			const options = {
+				model: values.model,
+				provider: values.provider,
+				session: values.session,
+				mode: values.mode,
+			};
+			const launcher = [
+				"import json, sys",
+				"from machina.ui_launcher import launch_ui",
+				'opts = json.loads(sys.argv[1])',
+				'raise SystemExit(launch_ui(model=opts.get("model"), provider=opts.get("provider"), session_id=opts.get("session"), mode=opts.get("mode")))',
+			].join("\n");
+			const child = spawn(python, ["-c", launcher, JSON.stringify(options)], {
+				detached: true,
+				stdio: "inherit",
+				env: { ...process.env, MACHINA_UI_RELAUNCH: String(attempt + 1) },
+			});
+			child.unref();
+			process.exit(75);
+		} catch (error) {
+			mainLog.error("gateway.relaunch_failed", { error: describeError(error) });
+			process.exit(1);
+		}
+	}, 1_000);
+};
 
 // `machina stop` targets the UI child, not the Python launcher. Shut the UI
 // and its gateway down in order; the launcher releases the database lease

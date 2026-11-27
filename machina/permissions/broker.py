@@ -465,6 +465,7 @@ def _stamp_execution(req: ActionRequest) -> None:
             "shell_payload": req.shell_payload,
             "cwd": req.cwd,
             "digest": req.digest,
+            "base_revision": req.base_revision,
             "approval_id": req.approval_id,
             "background": "background-process" in req.capabilities,
             "timeout": req.timeout,

@@ -209,9 +209,7 @@ def test_gateway_lists_prompt_changes_and_starts_a_review(
     assert turn["review"] is None
     assert turn["stats"]["files"] == 1
 
-    diff = asyncio.run(
-        changes.changes_diff(gateway, {"snapshotId": payload["snapshot_id"]})
-    )
+    diff = asyncio.run(changes.changes_diff(gateway, {"snapshotId": payload["snapshot_id"]}))
     assert diff["files"][0]["path"] == "src/dead.py"
     assert diff["files"][0]["change"] == "deleted"
 
@@ -222,13 +220,9 @@ def test_gateway_lists_prompt_changes_and_starts_a_review(
         )
     )
     assert started["review"]["status"] == "complete"
-    full = asyncio.run(
-        changes.review_get(gateway, {"snapshotId": payload["snapshot_id"]})
-    )
+    full = asyncio.run(changes.review_get(gateway, {"snapshotId": payload["snapshot_id"]}))
     assert full["review"]["id"] == started["review"]["id"]
     assert full["review"]["status"] == "complete"
 
-    listed_again = asyncio.run(
-        changes.changes_list(gateway, {"scope": "workspace", "limit": 10})
-    )
+    listed_again = asyncio.run(changes.changes_list(gateway, {"scope": "workspace", "limit": 10}))
     assert listed_again["turns"][0]["review"]["status"] == "complete"
