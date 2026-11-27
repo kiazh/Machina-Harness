@@ -533,7 +533,7 @@ test("composer is a raised input dock with one accent marker", async () => {
 		}
 	}
 	const rows = composer.render(80).map((line) => stripTerminalSequences(line));
-	assert.match(rows[0] ?? "", /^ {4}Chat input\s*$/, "the composer opens with its own label");
+	assert.doesNotMatch(rows.join("\n"), /Chat input/, "the composer has no title label");
 	assert.match(rows[1] ?? "", /^ {4}❯ Ask anything/, "the input row carries the accent marker");
 	assert.equal(rows.at(-1)!.trim(), "", "the raised surface ends with one padding row");
 	assert.equal(composer.handleMouse({ x: 0, y: 0 } as never), undefined);

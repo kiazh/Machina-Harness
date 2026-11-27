@@ -120,7 +120,7 @@ test("long transcript follows the end above the docked composer", () => {
 		const screen = plain(tui.getScreenLines());
 		assert.equal(screen.length, 24);
 		// The viewport follows the end; the last line sits just above the composer.
-		const composerRow = screen.findIndex((line) => line.includes("Chat input"));
+		const composerRow = screen.findIndex((line) => line.includes("Ask anything"));
 		assert.ok(composerRow > 0, "composer visible");
 		assert.match(screen.slice(0, composerRow).join("\n"), /line 99/);
 		assert.match(screen[0] ?? "", /line 8[0-2]/);

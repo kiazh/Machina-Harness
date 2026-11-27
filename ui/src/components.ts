@@ -329,7 +329,7 @@ export class ComposerInput extends Editor {
 
 /** Muted composer placeholder (the Editor cannot render its own). */
 export const COMPOSER_PLACEHOLDER = "Ask anything, or type / for commands.";
-const COMPOSER_TITLE = "  Chat input";
+const COMPOSER_TITLE = "";
 
 /**
  * Docked input on a raised surface. Rendering and hit-testing share the
@@ -389,28 +389,25 @@ export class ComposerBox extends Box {
 		const total = Math.max(0, width);
 		const { framed, inset, outer, editorWidth: inner } = this.geometry(total);
 		const margin = " ".repeat(inset);
-		const tint = this.editor.focused ? theme.accentBold : theme.text;
-		const title = COMPOSER_TITLE;
 		const imageKey = this.imageAction();
-		const room = imageKey ? outer - title.length - visibleWidth(imageKey) : 0;
+		const room = imageKey ? outer - visibleWidth(imageKey) : 0;
 		const transparent = !isOpaqueBackground();
 		const paint = (line: string) => `${margin}${surfaceLine(truncateToWidth(line, outer, "…", true), outer, true)}`;
-		// Transparent canvas: a real box (corners, title rule, side rules) so
-		// the input is an object on the terminal instead of floating text.
+		// Transparent canvas: a real box (corners, side rules) so the input is
+		// an object on the terminal instead of floating text.
 		const boxTop = (): string => {
 			const width = Math.max(0, outer - 4);
-			const label = `${COMPOSER_TITLE.slice(1)} `;
 			const image = imageKey ? ` ${imageKey.trim()} ` : "";
-			const fill = Math.max(0, width - visibleWidth(label) - visibleWidth(image));
+			const fill = Math.max(0, width - visibleWidth(image));
 			const middle = truncateToWidth(
-				`${tint(label)}${theme.border("─".repeat(fill))}${image ? theme.accent(image) : ""}`,
+				`${theme.border("─".repeat(fill))}${image ? theme.accent(image) : ""}`,
 				width,
 				"",
 			);
 			return `${margin}${theme.border("╭─")}${middle}${theme.border("─╮")}`;
 		};
 		const boxBottom = (): string => `${margin}${theme.border(`╰${"─".repeat(Math.max(0, outer - 2))}╯`)}`;
-		const heading = transparent ? boxTop() : paint(`${tint(title)}${room >= 3 ? `${" ".repeat(room)}${theme.accent(imageKey)}` : ""}`);
+		const heading = transparent ? boxTop() : paint(`${room >= 3 ? `${" ".repeat(room)}${theme.accent(imageKey)}` : ""}`);
 		const withDock = (rows: string[]): string[] =>
 			framed
 				? [
