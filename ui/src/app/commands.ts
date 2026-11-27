@@ -135,6 +135,11 @@ export class CommandController {
 		this.host = host;
 	}
 
+	/** Read-only compatibility view; the mounted menu remains controller-owned. */
+	get mountedSkillsMenu(): SkillsMenu | undefined {
+		return this.skillsMenu;
+	}
+
 	async submit(raw: string): Promise<void> {
 		const images = this.host.imageState();
 		const waitingForImages = images.pending > 0;
