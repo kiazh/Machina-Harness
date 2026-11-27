@@ -1420,9 +1420,10 @@ test("exit() calls the input listener disposer", async () => {
 
 	// Track whether the disposer was called
 	let disposerCalled = false;
-	const originalDisposer = (app as unknown as { inputListenerDisposer?: () => void }).inputListenerDisposer;
+	const bootstrap = (app as unknown as { bootstrap: { inputListenerDisposer?: () => void } }).bootstrap;
+	const originalDisposer = bootstrap.inputListenerDisposer;
 	if (originalDisposer) {
-		(app as unknown as { inputListenerDisposer: () => void }).inputListenerDisposer = () => {
+		bootstrap.inputListenerDisposer = () => {
 			disposerCalled = true;
 			originalDisposer();
 		};

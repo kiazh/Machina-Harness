@@ -595,8 +595,8 @@ test("a direct viewport click restores the caret with no key input (item 1)", as
 
 		// The composer had focus; the region tracker still says so (mouse focus
 		// on the composer never rewrote it), so the A2 path must fire on click.
+		state.setFocusForRegion("chat-composer");
 		tui.setFocus(state.editor as never);
-		(state as unknown as { activeRegion: string }).activeRegion = "chat-composer";
 		tui.renderNow(true);
 		assert.equal(state.integration?.view.focused, false, "editor view starts unfocused");
 		const frame = tui.getScreenLines().map(stripTerminalSequences);

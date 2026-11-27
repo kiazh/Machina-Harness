@@ -134,13 +134,11 @@ function frameIndex(line: string | undefined): number {
 }
 
 /**
- * Read-only peek at App's private music subscription handle. App exposes no
- * accessor for it and this fix must not touch app.ts, yet section 10.1 asks
- * for proof of "exactly one music subscription" and its retirement. This
- * never mutates the field.
+ * Read-only peek at AppBootstrap's private music subscription handle. The
+ * bootstrap controller owns the animation subscription; this never mutates it.
  */
 function musicAnimHandle(app: App): { stop(): void } | undefined {
-	return (app as unknown as { nowPlayingAnim?: { stop(): void } }).nowPlayingAnim;
+	return (app as unknown as { bootstrap: { nowPlayingAnim?: { stop(): void } } }).bootstrap.nowPlayingAnim;
 }
 
 test("real App: idle frame, clock, track change, pause/resume and exit need no input", async (t) => {

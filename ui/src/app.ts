@@ -3,12 +3,11 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
 	Container,
 	type Component,
 	type Editor,
-	isViewportTUI,
 	type OverlayOptions,
 	type OverlayHandle,
 	type SelectItem,
@@ -29,7 +28,7 @@ import { ChangesPage } from "./components/ChangesPage.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
-import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides, type BindingOverrides } from "./keybindings.ts";
+import { AppKeybindings, effectiveShortcutRows, type BindingOverrides } from "./keybindings.ts";
 import { KeybindingsDialog } from "./components/KeybindingsDialog.ts";
 import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
 import { loadKeyRows, redactSecret } from "./features/keys.ts";
@@ -37,7 +36,6 @@ import { addProvider, removeProvider } from "./features/settings.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
 import { sanitizePastedText } from "./design/text.ts";
 import { describeError, redactParamsForLog, uiLog } from "./debug.ts";
-import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type PickOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
@@ -52,8 +50,6 @@ import type {
 	HistoryEntry,
 	KiroFallback,
 	ProvidersListResult,
-	InitializeResult,
-	ResumeResult,
 	SessionInfo,
 } from "./protocol.ts";
 import { sanitizeDisplay } from "./editor/display.ts";
@@ -64,20 +60,20 @@ import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
 import { KeyboardRouter, type KeyboardHost } from "./app/keyboard.ts";
 import { CommandController, type CommandHost } from "./app/commands.ts";
-import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
+import type { ApprovalHost, SessionHost, StatusHost, ChangesHost, ScreenView } from "./app/contracts.ts";
 import { EventRouter, type EventHost } from "./app/events.ts";
 import { WorkspaceCoordinator, type WorkspaceHost as WorkspaceCoordinatorHost, type WorkspaceSurfaceWiring } from "./app/workspace.ts";
+import { AppBootstrap, type BootstrapHost, type WorkspaceReview } from "./app/bootstrap.ts";
 export { isKiroQuotaError } from "./app/events.ts";
 export { commandCarriesSecret } from "./app/commands.ts";
 
-import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
+import { editorTheme, getSkin, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
 import {
 	type ConflictResolution,
 	type SaveConflictDescriptor,
 } from "./workspace/controller.ts";
 import {
-	displayUriName,
 	WorkspaceSurface,
 	type WorkspaceIntegration,
 	type WorkspaceSurfaceHost,
@@ -161,8 +157,6 @@ export class App implements FeatureHost {
 	 */
 	private readonly shell: AppShell;
 	private readonly nowPlayingBar: NowPlayingBar;
-	private nowPlayingController: NowPlayingController | undefined;
-	private nowPlayingAnim: AnimationSubscription | undefined;
 	/**
 	 * The single caret-blink subscription (key `cursor.blink`). Present only
 	 * while a text surface owns the caret; its presence is the source of
@@ -190,6 +184,7 @@ export class App implements FeatureHost {
 	private readonly commands: CommandController;
 	private readonly events: EventRouter;
 	private readonly workspaceCoordinator: WorkspaceCoordinator;
+	private readonly bootstrap: AppBootstrap;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
@@ -207,15 +202,11 @@ export class App implements FeatureHost {
 	private readonly outputStore = new OutputStore();
 	private readonly dialogs: Array<{ handle: OverlayHandle; cancel: () => void; hidden: boolean }> = [];
 	private exiting = false;
-	/** Removed when lifecycle ownership moves to AppBootstrap. */
-	private dirtyExitInProgress = false;
 	private logValue: ReturnType<typeof uiLog.scope> | undefined;
 	/** Lazy so prototype-based tests and partially built instances stay safe. */
 	private get log() {
 		return (this.logValue ??= uiLog.scope("app"));
 	}
-	/** Gateway exit can arrive from both the error and exit events. */
-	private gatewayExitHandled = false;
 	/**
 	 * Feature-level event subscribers (e.g. /auth waiting on
 	 * auth.chatgpt.*). They observe every frame before turn bookkeeping,
@@ -223,7 +214,6 @@ export class App implements FeatureHost {
 	 */
 	private readonly featureEventHandlers = new Set<(event: GatewayEvent) => void>();
 	private resolveExit: () => void = () => {};
-	private inputListenerDisposer: (() => void) | undefined;
 	/**
 	 * True while a slash command is doing pre-dialog work (RPCs, secret
 	 * prompts). Input must not reach the composer in that window: typing `/`
@@ -249,6 +239,14 @@ export class App implements FeatureHost {
 	private get workspaceLayoutActive(): boolean { return this.workspaceSurface?.layoutActive ?? false; }
 	private get workspaceLayout(): LayoutResult | undefined { return this.workspaceSurface?.layout; }
 	private get workspaceGeneration(): number { return this.workspaceSurface?.currentGeneration ?? 0; }
+	get activeRegion(): FocusRegion { return this.workspaceCoordinator.activeRegion; }
+	get completionSession() { return this.workspaceCoordinator.completionSession(); }
+	get problemsOpen(): boolean { return this.workspaceCoordinator.problemsVisible(); }
+	get quickOpenPane(): Component | undefined {
+		if (!this.workspaceCoordinator.quickOpenActive()) return undefined;
+		const probe = this.tui as TUI & { getFocusedComponent?(): Component | null; focused?: Component | null };
+		return (typeof probe.getFocusedComponent === "function" ? probe.getFocusedComponent() : probe.focused) ?? undefined;
+	}
 	get skillsMenu() { return this.commands.mountedSkillsMenu; }
 	/** Global editor preferences (ui_preferences); defaults until loaded. */
 	private uiPrefs: UiPreferences = defaultUiPreferences();
@@ -305,6 +303,19 @@ export class App implements FeatureHost {
 		this.sessions = new SessionController(this.sessionHost());
 		this.status = new StatusController(this.statusHost());
 		this.changes = new ChangesController(this.changesHost());
+		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
+		this.configureShellSurfaces();
+		// App remains the state owner; this adapter exposes only the keyboard seam.
+		this.keyboard = new KeyboardRouter(this.keyboardHost());
+		this.commands = new CommandController(this.commandHost());
+		this.events = new EventRouter(this.eventHost());
+		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
+		this.editor.setAutocompleteMaxVisible(8);
+		this.editor.onSubmit = (text) => void this.submit(text);
+		this.bootstrap = new AppBootstrap(this.bootstrapHost());
+	}
+
+	private configureShellSurfaces(): void {
 		this.navBar = new NavBar(
 			() => this.navSnapshot(),
 			(view) => this.selectNav(view),
@@ -315,7 +326,6 @@ export class App implements FeatureHost {
 			},
 		);
 		this.shell.setNavBar(this.navBar);
-		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
 		this.shell.setPinnedBar(this.nowPlayingBar);
 		this.shell.setAgentBar(new AgentTabBar(
 			() => this.familyRows(),
@@ -323,7 +333,7 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.sessions.openFamily(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
-		this.statusPage = new StatusPage(tui, () => this.status.snapshot(), (row) => {
+		this.statusPage = new StatusPage(this.tui, () => this.status.snapshot(), (row) => {
 			const id = row.id ?? "";
 			const sessionId = id.startsWith("agent:")
 				? id.slice("agent:".length)
@@ -343,7 +353,7 @@ export class App implements FeatureHost {
 			return true;
 		});
 		this.changesPage = new ChangesPage(
-			tui,
+			this.tui,
 			() => this.changes.snapshot(),
 			(turnId) => this.changes.diffState(turnId),
 			{
@@ -356,13 +366,6 @@ export class App implements FeatureHost {
 				onClearHandled: (turnId) => this.changes.clearHandledFindings(turnId),
 			},
 		);
-		// App remains the state owner; this adapter exposes only the keyboard seam.
-		this.keyboard = new KeyboardRouter(this.keyboardHost());
-		this.commands = new CommandController(this.commandHost());
-		this.events = new EventRouter(this.eventHost());
-		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
-		this.editor.setAutocompleteMaxVisible(8);
-		this.editor.onSubmit = (text) => void this.submit(text);
 	}
 
 	private workspaceCoordinatorHost(): WorkspaceCoordinatorHost {
@@ -386,6 +389,57 @@ export class App implements FeatureHost {
 			request: <T>(method: string, params: Record<string, unknown>, timeoutMs: number) =>
 				this.client.request<T>(method, params, timeoutMs),
 			cursorBlockVisible: () => this.cursorBlinkOn(),
+		};
+	}
+
+	private bootstrapHost(): BootstrapHost {
+		return {
+			tui: this.tui,
+			client: this.client,
+			log: this.log,
+			footer: this.footer,
+			transcript: this.transcript,
+			shell: this.shell,
+			coordinator: this.coordinator,
+			editor: this.editor,
+			nowPlayingBar: this.nowPlayingBar,
+			status: this.status,
+			turnSession: this.turnSession,
+			transcriptView: this.transcriptView,
+			composer: this.composer,
+			options: this.options,
+			defaultProfile: this.defaultProfile,
+			onInput: (data) => this.keyboard.handle(data),
+			onEvent: (event) => this.events.route(event),
+			syncCursorBlink: () => this.syncCursorBlink(),
+			stopCursorBlink: () => this.stopCursorBlink(),
+			request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params),
+			current: () => this.current,
+			switchTo: (session, history) => this.switchTo(session, history),
+			showNewChat: () => this.showNewChat(),
+			applyKeybindings: (overrides) => this.applyKeybindings(overrides),
+			restyle: () => this.restyle(),
+			screen: () => this.screen(),
+			setFocusForRegion: (region) => this.setFocusForRegion(region),
+			startWorkspace: (root) => this.startWorkspace(root),
+			beginWorkspaceFence: () => this.beginWorkspaceFence(),
+			captureWorkspaceFence: () => this.captureWorkspaceFence(),
+			isWorkspaceCurrent: (generation) => this.isWorkspaceCurrent(generation),
+			workspaceReview: () => this.workspaceReview(),
+			resolveWorkspaceSaveConflict: (conflict) => this.resolveWorkspaceSaveConflict(conflict),
+			disposeWorkspaceTimer: () => this.disposeWorkspaceTimer(),
+			disposeWorkspaceIntegration: () => this.disposeWorkspaceIntegration(),
+			discardCompletion: () => this.discardCompletion(),
+			clearPendingAbortEsc: () => this.clearPendingAbortEsc(),
+			keyboardDispose: () => this.keyboardDispose(),
+			closeQuickOpen: () => this.closeQuickOpen(),
+			cancelAllDialogs: () => this.cancelAllDialogs(),
+			invalidateApprovals: () => this.invalidateApprovals(),
+			setRunning: (running) => this.setRunning(running),
+			isExiting: () => this.isExiting(),
+			markExiting: () => this.markExiting(),
+			resolveExitPromise: () => this.resolveExitPromise(),
+			pick: (title, items) => this.pick(title, items),
 		};
 	}
 
@@ -654,158 +708,9 @@ export class App implements FeatureHost {
 	}
 
 	async start(): Promise<void> {
-		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
-		this.log.info("start", {
-			sessionId: this.options.sessionId ?? null,
-			model: this.options.model ?? null,
-			provider: this.options.provider ?? null,
-			mode: this.options.mode ?? null,
-			workspace: workspaceFlagOn,
-		});
-		// Clear vacated rows when content shrinks (closed menus, finished
-		// turns). Without this, filled rows linger as ghost bands behind
-		// newer output.
-		this.tui.setClearOnShrink(true);
-		this.shell.sync();
-		if (isViewportTUI(this.tui)) {
-			this.tui.setLayoutRoot(this.shell.root);
-		} else {
-			// Fallback for non-viewport TUIs (and test doubles): classic stacking.
-			this.tui.addChild(this.transcriptView);
-			this.tui.addChild(this.composer);
-			this.tui.addChild(this.footer.chatStatus);
-			this.tui.addChild(this.footer);
-		}
-		this.tui.setFocus(this.editor);
-		this.syncCursorBlink();
-		this.inputListenerDisposer = this.tui.addInputListener((data) => this.keyboard.handle(data));
-
-		this.footer.cwd = process.cwd();
-		this.footer.status = "offline";
-		this.transcript.addNotice("Starting Machina…");
-		// Transparent background: apply the override before the first frame so
-		// there is never a flash of the opaque canvas. The launcher exports the
-		// saved value as MACHINA_TRANSPARENT_BACKGROUND; the persisted file value
-		// (read below) restyles with a full repaint if it differs.
-		const transparentEnv = /^(1|true|on|yes)$/i.test((process.env.MACHINA_TRANSPARENT_BACKGROUND ?? "").trim());
-		setOpaqueBackground(!transparentEnv);
-		this.tui.start();
-
-		this.client.onEvent = (event) => this.events.route(event);
-		this.client.onExit = (code, stderr) => this.onGatewayExit(code, stderr);
-		this.client.start();
-
-		let initializedCwd: string | undefined;
-		let initializedCwdFull: string | undefined;
-		// Music detection can stall for seconds (including a blocking macOS
-		// Automation prompt); it is joined at the end of start() but MUST NOT
-		// delay session creation (finding 8).
-		let nowPlayingReady: Promise<void> | undefined;
-		let profileReady: Promise<void> | undefined;
-		try {
-			const init = await this.client.request<InitializeResult>(
-				"initialize",
-				{ protocolVersion: 2, model: this.options.model, provider: this.options.provider, mode: this.options.mode },
-				60_000,
-			);
-			initializedCwd = init.cwd;
-			initializedCwdFull = typeof init.cwdFull === "string" && init.cwdFull ? init.cwdFull : undefined;
-				Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
-			this.log.info("gateway.ready", {
-				version: init.version,
-				model: init.model,
-				provider: init.provider,
-				cwd: init.cwd,
-			});
-			try {
-				const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
-				this.applyKeybindings(parseBindingOverrides(config.keybindings));
-				if (typeof config.theme === "string" && config.theme) {
-					setSkin(config.theme);
-					// The startup frame is already on screen. Use the same
-					// cache invalidation/full redraw as live theme selection.
-					this.restyle();
-				}
-				if (typeof config.transparent_background === "boolean") {
-					const opaque = !config.transparent_background;
-					if (opaque !== isOpaqueBackground()) {
-						setOpaqueBackground(opaque);
-						// Same full redraw as a skin change: every painted cell
-						// (including empty viewport rows) must drop the fill.
-						this.restyle();
-					}
-				}
-				// Kick off the pinned now-playing bar here, but never await it
-				// before the session exists (finding 8). start() joins the
-				// promise before returning, so the bar still lands on the first
-				// frame while session creation stays unblocked.
-				nowPlayingReady = this.startNowPlaying(config).catch(() => {
-					// The music bar is optional; detection failures never block chat.
-				});
-			} catch {
-				// Saved skin is best-effort; the default applies otherwise.
-			}
-			// Guarantee the default profile exists (first-touch RL/growth/memory
-			// identity), but do it alongside the first chat render rather than
-			// blocking it on a DB round-trip.
-			profileReady = this.client
-				.request("profile.get", { userId: this.defaultProfile }, 30_000)
-				.then(() => {})
-				.catch(() => {
-					// Profiles stay best-effort; commands surface real errors.
-				});
-			if (this.options.sessionId) {
-				const { session, history } = await this.client.request<ResumeResult>("session.resume", {
-					sessionId: this.options.sessionId,
-				});
-				this.switchTo(session, history);
-			} else {
-				// A blank chat is client-side only. The first real message
-				// creates the session, so opening the CLI never adds an empty
-				// conversation to history.
-				this.showNewChat();
-			}
-			try {
-				// Session-scoped authority for the initial session (finding 8):
-				// resolve AFTER the session exists so the footer and the
-				// notice below reflect the governing session, never the
-				// global default. Later switches refresh via switchTo.
-				const session = this.current;
-				const { mode } = await this.request<{ mode: string }>("mode.get", session ? { sessionId: session.id } : {});
-				if (mode === "full") {
-					this.transcript.addNotice("FULL HOST mode active for this session: host operations proceed without further approval, including credential access, elevation, and destructive system ops.", "warning");
-				}
-			} catch {
-				// Mode display is best-effort.
-			}
-		} catch (error) {
-			this.log.error("start.failed", { error: describeError(error), stderr: this.client.stderr().slice(-8) });
-			this.footer.status = "offline";
-			this.transcript.clear();
-			this.transcript.addNotice(`Could not start: ${message(error)}`, "error");
-			const tail = this.client.stderr().slice(-8);
-			if (tail.length) this.transcript.addNotice(tail.join("\n"));
-			this.transcript.addNotice("Run `machina doctor` to check your setup. Press Ctrl+C to exit.");
-		}
-		// Integrated workspace: only after initialize + session setup, only when
-		// the flag allows it, and never blocking chat. Prefer the absolute
-		// launch directory (authenticated handshakes). The redacted basename is
-		// a display value and must never be treated as a root: when only that
-		// is available (older backend), stay chat-only.
-		if (workspaceFlagOn) {
-			const root = initializedCwdFull ?? (initializedCwd !== undefined && isAbsolute(initializedCwd) ? initializedCwd : undefined);
-			if (root !== undefined) {
-				this.startWorkspace(root);
-			}
-		}
-		// Join the background first-touch work now that the session is visible.
-		// Neither the profile row nor the music bar may block session creation.
-		await Promise.all([profileReady, nowPlayingReady]);
-		this.log.info("ready", { session: this.current?.id ?? null, view: this.view });
-		this.tui.requestRender();
+		return this.bootstrap.start();
 	}
 
-	/** UI seams the workspace surface calls back into (composition root). */
 	private workspaceSurfaceHost(): WorkspaceSurfaceHost {
 		const wiring: WorkspaceSurfaceWiring = {
 			shell: this.shell,
@@ -821,6 +726,62 @@ export class App implements FeatureHost {
 		this.workspaceSurface = new WorkspaceSurface(this.workspaceSurfaceHost());
 		this.client.onWorkspaceEvent = (event) => this.workspaceSurface?.onEvent(event);
 		this.workspaceSurface.start(root);
+	}
+
+	private screen(): ScreenView {
+		return this.view;
+	}
+
+	private isExiting(): boolean {
+		return this.exiting;
+	}
+
+	private markExiting(): void {
+		this.exiting = true;
+	}
+
+	private resolveExitPromise(): void {
+		this.resolveExit();
+	}
+
+	private workspaceReview(): WorkspaceReview | undefined {
+		const integration = this.integration;
+		if (!integration) return undefined;
+		return {
+			documents: () => integration.store.documents(),
+			save: (documentId) => integration.controller.save(documentId),
+		};
+	}
+
+	private resolveWorkspaceSaveConflict(conflict: SaveConflictDescriptor): Promise<ConflictResolution | undefined> {
+		return this.workspaceCoordinator.resolveSaveConflict(conflict);
+	}
+
+	private disposeWorkspaceTimer(): void {
+		this.workspaceSurface?.disposeTimer();
+	}
+
+	private async disposeWorkspaceIntegration(): Promise<void> {
+		await this.integration?.controller.dispose();
+	}
+
+	private discardCompletion(): void {
+		this.workspaceCoordinator.discardCompletion();
+	}
+
+	private keyboardDispose(): void {
+		this.keyboard.dispose();
+	}
+
+	private cancelAllDialogs(): void {
+		for (const dialog of [...this.dialogs].reverse()) dialog.cancel();
+	}
+
+	private stopCursorBlink(): void {
+		this.cursorBlinkSub?.stop();
+		this.cursorBlinkSub = undefined;
+		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
+		this.cursorBlinkIdleTimer = undefined;
 	}
 
 	// ─── FeatureHost ─────────────────────────────────────────────────────────
@@ -909,15 +870,7 @@ export class App implements FeatureHost {
 	}
 
 	print(text: string, kind: NoticeKind = "info"): void {
-		// Plain command output is a report, not a one-line status: render it
-		// through Markdown so headings, lists, tables and inline code are
-		// parsed consistently instead of appearing as literal source text.
-		// The one exception is the pinned U07 `/skills` fallback, whose
-		// byte-identical fixed-width table is already a readable report.
-		if (kind === "plain" && !/^[ \t]*[─]{3,}[ \t]{2}/m.test(text))
-			this.transcript.addMarkdown(text, "output");
-		else this.transcript.addNotice(text, kind);
-		this.tui.requestRender();
+		this.bootstrap.print(text, kind);
 	}
 
     copyText(text: string): Promise<boolean> { return copyClipboardText(text); }
@@ -928,9 +881,7 @@ export class App implements FeatureHost {
 	 * Focus moves to the composer with the cursor after the inserted text.
 	 */
 	prefillInput(text: string): void {
-		this.editor.setText(text);
-		this.setFocusForRegion("chat-composer");
-		this.tui.requestRender();
+		this.bootstrap.prefillInput(text);
 	}
 
 	onGatewayEvent(handler: (event: GatewayEvent) => void): () => void {
@@ -1080,58 +1031,9 @@ export class App implements FeatureHost {
 	 * one honest notice instead of failing.
 	 */
 	music(): MusicHost | undefined {
-		return this.nowPlayingController;
+		return this.bootstrap.music();
 	}
 
-	/**
-	 * Start the pinned now-playing bar: config gate, first reading, and the
-	 * shared-coordinator subscriptions (poll always; 250 ms animation only
-	 * while audio is actually playing).
-	 */
-	private async startNowPlaying(config: Record<string, unknown>): Promise<void> {
-		this.nowPlayingController = new NowPlayingController({
-			bar: this.nowPlayingBar,
-			request: (method, params) => this.client.request(method, params ?? {}, 30_000),
-			onChange: () => {
-				this.syncNowPlayingTicks();
-				this.tui.requestRender();
-			},
-		});
-		await this.nowPlayingController.initialize(config);
-	}
-
-	/**
-	 * Subscribe/detach the coordinator demand for the bar. Polling is a slow
-	 * 2 s heartbeat; the equalizer and interpolated progress need 250 ms
-	 * frames, but only while audio is playing.
-	 */
-	private syncNowPlayingTicks(): void {
-		// Data polling is owned by the controller (its own 2 s interval,
-		// stopped on exit/disable); the coordinator here only drives render
-		// demand: 250 ms frames for the equalizer and interpolated clock
-		// while audio is actually playing.
-		const controller = this.nowPlayingController;
-		const state = controller?.status();
-		const playing =
-			(controller?.isEnabled() ?? false) &&
-			state?.state === "playing" &&
-			Boolean(state.title);
-		if (playing && !this.nowPlayingAnim) {
-			this.nowPlayingAnim = this.coordinator.subscribe("nowplaying.anim", 250);
-		} else if (!playing && this.nowPlayingAnim) {
-			this.nowPlayingAnim.stop();
-			this.nowPlayingAnim = undefined;
-		}
-	}
-
-	// ─── caret blink (one coordinator subscription) ──────────────────────────
-
-	/**
-	 * True while a typing caret is actually on screen: the workspace editor
-	 * (focused, with an open document) or the composer (focused, with a
-	 * non-empty draft — an empty composer shows only the placeholder, so
-	 * blinking it would burn renders with nothing to blink).
-	 */
 	private cursorCaretVisible(): boolean {
 		if (this.exiting) return false;
 		const integration = this.integration;
@@ -1726,97 +1628,9 @@ export class App implements FeatureHost {
 	}
 
 	async exit(): Promise<void> {
-		if (this.exiting) return;
-		// Plan §9 dirty-quit review: one dialog before any teardown. The review
-		// runs while the app is still alive (dialogs stay usable); a cancel or
-		// a failed save leaves everything untouched.
-		if (this.dirtyExitInProgress) return;
-		this.dirtyExitInProgress = true;
-		try {
-			if (!(await this.reviewDirtyExit())) return;
-		} finally {
-			this.dirtyExitInProgress = false;
-		}
-		if (this.exiting) return;
-		this.exiting = true;
-		this.keyboard.dispose();
-		this.clearPendingAbortEsc();
-		this.footer.keyHint = "";
-		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
-		// cancel loop below never sees it; tear it down explicitly so its
-		// pending provider timer dies with the app.
-		this.closeQuickOpen();
-		// MCH-012: every in-flight workspace open/switch continuation is stale
-		// the moment the app is leaving: it must publish nothing.
-		this.beginWorkspaceFence();
-		this.footer.dispose();
-		this.status.dispose();
-		this.turnSession.clearInFlightTimers();
-		this.transcript.suspend();
-		this.invalidateApprovals();
-		this.nowPlayingController?.stop();
-		this.nowPlayingAnim?.stop();
-		this.nowPlayingAnim = undefined;
-		this.cursorBlinkSub?.stop();
-		this.cursorBlinkSub = undefined;
-		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
-		this.cursorBlinkIdleTimer = undefined;
-		this.coordinator.dispose();
-		for (const dialog of [...this.dialogs].reverse()) dialog.cancel();
-		this.inputListenerDisposer?.();
-		this.tui.stop();
-		await this.integration?.controller.dispose();
-		await this.client.stop();
-		this.resolveExit();
+		return this.bootstrap.exit();
 	}
 
-	/**
-	 * Dirty-quit review (plan §9): lists up to two dirty basenames plus a
-	 * `+N` remainder (finding 6: `1 unsaved file: main.py`) and offers
-	 * Save all & exit / Discard & exit / Cancel. Save-all drives sequential
-	 * controller saves; the first failure (conflict, refusal, transport) keeps
-	 * the app open with a notice naming the file.
-	 */
-	private async reviewDirtyExit(): Promise<boolean> {
-		const integration = this.integration;
-		if (!integration || this.exiting) return true;
-		const dirty = integration.store.documents().filter((document) => document.dirty);
-		if (dirty.length === 0) return true;
-		const names = dirty.slice(0, 2).map((document) => displayUriName(document.uri));
-		const more = dirty.length > names.length ? ` +${dirty.length - names.length}` : "";
-		const label = `${dirty.length} unsaved file${dirty.length === 1 ? "" : "s"}: ${names.join(", ")}${more}`;
-		const choice = await this.pick(label, [
-			{ value: "save", label: "Save all & exit" },
-			{ value: "discard", label: "Discard & exit" },
-			{ value: "cancel", label: "Cancel" },
-		]);
-		if (!choice || choice.value === "cancel") return false;
-		if (choice.value === "discard") return true;
-		// MCH-012: a workspace lifecycle change during the review retires the
-		// exit request (the buffers belong to a workspace that moved on).
-		const gen = this.captureWorkspaceFence();
-		if (!this.isWorkspaceCurrent(gen)) return false;
-		for (const document of dirty) {
-			const outcome = await integration.controller.save(document.id);
-			if (!this.isWorkspaceCurrent(gen)) return false;
-			if (outcome.status === "conflict") {
-				// "Save all & exit" survives the conflict detour: an explicit
-				// overwrite/reload leaves the file saved (or adopted), so the
-				// requested exit is still the user's decision. "Keep editing"
-				// (or a failed/stale resolution) cancels it honestly.
-				const resolution = await this.resolveSaveConflict(outcome.conflict);
-				if (!this.isWorkspaceCurrent(gen)) return false;
-				if (resolution?.status === "saved" || resolution?.status === "reloaded") continue;
-				this.print(`Exit cancelled: ${displayUriName(document.uri)} was not saved.`, "warning");
-				return false;
-			}
-			if (outcome.status !== "saved") {
-				this.print(`Exit cancelled: could not save ${displayUriName(document.uri)}.`, "error");
-				return false;
-			}
-		}
-		return true;
-	}
 
 	// ─── input ────────────────────────────────────────────────────────────
     private clearImages(): void {
@@ -1947,8 +1761,16 @@ export class App implements FeatureHost {
 		this.workspaceCoordinator.closeQuickOpen();
 	}
 
-	private resolveSaveConflict(conflict: SaveConflictDescriptor): Promise<ConflictResolution | undefined> {
-		return this.workspaceCoordinator.resolveSaveConflict(conflict);
+	noteRegionFocus(region: FocusRegion): void {
+		this.workspaceCoordinator.noteRegionFocus(region);
+	}
+
+	openProblems(): void {
+		this.workspaceCoordinator.openProblems();
+	}
+
+	lspStatusText(): string | undefined {
+		return this.workspaceCoordinator.lspStatusText();
 	}
 
 	private reconcileFocus(): void {
@@ -2173,40 +1995,10 @@ export class App implements FeatureHost {
 		this.approvals.clear(sessionId);
 	}
 
-	private onGatewayExit(code: number | null, stderr: string[]): void {
-		if (this.exiting || this.gatewayExitHandled) return;
-		this.gatewayExitHandled = true;
-		// MCH-012: the transport is gone - in-flight workspace opens publish
-		// nothing (their teardown RPCs cannot be trusted either).
-		this.beginWorkspaceFence();
-		this.nowPlayingController?.stop();
-		this.nowPlayingAnim?.stop();
-		this.nowPlayingAnim = undefined;
-		this.workspaceSurface?.disposeTimer();
-		this.keyboard.dispose();
-		this.workspaceCoordinator.discardCompletion();
-		this.cursorBlinkSub?.stop();
-		this.cursorBlinkSub = undefined;
-		this.footer.dispose();
-		this.clearPendingAbortEsc();
-		this.status.dispose();
-		this.transcript.suspend();
-		// The gateway is gone: clear workspace timers/mirrors without RPC
-		// expectations (every teardown call is bounded and fails fast).
-		void this.integration?.controller.dispose();
-		// Retire local approval prompts without resolving: navigation and
-		// disconnect invalidation never issues surprise resolve RPCs.
-		this.invalidateApprovals();
-		// Clear all in-flight tracking so the session isn't permanently locked.
-		this.turnSession.clearAllInFlight();
-		this.setRunning(false);
-		this.footer.status = "offline";
-		this.transcript.addNotice(`The gateway stopped${code === null ? "" : ` (exit code ${code})`}.`, "error");
-		const tail = stderr.slice(-8);
-		if (tail.length) this.transcript.addNotice(tail.join("\n"));
-		this.transcript.addNotice("Press Ctrl+C to exit, then run `machina doctor`.");
-		this.tui.requestRender();
+	onGatewayExit(code: number | null, stderr: string[]): void {
+		this.bootstrap.onGatewayExit(code, stderr);
 	}
+
 }
 
 function message(error: unknown): string {
