@@ -23,7 +23,7 @@ async def _resident_session() -> tuple[dict, str]:
 @registry.register(
     name="resident_remember",
     description=(
-        "Store a stable fact or preference in the resident buddy's core memory. "
+        "Store a stable fact or preference in Maki's core memory. "
         "Use when the user shares identity, contact, style, or standing instructions."
     ),
     parameters={
@@ -142,7 +142,7 @@ async def resident_batch_create(goal: str, items: list[dict], key_prefix: str = 
     from machina.resident import batches
 
     batch = await batches.create_batch(goal, items, key_prefix=key_prefix)
-    return f"Batch {batch['id'][:8]} created with {batch['total']} item(s)."
+    return f"Batch {batch['id']} created with {batch['total']} item(s)."
 
 
 @registry.register(
@@ -202,4 +202,4 @@ async def resident_batch_status(batch_id: str) -> str:
     batch = await batches.batch_status(batch_id)
     if batch is None:
         return "unknown batch"
-    return f"{batch['id'][:8]}  {batch['status']}  {batch['done']}/{batch['total']}  {batch['goal']}"
+    return f"{batch['id']}  {batch['status']}  {batch['done']}/{batch['total']}  {batch['goal']}"

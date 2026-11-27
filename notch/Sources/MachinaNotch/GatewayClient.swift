@@ -150,11 +150,18 @@ struct GatewayClient {
         )
     }
 
-    func prompt(sessionId: String, text: String) async throws -> String {
-        let result: ResidentPromptResult = try await call(
-            "resident.prompt",
-            params: ["sessionId": sessionId, "text": text]
-        )
+    func prompt(sessionId: String, text: String, image: Data? = nil) async throws -> String {
+        var params: [String: Any] = ["sessionId": sessionId, "text": text]
+        if let image {
+            params["images"] = [
+                [
+                    "mediaType": "image/jpeg",
+                    "data": image.base64EncodedString(),
+                    "name": "screen.jpg",
+                ]
+            ]
+        }
+        let result: ResidentPromptResult = try await call("resident.prompt", params: params)
         return result.turnId
     }
 

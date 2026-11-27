@@ -1,4 +1,4 @@
-"""Durable batch work for the resident buddy.
+"""Durable batch work for Maki.
 
 A batch is a goal plus idempotent items. Workers claim items, execute them,
 and report a terminal status; the batch aggregates counts and can be paused,
@@ -36,6 +36,22 @@ def _batch_view(row: dict[str, Any]) -> dict[str, Any]:
     item["createdAt"] = item.pop("created_at", None)
     item["updatedAt"] = item.pop("updated_at", None)
     return item
+
+
+async def resolve_batch_id(value: str) -> str | None:
+    """Accept a full UUID or the display prefix shown by the tools."""
+    uid = _uid(value)
+    if uid is not None:
+        return str(uid)
+    prefix = str(value or "").strip()
+    if len(prefix) < 6:
+        return None
+    row = await db.fetchrow(
+        "SELECT id::text AS id FROM resident_batches WHERE id::text LIKE $1 "
+        "ORDER BY created_at DESC LIMIT 1",
+        prefix + "%",
+    )
+    return str(row["id"]) if row is not None else None
 
 
 async def create_batch(
@@ -96,9 +112,10 @@ async def list_batches(*, limit: int = 50) -> list[dict[str, Any]]:
 
 
 async def batch_status(batch_id: str) -> dict[str, Any] | None:
-    uid = _uid(batch_id)
-    if uid is None:
+    resolved = await resolve_batch_id(batch_id)
+    if resolved is None:
         return None
+    uid = uuid.UUID(resolved)
     row = await db.fetchrow(
         "SELECT id::text AS id, goal, plan, status, total, done, failed, grant_id, "
         "created_at, updated_at FROM resident_batches WHERE id = $1",
@@ -118,9 +135,10 @@ async def batch_status(batch_id: str) -> dict[str, Any] | None:
 
 
 async def cancel_batch(batch_id: str) -> bool:
-    uid = _uid(batch_id)
-    if uid is None:
+    resolved = await resolve_batch_id(batch_id)
+    if resolved is None:
         return False
+    uid = uuid.UUID(resolved)
     result = await db.execute(
         "UPDATE resident_batches SET status = 'cancelled', updated_at = now() "
         "WHERE id = $1 AND status IN ('queued', 'running', 'paused')",
@@ -130,9 +148,10 @@ async def cancel_batch(batch_id: str) -> bool:
 
 
 async def claim_items(batch_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-    uid = _uid(batch_id)
-    if uid is None:
+    resolved = await resolve_batch_id(batch_id)
+    if resolved is None:
         return []
+    uid = uuid.UUID(resolved)
     rows = await db.fetch(
         "WITH picked AS ("
         "  SELECT id FROM resident_batch_items WHERE batch_id = $1 AND status = 'queued' "

@@ -21,6 +21,11 @@ struct MascotView: View {
     @State private var closed = false
     @State private var spinning = false
     @State private var look = CGSize.zero
+    @State private var floating = false
+    @State private var breathing = false
+    @State private var gaze = CGSize.zero
+    @State private var zphase = false
+    @State private var sparkle = false
 
     private var eyeWidth: CGFloat { size * 0.115 }
     private var eyeHeight: CGFloat { size * 0.20 }
@@ -35,15 +40,58 @@ struct MascotView: View {
             }
         }
         .frame(width: size, height: size)
+        .offset(
+            x: state == .sleeping ? 0 : (floating ? size * 0.045 : -size * 0.045),
+            y: floating ? -size * 0.018 : size * 0.012
+        )
+        .scaleEffect(breathing ? 1.022 : 0.992)
+        .rotationEffect(.degrees(state == .thinking ? 2.0 : 0))
+        .overlay(alignment: .center) {
+            if state == .happy {
+                blush
+            }
+            if state == .surprised {
+                SurpriseBurst(size: size)
+            }
+            if state == .sleeping {
+                SleepingZs(size: size, phase: zphase)
+            }
+            if state == .happy {
+                Image(systemName: "sparkle")
+                    .font(.system(size: size * 0.20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .offset(x: size * 0.34, y: -size * 0.34)
+                    .scaleEffect(sparkle ? 1.0 : 0.4)
+                    .opacity(sparkle ? 0.9 : 0.0)
+            }
+        }
         .onAppear {
             if !reduceMotion {
                 spinning = true
+                withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
+                    floating = true
+                }
+                withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
+                    breathing = true
+                }
+                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                    zphase = true
+                }
                 scheduleBlink()
+                scheduleGaze()
             }
         }
         .onChange(of: state) { _, newValue in
             withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
-                look = newValue == .thinking ? CGSize(width: size * 0.035, height: -size * 0.025) : .zero
+                look = newValue == .thinking
+                    ? CGSize(width: size * 0.045, height: -size * 0.035)
+                    : newValue == .waiting
+                        ? CGSize(width: size * 0.035, height: 0)
+                        : .zero
+                sparkle = newValue == .happy
+            }
+            if newValue != .happy {
+                sparkle = false
             }
         }
     }
@@ -91,7 +139,7 @@ struct MascotView: View {
             eye
             eye
         }
-        .offset(look)
+        .offset(x: look.width + gaze.width, y: look.height + gaze.height)
     }
 
     @ViewBuilder
@@ -147,6 +195,32 @@ struct MascotView: View {
             .padding(1)
     }
 
+    private var blush: some View {
+        HStack(spacing: size * 0.36) {
+            Ellipse()
+                .fill(Color(red: 1.0, green: 0.58, blue: 0.58).opacity(0.22))
+                .frame(width: size * 0.13, height: size * 0.07)
+            Ellipse()
+                .fill(Color(red: 1.0, green: 0.58, blue: 0.58).opacity(0.22))
+                .frame(width: size * 0.13, height: size * 0.07)
+        }
+        .offset(y: size * 0.13)
+    }
+
+    private func scheduleGaze() {
+        guard !reduceMotion else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 2.4...5.2)) {
+            guard state == .idle || state == .waiting else {
+                scheduleGaze()
+                return
+            }
+            let x = CGFloat.random(in: -0.045...0.045) * size
+            let y = CGFloat.random(in: -0.02...0.03) * size
+            withAnimation(.easeInOut(duration: 0.55)) { gaze = CGSize(width: x, height: y) }
+            scheduleGaze()
+        }
+    }
+
     private func scheduleBlink() {
         guard !reduceMotion else { return }
         let delay = Double.random(in: 3.2...5.8)
@@ -161,6 +235,36 @@ struct MascotView: View {
                 scheduleBlink()
             }
         }
+    }
+}
+
+private struct SurpriseBurst: View {
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(.white.opacity(0.72))
+                    .frame(width: size * 0.11, height: max(0.8, size * 0.022))
+                    .offset(x: size * 0.33, y: -size * 0.30)
+                    .rotationEffect(.degrees(Double(index - 1) * 26 - 18 + 30))
+            }
+        }
+    }
+}
+
+private struct SleepingZs: View {
+    let size: CGFloat
+    let phase: Bool
+
+    var body: some View {
+        Text("z")
+            .font(.system(size: size * 0.24, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.55))
+            .offset(x: size * 0.34, y: phase ? -size * 0.42 : -size * 0.32)
+            .opacity(phase ? 0.85 : 0.35)
+            .scaleEffect(phase ? 1.0 : 0.8)
     }
 }
 

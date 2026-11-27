@@ -1,4 +1,4 @@
-# Machina Notch — resident buddy (macOS)
+# Machina Notch — Maki (macOS)
 
 The notch is a native SwiftUI/AppKit client for the resident Machina session.
 It is a satellite, not a second brain: the Python gateway owns turns, memory,

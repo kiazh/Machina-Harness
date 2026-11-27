@@ -1,8 +1,8 @@
-# Resident buddy
+# Maki, the resident companion
 
 Status: **foundation implemented; connectors and screen control are next.**
 
-The resident buddy is a dedicated Machina session with a stable profile,
+Maki is a dedicated Machina session with a stable profile,
 always-injected core memory, autonomy grants, and a native macOS notch client.
 It is a normal turn engine with an identity and a policy layer — not a second
 agent runtime.

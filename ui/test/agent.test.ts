@@ -23,7 +23,7 @@ function host(overrides: Record<string, (params: Record<string, unknown>) => unk
 const status = {
 	profile: {
 		key: "default",
-		name: "Buddy",
+		name: "Maki",
 		persona: "",
 		autonomyMode: "auto-safe",
 		sharedMemory: true,
@@ -40,7 +40,7 @@ test("/agent status prints the resident profile", async () => {
 
 	await agentCommand.run("", h.host);
 
-	assert.match(h.printed.join("\n"), /Resident: Buddy/);
+	assert.match(h.printed.join("\n"), /Resident: Maki/);
 	assert.match(h.printed.join("\n"), /Autonomy: auto-safe/);
 	assert.match(h.printed.join("\n"), /Session: session-1/);
 	assert.match(h.printed.join("\n"), /Pending approvals: 2/);
@@ -130,16 +130,19 @@ test("/agent rsi lists learned rules and batches", async () => {
 		"resident.rsi.list": () => ({
 			rules: [{ id: "11111111-1111", rule: "short emails", category: "style", confidence: 0.8, status: "active", version: 2, approvedBy: "user" }],
 		}),
+		"resident.rsi.review": () => ({ created: [] }),
 		"resident.batch.list": () => ({
 			batches: [{ id: "22222222-2222", goal: "inbox triage", status: "running", total: 10, done: 4, failed: 0, createdAt: null }],
 		}),
 	});
 
 	await agentCommand.run("rsi", h.host);
+	await agentCommand.run("rsi review", h.host);
 	await agentCommand.run("batches", h.host);
 
 	const text = h.printed.join("\n");
 	assert.match(text, /short emails/);
 	assert.match(text, /inbox triage/);
+	assert.match(text, /No new rules proposed/);
 	assert.match(text, /4\/10/);
 });

@@ -1,4 +1,4 @@
-// /agent — the resident buddy: status, inbox, memory, grants, autonomy.
+// /agent — Maki, the resident companion: status, inbox, memory, grants, autonomy.
 //
 // The resident is a normal Machina session with a durable profile, core
 // memory, and scoped autonomy grants. This command is the terminal surface;
@@ -31,7 +31,7 @@ const SUBCOMMANDS: Array<[string, string]> = [
 	["grant", "Create a grant: /agent grant <minutes> <ops> [--sessions ...] [--targets ...] [--max N]"],
 	["revoke", "Revoke a grant: /agent revoke <grantId>"],
 	["autonomy", "Set mode: /agent autonomy ask|auto-safe|full"],
-	["rsi", "List learned rules: /agent rsi [propose <rule>|activate <id>|retire <id>]"],
+	["rsi", "Learned rules: /agent rsi [review|propose <rule>|activate <id>|retire <id>]"],
 	["batches", "List durable batch work"],
 	["batch", "Show one batch: /agent batch <batchId>"],
 	["cancel-batch", "Cancel a batch: /agent cancel-batch <batchId>"],
@@ -139,7 +139,7 @@ async function grant(host: FeatureHost, args: string): Promise<void> {
 
 export const agentCommand: Command = {
 	name: "agent",
-	description: "Resident buddy: status, inbox, memory, grants, autonomy",
+	description: "Maki: resident companion, inbox, memory, grants, autonomy",
 	argumentHint: "[status|open|inbox|approve|deny|memory|remember|grants|grant|revoke|autonomy|kill]",
 	getArgumentCompletions: (prefix: string) => {
 		const typed = prefix.trimStart().toLowerCase();
@@ -230,6 +230,16 @@ export const agentCommand: Command = {
 						result.rules.length
 							? result.rules.map((rule) => `${rule.status.padEnd(8)} ${rule.id.slice(0, 8)}  ${rule.rule}  (${rule.confidence.toFixed(2)})`).join("\n")
 							: "No learned rules yet.",
+						"plain",
+					);
+					return;
+				}
+				if (action === "review") {
+					const result = await host.request<{ created: Array<{ id: string; rule: string }> }>("resident.rsi.review", {});
+					host.print(
+						result.created.length
+							? result.created.map((rule) => `proposed ${rule.id.slice(0, 8)}  ${rule.rule}`).join("\n")
+							: "No new rules proposed.",
 						"plain",
 					);
 					return;

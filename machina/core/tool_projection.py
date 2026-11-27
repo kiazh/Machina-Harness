@@ -38,6 +38,16 @@ CORE_TOOL_NAMES = frozenset(
         "terminal_job",
         "ask_user",
         "tool_load",
+        # Maki's control surface. These fail closed outside the resident
+        # session, but keeping the schemas warm lets the resident act without
+        # an extra tool_load round-trip.
+        "resident_remember",
+        "resident_pending_approvals",
+        "resident_proxy_resolve",
+        "resident_batch_create",
+        "resident_batch_claim",
+        "resident_batch_finish",
+        "resident_batch_status",
     }
 )
 

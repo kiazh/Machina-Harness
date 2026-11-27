@@ -80,7 +80,7 @@ def test_core_memory_block_has_a_hard_character_bound() -> None:
 
     block = store.render_core_memory(rows)
 
-    assert block.startswith("Buddy core memory")
+    assert block.startswith("Maki core memory")
     assert len(block) <= store.CORE_MEMORY_MAX_CHARS
     assert "fact-0 (pinned)" in block
 
@@ -195,7 +195,7 @@ async def test_resident_status_is_local_only_and_returns_the_profile(monkeypatch
         return {
             "profile": {
                 "key": "default",
-                "name": "Buddy",
+                "name": "Maki",
                 "persona": "",
                 "autonomyMode": "auto-safe",
                 "sharedMemory": True,

@@ -146,6 +146,7 @@ export const RPC_METHODS = [
   "resident.prompt",
   "resident.rsi.list",
   "resident.rsi.propose",
+  "resident.rsi.review",
   "resident.rsi.set",
   "resident.status",
   "review.cancel",

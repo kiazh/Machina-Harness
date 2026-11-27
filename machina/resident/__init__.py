@@ -1,4 +1,4 @@
-"""Resident buddy: the always-on notch agent's durable core."""
+"""Maki: the always-on notch companion's durable core."""
 
 from __future__ import annotations
 

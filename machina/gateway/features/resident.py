@@ -1,4 +1,4 @@
-"""Resident buddy feature handlers (``resident.*``).
+"""Maki feature handlers (``resident.*``).
 
 These methods are local-terminal only. Grants, proxy approval resolution, and
 core-memory edits must never be reachable through the shared HTTP surface.
@@ -47,7 +47,11 @@ async def resident_prompt(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]
     if profile.get("paused"):
         raise RpcError(INVALID_PARAMS, "the resident is paused; resume it before prompting")
     text = _str(params, "text", max_len=20_000)
-    return await gw._prompt_submit({"sessionId": str(session.id), "text": text})
+    payload: dict[str, Any] = {"sessionId": str(session.id), "text": text}
+    images = params.get("images")
+    if images is not None:
+        payload["images"] = images
+    return await gw._prompt_submit(payload)
 
 
 async def resident_context(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
@@ -275,6 +279,15 @@ async def resident_rsi_propose(gw: Gateway, params: dict[str, Any]) -> dict[str,
     except (TypeError, ValueError) as error:
         raise RpcError(INVALID_PARAMS, str(error)) from None
     return {"rule": row}
+
+
+async def resident_rsi_review(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:
+    _require_local_transport(gw, "resident.rsi.review")
+    gw.require_db()
+    from machina.resident import review
+
+    created = await review.review(days=_int(params, "days", 30, 1, 365))
+    return {"created": created}
 
 
 async def resident_rsi_set(gw: Gateway, params: dict[str, Any]) -> dict[str, Any]:

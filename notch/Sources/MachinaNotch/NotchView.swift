@@ -4,6 +4,7 @@ struct NotchView: View {
     @ObservedObject var model: NotchModel
     let controller: NotchPanelController
     @FocusState private var composerFocused: Bool
+    @State private var mascotDrag = CGSize.zero
 
     var body: some View {
         Group {
@@ -12,17 +13,39 @@ struct NotchView: View {
         .animation(.spring(response: 0.34, dampingFraction: 0.84), value: model.expanded)
         .onHover { hovering in
             if hovering {
-                controller.expand()
+                controller.expand(activate: false)
             } else {
-                controller.collapseSoon()
+                controller.collapseSoonIfNotKey()
             }
         }
-        .onTapGesture { controller.toggle() }
+        .onExitCommand { controller.collapse() }
+        .onChange(of: model.expanded) { _, expanded in
+            guard expanded else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                composerFocused = true
+            }
+        }
     }
 
     private var collapsed: some View {
         HStack(spacing: 8) {
             MascotView(state: model.mascot, size: 22)
+                .offset(mascotDrag)
+                .gesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { value in
+                            mascotDrag = CGSize(
+                                width: max(-42, min(42, value.translation.width)),
+                                height: max(-10, min(10, value.translation.height))
+                            )
+                        }
+                        .onEnded { _ in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
+                                mascotDrag = .zero
+                            }
+                            model.pet()
+                        }
+                )
             Circle()
                 .fill(model.connection == "live" ? Color.green : Color.orange)
                 .frame(width: 6, height: 6)
@@ -37,6 +60,8 @@ struct NotchView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
+        .contentShape(Capsule(style: .continuous))
+        .onTapGesture { controller.expand(activate: true) }
         .background(
             Capsule(style: .continuous)
                 .fill(
@@ -82,8 +107,9 @@ struct NotchView: View {
             footer
         }
         .padding(16)
-        .frame(width: 400, height: 560, alignment: .top)
+        .frame(width: 420, height: 560, alignment: .top)
         .background(glass)
+        .compositingGroup()
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
@@ -97,6 +123,9 @@ struct NotchView: View {
                 )
         )
         .shadow(color: .black.opacity(0.58), radius: 26, y: 12)
+        .simultaneousGesture(
+            TapGesture().onEnded { controller.activate() }
+        )
     }
 
     private var glass: some View {
@@ -113,8 +142,24 @@ struct NotchView: View {
     private var header: some View {
         HStack(spacing: 12) {
             MascotView(state: model.mascot, size: 42)
+                .offset(mascotDrag)
+                .gesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { value in
+                            mascotDrag = CGSize(
+                                width: max(-60, min(60, value.translation.width)),
+                                height: max(-20, min(20, value.translation.height))
+                            )
+                        }
+                        .onEnded { _ in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
+                                mascotDrag = .zero
+                            }
+                            model.pet()
+                        }
+                )
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.status?.profile.name ?? "Buddy")
+                Text(model.status?.profile.name ?? "Maki")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                 Text(subtitle)
@@ -155,6 +200,15 @@ struct NotchView: View {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            Button {
+                controller.hide()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -220,12 +274,22 @@ struct NotchView: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("Ask Buddy…", text: $model.draft)
+            TextField("Ask Maki…", text: $model.draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(.white.opacity(0.9))
                 .focused($composerFocused)
                 .onSubmit { model.send() }
+            Button {
+                model.sendScreenshot()
+            } label: {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(.white.opacity(0.07)))
+            }
+            .buttonStyle(.plain)
             Button {
                 model.send()
             } label: {

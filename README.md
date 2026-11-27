@@ -46,7 +46,7 @@ Counts below are from this checkout’s registries and checked-in files; they de
 | Jobs | Durable scheduled jobs, including interval/cron/heartbeat and reviewed script jobs; job execution is at-least-once. |
 | Observability | Sanitized audit events, diagnostics, operation metrics, traces, and durable usage accounting. |
 
-## Resident buddy
+## Maki, the resident companion
 
 Machina has a resident session with a stable persona, always-injected core
 memory, and scoped autonomy grants. The terminal surface is `/agent`; the

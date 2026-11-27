@@ -1,4 +1,4 @@
-"""Resident buddy runtime: profile bootstrap and status."""
+"""Maki runtime: profile bootstrap and status."""
 
 from __future__ import annotations
 
@@ -39,9 +39,9 @@ async def ensure_session() -> tuple[dict[str, Any], Any]:
             _apply_mode(profile, session)
             return profile, session
     session = await session_manager.create(
-        title="Buddy",
+        title="Maki",
         agent_id="harness",
-        goal="Resident buddy",
+        goal="Maki, the resident companion",
     )
     profile = await store.update_profile(session_id=str(session.id))
     _apply_mode(profile, session)

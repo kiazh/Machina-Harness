@@ -119,6 +119,65 @@ final class NotchModel: ObservableObject {
         }
     }
 
+    func pet() {
+        mascot = .happy
+        SoundPlayer.shared.play(.happy)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self, !self.busy else { return }
+            self.mascot = self.approvals.isEmpty ? .idle : .waiting
+        }
+    }
+
+    func sendScreenshot() {
+        guard let sessionId = status?.sessionId, connection == "live" else {
+            messages.append(
+                ChatLine(text: "Start the gateway before capturing the screen.", fromUser: false)
+            )
+            mascot = .sleeping
+            return
+        }
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        busy = true
+        mascot = .processing
+        Task { @MainActor in
+            do {
+                let image = try await ScreenCapture.jpeg()
+                messages.append(
+                    ChatLine(
+                        text: text.isEmpty ? "What do you see on my screen?" : text,
+                        fromUser: true
+                    )
+                )
+                _ = try await gateway.prompt(
+                    sessionId: sessionId,
+                    text: text.isEmpty ? "What do you see on my screen?" : text,
+                    image: image
+                )
+                let baseline = messages.last(where: { !$0.fromUser })?.text
+                for _ in 0..<90 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    let entries = try await gateway.history(sessionId: sessionId)
+                    guard let reply = entries.first(where: { $0.role == "assistant" })?.content,
+                          !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          reply != baseline else { continue }
+                    messages.append(ChatLine(text: reply, fromUser: false))
+                    mascot = .happy
+                    SoundPlayer.shared.play(.happy)
+                    break
+                }
+            } catch {
+                messages.append(
+                    ChatLine(text: "Screen capture failed: \(error.localizedDescription)", fromUser: false)
+                )
+                mascot = .surprised
+                SoundPlayer.shared.play(.boop)
+            }
+            busy = false
+            if mascot != .waiting { mascot = .idle }
+        }
+    }
+
     func resolve(_ approval: ResidentApproval, verdict: String) {
         Task { @MainActor in
             do {
@@ -154,7 +213,7 @@ final class NotchModel: ObservableObject {
         status = ResidentStatus(
             profile: ResidentProfile(
                 key: "default",
-                name: "Buddy",
+                name: "Maki",
                 persona: "",
                 autonomyMode: "auto-safe",
                 sharedMemory: true,
