@@ -55,6 +55,12 @@ export MACHINA_MAX_TOKENS
 MACHINA_MAX_TOKENS="$(config_value max_tokens)"
 export MACHINA_TEMPERATURE
 MACHINA_TEMPERATURE="$(config_value temperature)"
+# The harness grants ``max_agent_turns``; align Machina's repair guard so a
+# legitimate long task is not stopped at the interactive default (60 turns).
+export MACHINA_TASK_RUN_MAX_TURNS
+MACHINA_TASK_RUN_MAX_TURNS="$(config_value max_agent_turns)"
+export MACHINA_TASK_RUN_MAX_TOOL_CALLS
+MACHINA_TASK_RUN_MAX_TOOL_CALLS="$((MACHINA_TASK_RUN_MAX_TURNS * 2))"
 export MACHINA_CONTEXT_BUDGET
 MACHINA_CONTEXT_BUDGET="$(
   python3 -c '
