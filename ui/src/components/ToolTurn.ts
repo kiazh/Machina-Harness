@@ -201,7 +201,11 @@ export class ToolTurn implements Component {
 			const diff = !showContent && looksLikeDiff(source);
 			shaped.shown.forEach((line, index) => {
 				const prefix = index === 0 ? theme.dim("⎿ ") : "  ";
-				const styled = diff ? styleDiffLine(line) : theme.text(line);
+				const styled = diff
+					? styleDiffLine(line)
+					: this.expanded || this.outcome === "error" || this.outcome === "denied"
+						? theme.text(line)
+						: theme.muted(line);
 				lines.push(`  ${prefix}${truncateToWidth(styled, Math.max(1, room - 4))}`);
 			});
 			if (shaped.omitted > 0) {
