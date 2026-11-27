@@ -131,10 +131,8 @@ export interface BootstrapHost {
 
 	/** Drop the pending completion timer/session without closing the session. */
 	discardCompletion(): void;
-	/** Clear only the leader timer (gateway loss leaves the value untouched). */
-	clearPendingKeyLeaderTimer(): void;
-	/** Clear the leader timer and value (full exit). */
-	clearPendingKeyLeader(): void;
+	/** Dispose all keyboard-router state (timer and pending leader). */
+	keyboardDispose(): void;
 	clearPendingAbortEsc(): void;
 	closeQuickOpen(): void;
 	/** Cancel every open dialog in reverse mount order. */
@@ -403,7 +401,7 @@ export class AppBootstrap {
 		}
 		if (host.isExiting()) return;
 		host.markExiting();
-		host.clearPendingKeyLeader();
+		host.keyboardDispose();
 		host.clearPendingAbortEsc();
 		host.footer.keyHint = "";
 		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
@@ -490,7 +488,7 @@ export class AppBootstrap {
 		this.nowPlayingAnim?.stop();
 		this.nowPlayingAnim = undefined;
 		host.disposeWorkspaceTimer();
-		host.clearPendingKeyLeaderTimer();
+		host.keyboardDispose();
 		host.discardCompletion();
 		host.stopCursorBlink();
 		host.footer.dispose();

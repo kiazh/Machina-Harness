@@ -3,13 +3,11 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
 import {
 	Container,
 	type Component,
 	type Editor,
-	isViewportTUI,
 	type OverlayOptions,
 	type OverlayHandle,
 	type SelectItem,
@@ -27,11 +25,10 @@ import { AgentTabBar } from "./components/AgentTabBar.ts";
 import { ActivityBar, ActivityStore } from "./activity.ts";
 import { StatusPage } from "./components/StatusPage.ts";
 import { ChangesPage } from "./components/ChangesPage.ts";
-import { uriDisplayPath } from "./components/EditorPane.ts";
 import { OutputStore, OutputViewer, type OutputRecord } from "./components/OutputViewer.ts";
 import { AnimationCoordinator, CURSOR_BLINK_INTERVAL_MS, CURSOR_BLINK_RESUME_DELAY_MS, reducedMotionFromEnv } from "./design/motion.ts";
 import type { AnimationSubscription } from "./design/motion.ts";
-import { AppKeybindings, effectiveShortcutRows, parseBindingOverrides, type BindingOverrides } from "./keybindings.ts";
+import { AppKeybindings, effectiveShortcutRows, type BindingOverrides } from "./keybindings.ts";
 import { KeybindingsDialog } from "./components/KeybindingsDialog.ts";
 import { KeysDialog, type KeysDialogChoice } from "./components/KeysDialog.ts";
 import { loadKeyRows, redactSecret } from "./features/keys.ts";
@@ -39,7 +36,6 @@ import { addProvider, removeProvider } from "./features/settings.ts";
 import { NowPlayingBar } from "./components/NowPlayingBar.ts";
 import { sanitizePastedText } from "./design/text.ts";
 import { describeError, redactParamsForLog, uiLog } from "./debug.ts";
-import { NowPlayingController } from "./nowplaying/controller.ts";
 import type { MusicHost } from "./features/types.ts";
 import { type FamilySession, type FeatureHost, type NoticeKind, runCommand, SLASH_COMMANDS, type WorkspaceHost } from "./features/index.ts";
 import { type AskTextOptions, PROFILE_ID_RE, type OAuthProgressHandle, type OAuthProgressOptions, type PickOptions, type SkillsDirectoryHost, type UiPreferenceKey, type UiSettingsHost } from "./features/types.ts";
@@ -54,24 +50,9 @@ import type {
 	HistoryEntry,
 	KiroFallback,
 	ProvidersListResult,
-	InitializeResult,
-	ResumeResult,
 	SessionInfo,
 } from "./protocol.ts";
-import { type DocumentRecord } from "./editor/model.ts";
 import { sanitizeDisplay } from "./editor/display.ts";
-import { languageForId } from "./editor/syntax.ts";
-import { QuickOpenPane } from "./editor/quickOpen.ts";
-import {
-	CompletionSession,
-	LocationPicker,
-	narrowLocationsPayload,
-	RenameSession,
-	type IntelligenceRequest,
-	type LocationChoice,
-	type ProblemRow,
-} from "./editor/intelligence.ts";
-import { offsetToPosition, positionToOffset } from "./editor/positions.ts";
 import { TurnSessionStore } from "./turnSessionStore.ts";
 import { StatusController } from "./app/status.ts";
 import { ChangesController } from "./app/changes.ts";
@@ -79,21 +60,20 @@ import { ApprovalController } from "./app/approvals.ts";
 import { SessionController } from "./app/sessions.ts";
 import { KeyboardRouter, type KeyboardHost } from "./app/keyboard.ts";
 import { CommandController, type CommandHost } from "./app/commands.ts";
-import type { ApprovalHost, SessionHost, StatusHost, ChangesHost } from "./app/contracts.ts";
+import type { ApprovalHost, SessionHost, StatusHost, ChangesHost, ScreenView } from "./app/contracts.ts";
 import { EventRouter, type EventHost } from "./app/events.ts";
+import { WorkspaceCoordinator, type WorkspaceHost as WorkspaceCoordinatorHost, type WorkspaceSurfaceWiring } from "./app/workspace.ts";
+import { AppBootstrap, type BootstrapHost, type WorkspaceReview } from "./app/bootstrap.ts";
 export { isKiroQuotaError } from "./app/events.ts";
 export { commandCarriesSecret } from "./app/commands.ts";
 
-import { editorTheme, getSkin, isOpaqueBackground, setOpaqueBackground, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
+import { editorTheme, getSkin, setSkin, SKIN_NAMES, skinDescription } from "./theme.ts";
 import { Transcript } from "./transcript.ts";
 import {
 	type ConflictResolution,
-	type DirtyCloseChoice,
-	type IntelligenceOutcome,
 	type SaveConflictDescriptor,
 } from "./workspace/controller.ts";
 import {
-	displayUriName,
 	WorkspaceSurface,
 	type WorkspaceIntegration,
 	type WorkspaceSurfaceHost,
@@ -107,10 +87,6 @@ import type {
 	FocusRegion,
 	LayoutResult,
 } from "./workspace/state.ts";
-import type {
-	LspPosition,
-	WorkspaceQuickOpenResult,
-} from "./workspace/protocol.ts";
 
 export interface AppOptions {
 	model?: string;
@@ -135,65 +111,6 @@ export function defaultProfileId(): string {
  * ({@link DEFAULT_MENU_VISIBLE_ROWS}) while still scrolling within the box.
  */
 const SHORTCUTS_VISIBLE_ROWS = 14;
-
-/** Inline-safe display text: one line, no controls or backticks (header/notice surfaces). */
-function inlineSafe(text: string): string {
-	return sanitizeDisplay(text).replace(/`+/g, "").trim();
-}
-
-/** Fence long enough that no backtick run inside the text can close it. */
-function fenceFor(text: string): string {
-	let longest = 0;
-	for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
-	return "`".repeat(Math.max(3, longest + 1));
-}
-
-/** Fence language token: identifier characters only (never markup). */
-function fenceLanguage(languageId: string): string {
-	return languageId.replace(/[^A-Za-z0-9_+.#-]/g, "");
-}
-
-/** Completion-prefix characters: the identifier run before the caret. */
-const COMPLETION_PREFIX_CHAR = /[A-Za-z0-9_$]/;
-
-/**
- * Trailing identifier at `cursorOffset`, used to request matching suggestions.
- * Punctuation/whitespace end the run, so the prefix never spans tokens.
- */
-function completionPrefixBefore(text: string, cursorOffset: number): string {
-	const offset = Math.max(0, Math.min(cursorOffset, text.length));
-	let start = offset;
-	while (start > 0 && COMPLETION_PREFIX_CHAR.test(text[start - 1] ?? "")) start -= 1;
-	return text.slice(start, offset);
-}
-
-/**
- * Typed failure for the IntelligenceRequest adapter: sessions catch it and
- * record an honest failure (including `superseded`, whose result is gone).
- */
-class WorkspaceIntelligenceFailure extends Error {
-	readonly reason: "refused" | "failed" | "no-workspace" | "superseded";
-
-	constructor(reason: "refused" | "failed" | "no-workspace" | "superseded", message: string) {
-		super(message);
-		this.name = "WorkspaceIntelligenceFailure";
-		this.reason = reason;
-	}
-}
-
-function intelligenceOutcomeMessage(outcome: IntelligenceOutcome): string {
-	switch (outcome.status) {
-		case "refused":
-		case "failed":
-			return outcome.message;
-		case "no-workspace":
-			return "no workspace is open";
-		case "superseded":
-			return "superseded by a newer request";
-		default:
-			return "unavailable";
-	}
-}
 
 /** One dialog title/row label sink: never render decoded or server text raw. */
 function sanitizeSelectItems(items: SelectItem[]): SelectItem[] {
@@ -240,8 +157,6 @@ export class App implements FeatureHost {
 	 */
 	private readonly shell: AppShell;
 	private readonly nowPlayingBar: NowPlayingBar;
-	private nowPlayingController: NowPlayingController | undefined;
-	private nowPlayingAnim: AnimationSubscription | undefined;
 	/**
 	 * The single caret-blink subscription (key `cursor.blink`). Present only
 	 * while a text surface owns the caret; its presence is the source of
@@ -268,6 +183,8 @@ export class App implements FeatureHost {
 	private readonly keyboard: KeyboardRouter;
 	private readonly commands: CommandController;
 	private readonly events: EventRouter;
+	private readonly workspaceCoordinator: WorkspaceCoordinator;
+	private readonly bootstrap: AppBootstrap;
 	private navBar!: NavBar;
 	private statusPage!: StatusPage;
 	private changesPage!: ChangesPage;
@@ -290,8 +207,6 @@ export class App implements FeatureHost {
 	private get log() {
 		return (this.logValue ??= uiLog.scope("app"));
 	}
-	/** Gateway exit can arrive from both the error and exit events. */
-	private gatewayExitHandled = false;
 	/**
 	 * Feature-level event subscribers (e.g. /auth waiting on
 	 * auth.chatgpt.*). They observe every frame before turn bookkeeping,
@@ -299,7 +214,6 @@ export class App implements FeatureHost {
 	 */
 	private readonly featureEventHandlers = new Set<(event: GatewayEvent) => void>();
 	private resolveExit: () => void = () => {};
-	private inputListenerDisposer: (() => void) | undefined;
 	/**
 	 * True while a slash command is doing pre-dialog work (RPCs, secret
 	 * prompts). Input must not reach the composer in that window: typing `/`
@@ -325,17 +239,15 @@ export class App implements FeatureHost {
 	private get workspaceLayoutActive(): boolean { return this.workspaceSurface?.layoutActive ?? false; }
 	private get workspaceLayout(): LayoutResult | undefined { return this.workspaceSurface?.layout; }
 	private get workspaceGeneration(): number { return this.workspaceSurface?.currentGeneration ?? 0; }
+	get activeRegion(): FocusRegion { return this.workspaceCoordinator.activeRegion; }
+	get completionSession() { return this.workspaceCoordinator.completionSession(); }
+	get problemsOpen(): boolean { return this.workspaceCoordinator.problemsVisible(); }
+	get quickOpenPane(): Component | undefined {
+		if (!this.workspaceCoordinator.quickOpenActive()) return undefined;
+		const probe = this.tui as TUI & { getFocusedComponent?(): Component | null; focused?: Component | null };
+		return (typeof probe.getFocusedComponent === "function" ? probe.getFocusedComponent() : probe.focused) ?? undefined;
+	}
 	get skillsMenu() { return this.commands.mountedSkillsMenu; }
-	/** v1 focus router state (plan §8): the last meaningfully focused region. */
-	private activeRegion: FocusRegion = "chat-composer";
-	private problemsOpen = false;
-	private completionSession: CompletionSession | undefined;
-	/** Debounce automatic requests without blocking local edits. */
-	private automaticCompletionTimer: ReturnType<typeof setTimeout> | undefined;
-	private quickOpenPane: QuickOpenPane | undefined;
-	private quickOpenHandle: OverlayHandle | undefined;
-	/** Re-entrancy guard for the dirty-exit review. */
-	private dirtyExitInProgress = false;
 	/** Global editor preferences (ui_preferences); defaults until loaded. */
 	private uiPrefs: UiPreferences = defaultUiPreferences();
 
@@ -383,24 +295,37 @@ export class App implements FeatureHost {
                 }
             });
             return true;
-        };
+		};
 		this.shell = new AppShell(tui, this.transcriptView, this.composer, this.footer);
 		this.shell.onViewportResize = () => this.syncWorkspaceShellIfChanged();
+		this.workspaceCoordinator = new WorkspaceCoordinator(this.workspaceCoordinatorHost());
 		this.approvals = new ApprovalController(this.approvalHost());
 		this.sessions = new SessionController(this.sessionHost());
 		this.status = new StatusController(this.statusHost());
 		this.changes = new ChangesController(this.changesHost());
+		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
+		this.configureShellSurfaces();
+		// App remains the state owner; this adapter exposes only the keyboard seam.
+		this.keyboard = new KeyboardRouter(this.keyboardHost());
+		this.commands = new CommandController(this.commandHost());
+		this.events = new EventRouter(this.eventHost());
+		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
+		this.editor.setAutocompleteMaxVisible(8);
+		this.editor.onSubmit = (text) => void this.submit(text);
+		this.bootstrap = new AppBootstrap(this.bootstrapHost());
+	}
+
+	private configureShellSurfaces(): void {
 		this.navBar = new NavBar(
 			() => this.navSnapshot(),
 			(view) => this.selectNav(view),
 			() => this.tui.terminal.rows,
 			() => {
-				if (!this.dialogs.length && !this.quickOpenPane
+				if (!this.dialogs.length && !this.workspaceCoordinator.quickOpenActive()
 					&& (this.view !== "chat" || !this.turnSession.approvalDialogCount())) this.openShortcutReference();
 			},
 		);
 		this.shell.setNavBar(this.navBar);
-		this.nowPlayingBar = new NowPlayingBar(this.coordinator);
 		this.shell.setPinnedBar(this.nowPlayingBar);
 		this.shell.setAgentBar(new AgentTabBar(
 			() => this.familyRows(),
@@ -408,7 +333,7 @@ export class App implements FeatureHost {
 			(sessionId) => { void this.sessions.openFamily(sessionId); },
 		));
 		this.shell.setActivityBar(new ActivityBar(() => this.activitySummary(), () => { void this.inspectActivity(); }, () => this.commandActions()));
-		this.statusPage = new StatusPage(tui, () => this.status.snapshot(), (row) => {
+		this.statusPage = new StatusPage(this.tui, () => this.status.snapshot(), (row) => {
 			const id = row.id ?? "";
 			const sessionId = id.startsWith("agent:")
 				? id.slice("agent:".length)
@@ -428,7 +353,7 @@ export class App implements FeatureHost {
 			return true;
 		});
 		this.changesPage = new ChangesPage(
-			tui,
+			this.tui,
 			() => this.changes.snapshot(),
 			(turnId) => this.changes.diffState(turnId),
 			{
@@ -441,14 +366,83 @@ export class App implements FeatureHost {
 				onClearHandled: (turnId) => this.changes.clearHandledFindings(turnId),
 			},
 		);
-		// App remains the state owner; this adapter exposes only the keyboard seam.
-		this.keyboard = new KeyboardRouter(this.keyboardHost());
-		this.commands = new CommandController(this.commandHost());
-		this.events = new EventRouter(this.eventHost());
-		this.editor.setAutocompleteProvider(new ArgumentAwareAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
-		this.editor.setAutocompleteMaxVisible(8);
-		this.editor.onSubmit = (text) => void this.submit(text);
 	}
+
+	private workspaceCoordinatorHost(): WorkspaceCoordinatorHost {
+		return {
+			tui: this.tui,
+			composerEditor: this.editor,
+			bindings: this.keybindings,
+			integration: () => this.integration,
+			layout: () => this.workspaceLayout,
+			unsupported: () => this.workspaceUnsupported,
+			captureFence: () => this.captureWorkspaceFence(),
+			isCurrent: (generation) => this.isWorkspaceCurrent(generation),
+			isExiting: () => this.exiting,
+			overlayActive: () => this.dialogs.length > 0 || this.turnSession.approvalDialogCount() > 0,
+			restoreSplit: () => this.workspaceHostSurface?.restoreSplit(),
+			syncShellIfChanged: () => this.syncWorkspaceShellIfChanged(),
+			syncCursorBlink: () => this.syncCursorBlink(),
+			pauseEditorCursorBlink: () => this.pauseEditorCursorBlink(),
+			pick: (title, items) => this.pick(title, items),
+			print: (text, kind) => this.print(text, kind),
+			request: <T>(method: string, params: Record<string, unknown>, timeoutMs: number) =>
+				this.client.request<T>(method, params, timeoutMs),
+			cursorBlockVisible: () => this.cursorBlinkOn(),
+		};
+	}
+
+	private bootstrapHost(): BootstrapHost {
+		return {
+			tui: this.tui,
+			client: this.client,
+			log: this.log,
+			footer: this.footer,
+			transcript: this.transcript,
+			shell: this.shell,
+			coordinator: this.coordinator,
+			editor: this.editor,
+			nowPlayingBar: this.nowPlayingBar,
+			status: this.status,
+			turnSession: this.turnSession,
+			transcriptView: this.transcriptView,
+			composer: this.composer,
+			options: this.options,
+			defaultProfile: this.defaultProfile,
+			onInput: (data) => this.keyboard.handle(data),
+			onEvent: (event) => this.events.route(event),
+			syncCursorBlink: () => this.syncCursorBlink(),
+			stopCursorBlink: () => this.stopCursorBlink(),
+			request: <T>(method: string, params?: Record<string, unknown>) => this.request<T>(method, params),
+			current: () => this.current,
+			switchTo: (session, history) => this.switchTo(session, history),
+			showNewChat: () => this.showNewChat(),
+			applyKeybindings: (overrides) => this.applyKeybindings(overrides),
+			restyle: () => this.restyle(),
+			screen: () => this.screen(),
+			setFocusForRegion: (region) => this.setFocusForRegion(region),
+			startWorkspace: (root) => this.startWorkspace(root),
+			beginWorkspaceFence: () => this.beginWorkspaceFence(),
+			captureWorkspaceFence: () => this.captureWorkspaceFence(),
+			isWorkspaceCurrent: (generation) => this.isWorkspaceCurrent(generation),
+			workspaceReview: () => this.workspaceReview(),
+			resolveWorkspaceSaveConflict: (conflict) => this.resolveWorkspaceSaveConflict(conflict),
+			disposeWorkspaceTimer: () => this.disposeWorkspaceTimer(),
+			disposeWorkspaceIntegration: () => this.disposeWorkspaceIntegration(),
+			discardCompletion: () => this.discardCompletion(),
+			clearPendingAbortEsc: () => this.clearPendingAbortEsc(),
+			keyboardDispose: () => this.keyboardDispose(),
+			closeQuickOpen: () => this.closeQuickOpen(),
+			cancelAllDialogs: () => this.cancelAllDialogs(),
+			invalidateApprovals: () => this.invalidateApprovals(),
+			setRunning: (running) => this.setRunning(running),
+			isExiting: () => this.isExiting(),
+			markExiting: () => this.markExiting(),
+			resolveExitPromise: () => this.resolveExitPromise(),
+			pick: (title, items) => this.pick(title, items),
+		};
+	}
+
 	private statusHost(): StatusHost {
 		return {
 			tui: this.tui,
@@ -474,7 +468,7 @@ export class App implements FeatureHost {
 			showApprovalDock: () => this.showApprovalDock(),
 			focusChat: () => this.setFocusForRegion("chat-composer"),
 			hasVisibleDialog: () => this.dialogs.some(dialog => !dialog.hidden),
-			quickOpenActive: () => Boolean(this.quickOpenPane),
+			quickOpenActive: () => this.workspaceCoordinator.quickOpenActive(),
 			isExiting: () => this.exiting,
 			print: (text, kind) => this.print(text, kind),
 			pickCentered: (title, items) => this.pickCentered(title, items),
@@ -569,7 +563,7 @@ export class App implements FeatureHost {
 			transcript: this.transcript,
 			keybindings: this.keybindings,
 			screen: () => this.view,
-			activeRegion: () => this.activeRegion,
+			activeRegion: () => this.workspaceCoordinator.activeRegion,
 			syncShell: () => this.shell.sync(),
 			syncWorkspaceShellIfChanged: () => this.syncWorkspaceShellIfChanged(),
 			scheduleWorkspaceChromeSync: () => this.scheduleWorkspaceChromeSync(),
@@ -578,8 +572,8 @@ export class App implements FeatureHost {
 			changesPage: () => this.changesPage,
 			dialogCount: () => this.dialogs.length,
 			hasVisibleDialog: () => this.dialogs.some((dialog) => !dialog.hidden),
-			quickOpenActive: () => Boolean(this.quickOpenPane),
-			dismissQuickOpen: () => this.closeQuickOpen(),
+			quickOpenActive: () => this.workspaceCoordinator.quickOpenActive(),
+			dismissQuickOpen: () => this.workspaceCoordinator.dismissQuickOpen(),
 			commandRunning: () => this.commandRunning,
 			commandRunningAt: () => this.commandRunningAt,
 			approvalDialogCount: () => this.turnSession.approvalDialogCount(),
@@ -603,12 +597,12 @@ export class App implements FeatureHost {
 			openSubagentMenu: () => this.openSubagentMenu(),
 			pasteFromClipboard: (imageOnly) => this.pasteFromClipboard(imageOnly),
 			clearImages: () => this.clearImages(),
-			completionSession: () => this.completionSession,
+			completionSession: () => this.workspaceCoordinator.completionSession(),
 			activeEditorDocumentId: () => this.integration?.tabs.activeDocumentId() ?? undefined,
-			acceptCompletion: () => this.acceptCompletion(),
-			clearCompletion: () => this.clearCompletion(),
-			problemsOpen: () => this.problemsOpen,
-			closeProblems: () => this.closeProblems(),
+			acceptCompletion: () => this.workspaceCoordinator.acceptCompletion(),
+			clearCompletion: () => this.workspaceCoordinator.clearCompletion(),
+			problemsOpen: () => this.workspaceCoordinator.problemsVisible(),
+			closeProblems: () => this.workspaceCoordinator.closeProblems(),
 			hasWorkspace: () => this.integration !== undefined,
 			workspaceReady: () => this.integration?.controller.phase === "ready",
 			workspaceLayoutActive: () => this.workspaceLayoutActive,
@@ -620,14 +614,14 @@ export class App implements FeatureHost {
 			toggleEditorMaximize: () => this.workspaceHostSurface?.toggleEditorMaximize(),
 			editorHasSelection: () => this.integration?.view.hasSelection() ?? false,
 			handleEditorInput: (data) => { this.integration?.view.handleInput(data); },
-			openQuickOpen: () => this.openQuickOpen(),
-			closeActiveWorkspaceTab: () => this.closeActiveWorkspaceTab(),
-			cycleFocus: (direction) => this.cycleFocus(direction),
-			attachSelectionToDraft: () => this.attachSelectionToDraft(),
-			startCompletion: () => this.startCompletion(),
-			runDefinitionOrReferences: (operation) => this.runDefinitionOrReferences(operation),
-			runRenamePreview: () => this.runRenamePreview(),
-			saveActiveDocument: () => this.saveActiveDocument(),
+			openQuickOpen: () => this.workspaceCoordinator.openQuickOpen(),
+			closeActiveWorkspaceTab: () => this.workspaceCoordinator.closeActiveWorkspaceTab(),
+			cycleFocus: (direction) => this.workspaceCoordinator.cycleFocus(direction),
+			attachSelectionToDraft: () => this.workspaceCoordinator.attachSelectionToDraft(),
+			startCompletion: () => this.workspaceCoordinator.startCompletion(),
+			runDefinitionOrReferences: (operation) => this.workspaceCoordinator.runDefinitionOrReferences(operation),
+			runRenamePreview: () => this.workspaceCoordinator.runRenamePreview(),
+			saveActiveDocument: () => this.workspaceCoordinator.saveActiveDocument(),
 			print: (text, kind) => this.print(text, kind),
 		};
 	}
@@ -714,204 +708,80 @@ export class App implements FeatureHost {
 	}
 
 	async start(): Promise<void> {
-		const workspaceFlagOn = !/^(0|false|off)$/i.test((process.env.MACHINA_WORKSPACE ?? "").trim());
-		this.log.info("start", {
-			sessionId: this.options.sessionId ?? null,
-			model: this.options.model ?? null,
-			provider: this.options.provider ?? null,
-			mode: this.options.mode ?? null,
-			workspace: workspaceFlagOn,
-		});
-		// Clear vacated rows when content shrinks (closed menus, finished
-		// turns). Without this, filled rows linger as ghost bands behind
-		// newer output.
-		this.tui.setClearOnShrink(true);
-		this.shell.sync();
-		if (isViewportTUI(this.tui)) {
-			this.tui.setLayoutRoot(this.shell.root);
-		} else {
-			// Fallback for non-viewport TUIs (and test doubles): classic stacking.
-			this.tui.addChild(this.transcriptView);
-			this.tui.addChild(this.composer);
-			this.tui.addChild(this.footer.chatStatus);
-			this.tui.addChild(this.footer);
-		}
-		this.tui.setFocus(this.editor);
-		this.syncCursorBlink();
-		this.inputListenerDisposer = this.tui.addInputListener((data) => this.keyboard.handle(data));
-
-		this.footer.cwd = process.cwd();
-		this.footer.status = "offline";
-		this.transcript.addNotice("Starting Machina…");
-		// Transparent background: apply the override before the first frame so
-		// there is never a flash of the opaque canvas. The launcher exports the
-		// saved value as MACHINA_TRANSPARENT_BACKGROUND; the persisted file value
-		// (read below) restyles with a full repaint if it differs.
-		const transparentEnv = /^(1|true|on|yes)$/i.test((process.env.MACHINA_TRANSPARENT_BACKGROUND ?? "").trim());
-		setOpaqueBackground(!transparentEnv);
-		this.tui.start();
-
-		this.client.onEvent = (event) => this.events.route(event);
-		this.client.onExit = (code, stderr) => this.onGatewayExit(code, stderr);
-		this.client.start();
-
-		let initializedCwd: string | undefined;
-		let initializedCwdFull: string | undefined;
-		// Music detection can stall for seconds (including a blocking macOS
-		// Automation prompt); it is joined at the end of start() but MUST NOT
-		// delay session creation (finding 8).
-		let nowPlayingReady: Promise<void> | undefined;
-		let profileReady: Promise<void> | undefined;
-		try {
-			const init = await this.client.request<InitializeResult>(
-				"initialize",
-				{ protocolVersion: 2, model: this.options.model, provider: this.options.provider, mode: this.options.mode },
-				60_000,
-			);
-			initializedCwd = init.cwd;
-			initializedCwdFull = typeof init.cwdFull === "string" && init.cwdFull ? init.cwdFull : undefined;
-				Object.assign(this.footer, { cwd: init.cwd, branch: init.branch, model: init.model, status: "ready" });
-			this.log.info("gateway.ready", {
-				version: init.version,
-				model: init.model,
-				provider: init.provider,
-				cwd: init.cwd,
-			});
-			try {
-				const { config } = await this.client.request<ConfigGetResult>("config.get", {}, 30_000);
-				this.applyKeybindings(parseBindingOverrides(config.keybindings));
-				if (typeof config.theme === "string" && config.theme) {
-					setSkin(config.theme);
-					// The startup frame is already on screen. Use the same
-					// cache invalidation/full redraw as live theme selection.
-					this.restyle();
-				}
-				if (typeof config.transparent_background === "boolean") {
-					const opaque = !config.transparent_background;
-					if (opaque !== isOpaqueBackground()) {
-						setOpaqueBackground(opaque);
-						// Same full redraw as a skin change: every painted cell
-						// (including empty viewport rows) must drop the fill.
-						this.restyle();
-					}
-				}
-				// Kick off the pinned now-playing bar here, but never await it
-				// before the session exists (finding 8). start() joins the
-				// promise before returning, so the bar still lands on the first
-				// frame while session creation stays unblocked.
-				nowPlayingReady = this.startNowPlaying(config).catch(() => {
-					// The music bar is optional; detection failures never block chat.
-				});
-			} catch {
-				// Saved skin is best-effort; the default applies otherwise.
-			}
-			// Guarantee the default profile exists (first-touch RL/growth/memory
-			// identity), but do it alongside the first chat render rather than
-			// blocking it on a DB round-trip.
-			profileReady = this.client
-				.request("profile.get", { userId: this.defaultProfile }, 30_000)
-				.then(() => {})
-				.catch(() => {
-					// Profiles stay best-effort; commands surface real errors.
-				});
-			if (this.options.sessionId) {
-				const { session, history } = await this.client.request<ResumeResult>("session.resume", {
-					sessionId: this.options.sessionId,
-				});
-				this.switchTo(session, history);
-			} else {
-				// A blank chat is client-side only. The first real message
-				// creates the session, so opening the CLI never adds an empty
-				// conversation to history.
-				this.showNewChat();
-			}
-			try {
-				// Session-scoped authority for the initial session (finding 8):
-				// resolve AFTER the session exists so the footer and the
-				// notice below reflect the governing session, never the
-				// global default. Later switches refresh via switchTo.
-				const session = this.current;
-				const { mode } = await this.request<{ mode: string }>("mode.get", session ? { sessionId: session.id } : {});
-				if (mode === "full") {
-					this.transcript.addNotice("FULL HOST mode active for this session: host operations proceed without further approval, including credential access, elevation, and destructive system ops.", "warning");
-				}
-			} catch {
-				// Mode display is best-effort.
-			}
-		} catch (error) {
-			this.log.error("start.failed", { error: describeError(error), stderr: this.client.stderr().slice(-8) });
-			this.footer.status = "offline";
-			this.transcript.clear();
-			this.transcript.addNotice(`Could not start: ${message(error)}`, "error");
-			const tail = this.client.stderr().slice(-8);
-			if (tail.length) this.transcript.addNotice(tail.join("\n"));
-			this.transcript.addNotice("Run `machina doctor` to check your setup. Press Ctrl+C to exit.");
-		}
-		// Integrated workspace: only after initialize + session setup, only when
-		// the flag allows it, and never blocking chat. Prefer the absolute
-		// launch directory (authenticated handshakes). The redacted basename is
-		// a display value and must never be treated as a root: when only that
-		// is available (older backend), stay chat-only.
-		if (workspaceFlagOn) {
-			const root = initializedCwdFull ?? (initializedCwd !== undefined && isAbsolute(initializedCwd) ? initializedCwd : undefined);
-			if (root !== undefined) {
-				this.workspaceSurface = new WorkspaceSurface(this.workspaceSurfaceHost());
-				this.client.onWorkspaceEvent = (event) => this.workspaceSurface?.onEvent(event);
-				this.workspaceSurface.start(root);
-			}
-		}
-		// Join the background first-touch work now that the session is visible.
-		// Neither the profile row nor the music bar may block session creation.
-		await Promise.all([profileReady, nowPlayingReady]);
-		this.log.info("ready", { session: this.current?.id ?? null, view: this.view });
-		this.tui.requestRender();
+		return this.bootstrap.start();
 	}
 
-	/** UI seams the workspace surface calls back into (composition root). */
 	private workspaceSurfaceHost(): WorkspaceSurfaceHost {
-		return {
-			request: (method, params, timeoutMs) => this.client.request(method, params, timeoutMs),
-			requestRender: () => this.tui.requestRender(),
-			terminalSize: () => ({
-				columns: Math.max(0, this.tui.terminal.columns),
-				rows: Math.max(0, this.tui.terminal.rows),
-			}),
-			notify: (kind, text) => {
-				this.transcript.addNotice(text, kind);
-				this.tui.requestRender();
-			},
-			print: (text, kind) => this.print(text, kind),
+		const wiring: WorkspaceSurfaceWiring = {
 			shell: this.shell,
 			setWorkspaceHints: (hints) => { this.footer.workspaceHints = hints; },
-			setFocusForRegion: (region) => this.setFocusForRegion(region),
-			noteRegionFocus: (region) => this.noteRegionFocus(region),
-			focusRegions: () => this.focusRegions(),
-			activeRegion: () => this.activeRegion,
-			reconcileFocus: () => this.reconcileFocus(),
-			completionActive: () => this.completionSession !== undefined,
-			clearCompletion: () => this.clearCompletion(),
-			scheduleAutomaticCompletion: () => this.scheduleAutomaticCompletion(),
-			openProblems: () => this.openProblems(),
-			pauseEditorCursorBlink: () => this.pauseEditorCursorBlink(),
-			isCursorBlockVisible: () => this.cursorBlinkOn(),
-			syncCursorBlink: () => this.syncCursorBlink(),
-			refreshProblemsForActiveDocument: () => this.refreshProblemsForActiveDocument(),
-			refreshLspStatus: () => this.refreshLspStatus(),
-			lspStatusText: () => this.lspStatusText(),
-			closeWorkspaceTab: (documentId) => this.closeWorkspaceTab(documentId),
-			saveActiveDocument: () => this.saveActiveDocument(),
-			openWorkspacePath: (path, options) => this.openWorkspacePath(path, options),
-			openProblem: (row) => this.openProblem(row),
-			closeProblems: () => this.closeProblems(),
-			openQuickOpen: () => this.openQuickOpen(),
-			startCompletion: () => this.startCompletion(),
-			attachSelectionToDraft: () => this.attachSelectionToDraft(),
-			intelligenceRequest: () => this.intelligenceRequest(),
-			closeActiveWorkspaceTab: () => this.closeActiveWorkspaceTab(),
 			loadUiPreferences: () => { void this.loadUiPreferences(); },
 			applyUiPreferences: () => this.applyUiPreferences(this.uiPrefs),
-			isExiting: () => this.exiting,
 		};
+		return this.workspaceCoordinator.workspaceSurfaceHost(wiring);
+	}
+
+	/** Start synchronously so workspace startup preserves the boot sequence. */
+	startWorkspace(root: string): void {
+		this.workspaceSurface = new WorkspaceSurface(this.workspaceSurfaceHost());
+		this.client.onWorkspaceEvent = (event) => this.workspaceSurface?.onEvent(event);
+		this.workspaceSurface.start(root);
+	}
+
+	private screen(): ScreenView {
+		return this.view;
+	}
+
+	private isExiting(): boolean {
+		return this.exiting;
+	}
+
+	private markExiting(): void {
+		this.exiting = true;
+	}
+
+	private resolveExitPromise(): void {
+		this.resolveExit();
+	}
+
+	private workspaceReview(): WorkspaceReview | undefined {
+		const integration = this.integration;
+		if (!integration) return undefined;
+		return {
+			documents: () => integration.store.documents(),
+			save: (documentId) => integration.controller.save(documentId),
+		};
+	}
+
+	private resolveWorkspaceSaveConflict(conflict: SaveConflictDescriptor): Promise<ConflictResolution | undefined> {
+		return this.workspaceCoordinator.resolveSaveConflict(conflict);
+	}
+
+	private disposeWorkspaceTimer(): void {
+		this.workspaceSurface?.disposeTimer();
+	}
+
+	private async disposeWorkspaceIntegration(): Promise<void> {
+		await this.integration?.controller.dispose();
+	}
+
+	private discardCompletion(): void {
+		this.workspaceCoordinator.discardCompletion();
+	}
+
+	private keyboardDispose(): void {
+		this.keyboard.dispose();
+	}
+
+	private cancelAllDialogs(): void {
+		for (const dialog of [...this.dialogs].reverse()) dialog.cancel();
+	}
+
+	private stopCursorBlink(): void {
+		this.cursorBlinkSub?.stop();
+		this.cursorBlinkSub = undefined;
+		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
+		this.cursorBlinkIdleTimer = undefined;
 	}
 
 	// ─── FeatureHost ─────────────────────────────────────────────────────────
@@ -1000,15 +870,7 @@ export class App implements FeatureHost {
 	}
 
 	print(text: string, kind: NoticeKind = "info"): void {
-		// Plain command output is a report, not a one-line status: render it
-		// through Markdown so headings, lists, tables and inline code are
-		// parsed consistently instead of appearing as literal source text.
-		// The one exception is the pinned U07 `/skills` fallback, whose
-		// byte-identical fixed-width table is already a readable report.
-		if (kind === "plain" && !/^[ \t]*[─]{3,}[ \t]{2}/m.test(text))
-			this.transcript.addMarkdown(text, "output");
-		else this.transcript.addNotice(text, kind);
-		this.tui.requestRender();
+		this.bootstrap.print(text, kind);
 	}
 
     copyText(text: string): Promise<boolean> { return copyClipboardText(text); }
@@ -1019,9 +881,7 @@ export class App implements FeatureHost {
 	 * Focus moves to the composer with the cursor after the inserted text.
 	 */
 	prefillInput(text: string): void {
-		this.editor.setText(text);
-		this.setFocusForRegion("chat-composer");
-		this.tui.requestRender();
+		this.bootstrap.prefillInput(text);
 	}
 
 	onGatewayEvent(handler: (event: GatewayEvent) => void): () => void {
@@ -1171,58 +1031,9 @@ export class App implements FeatureHost {
 	 * one honest notice instead of failing.
 	 */
 	music(): MusicHost | undefined {
-		return this.nowPlayingController;
+		return this.bootstrap.music();
 	}
 
-	/**
-	 * Start the pinned now-playing bar: config gate, first reading, and the
-	 * shared-coordinator subscriptions (poll always; 250 ms animation only
-	 * while audio is actually playing).
-	 */
-	private async startNowPlaying(config: Record<string, unknown>): Promise<void> {
-		this.nowPlayingController = new NowPlayingController({
-			bar: this.nowPlayingBar,
-			request: (method, params) => this.client.request(method, params ?? {}, 30_000),
-			onChange: () => {
-				this.syncNowPlayingTicks();
-				this.tui.requestRender();
-			},
-		});
-		await this.nowPlayingController.initialize(config);
-	}
-
-	/**
-	 * Subscribe/detach the coordinator demand for the bar. Polling is a slow
-	 * 2 s heartbeat; the equalizer and interpolated progress need 250 ms
-	 * frames, but only while audio is playing.
-	 */
-	private syncNowPlayingTicks(): void {
-		// Data polling is owned by the controller (its own 2 s interval,
-		// stopped on exit/disable); the coordinator here only drives render
-		// demand: 250 ms frames for the equalizer and interpolated clock
-		// while audio is actually playing.
-		const controller = this.nowPlayingController;
-		const state = controller?.status();
-		const playing =
-			(controller?.isEnabled() ?? false) &&
-			state?.state === "playing" &&
-			Boolean(state.title);
-		if (playing && !this.nowPlayingAnim) {
-			this.nowPlayingAnim = this.coordinator.subscribe("nowplaying.anim", 250);
-		} else if (!playing && this.nowPlayingAnim) {
-			this.nowPlayingAnim.stop();
-			this.nowPlayingAnim = undefined;
-		}
-	}
-
-	// ─── caret blink (one coordinator subscription) ──────────────────────────
-
-	/**
-	 * True while a typing caret is actually on screen: the workspace editor
-	 * (focused, with an open document) or the composer (focused, with a
-	 * non-empty draft — an empty composer shows only the placeholder, so
-	 * blinking it would burn renders with nothing to blink).
-	 */
 	private cursorCaretVisible(): boolean {
 		if (this.exiting) return false;
 		const integration = this.integration;
@@ -1817,97 +1628,9 @@ export class App implements FeatureHost {
 	}
 
 	async exit(): Promise<void> {
-		if (this.exiting) return;
-		// Plan §9 dirty-quit review: one dialog before any teardown. The review
-		// runs while the app is still alive (dialogs stay usable); a cancel or
-		// a failed save leaves everything untouched.
-		if (this.dirtyExitInProgress) return;
-		this.dirtyExitInProgress = true;
-		try {
-			if (!(await this.reviewDirtyExit())) return;
-		} finally {
-			this.dirtyExitInProgress = false;
-		}
-		if (this.exiting) return;
-		this.exiting = true;
-		this.keyboard.dispose();
-		this.clearPendingAbortEsc();
-		this.footer.keyHint = "";
-		// P0-20: the Quick Open overlay is not an openDialog dialog, so the
-		// cancel loop below never sees it; tear it down explicitly so its
-		// pending provider timer dies with the app.
-		this.closeQuickOpen();
-		// MCH-012: every in-flight workspace open/switch continuation is stale
-		// the moment the app is leaving: it must publish nothing.
-		this.beginWorkspaceFence();
-		this.footer.dispose();
-		this.status.dispose();
-		this.turnSession.clearInFlightTimers();
-		this.transcript.suspend();
-		this.invalidateApprovals();
-		this.nowPlayingController?.stop();
-		this.nowPlayingAnim?.stop();
-		this.nowPlayingAnim = undefined;
-		this.cursorBlinkSub?.stop();
-		this.cursorBlinkSub = undefined;
-		if (this.cursorBlinkIdleTimer !== undefined) clearTimeout(this.cursorBlinkIdleTimer);
-		this.cursorBlinkIdleTimer = undefined;
-		this.coordinator.dispose();
-		for (const dialog of [...this.dialogs].reverse()) dialog.cancel();
-		this.inputListenerDisposer?.();
-		this.tui.stop();
-		await this.integration?.controller.dispose();
-		await this.client.stop();
-		this.resolveExit();
+		return this.bootstrap.exit();
 	}
 
-	/**
-	 * Dirty-quit review (plan §9): lists up to two dirty basenames plus a
-	 * `+N` remainder (finding 6: `1 unsaved file: main.py`) and offers
-	 * Save all & exit / Discard & exit / Cancel. Save-all drives sequential
-	 * controller saves; the first failure (conflict, refusal, transport) keeps
-	 * the app open with a notice naming the file.
-	 */
-	private async reviewDirtyExit(): Promise<boolean> {
-		const integration = this.integration;
-		if (!integration || this.exiting) return true;
-		const dirty = integration.store.documents().filter((document) => document.dirty);
-		if (dirty.length === 0) return true;
-		const names = dirty.slice(0, 2).map((document) => displayUriName(document.uri));
-		const more = dirty.length > names.length ? ` +${dirty.length - names.length}` : "";
-		const label = `${dirty.length} unsaved file${dirty.length === 1 ? "" : "s"}: ${names.join(", ")}${more}`;
-		const choice = await this.pick(label, [
-			{ value: "save", label: "Save all & exit" },
-			{ value: "discard", label: "Discard & exit" },
-			{ value: "cancel", label: "Cancel" },
-		]);
-		if (!choice || choice.value === "cancel") return false;
-		if (choice.value === "discard") return true;
-		// MCH-012: a workspace lifecycle change during the review retires the
-		// exit request (the buffers belong to a workspace that moved on).
-		const gen = this.captureWorkspaceFence();
-		if (!this.isWorkspaceCurrent(gen)) return false;
-		for (const document of dirty) {
-			const outcome = await integration.controller.save(document.id);
-			if (!this.isWorkspaceCurrent(gen)) return false;
-			if (outcome.status === "conflict") {
-				// "Save all & exit" survives the conflict detour: an explicit
-				// overwrite/reload leaves the file saved (or adopted), so the
-				// requested exit is still the user's decision. "Keep editing"
-				// (or a failed/stale resolution) cancels it honestly.
-				const resolution = await this.resolveSaveConflict(outcome.conflict);
-				if (!this.isWorkspaceCurrent(gen)) return false;
-				if (resolution?.status === "saved" || resolution?.status === "reloaded") continue;
-				this.print(`Exit cancelled: ${displayUriName(document.uri)} was not saved.`, "warning");
-				return false;
-			}
-			if (outcome.status !== "saved") {
-				this.print(`Exit cancelled: could not save ${displayUriName(document.uri)}.`, "error");
-				return false;
-			}
-		}
-		return true;
-	}
 
 	// ─── input ────────────────────────────────────────────────────────────
     private clearImages(): void {
@@ -2027,794 +1750,36 @@ export class App implements FeatureHost {
 	}
 
 
-	// ─── workspace focus router (plan §8, v1) ───────────────────────────────
+	// ─── workspace facade ────────────────────────────────────────────────────
 
-	/**
-	 * Regions the current geometry makes visible, in cycle order. The editor
-	 * is skipped while chat is maximized and the explorer while it is not
-	 * docked; the Problems region exists only while its section is open.
-	 */
-	private focusRegions(): FocusRegion[] {
-		const regions: FocusRegion[] = ["chat-composer"];
-		const layout = this.workspaceLayout;
-		if (layout?.editor) regions.push("editor");
-		if (layout?.explorer) regions.push("explorer");
-		if (this.problemsOpen && layout?.editor) regions.push("problems");
-		return regions;
-	}
-
-	/** The mounted component that owns one visible focus region. */
-	private regionComponent(region: FocusRegion): Component {
-		const integration = this.integration;
-		if (integration) {
-			if (region === "editor") return integration.pane;
-			if (region === "explorer") return integration.explorerPane;
-			if (region === "problems") return integration.problemsPane;
-		}
-		return this.editor;
-	}
-
-	/** The region a mounted component stands for (undefined for non-regions). */
-	private regionForComponent(component: Component | null): FocusRegion | undefined {
-		if (component === this.editor) return "chat-composer";
-		const integration = this.integration;
-		if (!integration) return undefined;
-		if (component === integration.pane) return "editor";
-		if (component === integration.explorerPane) return "explorer";
-		if (component === integration.problemsPane) return "problems";
-		return undefined;
-	}
-
-	/**
-	 * Deterministic focus reconciliation for every layout/visibility change and
-	 * before each dispatched key. The TUI's real focused component wins when it
-	 * is a known region that the current geometry still composes; otherwise the
-	 * recorded region is re-validated. The composer is the always-live fallback.
-	 * Overlays (dialogs, approvals, quick open) own their own focus and are
-	 * never stolen from.
-	 */
-	private reconcileFocus(): void {
-		if (this.exiting) return;
-		if (this.dialogs.length > 0 || this.turnSession.approvalDialogCount() > 0 || this.quickOpenPane) return;
-		const regions = this.focusRegions();
-		const probe = this.tui as TUI & { getFocusedComponent?(): Component | null; focused?: Component | null };
-		const current =
-			typeof probe.getFocusedComponent === "function" ? probe.getFocusedComponent() : (probe.focused ?? null);
-		const focusedRegion = this.regionForComponent(current);
-		const next =
-			focusedRegion !== undefined && regions.includes(focusedRegion)
-				? focusedRegion
-				: regions.includes(this.activeRegion)
-					? this.activeRegion
-					: "chat-composer";
-		const expected = this.regionComponent(next);
-		if (next !== "editor") this.cancelAutomaticCompletion();
-		if (next !== this.activeRegion) {
-			this.activeRegion = next;
-			if (next !== "editor" && this.completionSession) this.clearCompletion();
-			this.integration?.controller.noteFocus(next);
-		}
-		if (current !== expected) this.tui.setFocus(expected);
-		this.syncCursorBlink();
-	}
-
-	private cycleFocus(direction: 1 | -1): void {
-		const regions = this.focusRegions();
-		// A single visible region still takes focus: after a chat maximize
-		// must hand the composer its focus instead of early-returning.
-		if (regions.length <= 1) {
-			this.setFocusForRegion(regions[0] ?? "chat-composer");
-			return;
-		}
-		const index = regions.indexOf(this.activeRegion);
-		const next =
-			index < 0
-				? (regions[0] ?? "chat-composer")
-				: (regions[(index + direction + regions.length) % regions.length] ?? "chat-composer");
-		this.setFocusForRegion(next);
-	}
-
-	/** Focus one region: retarget the TUI, record it, and re-sync narrow fallback. */
-	private setFocusForRegion(region: FocusRegion): void {
-		const integration = this.integration;
-		// Only a region the current geometry actually composes may take TUI
-		// focus (typing must never land in a hidden editor). The region intent
-		// still reaches the controller so `preferredPane`/restore stay honest.
-		const visible =
-			region === "chat-composer" ||
-			(region === "editor" && this.workspaceLayout?.editor !== undefined) ||
-			(region === "explorer" && this.workspaceLayout?.explorer !== undefined) ||
-			(region === "problems" && this.problemsOpen && this.workspaceLayout?.editor !== undefined);
-		this.activeRegion = visible ? region : "chat-composer";
-		if (this.activeRegion !== "editor") this.cancelAutomaticCompletion();
-		// Inline suggestions belong to the editor and disappear on focus loss.
-		if (this.activeRegion !== "editor" && this.completionSession) this.clearCompletion();
-		if (!integration || !visible) {
-			this.tui.setFocus(this.editor);
-		} else {
-			switch (region) {
-				case "editor":
-					this.tui.setFocus(integration.pane);
-					break;
-				case "explorer":
-					this.tui.setFocus(integration.explorerPane);
-					break;
-				case "problems":
-					this.tui.setFocus(integration.problemsPane);
-					break;
-				default:
-					this.tui.setFocus(this.editor);
-			}
-		}
-		integration?.controller.noteFocus(region);
-		this.syncWorkspaceShellIfChanged();
-		this.syncCursorBlink();
-		this.tui.requestRender();
-	}
-
-	/** Mouse-driven region tracking (component onFocusRequested seam). */
-	private noteRegionFocus(region: FocusRegion): void {
-		// A mouse seam can report a region the layout no longer composes (the
-		// pane was hidden between render and click). Clamp to the always-live
-		// composer instead of leaving editor-scoped gates armed on a dead pane.
-		const next = this.focusRegions().includes(region) ? region : "chat-composer";
-		if (this.activeRegion === next) return;
-		this.activeRegion = next;
-		if (next !== "editor") this.cancelAutomaticCompletion();
-		// Inline completion is editor-scoped: mouse focus leaving
-		// the editor unmounts it instead of leaving a visible orphan that could
-		// later accept a stray Enter.
-		if (next !== "editor" && this.completionSession) this.clearCompletion();
-		this.integration?.controller.noteFocus(next);
-		this.syncWorkspaceShellIfChanged();
-		this.syncCursorBlink();
-	}
-
-	// ─── workspace keys (plan §8) ───────────────────────────────────────────
-
-	/**
-	 * Ctrl+T / Ctrl+Shift+E / Alt+E. Ctrl+Shift+E is the browser-safe
-	 * alias because Chrome/Edge reserve Ctrl+T before the page sees it.
-	 */
-	private activeEditorContext(): { document: DocumentRecord; position: LspPosition } | undefined {
-		const integration = this.integration;
-		if (!integration || integration.controller.phase !== "ready") return undefined;
-		const documentId = integration.tabs.activeDocumentId();
-		if (!documentId) return undefined;
-		const document = integration.store.getDocument(documentId);
-		if (!document) return undefined;
-		const state = integration.store.getViewState(documentId);
-		return { document, position: offsetToPosition(document.text, state?.cursorOffset ?? 0) };
-	}
-
-	/** Root-relative display path for attachment banners (never a raw URI). */
-	private workspaceRelativePath(uri: string): string {
-		const display = uriDisplayPath(uri);
-		const normalizedDisplay = display.replace(/^\/(?=[A-Za-z]:\/)/, "");
-		const rawRoot = this.integration?.controller.identity?.resolvedRoot;
-		const root = rawRoot ? resolve(rawRoot).replace(/\\/g, "/") : undefined;
-		if (root) {
-			const prefix = root.endsWith("/") ? root : `${root}/`;
-			if (normalizedDisplay === root) return inlineSafe(normalizedDisplay);
-			if (normalizedDisplay.startsWith(prefix)) return inlineSafe(normalizedDisplay.slice(prefix.length));
-		}
-		const parts = display.split("/").filter((segment) => segment.length > 0);
-		return inlineSafe(parts[parts.length - 1] ?? display);
-	}
-
-	/**
-	 * T10 explicit selection attachment (plan §20): move the active editor
-	 * selection into the composer draft with a visible scope header. This is
-	 * the ONLY path that lets unsaved buffer text reach a message: the user
-	 * invokes it directly (/attach or Ctrl+Shift+A in Kitty-protocol
-	 * terminals), the notice names the file, line range, version and unsaved
-	 * flag, and nothing is submitted — the user still writes and sends the
-	 * message. Opening or viewing a file never calls this.
-	 */
-	private attachSelectionToDraft(): { ok: boolean; notice: string } {
-		const integration = this.integration;
-		if (!integration || integration.controller.phase !== "ready") {
-			return { ok: false, notice: "Open a workspace first (/workspace)." };
-		}
-		const documentId = integration.tabs.activeDocumentId();
-		const record = documentId ? integration.store.getDocument(documentId) : undefined;
-		if (!documentId || !record) {
-			return { ok: false, notice: "No file is open to attach a selection from." };
-		}
-		const state = integration.store.getViewState(documentId);
-		const cursor = state?.cursorOffset ?? 0;
-		const anchor = state?.selectionAnchorOffset;
-		const start = anchor === undefined ? cursor : Math.min(anchor, cursor);
-		const end = anchor === undefined ? cursor : Math.max(anchor, cursor);
-		if (start >= end) return { ok: false, notice: "No selection to attach" };
-		const selected = record.text.slice(start, end);
-		// 1-based line range for display; a selection ending exactly at a line
-		// start still belongs to the previous line's text in the shown span.
-		const startLine = offsetToPosition(record.text, start).line + 1;
-		const endPosition = offsetToPosition(record.text, end);
-		let endLine = endPosition.line + 1;
-		if (endPosition.character === 0 && endLine > startLine) endLine -= 1;
-		const lineLabel = startLine === endLine ? `L${startLine}` : `L${startLine}–${endLine}`;
-		const relativePath = this.workspaceRelativePath(record.uri);
-		const versionLabel = record.dirty ? `unsaved v${record.version}` : "saved";
-		const noticeLabel = record.dirty ? `unsaved, v${record.version}` : `saved, v${record.version}`;
-		const banner = `<attached: ${relativePath} ${lineLabel} (${versionLabel})>`;
-		const fence = fenceFor(selected);
-		// A fence must close on its own line: add a trailing newline only when
-		// the selection does not already end with one, so the fenced content
-		// stays exactly the selected text.
-		const body = selected.endsWith("\n") ? selected : `${selected}\n`;
-		const block = `${banner}\n${fence}${fenceLanguage(record.languageId)}\n${body}${fence}`;
-		this.editor.insertTextAtCursor(`${block}\n`);
-		this.tui.requestRender();
-		const rawUri = record.uri.length > 300 ? `${record.uri.slice(0, 299)}…` : record.uri;
-		return {
-			ok: true,
-			notice: `Attached ${relativePath} ${lineLabel} (${noticeLabel}) — ${inlineSafe(rawUri)} — review and send when ready.`,
-		};
-	}
-
-	/**
-	 * Adapt the controller's IntelligenceOutcome union to the frozen
-	 * IntelligenceRequest seam: ok → result; refused/failed/no-workspace (and
-	 * superseded, whose result is gone) throw a typed error so sessions record
-	 * an honest failure and never render a fabricated result.
-	 */
-	private intelligenceRequest(): IntelligenceRequest {
-		return async (operation, uri, version, position) => {
-			const integration = this.integration;
-			if (!integration) {
-				throw new WorkspaceIntelligenceFailure("no-workspace", "workspace is not available");
-			}
-			const outcome = await integration.controller.request(operation, uri, version, position);
-			switch (outcome.status) {
-				case "ok":
-					return outcome.result;
-				case "superseded":
-					throw new WorkspaceIntelligenceFailure("superseded", "superseded by a newer request");
-				case "refused":
-					throw new WorkspaceIntelligenceFailure("refused", outcome.message);
-				case "failed":
-					throw new WorkspaceIntelligenceFailure("failed", outcome.message);
-				case "no-workspace":
-					throw new WorkspaceIntelligenceFailure("no-workspace", "no workspace is open");
-			}
-		};
-	}
-
-	/** Ctrl+Space and idle typing share one version-fenced inline suggestion. */
-	private async startCompletion(automatic = false): Promise<void> {
-		this.cancelAutomaticCompletion();
-		const integration = this.integration;
-		const context = this.activeEditorContext();
-		if (!integration || !context) return; // no open file: do not fire (v1)
-		if (!automatic && this.activeRegion !== "editor") this.setFocusForRegion("editor");
-		if (this.activeRegion !== "editor") return;
-		const gen = this.captureWorkspaceFence();
-		this.clearCompletion();
-		const session = new CompletionSession({
-			store: integration.store,
-			request: this.intelligenceRequest(),
-			uri: context.document.uri,
-			documentId: context.document.id,
-			position: context.position,
-			prefix: completionPrefixBefore(context.document.text,
-				integration.store.getViewState(context.document.id)?.cursorOffset ?? 0),
-		});
-		this.completionSession = session;
-		const state = await session.start();
-		if (this.completionSession !== session || this.exiting || !this.isWorkspaceCurrent(gen)) return;
-		if (state === "visible") {
-			// A completion that rewrites existing text, imports names or inserts
-			// snippets cannot be represented honestly as an inline suffix.
-			const preview = session.inlinePreview();
-			if (preview !== undefined) {
-				integration.view.setInlineCompletion(preview);
-				this.tui.requestRender();
-				return;
-			}
-		}
-		// Nothing to show: one quiet honest notice per explicit invocation.
-		if (!automatic && session.lastDropReason === "unavailable") this.print("Completion is unavailable here.", "info");
-		else if (!automatic && session.lastDropReason === "error") this.print("Completion request failed.", "info");
-		this.clearCompletion();
-	}
-
-	private acceptCompletion(): void {
-		const session = this.completionSession;
-		if (!session) return;
-		const result = session.accept();
-		this.clearCompletion();
-		if (result.ok) {
-			this.pauseEditorCursorBlink();
-			for (const application of result.applied) {
-				this.integration?.controller.noteEdit(application.documentId);
-			}
-			this.refreshEditorView();
-		} else if (result.reason !== "not-open") {
-			this.print(`Completion not applied: ${result.message}`, "info");
-		}
-		this.tui.requestRender();
-	}
-
-	private cancelAutomaticCompletion(): void {
-		if (this.automaticCompletionTimer !== undefined) clearTimeout(this.automaticCompletionTimer);
-		this.automaticCompletionTimer = undefined;
-	}
-
-	/** Keep editing local; ask for suggestions once typing pauses. */
-	private scheduleAutomaticCompletion(): void {
-		this.cancelAutomaticCompletion();
-		if (this.activeRegion !== "editor" || this.completionSession || this.exiting) return;
-		const context = this.activeEditorContext();
-		const store = this.integration?.store;
-		if (!context || !store || context.document.readOnly || languageForId(context.document.languageId) === "plain") return;
-		const selection = store.getViewState(context.document.id);
-		if (!selection || (selection.selectionAnchorOffset !== undefined && selection.selectionAnchorOffset !== selection.cursorOffset)) return;
-		const cursor = selection.cursorOffset;
-		const previous = context.document.text[cursor - 1] ?? "";
-		const prefix = completionPrefixBefore(context.document.text, cursor);
-		const member = context.document.text[cursor - prefix.length - 1] === ".";
-		if (previous !== "." && (!COMPLETION_PREFIX_CHAR.test(previous) || (!member && prefix.length < 2))) return;
-		const { id, version } = context.document;
-		const gen = this.captureWorkspaceFence();
-		this.automaticCompletionTimer = setTimeout(() => {
-			this.automaticCompletionTimer = undefined;
-			if (this.exiting || !this.isWorkspaceCurrent(gen) || this.activeRegion !== "editor"
-				|| this.dialogs.length || this.turnSession.approvalDialogCount() || this.quickOpenPane || this.completionSession) return;
-			const current = this.activeEditorContext();
-			if (current?.document.id !== id || current.document.version !== version
-				|| store.getViewState(id)?.cursorOffset !== cursor || this.lspStatusText() !== "ready"
-				|| !this.integration?.view.allowsAutomaticCompletion()) return;
-			void this.startCompletion(true);
-		}, 150);
-	}
-
-	private clearCompletion(): void {
-		this.cancelAutomaticCompletion();
-		this.completionSession?.close("dismissed");
-		this.completionSession = undefined;
-		this.integration?.view.setInlineCompletion(undefined);
-		this.tui.requestRender();
-	}
-
-	/** Request, pick among multiple targets, then jump. */
-	private async runDefinitionOrReferences(operation: "definition" | "references"): Promise<void> {
-		const integration = this.integration;
-		const context = this.activeEditorContext();
-		if (!integration || !context) return;
-		const gen = this.captureWorkspaceFence();
-		const outcome = await integration.controller.request(
-			operation,
-			context.document.uri,
-			context.document.version,
-			context.position,
-		);
-		if (this.exiting || this.integration !== integration || !this.isWorkspaceCurrent(gen)) return;
-		if (outcome.status !== "ok") {
-			this.print(`${operation} unavailable: ${intelligenceOutcomeMessage(outcome)}`, "info");
-			return;
-		}
-		const payload = narrowLocationsPayload(outcome.result.result);
-		const picker = new LocationPicker(payload.locations, { omitted: payload.omitted });
-		if (picker.size === 0) {
-			this.print(`No ${operation} found.`, "info");
-			return;
-		}
-		if (picker.size === 1) {
-			const only = picker.current();
-			if (only) await this.openLocation(only);
-			return;
-		}
-		const targets = picker.targets();
-		const choice = await this.pick(
-			`${operation === "definition" ? "Definitions" : "References"} (${targets.length})`,
-			targets.map((target, index) => ({
-				value: String(index),
-				label: `${uriDisplayPath(target.uri)}:${target.lineLabel}`,
-			})),
-		);
-		if (!choice) return;
-		if (!this.isWorkspaceCurrent(gen)) return;
-		const target = targets[Number(choice.value)];
-		if (target) await this.openLocation(target);
-	}
-
-	/** Open one jump target and place the caret (definition-style navigation). */
-	private async openLocation(target: LocationChoice): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		const gen = this.captureWorkspaceFence();
-		const outcome = await integration.controller.openUri(target.uri);
-		if (!this.isWorkspaceCurrent(gen)) return;
-		if (outcome.status !== "opened" && outcome.status !== "focused") return;
-		const record = integration.store.getDocument(outcome.documentId);
-		if (record) {
-			const offset = positionToOffset(record.text, { line: target.line, character: target.character });
-			integration.store.setSelection(outcome.documentId, { cursorOffset: offset });
-			integration.view.setView({
-				documentId: outcome.documentId,
-				cursorOffset: offset,
-				scrollLine: Math.max(0, target.line - 2),
-				horizontalCellOffset: 0,
-			});
-		}
-		this.tui.requestRender();
-	}
-
-	/** Prepare a rename preview when available. */
-	private async runRenamePreview(): Promise<void> {
-		const integration = this.integration;
-		const context = this.activeEditorContext();
-		if (!integration || !context) return;
-		const session = new RenameSession({
-			store: integration.store,
-			uri: context.document.uri,
-			documentId: context.document.id,
-			position: context.position,
-		});
-		const gen = this.captureWorkspaceFence();
-		const result = await session.start();
-		if (!this.isWorkspaceCurrent(gen)) return;
-		if (!result.ok) {
-			// Unavailable is the honest state until the service offers rename
-			// (the operation is not in the frozen intelligence allowlist).
-			this.print(result.reason, "info");
-			return;
-		}
-		const choice = await this.pick(
-			`Rename: ${result.preview.fileCount} file(s), ${result.preview.totalEdits} edit(s)`,
-			[
-				{ value: "cancel", label: "Cancel" },
-				{ value: "apply", label: "Apply rename" },
-			],
-		);
-		if (choice?.value !== "apply") return;
-		if (!this.isWorkspaceCurrent(gen)) return;
-		const applied = session.apply(true);
-		if (!applied.ok) {
-			this.print(`Rename not applied: ${applied.message}`, "error");
-			return;
-		}
-		for (const application of applied.applied) {
-			integration.controller.noteEdit(application.documentId);
-			this.refreshEditorView(application.documentId);
-		}
-		this.print("Rename applied.", "info");
-	}
-
-	/** Ctrl+S: save the active buffer; conflicts open the explicit dialog. */
-	private async saveActiveDocument(): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		const documentId = integration.tabs.activeDocumentId();
-		// No open file: do not fire (consistent with completion/definition/rename).
-		if (!documentId) return;
-		await this.saveDocument(documentId);
-	}
-
-	private async saveDocument(documentId: string): Promise<boolean> {
-		const integration = this.integration;
-		if (!integration) return false;
-		// MCH-012: a save (or its conflict detour) belongs to the workspace
-		// generation that started it. A root switch/close/exit while the RPC is
-		// parked must not publish into, or resolve against, the successor.
-		const gen = this.captureWorkspaceFence();
-		const outcome = await integration.controller.save(documentId);
-		if (!this.isWorkspaceCurrent(gen)) return false;
-		switch (outcome.status) {
-			case "saved":
-				this.tui.requestRender(); // status row: dirty marker cleared
-				return true;
-			case "conflict":
-				await this.resolveSaveConflict(outcome.conflict);
-				return false;
-			case "not-found":
-				this.print("No file open to save.", "info");
-				return false;
-			default:
-				// refused/failed were notified by the controller with the reason.
-				return false;
-		}
-	}
-
-	/**
-	 * Reload disk / Overwrite (explicit) / Keep editing, per plan §9. Returns
-	 * the controller resolution so close-flow callers can continue the close
-	 * after a conflict detour (finding 7).
-	 */
-	private async resolveSaveConflict(conflict: SaveConflictDescriptor): Promise<ConflictResolution | undefined> {
-		const integration = this.integration;
-		if (!integration) return undefined;
-		// MCH-012: the picker can stay open across a root switch/close. The
-		// resolution (and a possible overwrite write) must target the workspace
-		// that raised the conflict, never its successor.
-		const gen = this.captureWorkspaceFence();
-		const choice = await this.pick(`Save conflict: ${displayUriName(conflict.uri)}`, [
-			{ value: "reload", label: "Reload disk", description: "Discard buffer edits and adopt the file on disk" },
-			{ value: "overwrite-explicit", label: "Overwrite (explicit)", description: "Write this buffer over the file on disk" },
-			{ value: "keep", label: "Keep editing", description: "Nothing is written; the buffer stays dirty" },
-		]);
-		if (!this.isWorkspaceCurrent(gen)) return undefined;
-		const resolution = await integration.controller.resolveConflict(
-			conflict.documentId,
-			(choice?.value as "keep" | "reload" | "overwrite-explicit" | undefined) ?? "keep",
-		);
-		if (!this.isWorkspaceCurrent(gen)) return undefined;
-		if (resolution.status === "reloaded" || resolution.status === "saved" || resolution.status === "kept") {
-			this.refreshEditorView(conflict.documentId);
-		}
-		this.tui.requestRender();
-		return resolution;
-	}
-
-	/** Ctrl+W / `/editor close` path: close the active tab, dirty-guarded. */
-	private closeActiveWorkspaceTab(): void {
-		const documentId = this.integration?.tabs.activeDocumentId();
-		if (!documentId) return;
-		void this.closeWorkspaceTab(documentId);
-	}
-
-	/** Tab-strip close (middle-click / onCloseTab): decision dialog when dirty. */
-	private async closeWorkspaceTab(documentId: string): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		// MCH-012: the dirty-close picker and the conflict detour are both
-		// user-paced awaits; a root switch/close/exit in between retires the
-		// whole request (the buffer itself is retained by the controller).
-		const gen = this.captureWorkspaceFence();
-		const outcome = await integration.controller.closeTab(documentId);
-		if (!this.isWorkspaceCurrent(gen)) return;
-		if (outcome.status === "needs-decision") {
-			const record = integration.store.getDocument(documentId);
-			const choice = await this.pick(`Close ${record ? displayUriName(record.uri) : "file"}?`, [
-				{ value: "save", label: "Save and close" },
-				{ value: "discard", label: "Discard changes" },
-				{ value: "cancel", label: "Cancel" },
-			]);
-			if (!choice || !this.isWorkspaceCurrent(gen)) return;
-			const resolved = await integration.controller.resolveClose(documentId, choice.value as DirtyCloseChoice);
-			if (!this.isWorkspaceCurrent(gen)) return;
-			if (resolved.status === "closed") this.afterTabClosed(documentId);
-			else if (resolved.status === "save-conflict") {
-				// The close decision survives the conflict detour (finding 7):
-				// once the save/overwrite (or reload) cleared the buffer, run the
-				// already-chosen close again — otherwise the tab silently stays
-				// open after the user answered "Save and close". Keep editing
-				// leaves the tab open (and dirty) on purpose.
-				const conflict = await this.resolveSaveConflict(resolved.conflict);
-				if (!this.isWorkspaceCurrent(gen)) return;
-				if (conflict?.status === "saved" || conflict?.status === "reloaded") {
-					const closed = await integration.controller.resolveClose(documentId, "discard");
-					if (this.isWorkspaceCurrent(gen) && closed.status === "closed") this.afterTabClosed(documentId);
-				}
-			} else if (resolved.status === "needs-decision") {
-				this.print("The file changed while saving; save again or discard.", "warning");
-			}
-			return;
-		}
-		if (outcome.status === "closed") this.afterTabClosed(documentId);
-	}
-
-	private afterTabClosed(documentId: string): void {
-		const integration = this.integration;
-		if (!integration) return;
-		if (this.completionSession?.documentId === documentId) this.clearCompletion();
-		integration.view.releaseDocument(documentId);
-		const active = integration.tabs.activeDocumentId();
-		if (active) integration.view.setDocument(active);
-		this.refreshLspStatus();
-		this.syncCursorBlink();
-		this.tui.requestRender();
-	}
-
-	/** Open a root-relative workspace path (explorer/quick open) as a file URI. */
-	private async openWorkspacePath(path: string, options: { preview?: boolean; focus?: boolean } = {}): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		const identity = integration.controller.identity;
-		if (!identity) {
-			this.print("Workspace is not available.", "warning");
-			return;
-		}
-		const gen = this.captureWorkspaceFence();
-		const uri = pathToFileURL(isAbsolute(path) ? path : join(identity.resolvedRoot, path)).href;
-		const outcome = await integration.controller.openUri(uri, options);
-		// MCH-012: the read may outlive a root switch; a retired document id
-		// must not be published into the successor's view.
-		if (!this.isWorkspaceCurrent(gen)) return;
-		if (outcome.status === "opened" || outcome.status === "focused") {
-			if (this.completionSession?.documentId !== outcome.documentId) this.clearCompletion();
-			integration.view.setDocument(outcome.documentId);
-			void this.refreshProblemsForActiveDocument();
-			this.refreshLspStatus();
-			// Opening a file reveals the editor from the default chat canvas.
-			// Sync the composed geometry before claiming editor focus; otherwise
-			// the focus router still sees a chat-only layout and falls back.
-			if (options.focus !== false) {
-				this.syncWorkspaceShellIfChanged();
-				this.setFocusForRegion("editor");
-			}
-			this.syncCursorBlink();
-			this.tui.requestRender();
-		}
-	}
-
-	/** Problems Enter/click: open the file and place the caret at the row. */
-	private async openProblem(row: ProblemRow): Promise<void> {
-		const integration = this.integration;
-		if (!integration) return;
-		const gen = this.captureWorkspaceFence();
-		const outcome = await integration.controller.openUri(row.uri);
-		if (!this.isWorkspaceCurrent(gen)) return;
-		if (outcome.status !== "opened" && outcome.status !== "focused") return;
-		const record = integration.store.getDocument(outcome.documentId);
-		if (record) {
-			const offset = positionToOffset(record.text, { line: row.line, character: row.character });
-			integration.store.setSelection(outcome.documentId, { cursorOffset: offset });
-			integration.view.setView({
-				documentId: outcome.documentId,
-				cursorOffset: offset,
-				scrollLine: Math.max(0, row.line - 2),
-				horizontalCellOffset: 0,
-			});
-		}
-		this.tui.requestRender();
-	}
-
-	/** Pull cursor/selection from the store after an external store mutation. */
-	private refreshEditorView(documentId?: string): void {
-		const integration = this.integration;
-		if (!integration) return;
-		const id = documentId ?? integration.tabs.activeDocumentId();
-		if (this.completionSession && this.completionSession.documentId !== id) this.clearCompletion();
-		if (!id) return;
-		const state = integration.store.getViewState(id);
-		if (state) integration.view.setView(state);
-		this.tui.requestRender();
-	}
-
-	// ─── workspace problems + LSP ───────────────────────────────────────────
-
-	/** Feed the Problems pane: mounted on demand, refocused on request. */
-	private openProblems(): void {
-		const integration = this.integration;
-		if (!integration || this.workspaceUnsupported) {
-			this.print("Workspace is not available.", "warning");
-			return;
-		}
-		if (!this.problemsOpen) {
-			this.problemsOpen = true;
-			integration.pane.setProblems(integration.problemsPane);
-		}
-		if (!this.workspaceLayout?.editor) {
-			// The section lives inside the editor pane: bring the split back
-			// when the geometry allows it, then focus; otherwise say so.
-			this.workspaceHostSurface?.restoreSplit();
-		}
-		if (this.workspaceLayout?.editor) this.setFocusForRegion("problems");
-		else this.print("The editor pane is not visible at this terminal size.", "warning");
-		void this.refreshProblemsForActiveDocument();
-	}
-
-	/** Esc/Problems dismissal: unmount the section and return focus to the editor. */
-	private closeProblems(): void {
-		const integration = this.integration;
-		if (!integration || !this.problemsOpen) return;
-		this.problemsOpen = false;
-		integration.pane.setProblems(undefined);
-		if (this.activeRegion === "problems") this.setFocusForRegion("editor");
-		else this.tui.requestRender();
-	}
-
-	/** Diagnostics pull for the active document (tab focus / after open). */
-	private async refreshProblemsForActiveDocument(): Promise<void> {
-		const integration = this.integration;
-		if (!integration || integration.controller.phase !== "ready") return;
-		const documentId = integration.tabs.activeDocumentId();
-		const record = documentId ? integration.store.getDocument(documentId) : undefined;
-		if (!record) return;
-		const gen = this.captureWorkspaceFence();
-		await integration.problemsModel.refresh(record.uri, record.version);
-		// The model is URI/version-keyed; a superseded refresh must not repaint
-		// the successor's pane from the retired root's diagnostics.
-		if (this.isWorkspaceCurrent(gen)) this.tui.requestRender();
-	}
-
-	/**
-	 * Right-aligned editor status text for the ACTIVE document's language
-	 * (finding 3): the raw LSP state only ("ready", "starting…", "missing"),
-	 * never repeating the language name shown on the left. No reported server
-	 * means no segment — absence is not invented as a state.
-	 */
-	private lspStatusText(): string | undefined {
-		const integration = this.integration;
-		const controller = integration?.controller;
-		if (!integration || !controller || controller.phase !== "ready") return undefined;
-		const documentId = integration.tabs.activeDocumentId();
-		const record = documentId ? integration.store.getDocument(documentId) : undefined;
-		if (!record) return undefined;
-		const target = languageForId(record.languageId);
-		if (target === "plain") return undefined;
-		const family = (language: string): string => language === "javascript" ? "typescript" : language;
-		const matches = (id: string): boolean => family(languageForId(id)) === family(target);
-		const shown = (state: string): string => (state === "starting" ? "starting…" : state);
-		const snapshot = controller.lspStatusSnapshot();
-		for (const server of snapshot.servers) {
-			if (matches(server.languageId || server.profile)) return shown(server.state);
-		}
-		for (const [profile, entry] of Object.entries(snapshot.profiles)) {
-			if (matches(profile)) return shown(entry.state);
-		}
-		return undefined;
-	}
-
-	private refreshLspStatus(): void {
-		this.integration?.pane.setLspStatus(this.lspStatusText());
-	}
-
-	// ─── workspace quick open ───────────────────────────────────────────────
-
-	/** Ctrl+P /quickopen: bounded overlay picker over `workspace.quickOpen`. */
-	private async openQuickOpen(): Promise<void> {
-		const integration = this.integration;
-		if (!integration || this.workspaceUnsupported || integration.controller.phase !== "ready") {
-			this.print("Open a workspace first (/workspace).", "warning");
-			return;
-		}
-		if (this.quickOpenPane) return;
-		const pane = new QuickOpenPane((query) => this.workspaceQuickOpen(query), {
-			onChange: () => this.tui.requestRender(),
-		});
-		pane.onOpen = (entry) => {
-			this.closeQuickOpen();
-			void this.openWorkspacePath(entry.path, { preview: true });
-		};
-		pane.onClose = () => this.closeQuickOpen();
-		this.quickOpenPane = pane;
-		this.quickOpenHandle = this.tui.showOverlay(pane, {
-			width: "100%",
-			maxHeight: "100%",
-			// Same palette family as the skills directory: open above so the
-			// list reads top-down and the composer stays visible.
-			anchor: "top-center",
-		});
-		pane.activate();
-		this.tui.setFocus(pane);
-		this.syncCursorBlink();
-		this.tui.requestRender();
+	/** Public App facade retained for workspace integration callers and tests. */
+	setFocusForRegion(region: FocusRegion): void {
+		this.workspaceCoordinator.setFocusForRegion(region);
 	}
 
 	private closeQuickOpen(): void {
-		const pane = this.quickOpenPane;
-		if (!pane) return;
-		this.quickOpenPane = undefined;
-		this.quickOpenHandle?.hide();
-		this.quickOpenHandle = undefined;
-		// P0-20: dismiss the pane too. Choice (onOpen) and exit paths close
-		// without ever running dismiss(), leaving its provider timer alive:
-		// a request scheduled for the dead overlay would still beat the
-		// debounce window and hit the workspace with a query nobody asked
-		// for. Clear the callback FIRST: dismiss() would otherwise re-enter
-		// this funnel through onClose.
-		pane.onClose = undefined;
-		pane.dismiss();
-		// Dismissing the overlay returns focus to the composer (finding 3);
-		// the region router keeps the recorded region honest.
-		if (!this.exiting) this.setFocusForRegion("chat-composer");
-		this.tui.requestRender();
+		this.workspaceCoordinator.closeQuickOpen();
 	}
 
-	/** Ranking call for Quick Open, bound to the open workspace identity. */
-	private workspaceQuickOpen(query: string): Promise<WorkspaceQuickOpenResult> {
-		const integration = this.integration;
-		const identity = integration?.controller.identity;
-		if (!integration || !identity) return Promise.reject(new Error("workspace is not open"));
-		return this.client.request<WorkspaceQuickOpenResult>(
-			"workspace.quickOpen",
-			{ workspaceId: identity.workspaceId, epoch: identity.epoch, query, limit: 50 },
-			120_000,
-		);
+	noteRegionFocus(region: FocusRegion): void {
+		this.workspaceCoordinator.noteRegionFocus(region);
+	}
+
+	openProblems(): void {
+		this.workspaceCoordinator.openProblems();
+	}
+
+	lspStatusText(): string | undefined {
+		return this.workspaceCoordinator.lspStatusText();
+	}
+
+	private reconcileFocus(): void {
+		this.workspaceCoordinator.reconcileFocus();
+	}
+
+	/** Public App facade retained for workspace integration callers and tests. */
+	openWorkspacePath(path: string, options: { preview?: boolean; focus?: boolean } = {}): Promise<void> {
+		return this.workspaceCoordinator.openWorkspacePath(path, options);
 	}
 
 	// ─── skills directory (A5, spec §12.3) ──────────────────────────────────
@@ -3030,44 +1995,10 @@ export class App implements FeatureHost {
 		this.approvals.clear(sessionId);
 	}
 
-	private onGatewayExit(code: number | null, stderr: string[]): void {
-		if (this.exiting || this.gatewayExitHandled) return;
-		this.gatewayExitHandled = true;
-		// MCH-012: the transport is gone - in-flight workspace opens publish
-		// nothing (their teardown RPCs cannot be trusted either).
-		this.beginWorkspaceFence();
-		this.nowPlayingController?.stop();
-		this.nowPlayingAnim?.stop();
-		this.nowPlayingAnim = undefined;
-		this.workspaceSurface?.disposeTimer();
-		this.keyboard.dispose();
-		if (this.automaticCompletionTimer !== undefined) {
-			clearTimeout(this.automaticCompletionTimer);
-			this.automaticCompletionTimer = undefined;
-		}
-		this.completionSession = undefined;
-		this.cursorBlinkSub?.stop();
-		this.cursorBlinkSub = undefined;
-		this.footer.dispose();
-		this.clearPendingAbortEsc();
-		this.status.dispose();
-		this.transcript.suspend();
-		// The gateway is gone: clear workspace timers/mirrors without RPC
-		// expectations (every teardown call is bounded and fails fast).
-		void this.integration?.controller.dispose();
-		// Retire local approval prompts without resolving: navigation and
-		// disconnect invalidation never issues surprise resolve RPCs.
-		this.invalidateApprovals();
-		// Clear all in-flight tracking so the session isn't permanently locked.
-		this.turnSession.clearAllInFlight();
-		this.setRunning(false);
-		this.footer.status = "offline";
-		this.transcript.addNotice(`The gateway stopped${code === null ? "" : ` (exit code ${code})`}.`, "error");
-		const tail = stderr.slice(-8);
-		if (tail.length) this.transcript.addNotice(tail.join("\n"));
-		this.transcript.addNotice("Press Ctrl+C to exit, then run `machina doctor`.");
-		this.tui.requestRender();
+	onGatewayExit(code: number | null, stderr: string[]): void {
+		this.bootstrap.onGatewayExit(code, stderr);
 	}
+
 }
 
 function message(error: unknown): string {

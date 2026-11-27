@@ -333,6 +333,11 @@ export class WorkspaceCoordinator {
 		return this.problemsOpenValue;
 	}
 
+	/** The completion session exposed to the keyboard router's narrow port. */
+	completionSession(): CompletionSession | undefined {
+		return this.completionSessionValue;
+	}
+
 	/** True while the Quick Open overlay owns keys. */
 	quickOpenActive(): boolean {
 		return this.quickOpenPaneValue !== undefined;
@@ -696,6 +701,12 @@ export class WorkspaceCoordinator {
 		this.completionSessionValue = undefined;
 		this.host.integration()?.view.setInlineCompletion(undefined);
 		this.host.tui.requestRender();
+	}
+
+	/** Drop local completion state when the gateway is gone, without RPCs. */
+	discardCompletion(): void {
+		this.cancelAutomaticCompletion();
+		this.completionSessionValue = undefined;
 	}
 
 	/** Request, pick among multiple targets, then jump. */

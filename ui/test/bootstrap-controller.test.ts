@@ -93,8 +93,7 @@ class FakeHost implements BootstrapHost {
 	exitResolved = false;
 	exiting = false;
 	running = true;
-	keyLeaderCleared = 0;
-	keyLeaderTimerCleared = 0;
+	keyboardDisposals = 0;
 	abortEscCleared = 0;
 	quickOpenClosed = 0;
 	dialogsCancelled = 0;
@@ -353,14 +352,9 @@ class FakeHost implements BootstrapHost {
 		this.record("app:discardCompletion");
 	}
 
-	clearPendingKeyLeaderTimer(): void {
-		this.keyLeaderTimerCleared += 1;
-		this.record("app:clearPendingKeyLeaderTimer");
-	}
-
-	clearPendingKeyLeader(): void {
-		this.keyLeaderCleared += 1;
-		this.record("app:clearPendingKeyLeader");
+	keyboardDispose(): void {
+		this.keyboardDisposals += 1;
+		this.record("app:keyboardDispose");
 	}
 
 	clearPendingAbortEsc(): void {
@@ -560,8 +554,8 @@ test("gateway exit retires local state offline once", async () => {
 		bootstrap.onGatewayExit(1, stderr);
 
 		host.happensBefore("workspace:beginFence", "workspace:disposeTimer");
-		host.happensBefore("workspace:disposeTimer", "app:clearPendingKeyLeaderTimer");
-		host.happensBefore("app:clearPendingKeyLeaderTimer", "app:discardCompletion");
+		host.happensBefore("workspace:disposeTimer", "app:keyboardDispose");
+		host.happensBefore("app:keyboardDispose", "app:discardCompletion");
 		host.happensBefore("app:discardCompletion", "app:stopCursorBlink");
 		host.happensBefore("app:stopCursorBlink", "footer:dispose");
 		host.happensBefore("footer:dispose", "status:dispose");
@@ -576,6 +570,7 @@ test("gateway exit retires local state offline once", async () => {
 		assert.equal(host.running, false);
 		assert.equal(host.workspaceTimerDisposed, 1);
 		assert.equal(host.workspaceIntegrationDisposed, 1);
+		assert.equal(host.keyboardDisposals, 1);
 		assert.equal(host.approvalsInvalidated, 1);
 		assert.equal(host.allInFlightCleared, 1);
 		assert.equal(host.transcriptSuspended, true);
@@ -671,7 +666,8 @@ test("dirty-exit save-all saves sequentially before teardown", async () => {
 		host.happensBefore("workspace:captureFence", "workspace:save:doc-1");
 		host.happensBefore("workspace:save:doc-1", "workspace:save:doc-2");
 		host.happensBefore("workspace:save:doc-2", "app:markExiting");
-		host.happensBefore("app:markExiting", "footer:dispose");
+		host.happensBefore("app:markExiting", "app:keyboardDispose");
+		host.happensBefore("app:keyboardDispose", "footer:dispose");
 		host.happensBefore("footer:dispose", "status:dispose");
 		host.happensBefore("status:dispose", "transcript:suspend");
 		host.happensBefore("transcript:suspend", "app:stopCursorBlink");
@@ -683,6 +679,7 @@ test("dirty-exit save-all saves sequentially before teardown", async () => {
 		host.happensBefore("client:stop", "app:resolveExit");
 		assert.equal(host.exiting, true);
 		assert.equal(host.exitResolved, true);
+		assert.equal(host.keyboardDisposals, 1);
 	} finally {
 		host.review = undefined;
 	}
