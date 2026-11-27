@@ -475,11 +475,14 @@ export class UsagePage implements Component {
 		].join("  ");
 	}
 
-	private hint(width: number): string {
-		return truncateToWidth(
-			theme.dim("esc back · tab switch · 1/2 tabs · g daily→weekly→cumulative · r refresh · ↑↓ scroll"),
-			width,
-		);
+	private footer(width: number): string[] {
+		return [
+			truncateToWidth(theme.dim("esc back"), width),
+			truncateToWidth(
+				theme.dim("tab switch · 1/2 tabs · g daily→weekly→cumulative · r refresh · ↑↓ scroll"),
+				width,
+			),
+		];
 	}
 
 	render(width: number): string[] {
@@ -487,7 +490,7 @@ export class UsagePage implements Component {
 		const height = Math.max(12, this.options.tui.terminal.rows);
 		const innerWidth = Math.min(CONTENT_MAX, Math.max(48, content - 8));
 		const inset = Math.max(0, Math.floor((content - innerWidth) / 2));
-		const frame = 6; // header, tabs, rule, mode, blank, hint
+		const frame = 7; // header, tabs, rule, mode, blank, two footer rows
 		const viewport = Math.max(1, height - frame);
 		this.viewport = viewport;
 
@@ -514,7 +517,7 @@ export class UsagePage implements Component {
 			modeLine,
 			"",
 			...shown.map((line) => `${" ".repeat(inset)}${truncateToWidth(line, innerWidth)}`),
-			this.hint(content),
+			...this.footer(content),
 		];
 		return out.map((line) => truncateToWidth(line, content));
 	}
