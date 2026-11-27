@@ -99,7 +99,7 @@ final class NotchModel: ObservableObject {
                 for _ in 0..<90 {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     let entries = try await gateway.history(sessionId: sessionId)
-                    guard let reply = entries.last(where: { $0.role == "assistant" })?.content,
+                    guard let reply = entries.first(where: { $0.role == "assistant" })?.content,
                           !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                           reply != lastAssistant else { continue }
                     messages.append(ChatLine(text: reply, fromUser: false))
