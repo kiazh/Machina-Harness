@@ -141,7 +141,7 @@ test("a streamed turn renders text, a tool card and a final summary", () => {
 	assert.deepEqual(summary, { tokens: 120, cancelled: false });
 	const out = plain(view);
 	assert.match(out, /read a\.py/);
-	assert.match(out, /Thought ·/);
+	assert.match(out, /Thought/);
 	assert.match(out, /Let me look\./);
 	assert.match(out, /✔ Read file a\.py/);
 	assert.match(out, /print\('hi'\)/);

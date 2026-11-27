@@ -117,7 +117,11 @@ export class WorkGroup implements Component {
 		if (this.counts.agents) parts.push(plural(this.counts.agents, "agent"));
 		if (this.counts.other) parts.push(plural(this.counts.other, "tool"));
 		if (!parts.length) parts.push(plural(this.children.length, "step"));
-		const elapsed = this.finished ? ` · ${duration(this.elapsedMs)}` : " · working";
+		const elapsed = this.finished
+			? this.elapsedMs > 0
+				? ` · ${duration(this.elapsedMs)}`
+				: ""
+			: " · working";
 		return `${parts.join(", ")}${elapsed}`;
 	}
 
@@ -127,7 +131,7 @@ export class WorkGroup implements Component {
 		const total = Math.max(0, width);
 		const chevron = theme.secondary(this.collapsed ? "▸" : "▾");
 		const line = truncateToWidth(`  ${chevron} ${theme.muted(this.summary())}`, total);
-		const rows = this.collapsed ? [line] : [line, ...this.children.flatMap((child) => child.render(width))];
+		const rows = this.collapsed ? ["", line] : ["", line, ...this.children.flatMap((child) => child.render(width))];
 		if (this.collapsed && this.cached.size >= 4) this.cached.clear();
 		if (this.collapsed) this.cached.set(width, rows);
 		return rows;
@@ -135,12 +139,12 @@ export class WorkGroup implements Component {
 
 	handleMouse(event: TuiMouseEvent): { handled: boolean; render: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		if (event.y === 0) {
+		if (event.y === 1) {
 			this.toggle();
 			return { handled: true, render: true };
 		}
 		if (this.collapsed) return undefined;
-		let offset = 1;
+		let offset = 2;
 		for (const child of this.children) {
 			const height = child.render(event.width).length;
 			if (event.y >= offset && event.y < offset + height) {
