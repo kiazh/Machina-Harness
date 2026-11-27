@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 import uuid
@@ -29,10 +30,13 @@ from machina.core.provider.streaming import (
     openai_stream_events,
 )
 from machina.core.provider.transport import (
+    _MAX_TRANSPORT_RETRIES,
     ReservationSettlement,
+    _is_retryable_transport_error,
     _post_with_retry,
     _stream_with_retry,
     _tools_payload,
+    _transport_retry_delay,
     _truncated_stream_error,
     _validate_messages,
     _validate_params,
@@ -261,25 +265,63 @@ class DirectProvider(LLMProvider, RateLimitBinding):
         start = time.monotonic()
         state = OpenAIStreamState(resolved_model=model)
         try:
-            async with _stream_with_retry(
-                self.client,
-                "/chat/completions",
-                payload,
-                retry_429=self.spec.name != "kiro",
-            ) as resp:
-                if self.spec.name == "kiro" and resp.status_code in (402, 429):
-                    detail = (await resp.aread()).decode("utf-8", "replace")[:500]
-                    raise ProviderError(
-                        f"Kiro usage limit reached (HTTP {resp.status_code}): "
-                        f"{detail or 'monthly quota exhausted'}"
+            transport_attempt = 0
+            while True:
+                emitted = False
+                try:
+                    async with _stream_with_retry(
+                        self.client,
+                        "/chat/completions",
+                        payload,
+                        retry_429=self.spec.name != "kiro",
+                        # This loop owns the whole attempt (open + body), so the
+                        # helper must not multiply the transport retry budget.
+                        transport_retries=0,
+                    ) as resp:
+                        if self.spec.name == "kiro" and resp.status_code in (402, 429):
+                            detail = (await resp.aread()).decode("utf-8", "replace")[:500]
+                            raise ProviderError(
+                                f"Kiro usage limit reached (HTTP {resp.status_code}): "
+                                f"{detail or 'monthly quota exhausted'}"
+                            )
+                        resp.raise_for_status()
+                        async for event in openai_stream_events(resp, state):
+                            # Mark before handing the event out: once the caller
+                            # has it, replaying the stream would duplicate text.
+                            emitted = True
+                            yield event
+                    if not state.saw_terminal:
+                        raise _truncated_stream_error(self.spec.name, state.resolved_model)
+                    if state.truncated:
+                        raise _truncated_stream_error(self.spec.name, state.resolved_model)
+                    break
+                except Exception as exc:
+                    # A TLS/socket failure before the first event may be a stale
+                    # keepalive connection: retry from scratch on a fresh socket.
+                    # httpcore closes the failed connection, so the next open
+                    # cannot reuse it. Anything after output is never replayed.
+                    if (
+                        emitted
+                        or transport_attempt >= _MAX_TRANSPORT_RETRIES
+                        or not _is_retryable_transport_error(exc)
+                    ):
+                        raise
+                    delay = _transport_retry_delay(transport_attempt)
+                    transport_attempt += 1
+                    logger.warning(
+                        "transient stream transport error (%s, provider=%s, model=%s), "
+                        "retrying from scratch in %.1fs (attempt %d/%d).",
+                        type(exc).__name__,
+                        self.spec.name,
+                        state.resolved_model,
+                        delay,
+                        transport_attempt,
+                        _MAX_TRANSPORT_RETRIES,
                     )
-                resp.raise_for_status()
-                async for event in openai_stream_events(resp, state):
-                    yield event
-            if not state.saw_terminal:
-                raise _truncated_stream_error(self.spec.name, state.resolved_model)
-            if state.truncated:
-                raise _truncated_stream_error(self.spec.name, state.resolved_model)
+                    await asyncio.sleep(delay)
+                    # Discard any partial decode state so a failed attempt
+                    # cannot contaminate the retried stream.
+                    state = OpenAIStreamState(resolved_model=model)
         except BaseException as exc:
             # GeneratorExit/CancelledError are BaseException: settle before
             # re-raising so an early close cannot strand the reservation.

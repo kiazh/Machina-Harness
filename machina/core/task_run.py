@@ -43,6 +43,9 @@ DEFAULT_MAX_REPEATS = 3
 DEFAULT_MAX_ACTION_REPEATS = 3
 DEFAULT_MAX_RECALL_CALLS = 12
 DEFAULT_MAX_EXPLORATION_CALLS = 10
+# An explicit "learn the whole repository" request is not an orientation loop;
+# give it enough room to survey the tree while the turn/tool caps still bound it.
+DEFAULT_REPO_WIDE_EXPLORATION_CALLS = 200
 DEFAULT_EDIT_NUDGE_TURNS = 10
 DEFAULT_FORCE_EDIT_TURNS = 0
 DEFAULT_ARTIFACT_NUDGE_READS = 3
@@ -167,12 +170,57 @@ _VERIFY_COMMAND_RE = re.compile(
     r"pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|ruff|mypy|tsc|eslint)\b",
     re.IGNORECASE,
 )
+# An orientation listing only when the command actually lists: a path segment
+# such as ``src/dir/file.py`` or a pattern argument containing "find" must not
+# make a real read look like a directory scan.
 _EXPLORATION_COMMAND_RE = re.compile(
-    r"(?:os\.(?:listdir|scandir|walk)\s*\(|"
-    r"\b(?:ls|dir|tree|find|get-childitem)\b|"
-    r"git\s+ls-files|rg\s+--files)",
+    r"(?:^|[;&|]\s*)(?:sudo\s+)?(?:ls|dir|tree|find|get-childitem)\b|"
+    r"\bgit\s+ls-files\b|"
+    r"\brg\s+--files\b|"
+    r"\bos\.(?:listdir|scandir|walk)\s*\(",
     re.IGNORECASE,
 )
+# Terminal-based reads/searches still count as progress for the consecutive
+# orientation budget, even if the model bypassed read_file/search_files.
+_READ_COMMAND_RE = re.compile(
+    r"(?:^|[;&|]\s*)(?:"
+    r"cat|bat|head|tail|less|more|nl|sed|awk|"
+    r"grep|rg|ag|ack|wc|stat|file|"
+    r"git\s+(?:diff|show|log|blame|grep|cat-file)"
+    r")\b",
+    re.IGNORECASE,
+)
+_REPO_WIDE_SCOPE_RE = re.compile(
+    r"\b(?:entire|whole|full|complete|all|every)\s+"
+    r"(?:repo(?:sitory)?|project|code\s*base|directory|tree|source(?:\s+tree)?|"
+    r"files?|directories|dirs|modules?|packages?)\b",
+    re.IGNORECASE,
+)
+_EXPLORATION_INTENT_RE = re.compile(
+    r"\b(?:explor\w*|learn\w*|understand\w*|study(?:ing)?|inspect\w*|"
+    r"survey\w*|review\w*|map(?:ping)?|read(?:ing)?|walk(?:ing)?|"
+    r"browse|browsing|analy[sz]\w*|digest\w*|holistic|overview|orient\w*)\b",
+    re.IGNORECASE,
+)
+_REPO_WIDE_PHRASE_RE = re.compile(
+    r"\b(?:line[\s-]+by[\s-]+line|file[\s-]+by[\s-]+file|"
+    r"directory[\s-]+by[\s-]+directory|"
+    r"learn\s+(?:the\s+)?(?:code\s*base|repo(?:sitory)?|project)|"
+    r"understand\s+(?:the\s+)?(?:code\s*base|repo(?:sitory)?|project)|"
+    r"holistic\s+(?:exploration|review|analysis|understanding|view|picture|overview|map)|"
+    r"(?:full|complete|holistic|comprehensive)\s+"
+    r"(?:view|picture|understanding|overview|review)\s+of\s+"
+    r"(?:the\s+)?(?:repo(?:sitory)?|project|code\s*base))\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_repo_wide_exploration(message: str) -> bool:
+    """Whether the prompt explicitly asks to learn/explore the whole repository."""
+    return bool(
+        _REPO_WIDE_PHRASE_RE.search(message)
+        or (_REPO_WIDE_SCOPE_RE.search(message) and _EXPLORATION_INTENT_RE.search(message))
+    )
 
 
 def _bounded_env_int(name: str, default: int) -> int:
@@ -249,15 +297,22 @@ def _write_path(entry: dict[str, Any]) -> str:
 
 
 def _is_source_edit(entry: dict[str, Any]) -> bool:
-    if entry.get("tool") != "write_file" or _failed(entry):
+    if entry.get("tool") not in {"write_file", "edit_file"} or _failed(entry):
         return False
     return Path(_write_path(entry)).suffix.casefold() in _SOURCE_SUFFIXES
 
 
 def _is_edit(entry: dict[str, Any]) -> bool:
-    if entry.get("tool") == "write_file":
+    if entry.get("tool") in {"write_file", "edit_file"}:
         return True
     return bool(_EDIT_COMMAND_RE.search(_command(entry)))
+
+
+def _is_read_or_search(entry: dict[str, Any]) -> bool:
+    """Real evidence-gathering calls, including terminal reads/searches."""
+    if entry.get("tool") in {"read_file", "search_files", "code_intelligence"}:
+        return True
+    return entry.get("tool") == "terminal" and bool(_READ_COMMAND_RE.search(_command(entry)))
 
 
 def _is_verification(entry: dict[str, Any]) -> bool:
@@ -338,6 +393,7 @@ class TaskRunPolicy:
         self.active = is_repair_task(user_message)
         self.lean_tools = lean_tools_enabled()
         self._prompt = user_message.casefold()
+        self.repo_wide_exploration = _wants_repo_wide_exploration(user_message)
         self.max_turns = configured_max_turns() if max_turns is None else max(0, max_turns)
         self.max_tool_calls = (
             configured_max_tool_calls() if max_tool_calls is None else max(0, max_tool_calls)
@@ -346,6 +402,12 @@ class TaskRunPolicy:
         self.max_action_repeats = max(1, max_action_repeats)
         self.max_recall_calls = max(1, max_recall_calls)
         self.max_exploration_calls = max(1, max_exploration_calls)
+        if self.repo_wide_exploration:
+            # Explicit whole-repo learning needs many distinct listings; the
+            # turn, tool-call, repeat, recall and edit guards remain unchanged.
+            self.max_exploration_calls = max(
+                self.max_exploration_calls, DEFAULT_REPO_WIDE_EXPLORATION_CALLS
+            )
         self.edit_nudge_turns = max(1, edit_nudge_turns)
         self.force_edit_turns = max(0, force_edit_turns)
         self.turns = 0
@@ -442,10 +504,12 @@ class TaskRunPolicy:
                 # A real change is progress; retries after it are a new phase.
                 self._action_counts.clear()
             # A listing budget bounds *consecutive* orientation, not the total
-            # for a long task. Reading or changing something between listings
-            # proves the agent is no longer orienting.
-            if is_edit or tool in {"read_file", "search_files", "code_intelligence"}:
+            # for a long task. Reading, searching, or changing something between
+            # listings proves the agent is no longer orienting. Clear the stop
+            # flag with the counter so a latched loop cannot outlive the burst.
+            if is_edit or _is_read_or_search(entry):
                 self.exploration_calls = 0
+                self.exploration_loop = False
             if tool in _RECALL_TOOLS:
                 self.recall_calls += 1
                 if self.recall_calls >= self.max_recall_calls:
@@ -465,9 +529,9 @@ class TaskRunPolicy:
                 continue
             if _is_edit(entry) and not _failed(entry):
                 edited_this_turn = True
-            if entry.get("tool") == "write_file":
+            if entry.get("tool") in {"write_file", "edit_file"}:
                 if _failed(entry) or not _is_source_edit(entry):
-                    # A rejected write or a non-source scratch/probe is not
+                    # A rejected edit or a non-source scratch/probe is not
                     # progress; keep the forced-edit surface and re-nudge.
                     self._force_edit_nudged = False
                 else:
@@ -573,6 +637,7 @@ class TaskRunPolicy:
             "repeated_action": self.repeated_action,
             "recall_calls": self.recall_calls,
             "recall_loop": self.recall_loop,
+            "repo_wide_exploration": self.repo_wide_exploration,
             "exploration_calls": self.exploration_calls,
             "exploration_loop": self.exploration_loop,
             "artifact_reads": self.artifact_reads,

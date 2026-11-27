@@ -183,6 +183,92 @@ def test_an_edit_between_directory_listings_resets_the_exploration_budget() -> N
     assert policy.exploration_loop is False
 
 
+def test_repo_wide_exploration_can_list_beyond_the_normal_budget() -> None:
+    prompt = (
+        "Learn the entire directory line by line, get a holistic full view of "
+        "the entire project, and understand what everything does. Use as many "
+        "subagents as needed to explore."
+    )
+    policy = TaskRunPolicy(prompt)
+    for index in range(30):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+
+    assert policy.repo_wide_exploration is True
+    assert policy.max_exploration_calls > 30
+    assert policy.exploration_calls == 30
+    assert policy.exploration_loop is False
+    assert policy.stop_reason() is None
+
+
+def test_ordinary_repair_turn_keeps_the_normal_exploration_budget() -> None:
+    policy = TaskRunPolicy(REPAIR)
+    for index in range(10):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+
+    assert policy.repo_wide_exploration is False
+    assert policy.exploration_loop is True
+    assert policy.stop_reason() == TASK_RUN_EXPLORATION_LIMIT_TEXT
+
+
+def test_repo_wide_exploration_still_stops_a_repeated_action() -> None:
+    policy = TaskRunPolicy("Learn the whole project and read every file.")
+    for _ in range(3):
+        policy.observe([_successful_terminal("ls src")])
+
+    assert policy.repeated_action is True
+    assert policy.stop_reason() == TASK_RUN_REPEAT_ACTION_TEXT
+
+
+def test_a_real_read_clears_a_latched_exploration_stop() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for index in range(10):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+    assert policy.exploration_loop is True
+
+    policy.observe([{"tool": "read_file", "args": {"path": "app.py"}, "outcome": "completed"}])
+
+    assert policy.exploration_calls == 0
+    assert policy.exploration_loop is False
+    assert policy.stop_reason() is None
+
+
+def test_terminal_reads_reset_the_budget_without_counting_as_listings() -> None:
+    policy = TaskRunPolicy(CHAT)
+    for index in range(9):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+    policy.observe([_successful_terminal("sed -n '1,80p' src/dir/app.py")])
+
+    assert policy.exploration_calls == 0
+    assert policy.exploration_loop is False
+
+    for index in range(9, 18):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+
+    assert policy.exploration_calls == 9
+    assert policy.stop_reason() is None
+
+
+def test_edit_file_resets_exploration_and_counts_as_a_source_edit() -> None:
+    policy = TaskRunPolicy(REPAIR)
+    for index in range(9):
+        policy.observe([_successful_terminal(f"ls dir-{index}")])
+    policy.observe(
+        [
+            {
+                "tool": "edit_file",
+                "args": {"path": "src/app.py", "old_text": "before", "new_text": "after"},
+                "outcome": "completed",
+            }
+        ]
+    )
+
+    assert policy.exploration_calls == 0
+    assert policy.exploration_loop is False
+    assert policy.edited is True
+    assert policy.source_edited is True
+    assert policy.stop_reason() is None
+
+
 def test_repeated_identical_search_is_guarded() -> None:
     policy = TaskRunPolicy(CHAT)
     search = {

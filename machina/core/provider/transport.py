@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import random
+import ssl
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -28,10 +30,48 @@ _FREE_MAX_RETRIES = 5
 _RETRY_BASE_DELAY = 1.0  # seconds; doubles each attempt
 _FREE_BASE_DELAY = 4.0  # free tier starts slower
 
+# Transient TLS/socket failures (typically a stale keepalive socket surfacing
+# ``SSLV3_ALERT_BAD_RECORD_MAC``) get their own small budget, so they neither
+# consume nor extend the 429 budget. httpcore closes the affected connection
+# when a transport exception escapes, so every retry opens a fresh socket.
+# Timeouts are excluded below: their connect/read budgets already bound the
+# wait, and retrying them would silently multiply those timeouts. Certificate
+# verification failures stay fatal too — a retry cannot repair a bad cert.
+_MAX_TRANSPORT_RETRIES = 2
+_TRANSPORT_BASE_DELAY = 0.5  # seconds; doubles each attempt, then jittered
+_TRANSPORT_MAX_DELAY = 4.0
+
 
 def _is_free_model(model: str) -> bool:
     m = (model or "").lower()
     return m == "openrouter/free" or m.endswith((":free", "/free"))
+
+
+def _is_retryable_transport_error(error: BaseException) -> bool:
+    """True when a fresh connection could plausibly succeed after *error*.
+
+    Raw ``ssl.SSLError`` can escape a body read unwrapped (httpcore maps
+    handshake errors to ``ConnectError`` but not every read-side TLS failure),
+    so both the SSL and httpx transport hierarchies are covered. Certificate
+    verification failures are configuration errors: they are inspected through
+    the cause chain and never retried.
+    """
+    seen: set[int] = set()
+    cause: BaseException | None = error
+    while cause is not None and id(cause) not in seen:
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            return False
+        seen.add(id(cause))
+        cause = cause.__cause__ or cause.__context__
+    if isinstance(error, httpx.TimeoutException):
+        return False
+    return isinstance(error, (ssl.SSLError, httpx.TransportError))
+
+
+def _transport_retry_delay(attempt: int) -> float:
+    """Bounded exponential backoff with jitter for transient transport errors."""
+    delay = min(_TRANSPORT_BASE_DELAY * (2**attempt), _TRANSPORT_MAX_DELAY)
+    return delay + random.uniform(0, 0.25)
 
 
 def _quota_exhausted(resp: httpx.Response) -> bool:
@@ -105,8 +145,6 @@ def _retry_delay(attempt: int, resp: httpx.Response | None, free: bool) -> float
             except (TypeError, ValueError, OverflowError) as _boundary_error:
                 # Not a valid HTTP-date either — fall through to plain backoff.
                 record_failure("provider._retry_delay", _boundary_error)
-    import random
-
     base = _FREE_BASE_DELAY if free else _RETRY_BASE_DELAY
     delay = base * (2**attempt)
     delay = min(delay, 30.0 if free else 8.0)
@@ -121,19 +159,46 @@ async def _post_with_retry(
     *,
     retry_429: bool = True,
 ) -> httpx.Response:
-    """POST with exponential backoff on 429 (rate limit) responses.
+    """POST with exponential backoff on 429s and transient transport failures.
 
-    Paid models: retries 2x (1s, 2s). Free models: ONE attempt here —
-    the caller walks the fallback chain instead. Retrying the same throttled
-    free model 6x is what burns the per-minute quota (36 POSTs per hello).
+    Paid models: retries 429s 2x (1s, 2s) and transient TLS/socket failures 2x
+    on a fresh connection. Free models: ONE attempt per model for 429s — the
+    caller walks the fallback chain instead; retrying the same throttled free
+    model 6x is what burns the per-minute quota (36 POSTs per hello). Transport
+    retries are separate from the 429 budget and apply to both tiers.
+
+    Scope is inference POSTs only (the idempotent, side-effect-free requests
+    routed through this helper); tool and connector calls never pass here.
     """
     model = str(payload.get("model", ""))
     free = _is_free_model(model)
     # Free: single attempt; fallback loop handles rotation. Paid: 2 retries.
     max_retries = 0 if free else _MAX_RETRIES
-    last_exc: Exception | None = None
-    for attempt in range(max_retries + 1):
-        resp = await client.post(url, json=payload)
+    transport_attempt = 0
+    attempt = 0
+    while True:
+        try:
+            resp = await client.post(url, json=payload)
+        except Exception as exc:
+            # No complete response was received. Retry only transport failures
+            # that a fresh connection may fix; timeouts/cert errors stay fatal.
+            if transport_attempt >= _MAX_TRANSPORT_RETRIES or not _is_retryable_transport_error(
+                exc
+            ):
+                raise
+            delay = _transport_retry_delay(transport_attempt)
+            transport_attempt += 1
+            logger.warning(
+                "transient transport error (%s, model=%s), retrying in %.1fs "
+                "(transport attempt %d/%d).",
+                type(exc).__name__,
+                model,
+                delay,
+                transport_attempt,
+                _MAX_TRANSPORT_RETRIES,
+            )
+            await asyncio.sleep(delay)
+            continue
         if resp.status_code != 429 or not retry_429:
             return resp
         # Account-wide daily quota gone: no free model can serve this, so
@@ -145,23 +210,23 @@ async def _post_with_retry(
                 daily_limit=int(resp.headers.get("x-ratelimit-limit") or 0) or None,
                 remaining=0,
             )
-        last_exc = httpx.HTTPStatusError(
-            f"429 Too Many Requests (attempt {attempt + 1}/{max_retries + 1})",
-            request=resp.request,
-            response=resp,
-        )
-        if attempt < max_retries:
-            delay = _retry_delay(attempt, resp, free)
-            logger.warning(
-                "429 rate limited (model=%s), retrying in %.1fs (attempt %d/%d). "
-                "Free tier: wait or /model <paid> to skip the queue.",
-                model,
-                delay,
-                attempt + 1,
-                max_retries + 1,
+        if attempt >= max_retries:
+            raise httpx.HTTPStatusError(
+                f"429 Too Many Requests (attempt {attempt + 1}/{max_retries + 1})",
+                request=resp.request,
+                response=resp,
             )
-            await asyncio.sleep(delay)
-    raise last_exc  # type: ignore[misc]
+        delay = _retry_delay(attempt, resp, free)
+        attempt += 1
+        logger.warning(
+            "429 rate limited (model=%s), retrying in %.1fs (attempt %d/%d). "
+            "Free tier: wait or /model <paid> to skip the queue.",
+            model,
+            delay,
+            attempt,
+            max_retries + 1,
+        )
+        await asyncio.sleep(delay)
 
 
 @asynccontextmanager
@@ -172,13 +237,46 @@ async def _stream_with_retry(
     payload: dict[str, Any],
     *,
     retry_429: bool = True,
+    transport_retries: int = _MAX_TRANSPORT_RETRIES,
 ) -> AsyncGenerator[httpx.Response, None]:
-    """Apply the POST retry policy before exposing any streaming content."""
+    """Apply the POST retry policy before exposing any streaming content.
+
+    Only failures while *opening* the stream (connect/handshake/headers) are
+    retried here. Once the response is yielded, a body failure belongs to the
+    caller, which alone knows whether tokens already reached the user; a
+    caller that wants pre-first-token body retries passes ``transport_retries=0``
+    and runs its own attempt loop.
+
+    The response is opened explicitly (``build_request`` + ``send``) instead of
+    ``client.stream`` so a failed open is retried without entering the response
+    context, while a consumer exception still closes the response exactly once.
+    """
     model = str(payload.get("model", ""))
     free = _is_free_model(model)
     max_retries = 0 if free else _MAX_RETRIES
-    for attempt in range(max_retries + 1):
-        async with client.stream("POST", url, json=payload) as resp:
+    transport_attempt = 0
+    attempt = 0
+    while True:
+        request = client.build_request("POST", url, json=payload)
+        try:
+            resp = await client.send(request, stream=True)
+        except Exception as exc:
+            if transport_attempt >= transport_retries or not _is_retryable_transport_error(exc):
+                raise
+            delay = _transport_retry_delay(transport_attempt)
+            transport_attempt += 1
+            logger.warning(
+                "transient stream transport error (%s, model=%s), retrying in %.1fs "
+                "(transport attempt %d/%d).",
+                type(exc).__name__,
+                model,
+                delay,
+                transport_attempt,
+                transport_retries,
+            )
+            await asyncio.sleep(delay)
+            continue
+        try:
             if resp.status_code != 429 or not retry_429:
                 yield resp
                 return
@@ -189,9 +287,17 @@ async def _stream_with_retry(
                     daily_limit=int(resp.headers.get("x-ratelimit-limit") or 0) or None,
                     remaining=0,
                 )
-            if attempt == max_retries:
+            if attempt >= max_retries:
                 resp.raise_for_status()
+                raise httpx.HTTPStatusError(
+                    f"429 Too Many Requests (attempt {attempt + 1}/{max_retries + 1})",
+                    request=resp.request,
+                    response=resp,
+                )
             delay = _retry_delay(attempt, resp, free)
+            attempt += 1
+        finally:
+            await resp.aclose()
         # Close the rejected response before waiting or opening another stream.
         logger.warning("429 rate limited (model=%s), retrying stream in %.1fs", model, delay)
         await asyncio.sleep(delay)
