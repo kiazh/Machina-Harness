@@ -10,6 +10,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/MachinaNotch" "$APP/Contents/MacOS/MachinaNotch"
 cp "Info.plist" "$APP/Contents/Info.plist"
+cp "THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 
 # Ad-hoc signature is enough for local use. Replace with a Developer ID
 # identity for distribution and notarization.

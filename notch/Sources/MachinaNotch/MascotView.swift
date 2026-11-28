@@ -17,6 +17,12 @@ enum MascotState: String, CaseIterable {
 struct MascotView: View {
     let state: MascotState
     var size: CGFloat = 26
+    /// Calm mode keeps the expressive eyes and discrete blinks/gazes but skips
+    /// the continuous floating/breathing loops. Used in the notch where the
+    /// face is always visible and idle CPU matters.
+    var calm: Bool = false
+    /// Paused during island morphs and other full-surface animations.
+    var idlePaused: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var closed = false
@@ -27,6 +33,14 @@ struct MascotView: View {
     @State private var gaze = CGSize.zero
     @State private var zphase = false
     @State private var sparkle = false
+    @State private var currentState: MascotState = .idle
+    @State private var headTilt: Double = 0
+    @State private var breath = false
+    @State private var bounce: CGFloat = 0
+    @State private var squish: CGFloat = 1
+    @State private var blinkTask: Task<Void, Never>?
+    @State private var gazeTask: Task<Void, Never>?
+    @State private var flourishTask: Task<Void, Never>?
 
     private var eyeWidth: CGFloat { size * 0.115 }
     private var eyeHeight: CGFloat { size * 0.20 }
@@ -43,10 +57,13 @@ struct MascotView: View {
         .frame(width: size, height: size)
         .offset(
             x: state == .sleeping ? 0 : (floating ? size * 0.045 : -size * 0.045),
-            y: floating ? -size * 0.018 : size * 0.012
+            y: (floating ? -size * 0.018 : size * 0.012)
+                + bounce
+                + (breath ? -size * 0.006 : 0)
         )
-        .scaleEffect(breathing ? 1.022 : 0.992)
-        .rotationEffect(.degrees(state == .thinking ? 2.0 : 0))
+        .scaleEffect((breathing ? 1.022 : 0.992) * squish)
+        .scaleEffect(x: breath ? 1.012 : 1, y: breath ? 0.988 : 1, anchor: .bottom)
+        .rotationEffect(.degrees((state == .thinking ? 2.0 : 0) + headTilt))
         .overlay(alignment: .center) {
             if state == .happy {
                 blush
@@ -67,22 +84,43 @@ struct MascotView: View {
             }
         }
         .onAppear {
+            currentState = state
             if !reduceMotion {
                 spinning = true
-                withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
-                    floating = true
+                if !calm {
+                    withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
+                        floating = true
+                    }
+                    withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
+                        breathing = true
+                    }
+                    withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                        zphase = true
+                    }
                 }
-                withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
-                    breathing = true
-                }
-                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                    zphase = true
-                }
-                scheduleBlink()
-                scheduleGaze()
+                startIdleLoops()
             }
         }
-        .onChange(of: state) { _, newValue in
+        .onDisappear {
+            stopIdleLoops()
+        }
+        .onChange(of: idlePaused) { _, paused in
+            if paused {
+                stopIdleLoops()
+                withAnimation(nil) {
+                    gaze = .zero
+                    headTilt = 0
+                    breath = false
+                    bounce = 0
+                    squish = 1
+                    closed = false
+                }
+            } else if !reduceMotion {
+                startIdleLoops()
+            }
+        }
+        .onChange(of: state) { oldValue, newValue in
+            currentState = newValue
             withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
                 look = newValue == .thinking
                     ? CGSize(width: size * 0.045, height: -size * 0.035)
@@ -93,6 +131,16 @@ struct MascotView: View {
             }
             if newValue != .happy {
                 sparkle = false
+            }
+            if newValue == .happy {
+                triggerHappyBounce()
+            } else if newValue == .listening {
+                triggerListeningPerk()
+            } else if oldValue == .listening {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    headTilt = 0
+                    squish = 1
+                }
             }
         }
     }
@@ -212,32 +260,177 @@ struct MascotView: View {
         .offset(y: size * 0.13)
     }
 
-    private func scheduleGaze() {
-        guard !reduceMotion else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 2.4...5.2)) {
-            guard state == .idle || state == .waiting else {
-                scheduleGaze()
-                return
+    private func startIdleLoops() {
+        guard !reduceMotion, !idlePaused else { return }
+        guard ProcessInfo.processInfo.environment["MACHINA_NOTCH_CALM_IDLE"] != "1" else { return }
+        startBlinkLoop()
+        startGazeLoop()
+        startFlourishLoop()
+    }
+
+    private func stopIdleLoops() {
+        blinkTask?.cancel()
+        gazeTask?.cancel()
+        flourishTask?.cancel()
+        blinkTask = nil
+        gazeTask = nil
+        flourishTask = nil
+    }
+
+    private func startBlinkLoop() {
+        blinkTask?.cancel()
+        blinkTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let delay = UInt64(Double.random(in: 3.8...6.5) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: delay)
+                if Task.isCancelled { return }
+                guard currentState != .sleeping, currentState != .happy else { continue }
+                await blinkOnce()
+                if Task.isCancelled { return }
+                if Bool.random() {
+                    try? await Task.sleep(nanoseconds: 140_000_000)
+                    if Task.isCancelled { return }
+                    await blinkOnce()
+                }
             }
-            let x = CGFloat.random(in: -0.045...0.045) * size
-            let y = CGFloat.random(in: -0.02...0.03) * size
-            withAnimation(.easeInOut(duration: 0.55)) { gaze = CGSize(width: x, height: y) }
-            scheduleGaze()
         }
     }
 
-    private func scheduleBlink() {
-        guard !reduceMotion else { return }
-        let delay = Double.random(in: 3.2...5.8)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard state == .idle || state == .waiting else {
-                scheduleBlink()
-                return
+    @MainActor
+    private func blinkOnce() async {
+        withAnimation(.easeInOut(duration: 0.10)) { closed = true }
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        if Task.isCancelled { return }
+        withAnimation(.easeInOut(duration: 0.13)) { closed = false }
+    }
+
+    private func startGazeLoop() {
+        gazeTask?.cancel()
+        gazeTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let delay = UInt64(Double.random(in: 2.6...6.0) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: delay)
+                if Task.isCancelled { return }
+                guard currentState != .sleeping, currentState != .happy else { continue }
+
+                let target = gazeTarget(for: currentState)
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                    gaze = target
+                }
+                try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 0.35...1.1) * 1_000_000_000))
+                if Task.isCancelled { return }
+                withAnimation(.easeInOut(duration: Double.random(in: 0.35...0.6))) {
+                    gaze = .zero
+                }
             }
-            withAnimation(.easeInOut(duration: 0.10)) { closed = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
-                withAnimation(.easeInOut(duration: 0.12)) { closed = false }
-                scheduleBlink()
+        }
+    }
+
+    private func gazeTarget(for state: MascotState) -> CGSize {
+        switch state {
+        case .thinking:
+            return CGSize(width: (Bool.random() ? -1 : 1) * size * 0.025, height: -size * 0.030)
+        case .processing:
+            return CGSize(width: 0, height: -size * 0.012)
+        case .listening:
+            return CGSize(width: 0, height: -size * 0.008)
+        case .waiting:
+            return CGSize(width: size * 0.010, height: size * 0.012)
+        case .happy, .sleeping:
+            return .zero
+        default:
+            return CGSize(
+                width: CGFloat.random(in: -0.055...0.055) * size,
+                height: CGFloat.random(in: -0.028...0.030) * size
+            )
+        }
+    }
+
+    private func startFlourishLoop() {
+        // The small compact/header faces only get cheap eye saccades and
+        // blinks. Whole-face breath/head-tilt flourishes run on the larger
+        // hero face so the notch's idle CPU stays low.
+        guard size >= 30 else { return }
+        flourishTask?.cancel()
+        flourishTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let delay = UInt64(Double.random(in: 9.0...14.0) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: delay)
+                if Task.isCancelled { return }
+
+                switch currentState {
+                case .sleeping:
+                    await breatheSlowly()
+                case .idle, .blink, .surprised, .processing:
+                    if Bool.random() {
+                        await headTiltFlourish()
+                    } else {
+                        await breatheSlowly()
+                    }
+                case .thinking:
+                    await headTiltFlourish(angle: -1.6)
+                case .listening:
+                    await headTiltFlourish(angle: -2.2)
+                case .waiting:
+                    await breatheSlowly()
+                case .happy:
+                    break
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func headTiltFlourish(angle: Double? = nil) async {
+        let target = angle ?? (Bool.random() ? 2.2 : -2.2)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+            headTilt = target
+        }
+        try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 0.45...0.7) * 1_000_000_000))
+        if Task.isCancelled { return }
+        withAnimation(.easeInOut(duration: 0.45)) {
+            headTilt = 0
+        }
+    }
+
+    @MainActor
+    private func breatheSlowly() async {
+        withAnimation(.easeInOut(duration: 0.7)) { breath = true }
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        if Task.isCancelled { return }
+        withAnimation(.easeInOut(duration: 0.9)) { breath = false }
+    }
+
+    private func triggerHappyBounce() {
+        guard !reduceMotion, !idlePaused else { return }
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.45)) {
+            bounce = -size * 0.07
+            squish = 1.07
+            headTilt = 2.0
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !idlePaused else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
+                bounce = 0
+                squish = 1
+                headTilt = 0
+            }
+        }
+    }
+
+    private func triggerListeningPerk() {
+        guard !reduceMotion, !idlePaused else { return }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.6)) {
+            headTilt = -2.0
+            squish = 1.04
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard currentState == .listening, !idlePaused else { return }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                headTilt = 0
+                squish = 1
             }
         }
     }

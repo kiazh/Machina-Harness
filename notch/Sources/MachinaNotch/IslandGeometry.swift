@@ -13,35 +13,42 @@ struct IslandMetrics: Equatable {
     var notchHeight: CGFloat = 32
     /// The black wings around the cutout make room for the mascot and timer.
     var compactWidth: CGFloat = 188
-    var expandedWidth: CGFloat = 420
+    var expandedWidth: CGFloat = 460
     var expandedHeight: CGFloat = 560
 
     /// Transparent breathing room in the panel for the island's shadow.
     static let panelPadding: CGFloat = 40
-    static let bannerWidth: CGFloat = 342
-    static let bannerHeight: CGFloat = 54
+    static let alertHeight: CGFloat = 58
+    static let minAlertWidth: CGFloat = 460
     static let bannerGap: CGFloat = 8
 
     var compactSize: CGSize { CGSize(width: compactWidth, height: notchHeight) }
     var expandedSize: CGSize { CGSize(width: expandedWidth, height: expandedHeight) }
+    var alertSize: CGSize {
+        CGSize(width: max(Self.minAlertWidth, notchWidth + 260), height: notchHeight + Self.alertHeight)
+    }
 
     /// Expanded content starts below the camera housing so nothing sits under it.
     var expandedContentInset: CGFloat { hasNotch ? notchHeight + 2 : 10 }
 
-    /// The window grows with the island so the shadow has room and the panel
-    /// never covers more of the screen than it needs to.
-    func windowSize(expanded: Bool, banner: Bool) -> CGSize {
-        if expanded {
-            return CGSize(
-                width: expandedWidth + Self.panelPadding * 2,
-                height: expandedHeight + Self.panelPadding
-            )
-        }
-        let bannerRoom = banner ? Self.bannerGap + Self.bannerHeight : 0
-        let width = max(compactWidth, banner ? Self.bannerWidth : 0)
-        return CGSize(
-            width: width + Self.panelPadding * 2,
-            height: notchHeight + bannerRoom + Self.panelPadding
+    /// One fixed canvas for every island state. The window is positioned once;
+    /// only SwiftUI morphs inside it, so expand/collapse never resize the
+    /// NSWindow and never clip the outgoing shape.
+    var panelSize: CGSize {
+        CGSize(
+            width: max(expandedWidth, alertSize.width) + Self.panelPadding * 2,
+            height: expandedHeight + Self.panelPadding
+        )
+    }
+
+    func windowFrame(in screen: NSScreen) -> NSRect {
+        let area = screen.frame
+        let size = panelSize
+        return NSRect(
+            x: area.midX - size.width / 2,
+            y: area.maxY - size.height,
+            width: size.width,
+            height: size.height
         )
     }
 
@@ -74,17 +81,6 @@ struct IslandMetrics: Equatable {
         return metrics
     }
 
-    func windowFrame(in screen: NSScreen, expanded: Bool, banner: Bool) -> NSRect {
-        let area = screen.frame
-        let size = windowSize(expanded: expanded, banner: banner)
-        return NSRect(
-            x: area.midX - size.width / 2,
-            y: area.maxY - size.height,
-            width: size.width,
-            height: size.height
-        )
-    }
-
     /// Collapsed/expanded island rect in screen coordinates.
     func islandRect(in screen: NSScreen, expanded: Bool) -> NSRect {
         let size = expanded ? expandedSize : compactSize
@@ -96,82 +92,15 @@ struct IslandMetrics: Equatable {
         )
     }
 
-    /// The transient banner hangs just below the collapsed island.
+    /// The alert island hangs below the notch and is wider than the compact
+    /// state, matching the reference drop-down layout.
     func bannerRect(in screen: NSScreen) -> NSRect {
-        NSRect(
-            x: screen.frame.midX - Self.bannerWidth / 2,
-            y: screen.frame.maxY - notchHeight - Self.bannerGap - Self.bannerHeight,
-            width: Self.bannerWidth,
-            height: Self.bannerHeight
+        let size = alertSize
+        return NSRect(
+            x: screen.frame.midX - size.width / 2,
+            y: screen.frame.maxY - size.height,
+            width: size.width,
+            height: size.height
         )
-    }
-}
-
-/// The black island silhouette. The top corners use concave quarter-arcs so
-/// the surface appears to grow out of the menu bar; the lower corners are
-/// convex arcs. All radii are animatable, so compact and expanded states morph
-/// as a single continuous surface.
-struct IslandSilhouette: Shape {
-    var topFlare: CGFloat
-    var bottomRadius: CGFloat
-
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(topFlare, bottomRadius) }
-        set {
-            topFlare = newValue.first
-            bottomRadius = newValue.second
-        }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let width = rect.width
-        let height = rect.height
-        let flare = max(0.5, min(topFlare, height / 2, width / 4))
-        let bottom = max(0.5, min(bottomRadius, height - flare, (width - 2 * flare) / 2))
-        let left = rect.minX
-        let right = rect.maxX
-        let top = rect.minY
-        let lower = rect.maxY
-
-        var path = Path()
-        path.move(to: CGPoint(x: left, y: top))
-
-        // Concave top-left: a quarter circle whose centre is the inner
-        // shoulder of the flare.
-        path.addRelativeArc(
-            center: CGPoint(x: left + flare, y: top),
-            radius: flare,
-            startAngle: .degrees(180),
-            delta: .degrees(-90)
-        )
-        path.addLine(to: CGPoint(x: left + flare, y: lower - bottom))
-
-        // Convex bottom-left.
-        path.addRelativeArc(
-            center: CGPoint(x: left + flare + bottom, y: lower - bottom),
-            radius: bottom,
-            startAngle: .degrees(180),
-            delta: .degrees(-90)
-        )
-        path.addLine(to: CGPoint(x: right - flare - bottom, y: lower))
-
-        // Convex bottom-right.
-        path.addRelativeArc(
-            center: CGPoint(x: right - flare - bottom, y: lower - bottom),
-            radius: bottom,
-            startAngle: .degrees(90),
-            delta: .degrees(-90)
-        )
-        path.addLine(to: CGPoint(x: right - flare, y: top + flare))
-
-        // Concave top-right, mirrored.
-        path.addRelativeArc(
-            center: CGPoint(x: right - flare, y: top),
-            radius: flare,
-            startAngle: .degrees(90),
-            delta: .degrees(-90)
-        )
-        path.closeSubpath()
-        return path
     }
 }

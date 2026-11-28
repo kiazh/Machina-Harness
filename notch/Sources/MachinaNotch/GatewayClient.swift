@@ -118,6 +118,30 @@ struct ResidentDaemon: Decodable {
     let lastError: String?
 }
 
+struct ResidentGoal: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let detail: String?
+    let status: String
+    let created_at: String?
+    let updated_at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, detail, status
+        case created_at
+        case updated_at
+    }
+}
+
+struct ResidentBatch: Decodable, Identifiable {
+    let id: String
+    let goal: String
+    let status: String
+    let total: Int
+    let done: Int
+    let failed: Int?
+}
+
 struct ResidentHistoryEntry: Decodable {
     let role: String
     let content: String
@@ -217,6 +241,29 @@ struct GatewayClient {
 
     func status() async throws -> ResidentStatus {
         try await call("resident.status")
+    }
+
+    func goals(status: String? = nil) async throws -> [ResidentGoal] {
+        struct Payload: Decodable { let goals: [ResidentGoal] }
+        var params: [String: Any] = [:]
+        if let status { params["status"] = status }
+        let payload: Payload = try await call("resident.goal.list", params: params)
+        return payload.goals
+    }
+
+    func createGoal(title: String, detail: String = "") async throws -> ResidentGoal {
+        struct Payload: Decodable { let goal: ResidentGoal }
+        let payload: Payload = try await call(
+            "resident.goal.create",
+            params: ["title": title, "detail": detail]
+        )
+        return payload.goal
+    }
+
+    func batches(limit: Int = 20) async throws -> [ResidentBatch] {
+        struct Payload: Decodable { let batches: [ResidentBatch] }
+        let payload: Payload = try await call("resident.batch.list", params: ["limit": limit])
+        return payload.batches
     }
 
     func approvals() async throws -> [ResidentApproval] {

@@ -23,28 +23,43 @@ private final class SpeechAudioFeeder: @unchecked Sendable {
 @MainActor
 final class VoiceInput: ObservableObject {
     @Published var isRecording = false
+    @Published private(set) var isFinalizing = false
+    @Published private var startupID: UUID?
     @Published var transcript = ""
     @Published var error = ""
 
     var onFinal: ((String) -> Void)?
+    var onPartial: ((String) -> Void)?
 
     private let recognizer = SFSpeechRecognizer(locale: .current)
     private var engine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var finalDelivered = false
+    private var tapInstalled = false
+    private var finalization: Task<Void, Never>?
+    private var recognitionID = UUID()
+
+    var isStarting: Bool { startupID != nil }
 
     func start() {
-        guard !isRecording else { return }
+        guard !isRecording, !isStarting, !isFinalizing else { return }
+        let id = UUID()
+        startupID = id
         error = ""
         transcript = ""
         finalDelivered = false
         Task { @MainActor in
-            guard await microphoneAllowed() else {
+            defer { if startupID == id { startupID = nil } }
+            let microphone = await microphoneAllowed()
+            guard startupID == id else { return }
+            guard microphone else {
                 error = "Microphone permission is required for dictation."
                 return
             }
-            guard await speechAllowed() else {
+            let speech = await speechAllowed()
+            guard startupID == id else { return }
+            guard speech else {
                 error = "Speech recognition permission is required for dictation."
                 return
             }
@@ -61,17 +76,35 @@ final class VoiceInput: ObservableObject {
         }
     }
 
+    /// Release the microphone immediately and let recognition finish the audio.
     func stop() {
-        guard isRecording else { return }
-        engine?.stop()
-        engine?.inputNode.removeTap(onBus: 0)
-        request?.endAudio()
+        if isStarting {
+            cancel()
+            return
+        }
+        guard isRecording, !isFinalizing else { return }
+        isFinalizing = true
         isRecording = false
+        stopAudio()
+        request?.endAudio()
         task?.finish()
+        finalization = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            self?.keepPartial("Dictation didn’t finish. Review the draft before sending.")
+        }
     }
 
+    /// Abort recognition, discard the transcript, and tear everything down.
     func cancel() {
+        startupID = nil
+        guard isRecording || engine != nil else {
+            transcript = ""
+            return
+        }
+        finalDelivered = true
         task?.cancel()
+        transcript = ""
+        error = ""
         cleanup()
     }
 
@@ -95,25 +128,28 @@ final class VoiceInput: ObservableObject {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
+            tapInstalled = false
             self.error = "The microphone could not start."
             return
         }
         self.engine = engine
         self.request = request
+        tapInstalled = true
         isRecording = true
+        let id = UUID()
+        recognitionID = id
         task = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let isFinal = result?.isFinal ?? false
             let errorText = error?.localizedDescription
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.recognitionID == id, !self.finalDelivered else { return }
                 if let text {
                     self.transcript = text
                     if isFinal { self.finish() }
                 }
                 if let errorText, !self.finalDelivered {
-                    self.error = errorText
-                    self.finish()
+                    self.keepPartial(errorText)
                 }
             }
         }
@@ -123,17 +159,39 @@ final class VoiceInput: ObservableObject {
         guard !finalDelivered else { return }
         finalDelivered = true
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        request?.endAudio()
+        task?.finish()
         cleanup()
         if !text.isEmpty { onFinal?(text) }
     }
 
-    private func cleanup() {
+    private func keepPartial(_ reason: String) {
+        guard !finalDelivered else { return }
+        finalDelivered = true
+        error = reason
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        task?.cancel()
+        cleanup()
+        if !text.isEmpty { onPartial?(text) }
+    }
+
+    private func stopAudio() {
         engine?.stop()
-        engine?.inputNode.removeTap(onBus: 0)
+        if tapInstalled, let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
         engine = nil
+    }
+
+    private func cleanup() {
+        finalization?.cancel()
+        finalization = nil
+        stopAudio()
         request = nil
         task = nil
         isRecording = false
+        isFinalizing = false
     }
 
     private func microphoneAllowed() async -> Bool {

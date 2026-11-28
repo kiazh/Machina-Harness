@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import ServiceManagement
 import SwiftUI
 
@@ -14,6 +15,14 @@ private final class NotchPanel: NSPanel {
 
     nonisolated override var canBecomeKey: Bool { acceptsKeyStatus }
     nonisolated override var canBecomeMain: Bool { false }
+}
+
+private final class IslandHostingView<Content: View>: NSHostingView<Content> {
+    /// The panel is non-activating, so the first click must be delivered to
+    /// the SwiftUI island rather than merely bringing the window forward.
+    nonisolated override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 }
 
 private final class HoverTrackingView: NSView {
@@ -69,7 +78,6 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var expandWork: DispatchWorkItem?
     private var collapseWork: DispatchWorkItem?
-    private var frameUpdateScheduled = false
     private var menuOpen = false
     private var suppressHover = false
     private var previousApp: NSRunningApplication?
@@ -80,6 +88,9 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
     private let hoverExpandDelay: TimeInterval = 0.20
     private let hoverCollapseDelay: TimeInterval = 0.52
     private let debugEnabled = ProcessInfo.processInfo.environment["MACHINA_NOTCH_DEBUG"] == "1"
+    private let measureMode = ProcessInfo.processInfo.environment["MACHINA_NOTCH_MEASURE"] == "1"
+    private let signposter = OSSignposter(subsystem: "com.machina.notch", category: "island")
+    private lazy var floating = FloatingMascotController(model: model)
 
     func debugLog(_ message: String) {
         guard debugEnabled else { return }
@@ -91,7 +102,7 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         screen = initialScreen
         metrics = initialScreen.map(IslandMetrics.read(from:)) ?? IslandMetrics()
         panel = NotchPanel(
-            contentRect: NSRect(origin: .zero, size: metrics.compactSize),
+            contentRect: NSRect(origin: .zero, size: metrics.panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -115,8 +126,18 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         NSApp.unhide(nil)
         panel.acceptsKeyStatus = false
         panel.orderFrontRegardless()
-        updatePanelFrame()
         model.start()
+        if ProcessInfo.processInfo.environment["MACHINA_NOTCH_DEMO_ALERT"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.model.showBanner(
+                    NotchBanner(
+                        style: .attention,
+                        title: "Maki",
+                        message: "Needs you · send_email"
+                    )
+                )
+            }
+        }
         DispatchQueue.main.async { [weak self] in
             self?.scheduleHoverEvaluation()
         }
@@ -139,6 +160,39 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         model.expanded && panel.isKeyWindow
     }
 
+    // MARK: - Floating mascot and annotations
+
+    /// Move the small companion to a screen point (AppKit screen coordinates).
+    func look(at point: CGPoint) {
+        floating.show(at: point)
+    }
+
+    /// Draw a transient, click-through annotation around a screen region.
+    /// Backend vision is not wired yet; this is ready for structured results.
+    func annotate(rect: CGRect, label: String, detail: String = "") {
+        floating.annotate(rect: rect, label: label, detail: detail)
+    }
+
+    func hideFloatingMascot() {
+        floating.hide()
+        floating.hideAnnotation()
+    }
+
+    /// Capture the screen through the existing Maki path and let the little
+    /// companion sit near the notch while the turn runs. It does not invent a
+    /// vision result or annotation.
+    func lookAtScreen() {
+        model.sendScreenshot()
+        guard let screen else { return }
+        // Sit below the expanded panel rather than behind it, and away from
+        // the hardware notch. The general look(at:) API accepts any target.
+        let y = max(
+            screen.visibleFrame.minY + 80,
+            screen.frame.maxY - metrics.expandedHeight - 90
+        )
+        floating.show(at: CGPoint(x: screen.frame.midX, y: y))
+    }
+
     // MARK: - Panel
 
     private func configurePanel() {
@@ -156,11 +210,11 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         panel.acceptsMouseMovedEvents = true
         panel.ignoresMouseEvents = true
 
-        let container = NSView(frame: NSRect(origin: .zero, size: metrics.compactSize))
+        let container = NSView(frame: NSRect(origin: .zero, size: metrics.panelSize))
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.clear.cgColor
 
-        let hosting = NSHostingView(rootView: NotchView(model: model, controller: self))
+        let hosting = IslandHostingView(rootView: NotchView(model: model, controller: self))
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
         hosting.sizingOptions = []
@@ -194,28 +248,12 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         scheduleHoverEvaluation()
     }
 
-    private func scheduleFrameUpdate() {
-        guard !frameUpdateScheduled else { return }
-        frameUpdateScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.frameUpdateScheduled = false
-            self.updatePanelFrame()
-            self.scheduleHoverEvaluation()
-        }
-    }
-
     private func updatePanelFrame() {
         guard let screen else { return }
-        let target = metrics.windowFrame(
-            in: screen,
-            expanded: model.expanded,
-            banner: model.banner != nil
-        )
+        let target = metrics.windowFrame(in: screen)
         if panel.frame.equalTo(target) { return }
-        // Resize the window immediately and let SwiftUI spring the island
-        // inside it. Animating the window frame itself during hover used to
-        // re-enter the hosting view; the island's own animation is enough.
+        // The panel is one fixed canvas for every island state. Only layout
+        // changes (screen/scale) move it; expand/collapse never resizes it.
         panel.setFrame(target, display: true)
     }
 
@@ -234,9 +272,16 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         }
 
         debugLog("expand activate=\(activate) key=\(panel.isKeyWindow) active=\(NSApp.isActive) ignores=\(panel.ignoresMouseEvents) composer=\(model.composerFocused) draft=\(!model.draft.isEmpty)")
-        model.expanded = true
+        signposter.emitEvent("island.expand.begin")
+        let animation = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.morph
+        withAnimation(animation) {
+            model.expanded = true
+        }
         suppressHover = false
-        scheduleFrameUpdate()
+        scheduleHoverEvaluation()
+        DispatchQueue.main.asyncAfter(deadline: .now() + (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.02 : 0.60)) { [signposter] in
+            signposter.emitEvent("island.expand.end")
+        }
 
         if activate {
             rememberFrontmost()
@@ -280,12 +325,19 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
         }
 
         debugLog("collapse restore=\(restoreFocus) key=\(panel.isKeyWindow) active=\(NSApp.isActive) composer=\(model.composerFocused) draft=\(!model.draft.isEmpty) menu=\(menuOpen)")
-        model.expanded = false
+        signposter.emitEvent("island.collapse.begin")
+        let animation = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.morph
+        withAnimation(animation) {
+            model.expanded = false
+        }
         model.composerFocused = false
         panel.acceptsKeyStatus = false
         if panel.isKeyWindow { panel.resignKey() }
         panel.ignoresMouseEvents = true
-        scheduleFrameUpdate()
+        scheduleHoverEvaluation()
+        DispatchQueue.main.asyncAfter(deadline: .now() + (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.02 : 0.60)) { [signposter] in
+            signposter.emitEvent("island.collapse.end")
+        }
 
         if restoreFocus {
             restorePreviousApp()
@@ -332,7 +384,7 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
     }
 
     private func scheduleExpand() {
-        guard !model.expanded, expandWork == nil, !suppressHover else { return }
+        guard !measureMode, !model.expanded, expandWork == nil, !suppressHover else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.expandWork = nil
@@ -463,6 +515,7 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
     }
 
     private func handleMouseDown() {
+        guard !measureMode else { return }
         guard let screen else { return }
         let point = NSEvent.mouseLocation
         debugLog("mouseDown at \(point) expanded=\(model.expanded) key=\(panel.isKeyWindow) ignores=\(panel.ignoresMouseEvents) front=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
@@ -552,12 +605,15 @@ final class NotchPanelController: NSObject, NSMenuDelegate {
     private func observeModel() {
         model.$expanded
             .removeDuplicates()
-            .sink { [weak self] _ in self?.scheduleFrameUpdate() }
+            .sink { [weak self] _ in self?.scheduleHoverEvaluation() }
             .store(in: &cancellables)
 
         model.$banner
             .removeDuplicates()
-            .sink { [weak self] _ in self?.scheduleFrameUpdate() }
+            .sink { [weak self] banner in
+                self?.debugLog("banner \(banner?.message ?? "nil")")
+                self?.scheduleHoverEvaluation()
+            }
             .store(in: &cancellables)
 
         model.$muted

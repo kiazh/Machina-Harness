@@ -33,6 +33,12 @@ final class NotchModel: ObservableObject {
     @Published var turnStartedAt: Date?
     @Published var lastTurnDuration: TimeInterval?
     @Published var banner: NotchBanner?
+    @Published var goals: [ResidentGoal] = []
+    @Published var batches: [ResidentBatch] = []
+    @Published var context: [String: String] = [:]
+    @Published var contextAt: Date?
+    @Published var lastLookAt: Date?
+    @Published var activity: [ActivityItem] = []
     /// Bumped by the controller when a click (not a hover) opens the island.
     @Published var focusComposerTick = 0
 
@@ -42,12 +48,29 @@ final class NotchModel: ObservableObject {
         let fromUser: Bool
     }
 
+    struct ActivityItem: Identifiable {
+        enum Kind: Equatable {
+            case message
+            case approval
+            case goal
+            case screen
+            case system
+        }
+
+        let id = UUID()
+        let kind: Kind
+        let text: String
+        let date: Date
+    }
+
     private let gateway = GatewayClient()
     private var timer: Timer?
     private var contextTimer: Timer?
+    private var goalsTimer: Timer?
     private var bannerWorkItem: DispatchWorkItem?
     private var knownApprovalIDs: Set<String> = []
     private var hasLoadedApprovals = false
+    private static let isoFormatter = ISO8601DateFormatter()
 
     // MARK: - Polling
 
@@ -64,7 +87,11 @@ final class NotchModel: ObservableObject {
         contextTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sendContext() }
         }
+        goalsTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshGoals() }
+        }
         sendContext()
+        refreshGoals()
     }
 
     func stop() {
@@ -72,15 +99,91 @@ final class NotchModel: ObservableObject {
         timer = nil
         contextTimer?.invalidate()
         contextTimer = nil
+        goalsTimer?.invalidate()
+        goalsTimer = nil
     }
 
     private func sendContext() {
         guard connection == "live" else { return }
         let snapshot = ContextSensor.snapshot()
         guard !snapshot.isEmpty else { return }
+        updateContext(snapshot)
         Task { @MainActor in
             try? await gateway.context(snapshot)
         }
+    }
+
+    private func updateContext(_ snapshot: [String: String]) {
+        // When the island is key, the frontmost app is Maki itself. Keep the
+        // last real work context instead of showing our own window.
+        let bundle = Bundle.main.bundleIdentifier ?? ""
+        if let appBundle = snapshot["bundle"], !bundle.isEmpty, appBundle == bundle {
+            return
+        }
+        if let app = snapshot["app"], app == "Machina Notch" {
+            return
+        }
+        context = snapshot
+        contextAt = Date()
+    }
+
+    func refreshGoals() {
+        guard connection == "live" else { return }
+        Task { @MainActor in
+            async let goalList = try? gateway.goals()
+            async let batchList = try? gateway.batches()
+            if let newGoals = await goalList { self.goals = newGoals }
+            if let newBatches = await batchList { self.batches = newBatches }
+        }
+    }
+
+    // MARK: - Goals and dashboard state
+
+    var currentGoal: ResidentGoal? {
+        goals.first { $0.status == "active" }
+    }
+
+    var activeBatch: ResidentBatch? {
+        let terminal = ["done", "cancelled", "failed"]
+        return batches.first { !terminal.contains($0.status) }
+    }
+
+    var nextHeartbeat: Date? {
+        guard let daemon = status?.daemon,
+              let tick = daemon.lastTick,
+              let last = Self.isoFormatter.date(from: tick)
+        else { return nil }
+        return last.addingTimeInterval(TimeInterval(daemon.intervalSeconds ?? 300))
+    }
+
+    func createGoal(title: String, detail: String = "") {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if goals.contains(where: {
+            $0.status == "active" && $0.title.caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            recordActivity(.goal, "Goal already active · \(name)")
+            return
+        }
+        guard connection == "live" else {
+            recordActivity(.system, "Goal not created · resident offline")
+            return
+        }
+        Task { @MainActor in
+            do {
+                let goal = try await gateway.createGoal(title: name, detail: detail)
+                goals.insert(goal, at: 0)
+                recordActivity(.goal, "Goal created · \(goal.title)")
+                SoundPlayer.shared.play(.chirp)
+            } catch {
+                recordActivity(.system, "Goal creation failed · \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func recordActivity(_ kind: ActivityItem.Kind, _ text: String) {
+        activity.insert(ActivityItem(kind: kind, text: text, date: Date()), at: 0)
+        if activity.count > 8 { activity.removeLast(activity.count - 8) }
     }
 
     func refresh() {
@@ -114,9 +217,16 @@ final class NotchModel: ObservableObject {
                     : (approvals.isEmpty ? (busy ? .thinking : .idle) : .waiting)
                 self.knownApprovalIDs = Set(approvals.map(\.request_id))
                 self.hasLoadedApprovals = true
+                if wasFirstLoad {
+                    self.refreshGoals()
+                    self.sendContext()
+                }
 
                 if approvals.count > previousCount {
                     SoundPlayer.shared.play(.alert)
+                }
+                if let fresh = approvals.first(where: { freshIDs.contains($0.request_id) }) {
+                    self.recordActivity(.approval, "Approval requested · \(fresh.operation.replacingOccurrences(of: "_", with: " "))")
                 }
                 if !freshIDs.isEmpty && !wasFirstLoad {
                     self.showBanner(
@@ -143,6 +253,7 @@ final class NotchModel: ObservableObject {
         guard !text.isEmpty else { return }
         draft = ""
         messages.append(ChatLine(text: text, fromUser: true))
+        recordActivity(.message, "Asked Maki · \(String(text.prefix(80)))")
         SoundPlayer.shared.play(.chirp)
 
         guard let sessionId = status?.sessionId, connection == "live" else {
@@ -182,6 +293,7 @@ final class NotchModel: ObservableObject {
                     ChatLine(text: "I couldn't reach the resident: \(error.localizedDescription)", fromUser: false)
                 )
                 mascot = .surprised
+                recordActivity(.system, "Turn failed · \(error.localizedDescription)")
                 SoundPlayer.shared.play(.boop)
             }
             finishTurn(startedAt: started, completed: completed)
@@ -202,10 +314,14 @@ final class NotchModel: ObservableObject {
         turnStartedAt = started
         busy = true
         mascot = .processing
+        let snapshot = ContextSensor.snapshot()
+        updateContext(snapshot)
         Task { @MainActor in
             var completed = false
             do {
                 let image = try await ScreenCapture.jpeg()
+                lastLookAt = Date()
+                recordActivity(.screen, "Looked at \(context["app"] ?? "the screen")")
                 messages.append(
                     ChatLine(
                         text: text.isEmpty ? "What do you see on my screen?" : text,
@@ -235,6 +351,7 @@ final class NotchModel: ObservableObject {
                     ChatLine(text: "Screen capture failed: \(error.localizedDescription)", fromUser: false)
                 )
                 mascot = .surprised
+                recordActivity(.system, "Screen capture failed · \(error.localizedDescription)")
                 SoundPlayer.shared.play(.boop)
             }
             finishTurn(startedAt: started, completed: completed)
@@ -252,6 +369,7 @@ final class NotchModel: ObservableObject {
         guard completed else { return }
         let elapsed = max(0, Date().timeIntervalSince(startedAt))
         lastTurnDuration = elapsed
+        recordActivity(.message, "Turn completed · \(Self.durationLabel(elapsed))")
         showBanner(
             NotchBanner(
                 style: .done,
@@ -285,6 +403,10 @@ final class NotchModel: ObservableObject {
                 mascot = approvals.isEmpty
                     ? (verdict == "approved" ? .happy : .idle)
                     : .waiting
+                recordActivity(
+                    .approval,
+                    "\(verdict == "approved" ? "Approved" : "Denied") · \(approval.operation.replacingOccurrences(of: "_", with: " "))"
+                )
                 SoundPlayer.shared.play(verdict == "approved" ? .happy : .boop)
             } catch {
                 connection = "offline"
@@ -297,11 +419,11 @@ final class NotchModel: ObservableObject {
     func showBanner(_ banner: NotchBanner) {
         guard !muted else { return }
         bannerWorkItem?.cancel()
-        self.banner = banner
+        setBanner(banner)
         let id = banner.id
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.banner?.id == id else { return }
-            self.banner = nil
+            self.setBanner(nil)
             self.bannerWorkItem = nil
         }
         bannerWorkItem = work
@@ -311,7 +433,14 @@ final class NotchModel: ObservableObject {
     func dismissBanner() {
         bannerWorkItem?.cancel()
         bannerWorkItem = nil
-        banner = nil
+        setBanner(nil)
+    }
+
+    private func setBanner(_ value: NotchBanner?) {
+        let animation = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.morph
+        withAnimation(animation) {
+            banner = value
+        }
     }
 
     func pause() {
